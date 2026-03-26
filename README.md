@@ -83,6 +83,9 @@ Optional environment variables for webhook processing:
 - `WEBHOOK_SECRET`: Resend/Svix signing secret used to verify webhook signatures. If omitted, Bloomx accepts the webhook without signature verification.
 - `TOP_DOMAIN`: Used when Bloomx sends the automatic undeliverable reply for unknown recipients.
 
+### DNS and Deliverability
+If you need to configure SPF, DKIM, DMARC, MX, and inbound webhook DNS so mail is less likely to land in spam, see [DNS_SETUP.md](./DNS_SETUP.md).
+
 ## 🧩 Expansions
 
 Expansions are the heart of Bloomx. They allow you to:
