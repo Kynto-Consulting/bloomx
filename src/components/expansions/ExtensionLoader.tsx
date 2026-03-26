@@ -17,12 +17,20 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
     // Find all mounts matching this point
     const mounts = extensions.flatMap((ext: any) => {
         if (!ext.template || !ext.template.mounts) return [];
+
+        // Pre-compute overlays from mounts array for this extension
+        const overlayMounts = ext.template.mounts.filter((m: any) => m.point === 'OVERLAY');
+        const overlays = overlayMounts.reduce((acc: any, m: any) => {
+            if (m.id) acc[m.id] = m.component;
+            return acc;
+        }, {});
+
         return ext.template.mounts
             .filter((m: any) => m.point === mountPoint)
             .map((m: any) => ({
                 ...m,
                 extensionId: ext.id,
-                overlays: ext.template.overlays // Pass overlays to context
+                overlays: { ...(ext.template.overlays || {}), ...overlays } // Pass overlays to context
             }));
     });
 
@@ -31,15 +39,17 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
     return (
         <>
             {mounts.map((mount: any, i: number) => (
-                <JsonRenderer
-                    key={`${mount.extensionId}-${i}`}
-                    component={mount.component}
-                    context={{
-                        ...context,
-                        extensionId: mount.extensionId,
-                        overlays: mount.overlays
-                    }}
-                />
+                mount.component ? (
+                    <JsonRenderer
+                        key={`${mount.extensionId}-${i}`}
+                        component={mount.component}
+                        context={{
+                            ...context,
+                            extensionId: mount.extensionId,
+                            overlays: mount.overlays
+                        }}
+                    />
+                ) : null
             ))}
         </>
     );

@@ -13,6 +13,7 @@ export async function middleware(req: NextRequest) {
     if (
         pathname.startsWith('/login') ||
         pathname.startsWith('/register') ||
+        pathname.startsWith('/api/register') || // Allow register API
         pathname.startsWith('/api/auth') || // Allow all auth routes
         pathname.startsWith('/api/cron') || // Allow cron routes
         pathname.startsWith('/api/config') || // Allow cron routes

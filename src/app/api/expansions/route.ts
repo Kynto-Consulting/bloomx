@@ -12,16 +12,18 @@ export async function GET(req: NextRequest) {
 
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
+    const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     const { searchParams } = new URL(req.url);
     const trigger = searchParams.get('trigger');
 
     try {
-        const res = await fetch(`${BACKEND_URL}/api/expansions?trigger=${trigger}`, {
+        const res = await fetch(`${BACKEND_URL}/api/extensions?trigger=${trigger || ''}`, {
             headers: {
                 'Authorization': `Bearer ${token || ''}`,
                 'X-User-ID': user.id,
-                'X-User-Email': user.email || ''
+                'X-User-Email': user.email || '',
+                'X-BloomX-Domain': host.split(':')[0]
             }
         });
 
@@ -43,18 +45,20 @@ export async function POST(req: NextRequest) {
 
     const cookieStore = await cookies();
     const token = cookieStore.get(COOKIE_NAME)?.value;
+    const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     try {
         const body = await req.json();
 
         // Forward to backend execution endpoint
-        const res = await fetch(`${BACKEND_URL}/api/expansions/execute`, {
+        const res = await fetch(`${BACKEND_URL}/api/extension/execute`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${token || ''}`,
                 'X-User-ID': user.id,
-                'X-User-Email': user.email || ''
+                'X-User-Email': user.email || '',
+                'X-BloomX-Domain': host.split(':')[0]
             },
             body: JSON.stringify(body)
         });

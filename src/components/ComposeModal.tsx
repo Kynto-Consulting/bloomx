@@ -673,12 +673,15 @@ export function ComposeModal({
                 </div>
 
                 {/* Client Expansions Overlay */}
+                {/* AI Prompt Overlay */}
                 {showAiPrompt && (
-                    <div className="absolute bottom-14 left-0 right-0 z-30">
-                        <ExtensionLoader
-                            mountPoint="COMPOSER_OVERLAY"
-                            context={{ ...contextProps, onClose: () => setShowAiPrompt(false) }}
-                        />
+                    <div className="absolute inset-x-2 bottom-14 top-2 z-40 flex justify-end items-end pointer-events-none">
+                        <div className="pointer-events-auto w-[400px] max-w-full max-h-full flex flex-col">
+                            <ExtensionLoader
+                                mountPoint="COMPOSER_OVERLAY"
+                                context={{ ...contextProps, onClose: () => setShowAiPrompt(false) }}
+                            />
+                        </div>
                     </div>
                 )}
 

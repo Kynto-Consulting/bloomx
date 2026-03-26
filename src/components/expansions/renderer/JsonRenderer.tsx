@@ -12,6 +12,7 @@ import { executeExtensionAction } from '@/lib/expansions/api';
 import DOMPurify from 'isomorphic-dompurify'; // Ensure safety for markdown/html
 import { SafeIframe } from '@/components/ui/SafeIframe';
 import { Popover } from '@/components/ui/Popover'; // For TOOLTIP or custom usage
+import * as LucideIcons from 'lucide-react'; // Dynamic icons
 
 
 // --- State Context ---
@@ -48,13 +49,18 @@ export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: a
 
     // We can't conditionally wrap. So we assume wrapper exists or we accept local state is per-component tree if not.
     // However, manifests like Hubspot assume shared state between "onLoad" and "CONDITIONAL" children.
-    // So the ROOT renderer call must be wrapped.
+    // So the ROOT renderer call must be wrapped in a state provider.
 
-    return <InnerJsonRenderer component={component} context={context} />;
+    return (
+        <ExtensionStateProvider>
+            <InnerJsonRenderer component={component} context={context} />
+        </ExtensionStateProvider>
+    );
 };
 
 const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context }) => {
-    const { type, props, children } = component;
+    const { type, props } = component;
+    const children = component.children || props?.children;
     // const { openOverlay, closeOverlay } = useExpansionUI(); // Use remapped context below
     const { openModal: openOverlay, closeModal: closeOverlay } = useExpansionUI(); // Remap for compatibility
     const { state, setState } = useContext(ExtensionStateContext);
@@ -69,7 +75,24 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
     // Helper to look up a single dotted path like "context.from.email" or "state.contact"
     const lookupPath = (key: string, ctx: any, st: any): any => {
-        const parts = key.split('.');
+        let actualKey = key.trim();
+        let invert = false;
+        if (actualKey.startsWith('!')) {
+            invert = true;
+            actualKey = actualKey.substring(1).trim();
+        }
+
+        let checkNotNull = false;
+        let checkNull = false;
+        if (actualKey.endsWith('!= null') || actualKey.endsWith('!== null')) {
+            checkNotNull = true;
+            actualKey = actualKey.replace(/!==?\s*null$/, '').trim();
+        } else if (actualKey.endsWith('== null') || actualKey.endsWith('=== null')) {
+            checkNull = true;
+            actualKey = actualKey.replace(/===?\s*null$/, '').trim();
+        }
+
+        const parts = actualKey.split('.');
         let val: any = undefined;
 
         if (parts[0] === 'context') val = ctx;
@@ -86,7 +109,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 val = val?.[parts[i]];
             }
         }
-        return val;
+        
+        let finalVal = val;
+        if (checkNotNull) finalVal = (val !== undefined && val !== null && val !== '');
+        if (checkNull) finalVal = (val === undefined || val === null || val === '');
+        if (invert) finalVal = !finalVal;
+
+        return finalVal;
     };
 
     // Resolve variables: supports pure refs "${context.email}" AND template strings "From: ${context.from}"
@@ -137,6 +166,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         for (const act of actions) {
             const resolvedAct = resolveProps(act, processingContext, state);
+            console.log("handleAction executing:", resolvedAct, "with state:", state, "Context:", processingContext);
 
             if (resolvedAct.action === 'SET_STATE') {
                 setState(resolvedAct.key, resolvedAct.value);
@@ -208,14 +238,15 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     }
 
                     // Pass the result to the next action via extraContext
-                    if (resolvedAct.onSuccess) {
-                        await handleAction(resolvedAct.onSuccess, e, { result: result.result });
+                    if (act.onSuccess) {
+                        console.log("CALL_BACKEND SUCCESS, firing handleAction with result:", result.result);
+                        await handleAction(act.onSuccess, e, { result: result.result });
                     }
 
                 } catch (err: any) {
                     console.error("Backend Call Failed", err);
-                    if (resolvedAct.onError) {
-                        await handleAction(resolvedAct.onError, e, { error: err.message });
+                    if (act.onError) {
+                        await handleAction(act.onError, e, { error: err.message });
                     } else {
                         toast.error(err.message || "Action failed");
                     }
@@ -254,12 +285,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             if (resolvedAct.action === 'SECURE_SAVE') {
                 try {
                     await secureWrite(resolvedAct.key, resolvedAct.value, userId);
-                    if (resolvedAct.onSuccess) {
-                        await handleAction(resolvedAct.onSuccess, e, extraContext);
+                    if (act.onSuccess) {
+                        await handleAction(act.onSuccess, e, extraContext);
                     }
                 } catch (err: any) {
                     console.error("Secure Save Failed", err);
-                    if (resolvedAct.onError) await handleAction(resolvedAct.onError, e, { error: err.message });
+                    if (act.onError) await handleAction(act.onError, e, { error: err.message });
                 }
             }
             if (resolvedAct.action === 'SECURE_READ') {
@@ -269,12 +300,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     if (resolvedAct.targetState) {
                         setState(resolvedAct.targetState, val);
                     }
-                    if (resolvedAct.onSuccess) {
-                        await handleAction(resolvedAct.onSuccess, e, { ...extraContext, value: val });
+                    if (act.onSuccess) {
+                        await handleAction(act.onSuccess, e, { ...extraContext, value: val });
                     }
                 } catch (err: any) {
                     console.error("Secure Read Failed", err);
-                    if (resolvedAct.onError) await handleAction(resolvedAct.onError, e, { error: err.message });
+                    if (act.onError) await handleAction(act.onError, e, { error: err.message });
                 }
             }
 
@@ -287,10 +318,10 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             }
             if (resolvedAct.action === 'CONFIRM') {
                 const confirmed = window.confirm(resolvedAct.message || 'Are you sure?');
-                if (confirmed && resolvedAct.onConfirm) {
-                    await handleAction(resolvedAct.onConfirm, e, extraContext);
-                } else if (!confirmed && resolvedAct.onCancel) {
-                    await handleAction(resolvedAct.onCancel, e, extraContext);
+                if (confirmed && act.onConfirm) {
+                    await handleAction(act.onConfirm, e, extraContext);
+                } else if (!confirmed && act.onCancel) {
+                    await handleAction(act.onCancel, e, extraContext);
                 }
             }
             if (resolvedAct.action === 'COPY_TO_CLIPBOARD') {
@@ -349,7 +380,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         body: JSON.stringify({ extensionId: context.extensionId })
                     });
                     toast.success('Disconnected');
-                    if (resolvedAct.onSuccess) await handleAction(resolvedAct.onSuccess, e, extraContext);
+                    if (act.onSuccess) await handleAction(act.onSuccess, e, extraContext);
                 } catch {
                     toast.error('Failed to disconnect');
                 }
@@ -364,33 +395,77 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         }
     }, [props.onLoad]); // Be careful with dependencies
 
+    const renderIcon = (iconName: string, size: number = 16, className: string = '') => {
+        if (!iconName) return null;
+
+        let normalizedName = iconName;
+        // Map missing custom brand icons to Lucide equivalents
+        const iconMap: Record<string, string> = {
+            'GoogleDrive': 'Cloud',
+            'Drive': 'Cloud',
+            'HubSpot': 'Briefcase',
+            'Notion': 'BookOpen',
+            'Zoom': 'Video',
+            'Trello': 'Trello', // If available, otherwise Layout
+        };
+        if (iconMap[iconName]) {
+            normalizedName = iconMap[iconName];
+        }
+
+        const IconComponent = (LucideIcons as any)[normalizedName];
+        if (IconComponent) {
+            return <IconComponent size={size} className={className} />;
+        }
+        // Fallback if not a Lucide icon (e.g. an emoji)
+        return <span className={className} style={{ fontSize: size }}>{iconName}</span>;
+    };
+
     switch (type) {
-        case 'BUTTON':
+        case 'BUTTON': {
+            const providedVariant = resolvedProps.variant || 'default';
+            const variant = providedVariant === 'primary' ? 'default' : providedVariant;
             return (
                 <Button
                     onClick={(e) => handleAction(props.onClick, e)}
-                    variant={resolvedProps.variant || 'default'}
+                    variant={variant}
                     size="sm"
+                    className={resolvedProps.className || "w-full shadow-sm"}
                 >
-                    {resolvedProps.icon && <span className="mr-2">{resolvedProps.icon}</span>}
+                    {resolvedProps.icon && <span className="mr-2">{renderIcon(resolvedProps.icon)}</span>}
                     {resolvedProps.label}
                 </Button>
             );
-        case 'TEXT':
-            let className = resolvedProps.className || "";
-            if (resolvedProps.variant === 'h4') return <h4 className="text-lg font-semibold">{resolvedProps.content}</h4>;
-            if (resolvedProps.variant === 'error') className += " text-red-500";
-            if (resolvedProps.variant === 'success') className += " text-green-500";
-            return <p className={className}>{resolvedProps.content}</p>;
-        case 'INPUT':
-            return <Input {...resolvedProps} onChange={(e) => {
+        }
+        case 'TEXT': {
+            let className = resolvedProps.className || "text-sm text-gray-700 whitespace-pre-wrap";
+            if (resolvedProps.variant === 'h4') return <h4 className={`text-lg font-semibold text-gray-800 ${resolvedProps.className || ''}`}>{resolvedProps.content}</h4>;
+            if (resolvedProps.variant === 'error') className += " text-red-500 bg-red-50 p-3 rounded-md";
+            if (resolvedProps.variant === 'success') className += " text-green-600 bg-green-50 p-3 rounded-md";
+            if (resolvedProps.variant === 'body') className += " leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100";
+            return <div className={className}>{resolvedProps.content}</div>;
+        }
+        case 'INPUT': {
+            const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
                 if (props.onChange) {
                     handleAction(props.onChange, e, { value: e.target.value });
                 }
                 if (props.bindTo) {
                     setState(props.bindTo, e.target.value);
                 }
-            }} />;
+            };
+            
+            if (resolvedProps.multiline) {
+                const { multiline, ...textareaProps } = resolvedProps;
+                return (
+                    <textarea 
+                        {...textareaProps}
+                        onChange={handleChange}
+                        className="flex min-h-[80px] w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm transition-all duration-200 hover:border-gray-300 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                );
+            }
+            return <Input {...resolvedProps} onChange={handleChange} />;
+        }
         case 'CARD':
             return (
                 <Card>
@@ -436,11 +511,25 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </Tabs>
             );
         case 'MODAL':
-            // Should assume this is rendered INSIDE a Dialog/Sheet provided by Overlay system
+            // Render as a proper local pseudo-modal card for inside-the-page overlays
             return (
-                <div className="p-4 space-y-4">
-                    {resolvedProps.title && <h2 className="text-xl font-bold">{resolvedProps.title}</h2>}
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                <div className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 shadow-black/10 w-full text-left flex flex-col gap-4 max-h-full overflow-y-auto">
+                    {resolvedProps.title && (
+                        <div className="flex justify-between items-center pb-2 border-b border-gray-100 flex-shrink-0">
+                            <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
+                                {resolvedProps.icon && renderIcon(resolvedProps.icon, 18, "text-purple-600")}
+                                {resolvedProps.title}
+                            </h2>
+                            {context?.onClose && (
+                                <button onClick={context.onClose} className="rounded-full p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 active:scale-90 active:bg-gray-200 transition-all duration-200">
+                                    {renderIcon('X', 16)}
+                                </button>
+                            )}
+                        </div>
+                    )}
+                    <div className="flex flex-col gap-4 text-sm text-gray-700 overflow-y-auto custom-scrollbar">
+                        {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    </div>
                 </div>
             );
         case 'WIZARD':
@@ -674,8 +763,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         }
 
         case 'ICON': {
-            // Render a simple emoji or text icon from the manifest
-            return <span className={`inline-flex items-center ${resolvedProps.className || ''}`} style={{ fontSize: resolvedProps.size || 16 }}>{resolvedProps.name}</span>;
+            // Render a real Lucide icon or an emoji/text icon fallback
+            return renderIcon(resolvedProps.name, resolvedProps.size || 16, `inline-flex items-center ${resolvedProps.className || ''}`);
         }
 
         case 'ACCORDION': {
