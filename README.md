@@ -45,6 +45,11 @@ Bloomx is configured entirely via Environment Variables. See `.env.example` for 
 - `DATABASE_URL`: Connection string for PostgreSQL.
 - `RESEND_API_KEY`: API Key from Resend.com.
 - `REGISTRATION_KEY`: Secret token to allow new user registration.
+- `TOP_DOMAIN`: Primary domain Bloomx should treat as the active tenant/domain in local setups and for system-generated mail such as undeliverable notices. Example: `mail.example.com` or `example.com`.
+
+### App URLs and Domain Resolution
+- `NEXT_PUBLIC_APP_URL`: Public URL of the Bloomx frontend, used in OAuth callback URLs.
+- `TOP_DOMAIN`: In development or proxy-based setups, this overrides the incoming host so Bloomx resolves the correct tenant/domain configuration. It should match the domain you expect users to receive mail on and the domain verified in Resend if you want automated bounce notices to be sent from `noreply@<TOP_DOMAIN>`.
 
 ### Storage (S3 Compatible, B2 Compatible)
 - `S3_ENDPOINT` || `B2_ENDPOINT`
@@ -56,6 +61,27 @@ Bloomx is configured entirely via Environment Variables. See `.env.example` for 
 ### AI Capabilities
 - `AI_PROVIDER`: `openai`, `gemini`, `anthropic`, `cohere`
 - `AI_KEY`: Your API Key.
+
+### Resend Inbound Webhook
+Bloomx receives inbound email and status updates from Resend at:
+
+```text
+POST /api/webhooks/resend
+```
+
+For local development, if Bloomx runs at `http://localhost:3000`, expose it with a tunnel and register this URL in Resend:
+
+```text
+https://your-public-host.example/api/webhooks/resend
+```
+
+Recommended webhook events:
+- `email.received`
+- Delivery/status events used by Resend for sent mail lifecycle updates
+
+Optional environment variables for webhook processing:
+- `WEBHOOK_SECRET`: Resend/Svix signing secret used to verify webhook signatures. If omitted, Bloomx accepts the webhook without signature verification.
+- `TOP_DOMAIN`: Used when Bloomx sends the automatic undeliverable reply for unknown recipients.
 
 ## 🧩 Expansions
 
