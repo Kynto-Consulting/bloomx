@@ -178,7 +178,17 @@ export default function CalendarPage() {
             });
 
             days.push(
-                <div key={`day-${i}`} className={`min-h-[120px] p-1 border-r border-slate-200 border-b transition-colors hover:bg-slate-50 ${isToday ? 'bg-blue-50/10' : 'bg-white'}`}>
+                <div 
+                    key={`day-${i}`} 
+                    onDoubleClick={() => {
+                        const d = new Date(currentYear, currentMonth, i, 9, 0); // Default to 9:00 AM
+                        setStartsAt(d.toISOString().slice(0, 16));
+                        const dEnd = new Date(d.getTime() + 60 * 60 * 1000); // +1 hour
+                        setEndsAt(dEnd.toISOString().slice(0, 16));
+                        setIsCreating(true);
+                    }}
+                    className={`min-h-[120px] p-1 border-r border-slate-200 border-b cursor-pointer transition-colors hover:bg-slate-100/50 ${isToday ? 'bg-blue-50/10' : 'bg-white'}`}
+                >
                     <div className="flex justify-center mb-1">
                         <span className={`text-xs flex items-center justify-center h-6 w-6 font-medium rounded-full mt-1 ${isToday ? 'bg-blue-600 text-white' : 'text-slate-700'}`}>
                             {i}
@@ -236,6 +246,25 @@ export default function CalendarPage() {
         await loadData();
     };
 
+    const miniCalendarDays = useMemo(() => {
+        const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+        const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
+        const prevMonthDays = getDaysInMonth(currentMonth === 0 ? currentYear - 1 : currentYear, currentMonth === 0 ? 11 : currentMonth - 1);
+        
+        const days = [];
+        for (let i = 0; i < firstDay; i++) {
+            days.push({ day: prevMonthDays - firstDay + i + 1, isCurrentMonth: false });
+        }
+        for (let i = 1; i <= daysInMonth; i++) {
+            days.push({ day: i, isCurrentMonth: true });
+        }
+        const remaining = 42 - days.length;
+        for (let i = 1; i <= remaining; i++) {
+            days.push({ day: i, isCurrentMonth: false });
+        }
+        return days;
+    }, [currentMonth, currentYear]);
+
     return (
         <div className="flex h-screen w-full bg-white overflow-hidden text-slate-900 font-sans">
             <AnimatePresence>
@@ -259,12 +288,12 @@ export default function CalendarPage() {
                         <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
-                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 hidden xl:block">
+                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-3 -ml-2 mr-2 rounded-full hover:bg-slate-100 hidden xl:block shrink-0">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
-                        <div className="flex items-center gap-2 pr-4 text-slate-700">
-                            <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center font-bold text-white shadow-sm shadow-blue-200">
+                        <div className="flex items-center gap-2 pr-6 text-slate-700">
+                            <div className="w-9 h-9 rounded bg-blue-600 flex items-center justify-center font-bold text-white shadow-sm shadow-blue-200">
                                 {currentDate.getDate()}
                             </div>
                             <span className="text-[22px] font-normal tracking-tight hidden sm:block text-slate-700">Calendar</span>
@@ -274,7 +303,7 @@ export default function CalendarPage() {
                             Today
                         </button>
                         
-                        <div className="flex items-center gap-1 mx-2">
+                        <div className="flex items-center gap-1 mx-4">
                             <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-slate-700" /></button>
                             <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-slate-700" /></button>
                         </div>
@@ -286,6 +315,9 @@ export default function CalendarPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
+                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
+                            <Settings className="w-5 h-5 text-slate-700" />
+                        </button>
                         <div className="border border-slate-300 rounded-md bg-white hover:bg-slate-50 hidden md:flex shadow-sm overflow-hidden">
                             <select 
                                 value={viewMode} 
@@ -303,71 +335,7 @@ export default function CalendarPage() {
                 </header>
 
                 <div className="flex flex-1 overflow-hidden">
-                    <AnimatePresence initial={false}>
-                        {isCalSidebarOpen && (
-                            <motion.aside 
-                                initial={{ width: 0, opacity: 0 }} 
-                                animate={{ width: 256, opacity: 1 }} 
-                                exit={{ width: 0, opacity: 0 }} 
-                                className="bg-white flex flex-col hidden lg:flex flex-shrink-0 border-r border-slate-100"
-                            >
-                                <div className="p-4 py-5 pl-4">
-                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
-                                        <Plus className="w-5 h-5 text-white" />
-                                        <span className="text-sm font-medium text-white transition-colors">Create Event</span>
-                                    </button>
-                                </div>
-
-                                <div className="px-6 pb-2">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[13px] font-medium text-slate-700">{monthNames[currentMonth]} {currentYear}</span>
-                                        <div className="flex gap-1">
-                                            <ChevronLeft className="w-4 h-4 text-slate-600" />
-                                            <ChevronRight className="w-4 h-4 text-slate-600" />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-slate-500 font-medium pb-2">
-                                        {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
-                                        {Array.from({length: 35}).map((_, i) => (
-                                            <div key={i} className={`w-6 h-6 flex items-center justify-center rounded-full mx-auto ${i+1 === currentDate.getDate() ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700 cursor-pointer'}`}>
-                                                {(i % 31) + 1}
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div className="p-4 flex-1 overflow-y-auto w-[256px]">
-                                    <div className="flex items-center gap-2 py-2 cursor-pointer text-slate-700 hover:bg-slate-50 px-2 rounded">
-                                        <span className="text-sm font-medium flex-1">My calendars</span>
-                                        <ChevronRight className="w-4 h-4 transform rotate-90" />
-                                    </div>
-                                    <div className="pl-4 space-y-1">
-                                        {allCalendars.map(calendar => {
-                                            const active = selectedCalendarIds.includes(calendar.id);
-                                            return (
-                                                <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group" onClick={() => toggleCalendar(calendar.id)}>
-                                                    <div className="relative flex items-center justify-center w-5 h-5 rounded hover:bg-slate-100">
-                                                        <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
-                                                            {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
-                                                        </div>
-                                                    </div>
-                                                    <span className="text-sm text-slate-700 truncate">{calendar.name}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    
-                                    <div className="mt-6">
-                                        <ExtensionLoader mountPoint="CALENDAR_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
-                                    </div>
-                                </div>
-                            </motion.aside>
-                        )}
-                    </AnimatePresence>
-
-                    <main className="flex-1 bg-white border-l border-t border-slate-200 flex flex-col relative ml-[-1px]">
+                    <main className="flex-1 bg-white border-t border-slate-200 flex flex-col relative z-0">
                         {isCreating && (
                             <div className="absolute top-4 left-4 z-40 w-96 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
                                 <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
@@ -398,12 +366,171 @@ export default function CalendarPage() {
                             <div className="flex-1 grid grid-cols-7 grid-rows-[auto_1fr_1fr_1fr_1fr_1fr] overflow-y-auto overflow-x-hidden">
                                 {renderMonthGrid()}
                             </div>
+                        ) : viewMode === 'Day' ? (
+                            <div className="flex-1 overflow-y-auto w-full">
+                                <div className="grid grid-cols-[60px_1fr] border-b border-slate-200 sticky top-0 z-10 bg-white">
+                                    <div className="border-r border-slate-200 bg-slate-50" />
+                                    <div className="font-semibold text-center py-2 text-slate-700 bg-slate-50 flex flex-col items-center">
+                                        <span className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][currentDate.getDay()]}</span>
+                                        <span className="text-lg mt-0.5 w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white">{currentDate.getDate()}</span>
+                                    </div>
+                                </div>
+                                <div className="relative">
+                                    {Array.from({length: 24}).map((_, i) => (
+                                        <div key={i} className="grid grid-cols-[60px_1fr] border-b border-slate-100 min-h-[60px]">
+                                            <div className="text-xs text-slate-500 text-right pr-2 py-1 select-none border-r border-slate-200">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`}</div>
+                                            <div 
+                                                className="relative group hover:bg-blue-50/30 cursor-pointer"
+                                                onDoubleClick={() => {
+                                                    const d = new Date(currentYear, currentMonth, currentDate.getDate(), i, 0);
+                                                    setStartsAt(d.toISOString().slice(0, 16));
+                                                    const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
+                                                    setEndsAt(dEnd.toISOString().slice(0, 16));
+                                                    setIsCreating(true);
+                                                }}
+                                            ></div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : viewMode === 'Week' ? (
+                            <div className="flex-1 overflow-y-auto w-full">
+                                <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-slate-200 sticky top-0 z-10 bg-white">
+                                    <div className="border-r border-slate-200 bg-slate-50" />
+                                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, index) => {
+                                        const dateOfD = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + index);
+                                        const isToday = dateOfD.getDate() === currentDate.getDate() && dateOfD.getMonth() === currentDate.getMonth() && dateOfD.getFullYear() === currentDate.getFullYear();
+                                        return (
+                                            <div key={d} className="font-semibold text-center py-2 text-slate-700 border-l border-slate-100 text-sm bg-slate-50 flex flex-col items-center">
+                                                <span className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{d}</span>
+                                                <span className={`text-lg mt-0.5 w-8 h-8 flex items-center justify-center rounded-full ${isToday ? 'bg-blue-600 text-white' : 'text-slate-700'}`}>{dateOfD.getDate()}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                                <div className="relative">
+                                    {Array.from({length: 24}).map((_, i) => (
+                                        <div key={i} className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-slate-100 min-h-[60px]">
+                                            <div className="text-xs text-slate-500 text-right pr-2 py-1 select-none border-r border-slate-200">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`}</div>
+                                            {Array.from({length: 7}).map((_, j) => {
+                                                const d = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + j, i, 0);
+                                                return (
+                                                    <div 
+                                                        key={j} 
+                                                        className="border-l border-slate-100 relative group hover:bg-blue-50/30 cursor-pointer"
+                                                        onDoubleClick={() => {
+                                                            setStartsAt(d.toISOString().slice(0, 16));
+                                                            const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
+                                                            setEndsAt(dEnd.toISOString().slice(0, 16));
+                                                            setIsCreating(true);
+                                                        }}
+                                                    ></div>
+                                                );
+                                            })}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         ) : (
-                            <div className="flex flex-1 items-center justify-center text-slate-500 bg-slate-50/50">
-                                {viewMode} view is under construction.
+                            <div className="flex-1 overflow-y-auto p-8 bg-slate-50/30">
+                                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-8">
+                                    {Array.from({length: 12}).map((_, m) => {
+                                        const daysInM = getDaysInMonth(currentYear, m);
+                                        const firstD = getFirstDayOfMonth(currentYear, m);
+                                        return (
+                                            <div key={m} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                                <div className="font-medium text-slate-800 mb-2">{monthNames[m]}</div>
+                                                <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-slate-500 mb-1">
+                                                    {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
+                                                </div>
+                                                <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
+                                                    {Array.from({length: firstD}).map((_, i) => <div key={`e-${i}`} />)}
+                                                    {Array.from({length: daysInM}).map((_, i) => {
+                                                        const isToday = (i + 1) === currentDate.getDate() && m === currentDate.getMonth() && currentYear === currentDate.getFullYear();
+                                                        return (
+                                                            <div key={i} className={`w-5 h-5 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-blue-600 text-white' : 'text-slate-700 hover:bg-slate-100'}`}>
+                                                                {i + 1}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         )}
                     </main>
+
+                    <AnimatePresence initial={false}>
+                        {isCalSidebarOpen && (
+                            <>
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCalSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
+                                <motion.aside 
+                                    initial={{ width: 0, opacity: 0 }} 
+                                    animate={{ width: 256, opacity: 1 }} 
+                                    exit={{ width: 0, opacity: 0 }} 
+                                    className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
+                                >
+                                    <div className="p-4 py-5 px-4 z-10 w-[256px]">
+                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
+                                        <Plus className="w-5 h-5 text-white" />
+                                        <span className="text-sm font-medium text-white transition-colors">Create Event</span>
+                                    </button>
+                                </div>
+
+                                <div className="px-6 pb-2 w-[256px]">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-[13px] font-medium text-slate-700">{monthNames[currentMonth]} {currentYear}</span>
+                                        <div className="flex gap-1">
+                                            <ChevronLeft className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={prevMonth} />
+                                            <ChevronRight className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={nextMonth} />
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-slate-500 font-medium pb-2">
+                                        {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
+                                    </div>
+                                    <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
+                                        {miniCalendarDays.map((dateObj, i) => {
+                                            const isToday = dateObj.isCurrentMonth && dateObj.day === currentDate.getDate() && currentMonth === currentDate.getMonth() && currentYear === currentDate.getFullYear();
+                                            return (
+                                                <div key={i} className={`w-6 h-6 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-blue-600 text-white' : dateObj.isCurrentMonth ? 'hover:bg-slate-100 text-slate-700 cursor-pointer' : 'text-slate-400'}`}>
+                                                    {dateObj.day}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="p-4 flex-1 overflow-y-auto w-[256px] border-t border-slate-100 mt-2">
+                                    <div className="flex items-center gap-2 py-2 cursor-pointer text-slate-700 hover:bg-slate-50 px-2 rounded font-medium">
+                                        <span className="text-sm flex-1">My calendars</span>
+                                        <ChevronRight className="w-4 h-4 transform rotate-90" />
+                                    </div>
+                                    <div className="pl-2 space-y-1 mt-1">
+                                        {allCalendars.map(calendar => {
+                                            const active = selectedCalendarIds.includes(calendar.id);
+                                            return (
+                                                <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group px-2 rounded-md hover:bg-slate-50" onClick={() => toggleCalendar(calendar.id)}>
+                                                    <div className="relative flex items-center justify-center w-5 h-5 rounded">
+                                                        <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
+                                                            {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-sm text-slate-700 truncate">{calendar.name}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    
+                                    <div className="mt-6">
+                                        <ExtensionLoader mountPoint="CALENDAR_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
+                                    </div>
+                                </div>
+                            </motion.aside>
+                            </>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         </div>

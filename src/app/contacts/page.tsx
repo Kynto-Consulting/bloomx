@@ -123,46 +123,15 @@ export default function ContactsPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
+                        <button onClick={() => setIsContactSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
+                            <Settings className="w-5 h-5 text-slate-700" />
+                        </button>
                         <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 sm:hidden"><Search className="w-6 h-6" /></button>
                     </div>
                 </header>
 
                 <div className="flex flex-1 overflow-hidden">
-                    <AnimatePresence initial={false}>
-                        {isContactSidebarOpen && (
-                            <motion.aside 
-                                initial={{ width: 0, opacity: 0 }} 
-                                animate={{ width: 256, opacity: 1 }} 
-                                exit={{ width: 0, opacity: 0 }} 
-                                className="bg-white flex flex-col hidden lg:flex flex-shrink-0 border-r border-slate-100"
-                            >
-                                <div className="p-4 py-5 pl-4">
-                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
-                                        <Plus className="w-5 h-5 text-white" />
-                                        <span className="text-sm font-medium text-white transition-colors">Create contact</span>
-                                    </button>
-                                </div>
-
-                                <div className="p-2 flex-1 overflow-y-auto w-[256px]">
-                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer bg-blue-50 text-blue-700 rounded-r-full mr-4 font-medium">
-                                        <Users className="w-5 h-5" />
-                                        <span className="text-sm flex-1">Contacts</span>
-                                        <span className="text-xs">{contacts.length}</span>
-                                    </div>
-                                    <hr className="my-2 border-slate-100 mr-4" />
-                                    <div className="pr-4">
-                                       <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
-                                    </div>
-                                    
-                                    <div className="mt-4 pr-4">
-                                        <ExtensionLoader mountPoint="CONTACTS_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
-                                    </div>
-                                </div>
-                            </motion.aside>
-                        )}
-                    </AnimatePresence>
-
-                    <main className="flex-1 bg-white border-l border-t border-slate-200 flex flex-col relative ml-[-1px]">
+                    <main className="flex-1 bg-white border-t border-slate-200 flex flex-col relative z-0">
                         {isCreating && (
                             <div className="absolute top-4 left-4 z-40 w-[450px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
                                 <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
@@ -233,6 +202,43 @@ export default function ContactsPage() {
                             )}
                         </div>
                     </main>
+
+                    <AnimatePresence initial={false}>
+                        {isContactSidebarOpen && (
+                            <>
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsContactSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
+                                <motion.aside 
+                                    initial={{ width: 0, opacity: 0 }} 
+                                    animate={{ width: 256, opacity: 1 }} 
+                                    exit={{ width: 0, opacity: 0 }} 
+                                    className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
+                                >
+                                    <div className="p-4 py-5 px-4 z-10 w-[256px]">
+                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
+                                        <Plus className="w-5 h-5 text-white" />
+                                        <span className="text-sm font-medium text-white transition-colors">Create contact</span>
+                                    </button>
+                                </div>
+
+                                <div className="p-2 flex-1 overflow-y-auto w-[256px]">
+                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer bg-blue-50 text-blue-700 rounded-lg mx-2 font-medium">
+                                        <Users className="w-5 h-5" />
+                                        <span className="text-sm flex-1">Contacts</span>
+                                        <span className="text-xs">{contacts.length}</span>
+                                    </div>
+                                    <hr className="my-3 border-slate-100 mx-4" />
+                                    <div className="px-4">
+                                       <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
+                                    </div>
+                                    
+                                    <div className="mt-4 px-4">
+                                        <ExtensionLoader mountPoint="CONTACTS_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
+                                    </div>
+                                </div>
+                            </motion.aside>
+                            </>
+                        )}
+                    </AnimatePresence>
                 </div>
             </div>
         </div>
