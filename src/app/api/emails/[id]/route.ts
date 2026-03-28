@@ -122,7 +122,7 @@ export async function GET(
             const normalizeSubject = (subject: string) => {
                 if (!subject) return '';
                 // Remove Re:, Fwd:, etc. (Case insensitive) - Logic matches frontend
-                return subject.replace(/^((re|fwd|rv|enc|invitaci[oó]n|invitaci[oó]n actualizada|accepted|declined|tentative|cancelado|canceled|updated): ?)+/gi, '').trim();
+                return subject.replace(/^((re|fwd|fw|rv|enc|invitaci[oó]n(?: actualizada)?|invitation(?: updated| canceled| cancelled)?|accepted|declined|tentative|cancelado|canceled|cancelled|updated): ?)+/gi, '').trim();
             };
 
             const normalized = normalizeSubject(email.subject);

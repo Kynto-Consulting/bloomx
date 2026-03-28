@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { TagInput } from '@/components/ui/TagInput';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
+import { toast } from 'sonner';
 
 type EventAttendee = {
     email: string;
@@ -61,6 +62,7 @@ export function CreateEventForm({
     const [attendeeDetails, setAttendeeDetails] = useState<EventAttendee[]>(initialAttendeeDetails);
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
     const [isSaving, setIsSaving] = useState(false);
+    const [isInviting, setIsInviting] = useState(false);
 
     const normalizeTags = useCallback((tags: string[]) => {
         return Array.from(new Set(
@@ -121,6 +123,50 @@ export function CreateEventForm({
         setAttendeeTags(resolvedTags);
     }, [runRecipientsMiddleware]);
 
+    const getAttendeeList = useCallback(() => {
+        return normalizeTags(attendeeTags).filter((tag) => tag.includes('@'));
+    }, [attendeeTags, normalizeTags]);
+
+    const buildEventPayload = useCallback((targetCalendarId?: string) => {
+        return {
+            calendarId: targetCalendarId,
+            title: title || 'New Event',
+            location,
+            startsAt,
+            endsAt,
+            attendees: getAttendeeList(),
+        };
+    }, [title, location, startsAt, endsAt, getAttendeeList]);
+
+    const markAttendeesAsPending = useCallback((emails: string[]) => {
+        const normalizedEmails = normalizeTags(emails);
+
+        setAttendeeDetails((current) => {
+            const organizers = current.filter((attendee) => attendee.isOrganizer);
+            const existingByEmail = new Map(
+                current
+                    .filter((attendee) => !attendee.isOrganizer)
+                    .map((attendee) => [attendee.email.toLowerCase(), attendee])
+            );
+
+            const updatedAttendees = normalizedEmails.map((email) => {
+                const existing = existingByEmail.get(email.toLowerCase());
+                if (existing) {
+                    return existing;
+                }
+
+                return {
+                    email,
+                    name: null,
+                    responseStatus: 'needsAction',
+                    isOrganizer: false,
+                } satisfies EventAttendee;
+            });
+
+            return [...organizers, ...updatedAttendees];
+        });
+    }, [normalizeTags]);
+
     // Update state if props change when reopened
     useEffect(() => {
         if (initialStartsAt) setStartsAt(initialStartsAt);
@@ -166,19 +212,12 @@ export function CreateEventForm({
 
             const url = eventId ? `/api/calendar/events/${eventId}` : '/api/calendar/events';
             const method = eventId ? 'PUT' : 'POST';
-            const attendeeList = normalizeTags(attendeeTags).filter((tag) => tag.includes('@'));
+            const payload = buildEventPayload(targetCalendarId);
 
             await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    calendarId: targetCalendarId,
-                    title: title || 'New Event',
-                    location,
-                    startsAt,
-                    endsAt,
-                    attendees: attendeeList
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!eventId) {
@@ -191,6 +230,92 @@ export function CreateEventForm({
             console.error(error);
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const inviteAttendees = async () => {
+        if (!eventId) {
+            toast.error('Save the event before sending invitations');
+            return;
+        }
+
+        const attendeeList = getAttendeeList();
+        if (attendeeList.length === 0) {
+            toast.error('Add at least one attendee');
+            return;
+        }
+
+        const oldEmails = new Set(attendeeDetails.map(a => a.email.toLowerCase()));
+        const newlyAdded = attendeeList.filter(email => !oldEmails.has(email.toLowerCase()));
+        
+        let toInvite = newlyAdded;
+        if (toInvite.length === 0) {
+            // If no new people, re-send to everyone
+            toInvite = attendeeList;
+        }
+
+        setIsInviting(true);
+        try {
+            const updateResponse = await fetch(`/api/calendar/events/${eventId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(buildEventPayload(calendarId)),
+            });
+
+            if (!updateResponse.ok) {
+                const updateResult = await updateResponse.json().catch(() => null);
+                throw new Error(updateResult?.error || 'Failed to save event before inviting attendees');
+            }
+
+            const inviteAttachmentResponse = await fetch(`/api/calendar/events/${eventId}/attach-invite`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ to: toInvite }),
+            });
+            const inviteAttachmentResult = await inviteAttachmentResponse.json().catch(() => null);
+
+            if (!inviteAttachmentResponse.ok || !inviteAttachmentResult?.attachment) {
+                throw new Error(inviteAttachmentResult?.error || 'Failed to generate invite attachment');
+            }
+
+            const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
+            const endsAtLabel = endsAt ? new Date(endsAt).toLocaleString() : 'TBD';
+
+            const text = [
+                `You are invited to: ${title || 'New Event'}`,
+                `Starts: ${startsAtLabel}`,
+                `Ends: ${endsAtLabel}`,
+                location ? `Location: ${location}` : '',
+                '',
+                'The calendar invite (.ics) is attached to this email.',
+            ].filter(Boolean).join('\n');
+
+            const sendInvitesResponse = await fetch('/api/emails', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: toInvite.join(','),
+                    subject: `Invitation: ${title || inviteAttachmentResult.subject || 'New Event'}`,
+                    text,
+                    attachments: [inviteAttachmentResult.attachment],
+                }),
+            });
+            const sendInvitesResult = await sendInvitesResponse.json().catch(() => null);
+
+            if (!sendInvitesResponse.ok || !sendInvitesResult?.success) {
+                throw new Error(sendInvitesResult?.error || 'Failed to send invitation emails');
+            }
+
+            markAttendeesAsPending(toInvite);
+            window.dispatchEvent(new CustomEvent('bloomx:calendar-sync-complete'));
+
+            const suffix = toInvite.length === 1 ? '' : 's';
+            toast.success(`Invitation sent to ${toInvite.length} attendee${suffix}`);
+        } catch (error: any) {
+            console.error(error);
+            toast.error(error?.message || 'Failed to send invitations');
+        } finally {
+            setIsInviting(false);
         }
     };
 
@@ -249,13 +374,25 @@ export function CreateEventForm({
                             {attendeeTags.length > 0 ? attendeeTags.join(', ') : 'No attendees'}
                         </div>
                     ) : (
-                        <TagInput
-                            value={attendeeTags}
-                            onChange={handleAttendeesChange}
-                            placeholder="Invite recipients or mail groups"
-                            className="border-b border-slate-100 px-0 py-1.5"
-                            suggestionEndpoint="/api/contacts/suggestions"
-                        />
+                        <div className="flex items-end gap-2">
+                            <TagInput
+                                value={attendeeTags}
+                                onChange={handleAttendeesChange}
+                                placeholder="Invite recipients or mail groups"
+                                className="flex-1 border-b border-slate-100 px-0 py-1.5"
+                                suggestionEndpoint="/api/contacts/suggestions"
+                            />
+                            {eventId && (
+                                <button
+                                    type="button"
+                                    onClick={inviteAttendees}
+                                    disabled={isSaving || isInviting || getAttendeeList().length === 0}
+                                    className="mb-1 ml-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                                >
+                                    {isInviting ? 'Enviando...' : 'Invitar'}
+                                </button>
+                            )}
+                        </div>
                     )}
                 </div>
 
@@ -329,7 +466,7 @@ export function CreateEventForm({
                     {!isReadOnly && (
                         <button 
                             type="submit" 
-                            disabled={isSaving}
+                            disabled={isSaving || isInviting}
                             className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-md text-sm font-medium px-6 py-2 transition-colors"
                         >
                             {isSaving ? 'Saving...' : 'Save'}

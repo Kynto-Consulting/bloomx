@@ -22,6 +22,14 @@ import { Popover } from './ui/Popover';
 import { motion } from 'framer-motion';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 
+function extractPlainTextFromHtml(value: string) {
+    return String(value || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 interface ComposeModalProps {
     id: string;
     initialTo?: string;
@@ -186,11 +194,103 @@ export function ComposeModal({
         };
     }, [toTags, ccTags, bccTags, subject, body, draftId]);
 
+    const syncCalendarEventsFromAttachments = async (
+        currentTo: string[],
+        currentCc: string[],
+        currentAttachments: any[]
+    ) => {
+        const attachmentsToSync = currentAttachments
+            .map((attachment, index) => ({ attachment, index }))
+            .filter(({ attachment }) => attachment?.calendarEvent && !attachment?.calendarEvent?.syncedEventId);
+
+        if (attachmentsToSync.length === 0) {
+            return currentAttachments;
+        }
+
+        const calendarsResponse = await fetch('/api/calendars', { cache: 'no-store' });
+        if (!calendarsResponse.ok) {
+            throw new Error('No se pudo consultar los calendarios para guardar la invitacion');
+        }
+
+        const calendars = await calendarsResponse.json();
+        const writableCalendar = Array.isArray(calendars)
+            ? (calendars.find((calendar: any) => calendar.source === 'local' && !calendar.isReadOnly)
+                || calendars.find((calendar: any) => !calendar.isReadOnly))
+            : null;
+
+        if (!writableCalendar?.id) {
+            throw new Error('No hay un calendario editable disponible para registrar el evento');
+        }
+
+        const fallbackRecipients = Array.from(new Set(
+            [...currentTo, ...currentCc]
+                .map((email) => String(email || '').trim().toLowerCase())
+                .filter((email) => email.includes('@'))
+        ));
+
+        const nextAttachments = [...currentAttachments];
+
+        for (const { attachment, index } of attachmentsToSync) {
+            const calendarEvent = attachment.calendarEvent || {};
+            const attendees = Array.isArray(calendarEvent.attendees) && calendarEvent.attendees.length > 0
+                ? Array.from(new Set(calendarEvent.attendees.map((email: string) => String(email || '').trim().toLowerCase()).filter((email: string) => email.includes('@'))))
+                : fallbackRecipients;
+
+            if (!calendarEvent.startsAt || !calendarEvent.endsAt) {
+                throw new Error('La invitacion no tiene fecha de inicio y fin validas para guardar en calendario');
+            }
+
+            const createEventResponse = await fetch('/api/calendar/events', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    calendarId: writableCalendar.id,
+                    title: calendarEvent.title || subject || 'New Event',
+                    description: calendarEvent.description || null,
+                    location: calendarEvent.location || null,
+                    startsAt: calendarEvent.startsAt,
+                    endsAt: calendarEvent.endsAt,
+                    attendees,
+                    inviteUid: calendarEvent.inviteUid || null,
+                    organizerEmail: calendarEvent.organizerEmail || session?.user?.email || null,
+                    organizerName: calendarEvent.organizerName || session?.user?.name || null,
+                    source: 'local',
+                }),
+            });
+
+            const createEventResult = await createEventResponse.json().catch(() => null);
+            if (!createEventResponse.ok) {
+                throw new Error(createEventResult?.error || 'No se pudo guardar el evento en calendario');
+            }
+
+            nextAttachments[index] = {
+                ...attachment,
+                calendarEvent: {
+                    ...calendarEvent,
+                    syncedEventId: createEventResult?.id || createEventResult?.eventId || true,
+                },
+            };
+        }
+
+        setAttachments(nextAttachments);
+        return nextAttachments;
+    };
+
     const handleSchedule = async (date: Date) => {
-        if (toTags.length === 0) return;
+        if (toTags.length === 0) {
+            toast.error('Agrega al menos un destinatario');
+            return;
+        }
+
+        const plainTextBody = extractPlainTextFromHtml(body);
+        if (!plainTextBody && attachments.length === 0) {
+            toast.error('No puedes enviar un correo vacio. Escribe un mensaje o adjunta un archivo.');
+            return;
+        }
 
         setSending(true);
         try {
+            const attachmentsForSend = await syncCalendarEventsFromAttachments(toTags, ccTags, attachments);
             const res = await fetch('/api/emails', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -199,19 +299,23 @@ export function ComposeModal({
                     cc: ccTags.length > 0 ? ccTags.join(', ') : undefined,
                     bcc: bccTags.length > 0 ? bccTags.join(', ') : undefined,
                     subject,
-                    text: body.replace(/<[^>]+>/g, ''),
+                    text: plainTextBody,
                     html: body,
-                    attachments,
+                    attachments: attachmentsForSend,
                     scheduledAt: date.toISOString()
                 }),
             });
+            const result = await res.json().catch(() => null);
             if (res.ok) {
                 if (draftId) await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
                 closeCompose(id);
                 // Ideally show a specific toast: "Email scheduled for ..."
+            } else {
+                throw new Error(result?.error?.message || result?.error || 'No se pudo programar el correo');
             }
         } catch (err) {
             console.error(err);
+            toast.error(err instanceof Error ? err.message : 'No se pudo programar el correo');
         } finally {
             setSending(false);
         }
@@ -230,10 +334,20 @@ export function ComposeModal({
         const mounts: any[] = []; // Placeholder
         const sortedMounts: any[] = [];
 
-        if (finalTo.length === 0) return; // Validate To field
+        if (finalTo.length === 0) {
+            toast.error('Agrega al menos un destinatario');
+            return;
+        }
+
+        const plainTextBody = extractPlainTextFromHtml(finalBody);
+        if (!plainTextBody && attachments.length === 0) {
+            toast.error('No puedes enviar un correo vacio. Escribe un mensaje o adjunta un archivo.');
+            return;
+        }
 
         setSending(true);
         try {
+            const attachmentsForSend = await syncCalendarEventsFromAttachments(finalTo, finalCc, attachments);
             const res = await fetch('/api/emails', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -242,17 +356,21 @@ export function ComposeModal({
                     cc: finalCc.length > 0 ? finalCc.join(', ') : undefined,
                     bcc: finalBcc.length > 0 ? finalBcc.join(', ') : undefined,
                     subject: finalSubject,
-                    text: finalBody.replace(/<[^>]+>/g, ''), // Naive strip HTML for text fallback
+                    text: plainTextBody,
                     html: finalBody,
-                    attachments
+                    attachments: attachmentsForSend
                 }),
             });
+            const result = await res.json().catch(() => null);
             if (res.ok) {
                 if (draftId) await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
                 closeCompose(id);
+            } else {
+                throw new Error(result?.error?.message || result?.error || 'No se pudo enviar el correo');
             }
         } catch (err) {
             console.error(err);
+            toast.error(err instanceof Error ? err.message : 'No se pudo enviar el correo');
         } finally {
             setSending(false);
         }

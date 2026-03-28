@@ -155,6 +155,17 @@ export async function POST(
         const organizerName = organizerFromAttendees?.name || event.organizerName || user.name || organizerEmail;
         const eventUid = event.inviteUid || event.externalId || `${event.id}@bloomx.local`;
 
+        if (!event.inviteUid || !event.organizerEmail || !event.organizerName) {
+            await prisma.calendarEvent.update({
+                where: { id: event.id },
+                data: {
+                    inviteUid: eventUid,
+                    organizerEmail,
+                    organizerName,
+                },
+            });
+        }
+
         const icsContent = buildIcsFromEvent({
             title: event.title,
             description: event.description,

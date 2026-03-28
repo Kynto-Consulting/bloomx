@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { getCurrentUser } from "@/lib/session";
 import { uploadToStorage } from '@/lib/storage';
+import { parseInviteFromIcs } from '@/lib/calendar/ics';
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -167,6 +168,33 @@ export async function POST(req: NextRequest) {
             return att;
         }));
 
+        const outboundInviteUids = new Set<string>();
+        processedAttachments.forEach((att: any) => {
+            const metadataUid = String(att?.calendarEvent?.inviteUid || '').trim();
+            if (metadataUid) {
+                outboundInviteUids.add(metadataUid);
+            }
+
+            const mimeType = String(att?.mimeType || '').toLowerCase();
+            const filename = String(att?.filename || '').toLowerCase();
+            const isCalendarAttachment = mimeType.includes('text/calendar') || filename.endsWith('.ics');
+
+            if (!isCalendarAttachment || !att?.contentBase64) {
+                return;
+            }
+
+            try {
+                const rawIcs = Buffer.from(att.contentBase64, 'base64').toString('utf8');
+                const parsedInvite = parseInviteFromIcs(rawIcs);
+                const parsedUid = String(parsedInvite?.uid || '').trim();
+                if (parsedUid) {
+                    outboundInviteUids.add(parsedUid);
+                }
+            } catch {
+                // Ignore malformed ICS payloads to avoid blocking send.
+            }
+        });
+
         // Use authenticated user's credentials
         let senderName = sessionUser.name || 'User';
         let senderEmail = sessionUser.email;
@@ -224,8 +252,21 @@ export async function POST(req: NextRequest) {
         let finalHtml = html;
         let finalText = text;
 
-        if ((!finalHtml && !finalText) && (attachments && attachments.length > 0)) {
-            finalText = '';
+        const plainHtml = String(finalHtml || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&nbsp;/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const plainText = String(finalText || '').trim();
+
+        if (!plainHtml && !plainText && resendAttachments.length === 0) {
+            return NextResponse.json({
+                error: 'Cannot send an empty email. Add message content or an attachment.'
+            }, { status: 400 });
+        }
+
+        if (!plainHtml && !plainText && resendAttachments.length > 0) {
+            finalText = ' ';
         }
 
         const payload: any = {
@@ -234,8 +275,8 @@ export async function POST(req: NextRequest) {
             cc: cc ? cc.split(',') : undefined,
             bcc: bcc ? bcc.split(',') : undefined,
             subject: subject,
-            html: finalHtml,
-            text: finalText,
+            html: finalHtml || undefined,
+            text: finalText || undefined,
             attachments: resendAttachments.length > 0 ? resendAttachments : undefined
         };
 
@@ -302,6 +343,18 @@ export async function POST(req: NextRequest) {
                 }
             }
         });
+
+        if (outboundInviteUids.size > 0) {
+            await prisma.calendarEvent.updateMany({
+                where: {
+                    userId: user.id,
+                    inviteUid: { in: Array.from(outboundInviteUids) },
+                },
+                data: {
+                    sourceEmailId: email.id,
+                }
+            });
+        }
 
         // ----------------------------------------------------
         // MIDDLEWARE: Post-Send Hooks (Background)

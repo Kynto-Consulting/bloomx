@@ -47,6 +47,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const title = String(body?.title || '').trim();
     const calendarId = String(body?.calendarId || '').trim();
+    const inviteUid = String(body?.inviteUid || '').trim() || null;
+    const organizerEmail = String(body?.organizerEmail || user.email || '').trim() || null;
+    const organizerName = String(body?.organizerName || user.name || organizerEmail || '').trim() || null;
     const startsAt = body?.startsAt ? new Date(body.startsAt) : null;
     const endsAt = body?.endsAt ? new Date(body.endsAt) : null;
 
@@ -66,12 +69,40 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'This calendar is read-only' }, { status: 400 });
     }
 
-    const additionalAttendees = Array.isArray(body?.attendees) ? body.attendees.map((email: string) => ({
-        email: typeof email === 'string' ? email.trim() : String(email).trim(),
+    if (inviteUid) {
+        const existingEvent = await prisma.calendarEvent.findFirst({
+            where: {
+                userId: user.id,
+                inviteUid,
+            },
+            include: {
+                calendar: true,
+                attendees: true,
+            }
+        });
+
+        if (existingEvent) {
+            return NextResponse.json(existingEvent);
+        }
+    }
+
+    const attendeeEmails: string[] = Array.isArray(body?.attendees)
+        ? body.attendees
+            .map((email: string) => typeof email === 'string' ? email.trim().toLowerCase() : String(email).trim().toLowerCase())
+            .filter((email: string) => email && email.includes('@') && email !== user.email?.toLowerCase())
+            .filter((email: string, index: number, all: string[]) => all.indexOf(email) === index)
+        : [];
+
+    const additionalAttendees = attendeeEmails.map((email: string) => ({
+        email,
         name: null,
         responseStatus: 'needsAction',
-        isOrganizer: false
-    })).filter((a: any) => a.email && a.email !== user.email) : [];
+        isOrganizer: false,
+    }));
+
+    const source = ['local', 'shared', 'google', 'outlook', 'public'].includes(String(body?.source || '').toLowerCase())
+        ? String(body?.source).toLowerCase()
+        : (calendar.source === 'local' ? 'local' : calendar.source);
 
     const event = await prisma.calendarEvent.create({
         data: {
@@ -83,7 +114,10 @@ export async function POST(req: NextRequest) {
             startsAt,
             endsAt,
             allDay: Boolean(body?.allDay),
-            source: calendar.source === 'local' ? 'local' : calendar.source,
+            source,
+            inviteUid,
+            organizerEmail,
+            organizerName,
             attendees: {
                 create: [
                     ...(user.email ? [{

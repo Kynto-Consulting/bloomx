@@ -69,6 +69,78 @@ function normalizeInviteStatus(value?: string | null): 'accepted' | 'tentative' 
     return 'needsAction';
 }
 
+function parseMailbox(value: unknown): { email: string; name: string | null } {
+    if (!value) {
+        return { email: '', name: null };
+    }
+
+    if (typeof value === 'object') {
+        const obj = value as any;
+        const email = String(obj?.email || '').trim().toLowerCase();
+        const name = String(obj?.name || '').trim() || null;
+        if (email.includes('@')) {
+            return { email, name };
+        }
+    }
+
+    const raw = String(value || '').trim();
+    const bracketMatch = raw.match(/^(.*)<([^>]+)>$/);
+    if (bracketMatch?.[2]) {
+        return {
+            email: bracketMatch[2].trim().toLowerCase(),
+            name: bracketMatch[1].trim().replace(/^"|"$/g, '') || null,
+        };
+    }
+
+    if (raw.includes('@')) {
+        return { email: raw.toLowerCase(), name: null };
+    }
+
+    return { email: '', name: null };
+}
+
+function decodeQuotedPrintable(input: string) {
+    return String(input || '')
+        .replace(/=(\r?\n)/g, '')
+        .replace(/=([A-Fa-f0-9]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+}
+
+function extractCalendarIcsFromRawEmail(rawSource: string): string[] {
+    const source = String(rawSource || '');
+    const foundBlocks: string[] = [];
+
+    const partRegex = /Content-Type:\s*(?:text\/calendar|application\/ics)[^\r\n]*((?:\r?\n[^\r\n]*)*)\r?\n\r?\n([\s\S]*?)(?=\r?\n--[^\r\n]+(?:--)?\r?\n?)/gi;
+    let partMatch: RegExpExecArray | null = null;
+    while ((partMatch = partRegex.exec(source)) !== null) {
+        const partHeaders = String(partMatch[1] || '');
+        const partBody = String(partMatch[2] || '');
+        const transferEncoding = (partHeaders.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i)?.[1] || '').trim().toLowerCase();
+
+        let decoded = partBody;
+        if (transferEncoding === 'base64') {
+            const base64Payload = partBody.replace(/\s+/g, '');
+            try {
+                decoded = Buffer.from(base64Payload, 'base64').toString('utf8');
+            } catch {
+                decoded = '';
+            }
+        } else if (transferEncoding === 'quoted-printable') {
+            decoded = decodeQuotedPrintable(partBody);
+        }
+
+        if (decoded && /BEGIN:VCALENDAR/i.test(decoded) && /END:VCALENDAR/i.test(decoded)) {
+            foundBlocks.push(decoded);
+        }
+    }
+
+    if (foundBlocks.length > 0) {
+        return Array.from(new Set(foundBlocks));
+    }
+
+    const inlineBlocks = source.match(/BEGIN:VCALENDAR[\s\S]*?END:VCALENDAR/gi) || [];
+    return Array.from(new Set(inlineBlocks.map((block) => block.trim()).filter(Boolean)));
+}
+
 async function handleInboundCalendarInvite(options: {
     userId: string;
     userEmail: string;
@@ -152,6 +224,23 @@ async function handleInboundCalendarInvite(options: {
                     name: responder?.name || null,
                     responseStatus,
                     isOrganizer: false,
+                }
+            });
+        }
+
+        if (existingEvent.sourceEmailId) {
+            await prisma.emailEvent.create({
+                data: {
+                    emailId: existingEvent.sourceEmailId,
+                    type: 'invite.rsvp',
+                    data: {
+                        response: responseStatus,
+                        responderEmail,
+                        responderName: responder?.name || responderEmail,
+                        organizerEmail: existingEvent.organizerEmail,
+                        organizerName: existingEvent.organizerName,
+                        uid: inviteUid,
+                    },
                 }
             });
         }
@@ -262,6 +351,9 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     console.log(`Payload Size: ${rawPayload.length} bytes`);
     console.log('-------------------------');
     const { from, to, subject, attachments, messageId } = data;
+    const headersMap = (data?.headers && typeof data.headers === 'object') ? data.headers : {};
+    const webhookEmailId = String(data?.email_id || data?.id || '').trim();
+    const resolvedMessageId = String(messageId || data?.message_id || '').trim();
     let { html, text } = data;
 
     // Normalize recipient data
@@ -281,10 +373,21 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     // Normalize all recipients for validation, but store RAW for display
     const normalizedRecipients = recipients.map(email => normalizeEmail(email));
 
-    // Parse sender (Moved up for auto-reply)
-    const senderMatch = from.match(/^(.+?)\s*<(.+?)>$/);
-    const senderEmail = senderMatch ? senderMatch[2].trim() : from.trim();
-    const senderName = senderMatch ? senderMatch[1].trim() : null;
+    const replyToCandidate = Array.isArray(data?.reply_to) && data.reply_to.length > 0
+        ? data.reply_to[0]
+        : headersMap['reply-to'];
+
+    // Parse sender using payload + headers to support calendar providers like Google.
+    const fromMailbox = parseMailbox(from || headersMap.from || headersMap.sender);
+    const replyToMailbox = parseMailbox(replyToCandidate);
+    const senderMailbox = fromMailbox.email
+        ? fromMailbox
+        : replyToMailbox.email
+            ? replyToMailbox
+            : parseMailbox(headersMap.sender || headersMap.from);
+
+    const senderEmail = senderMailbox.email || 'unknown@unknown.local';
+    const senderName = senderMailbox.name || null;
     const formattedFrom = senderName ? `${senderName} <${senderEmail}>` : senderEmail;
 
     // Use RAW for storage (Dedupe case-sensitive or insensitive? Let's keep it exact as received)
@@ -341,17 +444,30 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     uploads.push(uploadToStorage(rawKey, rawPayload, 'application/json'));
 
     // 2. Upload Bodies
-    if (!html && !text) {
-        console.log('[resend] Email body missing in webhook payload. Attempting Resend API fallback...');
+    const hasCalendarAttachmentWithoutContent = Array.isArray(attachments) && attachments.some((att: any) => {
+        const mimeType = String(att?.contentType || att?.content_type || '').toLowerCase();
+        const filename = String(att?.filename || '').toLowerCase();
+        const isCalendarAttachment = mimeType.includes('text/calendar') || mimeType.includes('application/ics') || filename.endsWith('.ics');
+        return isCalendarAttachment && !att?.content;
+    });
+
+    let fetchedReceivingData: any = null;
+    if (webhookEmailId && (!html || !text || hasCalendarAttachmentWithoutContent)) {
+        if (!html || !text) {
+            console.log('[resend] Email body missing in webhook payload. Attempting Resend API fallback...');
+        }
         try {
-            const res = await fetch(`https://api.resend.com/emails/receiving/${data.email_id}`, {
+            const res = await fetch(`https://api.resend.com/emails/receiving/${webhookEmailId}`, {
                 headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}` }
             });
 
             if (res.ok) {
-                const fetchedData = await res.json();
-                if (fetchedData.html) html = fetchedData.html;
-                if (fetchedData.text) text = fetchedData.text;
+                fetchedReceivingData = await res.json();
+                if (fetchedReceivingData?.html) html = fetchedReceivingData.html;
+                if (fetchedReceivingData?.text) text = fetchedReceivingData.text;
+                if (!data?.headers && fetchedReceivingData?.headers) {
+                    data.headers = fetchedReceivingData.headers;
+                }
                 console.log('Successfully fetched missing content from Resend API.');
             } else {
                 console.error(`Failed to fetch content: ${res.status}`);
@@ -376,35 +492,96 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     }
 
     // 3. Upload Attachments
-    const attachmentRecords = [];
+    const attachmentRecords: Array<{
+        filename: string;
+        mimeType: string;
+        size: number;
+        key: string;
+    }> = [];
     const parsedInvites: ParsedInvite[] = [];
+    const parsedInviteKeys = new Set<string>();
+
+    const registerParsedInvite = (invite: ParsedInvite | null | undefined) => {
+        if (!invite) {
+            return;
+        }
+
+        const key = `${invite.uid || ''}|${invite.method || ''}|${invite.organizerEmail || ''}`;
+        if (parsedInviteKeys.has(key)) {
+            return;
+        }
+
+        parsedInviteKeys.add(key);
+        parsedInvites.push(invite);
+    };
+
     if (attachments && Array.isArray(attachments)) {
         for (const att of attachments) {
             if (att.content) {
-                const attKey = `emails/${dateStr}/${uuid}/attachments/${att.filename}`;
+                const fallbackFilename: string = `attachment-${attachmentRecords.length + 1}.bin`;
+                const filename: string = String(att.filename || fallbackFilename);
+                const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
 
                 const buffer = Buffer.from(att.content.data || att.content);
-                const contentType = att.contentType || 'application/octet-stream';
+                const contentType = att.contentType || att.content_type || 'application/octet-stream';
 
                 uploads.push(uploadToStorage(attKey, buffer, contentType));
 
                 attachmentRecords.push({
-                    filename: att.filename,
+                    filename,
                     mimeType: contentType,
                     size: att.size || buffer.length,
                     key: attKey
                 });
 
                 const isCalendarAttachment = String(contentType || '').toLowerCase().includes('text/calendar')
+                    || String(contentType || '').toLowerCase().includes('application/ics')
                     || String(att.filename || '').toLowerCase().endsWith('.ics');
 
                 if (isCalendarAttachment) {
-                    const parsedInvite = parseInviteFromIcs(buffer.toString('utf8'));
-                    if (parsedInvite) {
-                        parsedInvites.push(parsedInvite);
-                    }
+                    registerParsedInvite(parseInviteFromIcs(buffer.toString('utf8')));
                 }
             }
+        }
+    }
+
+    if (fetchedReceivingData?.raw?.download_url) {
+        try {
+            const rawDownloadResponse = await fetch(fetchedReceivingData.raw.download_url);
+            if (rawDownloadResponse.ok) {
+                const rawMime = await rawDownloadResponse.text();
+                const calendarIcsBlocks = extractCalendarIcsFromRawEmail(rawMime);
+                const attachmentHints = Array.isArray(fetchedReceivingData?.attachments) ? fetchedReceivingData.attachments : [];
+
+                calendarIcsBlocks.forEach((icsContent, index) => {
+                    registerParsedInvite(parseInviteFromIcs(icsContent));
+
+                    const alreadyHasCalendarAttachment = attachmentRecords.some((record: any) => {
+                        const mimeType = String(record?.mimeType || '').toLowerCase();
+                        const filename = String(record?.filename || '').toLowerCase();
+                        return mimeType.includes('text/calendar') || mimeType.includes('application/ics') || filename.endsWith('.ics');
+                    });
+
+                    if (alreadyHasCalendarAttachment) {
+                        return;
+                    }
+
+                    const hintedFilename = String(attachmentHints[index]?.filename || '').trim();
+                    const filename = hintedFilename || `invite-${index + 1}.ics`;
+                    const contentBuffer = Buffer.from(icsContent, 'utf8');
+                    const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
+
+                    uploads.push(uploadToStorage(attKey, contentBuffer, 'text/calendar;charset=utf-8'));
+                    attachmentRecords.push({
+                        filename,
+                        mimeType: 'text/calendar;charset=utf-8',
+                        size: contentBuffer.byteLength,
+                        key: attKey,
+                    });
+                });
+            }
+        } catch (error) {
+            console.error('Failed to download raw MIME from Resend:', error);
         }
     }
 
@@ -462,7 +639,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 to: toField,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
-                messageId: users.length > 1 ? `${messageId || uuid}-${user.id}` : (messageId || uuid), // Ensure unique messageId per record if multipule users? 
+                messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid), // Ensure unique messageId per record if multipule users? 
                 // Wait, messageId in schema is unique? Yes.
                 // If we store same email for multiple users, they need distinct messageId in DB?
                 // The Schema says `messageId String @unique`.
@@ -504,7 +681,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             title: senderName || senderEmail,
             body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
             url: '/?folder=inbox',
-            tag: `email-${messageId || uuid}-${user.id}`,
+            tag: `email-${resolvedMessageId || uuid}-${user.id}`,
         });
     }
 }
