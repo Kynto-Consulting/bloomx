@@ -255,6 +255,32 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             if (resolvedAct.action === 'TOAST') {
                 toast(resolvedAct.message);
             }
+            if (resolvedAct.action === 'SET_SUBJECT') {
+                const nextSubject = resolvedAct.subject ?? resolvedAct.value;
+                const currentSubject = typeof context.subject === 'string' ? context.subject.trim() : '';
+
+                if (nextSubject && context.setSubject && (!resolvedAct.ifEmpty || !currentSubject)) {
+                    await context.setSubject(nextSubject);
+                }
+            }
+            if (resolvedAct.action === 'ADD_ATTACHMENT') {
+                const attachment = resolvedAct.attachment || resolvedAct;
+
+                if (attachment?.url && context.addAttachment) {
+                    context.addAttachment(attachment);
+                } else if (attachment?.contentBase64 && context.uploadAttachment) {
+                    const binary = atob(attachment.contentBase64);
+                    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                    const file = new File(
+                        [bytes],
+                        attachment.filename || 'attachment.bin',
+                        { type: attachment.mimeType || 'application/octet-stream' }
+                    );
+                    await context.uploadAttachment(file);
+                } else {
+                    toast.error('Attachment payload invalid');
+                }
+            }
             if (resolvedAct.action === 'INSERT_CONTENT') {
                 console.log("Insert content", resolvedAct.content);
                 if (context.insertBody) {
@@ -570,7 +596,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         <div key={i} className="space-y-1">
                             <label className="text-sm font-medium">{field.label}</label>
                             {field.type === 'textarea' ? (
-                                <textarea className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue} />
+                                <textarea className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue} placeholder={field.placeholder} />
                             ) : field.type === 'select' ? (
                                 <select className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue}>
                                     {field.options?.map((opt: any) => (
@@ -578,7 +604,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                                     ))}
                                 </select>
                             ) : (
-                                <Input name={field.name} defaultValue={field.defaultValue} readOnly={field.readOnly} />
+                                <Input type={field.type || 'text'} name={field.name} defaultValue={field.defaultValue} readOnly={field.readOnly} placeholder={field.placeholder} />
                             )}
                         </div>
                     ))}

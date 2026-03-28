@@ -4,10 +4,14 @@
     "description": "Serverless mail app",
     "main": "index.js",
     "scripts": {
+        "predev": "tsx scripts/ensure-schema.ts",
         "dev": "next dev",
+        "prebuild": "tsx scripts/ensure-schema.ts",
         "build": "next build",
+        "prestart": "tsx scripts/ensure-schema.ts",
         "start": "next start",
         "lint": "next lint",
+        "db:ensure": "tsx scripts/ensure-schema.ts",
         "postinstall": "prisma generate"
     },
     "keywords": [],
@@ -64,6 +68,7 @@
         "tailwind-merge": "^3.4.0",
         "tailwindcss-animate": "^1.0.7",
         "uuid": "^13.0.0",
+        "web-push": "^3.6.7",
         "zod": "^4.3.5"
     },
     "devDependencies": {
@@ -71,6 +76,7 @@
         "@types/bcryptjs": "^3.0.0",
         "@types/dompurify": "^3.2.0",
         "@types/node": "latest",
+        "@types/pg": "^8.15.5",
         "@types/react": "latest",
         "@types/react-dom": "latest",
         "@types/uuid": "^11.0.0",
@@ -79,6 +85,7 @@
         "eslint-config-next": "latest",
         "postcss": "latest",
         "tailwindcss": "latest",
+        "tsx": "^4.20.6",
         "typescript": "latest"
     }
 }

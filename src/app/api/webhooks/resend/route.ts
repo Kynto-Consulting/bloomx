@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { uploadToStorage } from '@/lib/storage';
 import { Webhook } from 'svix';
 import { resend } from '@/lib/resend';
+import { sendNewMessagePushNotification } from '@/lib/notifications/web-push';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -288,6 +289,13 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                     connect: uniqueLabelIds
                 }
             }
+        });
+
+        await sendNewMessagePushNotification(user.id, {
+            title: senderName || senderEmail,
+            body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
+            url: '/?folder=inbox',
+            tag: `email-${messageId || uuid}-${user.id}`,
         });
     }
 }

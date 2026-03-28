@@ -8,6 +8,7 @@ import { OfflineProvider } from '@/contexts/OfflineContext'
 import { ComposeWindows } from '@/components/ComposeWindows'
 import { Toaster } from '@/components/ui/sonner'
 import { RealTimeListener } from '@/components/RealTimeListener'
+import { PwaManager } from '@/components/PwaManager'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
@@ -32,7 +33,8 @@ export async function generateMetadata(): Promise<Metadata> {
         if (!res.ok) {
             return {
                 title: 'BloomX Mail',
-                description: 'Serverless mail client'
+                description: 'Serverless mail client',
+                manifest: '/manifest.webmanifest'
             };
         }
 
@@ -42,6 +44,7 @@ export async function generateMetadata(): Promise<Metadata> {
         return {
             title: config?.displayName || config?.name || 'BloomX Mail',
             description: 'Serverless mail client',
+            manifest: '/manifest.webmanifest',
             icons: config?.logo ? [
                 { rel: 'icon', url: config.logo },
                 { rel: 'shortcut icon', url: config.logo },
@@ -52,7 +55,8 @@ export async function generateMetadata(): Promise<Metadata> {
         console.error("Metadata generation failed:", e);
         return {
             title: 'BloomX Mail',
-            description: 'Serverless mail client'
+            description: 'Serverless mail client',
+            manifest: '/manifest.webmanifest'
         };
     }
 }
@@ -76,6 +80,7 @@ export default function RootLayout({
                                     <ThemeProvider>
                                         {children}
                                     </ThemeProvider>
+                                    <PwaManager />
                                     <RealTimeListener />
                                     <ComposeWindows />
                                     <Toaster />

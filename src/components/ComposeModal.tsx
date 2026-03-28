@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Minimize2, Trash2, Maximize2, Loader2, Send, Paperclip, Clock, Sparkles, Mic } from 'lucide-react';
+import { X, Minimize2, Trash2, Maximize2, Loader2, Send, Paperclip, Clock, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCompose } from '@/contexts/ComposeContext';
 // Local expansions removed.
@@ -18,7 +18,7 @@ import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 // import { ClientExpansions } from '@/lib/expansions/client/renderer'; // Legacy
 import { ClientExpansionContext } from '@/lib/expansions/client/types'; // Legacy
 import { Popover } from './ui/Popover';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 
 interface ComposeModalProps {
     id: string;
@@ -71,8 +71,6 @@ export function ComposeModal({
     // Track if user maximized the window manually (custom state, separate from minimize)
     const [maximized, setMaximized] = useState(false);
 
-    // AI/Editor State
-    const [showAiPrompt, setShowAiPrompt] = useState(false);
     const editorRef = useRef<any>(null);
 
     // Middleware Refs
@@ -672,19 +670,6 @@ export function ComposeModal({
 
                 </div>
 
-                {/* Client Expansions Overlay */}
-                {/* AI Prompt Overlay */}
-                {showAiPrompt && (
-                    <div className="absolute inset-x-2 bottom-14 top-2 z-40 flex justify-end items-end pointer-events-none">
-                        <div className="pointer-events-auto w-[400px] max-w-full max-h-full flex flex-col">
-                            <ExtensionLoader
-                                mountPoint="COMPOSER_OVERLAY"
-                                context={{ ...contextProps, onClose: () => setShowAiPrompt(false) }}
-                            />
-                        </div>
-                    </div>
-                )}
-
                 {/* Active Slash Component (e.g. Zoom Form) */}
                 {activeSlashComponent && activeSlashComponent.Component && (
                     <div className="absolute bottom-14 left-4 z-40 bg-white border border-gray-200 rounded-lg shadow-xl p-0 animate-in fade-in zoom-in-95">
@@ -708,6 +693,7 @@ export function ComposeModal({
                         {popover.content}
                     </Popover>
                 )}
+
                 {/* Footer / Send Button */}
                 <div className="flex items-center justify-between p-3 bg-gray-50/50 relative">
                     <div className="flex items-center gap-2">
@@ -819,18 +805,6 @@ export function ComposeModal({
                                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
                                     </span>
                                 )}
-                            </button>
-
-                            {/* AI Help Me Write */}
-                            <button
-                                onClick={() => setShowAiPrompt(!showAiPrompt)}
-                                className={cn(
-                                    "p-2 rounded-full transition-colors text-purple-600 hover:bg-purple-50",
-                                    showAiPrompt && "bg-purple-100 ring-2 ring-purple-200"
-                                )}
-                                title="AI Help Me Write"
-                            >
-                                <Sparkles className="w-5 h-5" />
                             </button>
 
                             {/* Expansions (Toolbar) */}
