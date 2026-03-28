@@ -66,6 +66,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'This calendar is read-only' }, { status: 400 });
     }
 
+    const additionalAttendees = Array.isArray(body?.attendees) ? body.attendees.map((email: string) => ({
+        email: typeof email === 'string' ? email.trim() : String(email).trim(),
+        name: null,
+        responseStatus: 'needsAction',
+        isOrganizer: false
+    })).filter((a: any) => a.email && a.email !== user.email) : [];
+
     const event = await prisma.calendarEvent.create({
         data: {
             userId: user.id,
@@ -78,12 +85,15 @@ export async function POST(req: NextRequest) {
             allDay: Boolean(body?.allDay),
             source: calendar.source === 'local' ? 'local' : calendar.source,
             attendees: {
-                create: user.email ? [{
-                    email: user.email,
-                    name: user.name || user.email,
-                    responseStatus: 'accepted',
-                    isOrganizer: true,
-                }] : []
+                create: [
+                    ...(user.email ? [{
+                        email: user.email,
+                        name: user.name || user.email,
+                        responseStatus: 'accepted',
+                        isOrganizer: true,
+                    }] : []),
+                    ...additionalAttendees
+                ]
             }
         },
         include: {

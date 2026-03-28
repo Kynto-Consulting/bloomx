@@ -26,6 +26,7 @@ type CalendarEventRecord = {
     endsAt: string;
     calendar: CalendarRecord;
     responseStatus?: string | null;
+    attendees?: { email: string; name?: string | null; isOrganizer?: boolean; responseStatus?: string | null }[];
 };
 
 export default function CalendarPage() {
@@ -94,6 +95,8 @@ export default function CalendarPage() {
                     initialLocation={event.location || ''}
                     initialStartsAt={event.startsAt}
                     initialEndsAt={event.endsAt}
+                    initialAttendees={event.attendees?.filter(a => !a.isOrganizer).map(a => a.email) || []}
+                    initialAttendeeDetails={event.attendees || []}
                     isReadOnly={event.calendar.isReadOnly}
                     onSaved={() => {
                         closeWindow(`event-${event.id}`);
@@ -105,13 +108,24 @@ export default function CalendarPage() {
         });
     };
 
-    const handleAddHolidayProvider = (code: string) => {
-        if (!holidayCountries.includes(code)) {
-            const newCountries = [...holidayCountries, code];
-            setHolidayCountries(newCountries);
+    const handleToggleHolidayProvider = (code: string) => {
+        setHolidayCountries(prev => {
+            const newCountries = prev.includes(code)
+                ? prev.filter(c => c !== code)
+                : [...prev, code];
+            
             localStorage.setItem('bloomx_holiday_countries', JSON.stringify(newCountries));
-            setSelectedCalendarIds(prev => [...prev, `holidays-${code}`]); // Enable it by default
-        }
+            
+            if (prev.includes(code)) {
+                // If it was removed, also remove from selected calendars so events hide locally
+                setSelectedCalendarIds(selected => selected.filter(id => id !== `holidays-${code}`));
+            } else {
+                // Enable it by default when added
+                setSelectedCalendarIds(selected => [...selected, `holidays-${code}`]);
+            }
+            
+            return newCountries;
+        });
     };
 
     const handleOpenAddCalendar = () => {
@@ -124,7 +138,7 @@ export default function CalendarPage() {
                 <AddCalendarForm 
                     isGoogleLinked={isGoogleLinked} 
                     currentHolidayProviders={holidayCountries}
-                    onAddHolidayProvider={handleAddHolidayProvider}
+                    onToggleHolidayProvider={handleToggleHolidayProvider}
                     onLocalCreate={() => {
                         // TODO: Provide UI to create local calendar if not using the default one
                         // Usually you might trigger an API `/api/calendars` POST and reload

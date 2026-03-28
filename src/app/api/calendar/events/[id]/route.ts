@@ -31,6 +31,24 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         return NextResponse.json({ error: 'Cannot edit read-only events' }, { status: 400 });
     }
 
+    const attendeeEmails = Array.isArray(body?.attendees) 
+        ? body.attendees.map((e: any) => typeof e === 'string' ? e.trim() : String(e).trim()).filter((e: string) => e && e !== user.email) 
+        : [];
+
+    await prisma.calendarAttendee.deleteMany({
+        where: {
+            eventId: id,
+            isOrganizer: false,
+            email: { notIn: attendeeEmails }
+        }
+    });
+
+    const existingAttendees = await prisma.calendarAttendee.findMany({
+        where: { eventId: id }
+    });
+    const existingEmails = existingAttendees.map(a => a.email);
+    const attendeesToAdd = attendeeEmails.filter((e: string) => !existingEmails.includes(e));
+
     const updated = await prisma.calendarEvent.update({
         where: { id },
         data: {
@@ -38,6 +56,17 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             location: body?.location || null,
             startsAt,
             endsAt,
+            attendees: {
+                create: attendeesToAdd.map((e: string) => ({
+                    email: e,
+                    responseStatus: 'needsAction',
+                    isOrganizer: false
+                }))
+            }
+        },
+        include: {
+            calendar: true,
+            attendees: true
         }
     });
 

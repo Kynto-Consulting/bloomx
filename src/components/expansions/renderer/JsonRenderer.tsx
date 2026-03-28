@@ -396,6 +396,14 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             if (resolvedAct.action === 'CLOSE_OVERLAY') {
                 closeOverlay();
             }
+            if (resolvedAct.action === 'SET_CONTEXT_VALUE') {
+                const targetKey = resolvedAct.key;
+                if (targetKey && typeof context?.[targetKey] === 'function') {
+                    context[targetKey](resolvedAct.value);
+                } else {
+                    toast.error(`Context setter '${targetKey}' is unavailable`);
+                }
+            }
             if (resolvedAct.action === 'NEXT_STEP') {
                 setWizardStep(prev => prev + 1);
             }
@@ -545,6 +553,41 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         return <span className={className} style={{ fontSize: size }}>{iconName}</span>;
     };
 
+    const renderMenuOptionButton = (option: any, index: number) => {
+        const optionLabel = option?.label || `Option ${index + 1}`;
+        return (
+            <button
+                key={`${optionLabel}-${index}`}
+                type="button"
+                onClick={(e) => {
+                    handleAction(option?.onClick, e);
+                    if (context?.close) {
+                        context.close();
+                    }
+                }}
+                className="inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+            >
+                {option?.icon ? <span>{renderIcon(option.icon, 16)}</span> : null}
+                <span>{optionLabel}</span>
+            </button>
+        );
+    };
+
+    const openButtonMenu = (target: EventTarget | null, menuOptions: any[]) => {
+        if (!context?.openPopover || !target || !Array.isArray(menuOptions) || menuOptions.length === 0) {
+            return;
+        }
+
+        const anchor = target as HTMLElement;
+        context.openPopover(
+            anchor,
+            <div className="flex min-w-[200px] flex-col gap-1 p-1">
+                {menuOptions.map((option, index) => renderMenuOptionButton(option, index))}
+            </div>,
+            { width: 220, header: false }
+        );
+    };
+
     switch (type) {
         case 'BUTTON': {
             const providedVariant = resolvedProps.variant || 'default';
@@ -561,9 +604,41 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 : isToolbarMenuButton
                     ? menuClassName
                     : (resolvedProps.className || "w-full shadow-sm");
+
+            const menuOptions = resolvedProps.menuOptions;
+            const hasMenuOptions = Array.isArray(menuOptions) && menuOptions.length > 0;
+
+            const handleButtonClick = (e: React.MouseEvent) => {
+                if (hasMenuOptions) {
+                    openButtonMenu(e.currentTarget, menuOptions);
+                    return;
+                }
+
+                handleAction(props.onClick, e);
+            };
+
+            const handleDesktopHover = (e: React.MouseEvent) => {
+                if (!hasMenuOptions) {
+                    return;
+                }
+
+                const isDesktopViewport = typeof window !== 'undefined' && window.innerWidth >= 1024;
+                if (!isDesktopViewport) {
+                    return;
+                }
+
+                const canHover = typeof window !== 'undefined' && window.matchMedia('(hover: hover)').matches;
+                if (!canHover) {
+                    return;
+                }
+
+                openButtonMenu(e.currentTarget, menuOptions);
+            };
+
             return (
                 <Button
-                    onClick={(e) => handleAction(props.onClick, e)}
+                    onClick={handleButtonClick}
+                    onMouseEnter={handleDesktopHover}
                     variant={buttonVariant}
                     size="sm"
                     title={buttonLabel}

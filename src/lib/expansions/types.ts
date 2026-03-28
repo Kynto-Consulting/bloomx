@@ -7,6 +7,7 @@ export type MountPoint =
     | 'SIDEBAR_HEADER'
     | 'SIDEBAR_FOOTER'
     | 'COMPOSER_TOOLBAR'
+    | 'EVENT_LOCATION_BUILDER'
     | 'CALENDAR_HEADER'
     | 'CALENDAR_SIDEBAR'
     | 'CONTACTS_HEADER'

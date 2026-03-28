@@ -11,6 +11,12 @@ export type ParsedInvite = {
     sequence?: number;
     organizerEmail?: string;
     organizerName?: string;
+    attendees?: Array<{
+        email: string;
+        name?: string;
+        responseStatus?: 'accepted' | 'tentative' | 'declined' | 'needsAction';
+        isOrganizer?: boolean;
+    }>;
 };
 
 function unfoldIcs(source: string) {
@@ -84,6 +90,42 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
         return null;
     }
 
+    const unfolded = unfoldIcs(source);
+
+    const attendeeLines = unfolded
+        .split(/\r?\n/)
+        .filter((line) => /^ATTENDEE/i.test(line));
+
+    const attendees = attendeeLines
+        .map((line) => {
+            const separatorIndex = line.indexOf(':');
+            const metadata = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+            const value = separatorIndex >= 0 ? line.slice(separatorIndex + 1) : '';
+
+            const email = extractEmail(value);
+            if (!email) {
+                return null;
+            }
+
+            const cnMatch = metadata.match(/CN=([^;:]+)/i);
+            const rawPartstat = metadata.match(/PARTSTAT=([^;:]+)/i)?.[1]?.toUpperCase();
+            const responseStatus = rawPartstat === 'ACCEPTED'
+                ? 'accepted'
+                : rawPartstat === 'DECLINED'
+                    ? 'declined'
+                    : rawPartstat === 'TENTATIVE'
+                        ? 'tentative'
+                        : 'needsAction';
+
+            return {
+                email,
+                name: cnMatch?.[1]?.trim().replace(/^"|"$/g, '') || extractDisplayName(value),
+                responseStatus,
+                isOrganizer: /ROLE=CHAIR/i.test(metadata),
+            };
+        })
+        .filter(Boolean) as ParsedInvite['attendees'];
+
     const organizerLine = extractIcsValue(source, 'ORGANIZER');
     const parsed = {
         uid: extractIcsValue(source, 'UID') || undefined,
@@ -92,10 +134,11 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
         location: extractIcsValue(source, 'LOCATION') || undefined,
         startsAt: formatInviteDate(extractIcsValue(source, 'DTSTART')) || undefined,
         endsAt: formatInviteDate(extractIcsValue(source, 'DTEND')) || undefined,
-        method: extractIcsValue(source, 'METHOD') || undefined,
+        method: (extractIcsValue(source, 'METHOD') || '').toUpperCase() || undefined,
         sequence: Number.parseInt(extractIcsValue(source, 'SEQUENCE') || '0', 10),
         organizerEmail: extractEmail(organizerLine) || undefined,
         organizerName: extractDisplayName(organizerLine) || undefined,
+        attendees,
     } satisfies ParsedInvite;
 
     return parsed.uid || parsed.summary || parsed.organizerEmail ? parsed : null;

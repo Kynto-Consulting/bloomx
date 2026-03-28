@@ -4,6 +4,8 @@ import { uploadToStorage } from '@/lib/storage';
 import { Webhook } from 'svix';
 import { resend } from '@/lib/resend';
 import { sendNewMessagePushNotification } from '@/lib/notifications/web-push';
+import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
+import { ParsedInvite, parseInviteFromIcs } from '@/lib/calendar/ics';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -57,6 +59,191 @@ function normalizeEmail(email: string): string {
     }
 
     return `${normalized}@${domain}`;
+}
+
+function normalizeInviteStatus(value?: string | null): 'accepted' | 'tentative' | 'declined' | 'needsAction' {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized === 'accepted') return 'accepted';
+    if (normalized === 'tentative') return 'tentative';
+    if (normalized === 'declined') return 'declined';
+    return 'needsAction';
+}
+
+async function handleInboundCalendarInvite(options: {
+    userId: string;
+    userEmail: string;
+    emailId: string;
+    senderEmail: string;
+    senderName: string | null;
+    invite: ParsedInvite;
+}) {
+    const method = (options.invite.method || 'REQUEST').toUpperCase();
+    const inviteUid = options.invite.uid || null;
+
+    const calendars = await ensureDefaultCalendars(options.userId);
+    const sharedCalendar = calendars.find((calendar) => calendar.source === 'shared') || calendars[0];
+    if (!sharedCalendar) {
+        return;
+    }
+
+    if (method === 'CANCEL') {
+        if (!inviteUid) {
+            return;
+        }
+
+        await prisma.calendarEvent.updateMany({
+            where: {
+                userId: options.userId,
+                inviteUid,
+            },
+            data: {
+                status: 'cancelled',
+                source: 'shared',
+                sourceEmailId: options.emailId,
+                calendarId: sharedCalendar.id,
+            }
+        });
+        return;
+    }
+
+    if (method === 'REPLY') {
+        if (!inviteUid) {
+            return;
+        }
+
+        const existingEvent = await prisma.calendarEvent.findFirst({
+            where: {
+                userId: options.userId,
+                inviteUid,
+            },
+        });
+
+        if (!existingEvent) {
+            return;
+        }
+
+        const responder = (options.invite.attendees || []).find((attendee) => attendee.email);
+        const responderEmail = (responder?.email || options.senderEmail || '').toLowerCase();
+        if (!responderEmail) {
+            return;
+        }
+
+        const responseStatus = normalizeInviteStatus(responder?.responseStatus || null);
+        const existingAttendee = await prisma.calendarAttendee.findFirst({
+            where: {
+                eventId: existingEvent.id,
+                email: responderEmail,
+            },
+        });
+
+        if (existingAttendee) {
+            await prisma.calendarAttendee.update({
+                where: { id: existingAttendee.id },
+                data: {
+                    responseStatus,
+                    name: responder?.name || existingAttendee.name,
+                },
+            });
+        } else {
+            await prisma.calendarAttendee.create({
+                data: {
+                    eventId: existingEvent.id,
+                    email: responderEmail,
+                    name: responder?.name || null,
+                    responseStatus,
+                    isOrganizer: false,
+                }
+            });
+        }
+
+        return;
+    }
+
+    const startsAt = options.invite.startsAt ? new Date(options.invite.startsAt) : null;
+    const endsAt = options.invite.endsAt ? new Date(options.invite.endsAt) : null;
+
+    if (!startsAt || !endsAt || Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
+        return;
+    }
+
+    const existingEvent = await prisma.calendarEvent.findFirst({
+        where: {
+            userId: options.userId,
+            OR: [
+                inviteUid ? { inviteUid } : undefined,
+                { sourceEmailId: options.emailId },
+            ].filter(Boolean) as any,
+        },
+    });
+
+    const organizerEmail = (options.invite.organizerEmail || options.senderEmail || '').toLowerCase();
+    const organizerName = options.invite.organizerName || options.senderName || organizerEmail;
+
+    const attendeeRecords = (options.invite.attendees || [])
+        .filter((attendee) => attendee.email)
+        .map((attendee) => ({
+            email: attendee.email.toLowerCase(),
+            name: attendee.name || attendee.email,
+            responseStatus: normalizeInviteStatus(attendee.responseStatus || null),
+            isOrganizer: Boolean(attendee.isOrganizer) || (organizerEmail ? attendee.email.toLowerCase() === organizerEmail : false),
+        }));
+
+    if (organizerEmail && !attendeeRecords.some((attendee) => attendee.email === organizerEmail)) {
+        attendeeRecords.push({
+            email: organizerEmail,
+            name: organizerName,
+            responseStatus: 'accepted',
+            isOrganizer: true,
+        });
+    }
+
+    if (options.userEmail && !attendeeRecords.some((attendee) => attendee.email === options.userEmail.toLowerCase())) {
+        attendeeRecords.push({
+            email: options.userEmail.toLowerCase(),
+            name: options.userEmail,
+            responseStatus: 'needsAction',
+            isOrganizer: false,
+        });
+    }
+
+    const eventData = {
+        calendarId: sharedCalendar.id,
+        title: options.invite.summary || 'Invitation',
+        description: options.invite.description || null,
+        location: options.invite.location || null,
+        startsAt,
+        endsAt,
+        source: 'shared',
+        status: 'confirmed',
+        responseStatus: null,
+        inviteUid,
+        organizerEmail: organizerEmail || null,
+        organizerName: organizerName || null,
+        sourceEmailId: options.emailId,
+    };
+
+    if (existingEvent) {
+        await prisma.calendarEvent.update({
+            where: { id: existingEvent.id },
+            data: {
+                ...eventData,
+                attendees: {
+                    deleteMany: {},
+                    create: attendeeRecords,
+                }
+            }
+        });
+    } else {
+        await prisma.calendarEvent.create({
+            data: {
+                userId: options.userId,
+                ...eventData,
+                attendees: {
+                    create: attendeeRecords,
+                }
+            }
+        });
+    }
 }
 
 async function handleEmailReceived(data: any, rawPayload: string) {
@@ -190,21 +377,33 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // 3. Upload Attachments
     const attachmentRecords = [];
+    const parsedInvites: ParsedInvite[] = [];
     if (attachments && Array.isArray(attachments)) {
         for (const att of attachments) {
             if (att.content) {
                 const attKey = `emails/${dateStr}/${uuid}/attachments/${att.filename}`;
 
                 const buffer = Buffer.from(att.content.data || att.content);
+                const contentType = att.contentType || 'application/octet-stream';
 
-                uploads.push(uploadToStorage(attKey, buffer, att.contentType || 'application/octet-stream'));
+                uploads.push(uploadToStorage(attKey, buffer, contentType));
 
                 attachmentRecords.push({
                     filename: att.filename,
-                    mimeType: att.contentType || 'application/octet-stream',
+                    mimeType: contentType,
                     size: att.size || buffer.length,
                     key: attKey
                 });
+
+                const isCalendarAttachment = String(contentType || '').toLowerCase().includes('text/calendar')
+                    || String(att.filename || '').toLowerCase().endsWith('.ics');
+
+                if (isCalendarAttachment) {
+                    const parsedInvite = parseInviteFromIcs(buffer.toString('utf8'));
+                    if (parsedInvite) {
+                        parsedInvites.push(parsedInvite);
+                    }
+                }
             }
         }
     }
@@ -256,7 +455,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
         const uniqueLabelIds = Array.from(new Set(matchingLabels.map(l => l.id))).map(id => ({ id }));
 
-        await prisma.email.create({
+        const createdEmail = await prisma.email.create({
             data: {
                 userId: user.id, // Assign to correct user
                 from: formattedFrom,
@@ -287,6 +486,19 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 }
             }
         });
+
+        if (parsedInvites.length > 0) {
+            for (const invite of parsedInvites) {
+                await handleInboundCalendarInvite({
+                    userId: user.id,
+                    userEmail: user.email,
+                    emailId: createdEmail.id,
+                    senderEmail: senderEmail.toLowerCase(),
+                    senderName,
+                    invite,
+                });
+            }
+        }
 
         await sendNewMessagePushNotification(user.id, {
             title: senderName || senderEmail,

@@ -15,18 +15,20 @@ const DEFAULT_HOLIDAY_PROVIDERS = [
     { code: 'CO', name: 'Holidays in Colombia' },
 ];
 
-export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onAddHolidayProvider, currentHolidayProviders = [] }: { 
+export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHolidayProvider, currentHolidayProviders = [] }: { 
     isGoogleLinked: boolean, 
     onLocalCreate: () => void,
-    onAddHolidayProvider: (code: string) => void,
+    onToggleHolidayProvider: (code: string) => void,
     currentHolidayProviders: string[]
 }) {
     const { closeWindow } = useGlobalWindow();
     const [addedProviders, setAddedProviders] = useState<string[]>(currentHolidayProviders);
 
-    const handleAddProvider = (code: string) => {
-        setAddedProviders([...addedProviders, code]);
-        onAddHolidayProvider(code);
+    const handleToggleProvider = (code: string) => {
+        setAddedProviders(prev => 
+            prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+        );
+        onToggleHolidayProvider(code);
     };
 
     return (
@@ -88,9 +90,8 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onAddHolidayPro
                             return (
                                 <button 
                                     key={p.code}
-                                    onClick={() => !isAdded && handleAddProvider(p.code)}
-                                    disabled={isAdded}
-                                    className={`w-full flex items-center justify-between p-3 border-b last:border-b-0 border-slate-100 transition-colors text-left ${isAdded ? 'bg-slate-50 cursor-default opacity-70' : 'hover:bg-slate-50'}`}
+                                    onClick={() => handleToggleProvider(p.code)}
+                                    className={`w-full flex items-center justify-between p-3 border-b last:border-b-0 border-slate-100 transition-colors text-left ${isAdded ? 'hover:bg-slate-100' : 'hover:bg-slate-50'}`}
                                 >
                                     <div className="flex items-center gap-3">
                                         <div className="w-8 h-8 rounded bg-teal-50 flex flex-shrink-0 items-center justify-center text-teal-600">
@@ -101,7 +102,7 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onAddHolidayPro
                                             <p className="text-xs text-slate-500">Public holidays for {p.code}</p>
                                         </div>
                                     </div>
-                                    {isAdded ? <Check className="w-4 h-4 text-emerald-500" /> : <Plus className="w-4 h-4 text-slate-400" />}
+                                    {isAdded ? <Check className="w-5 h-5 text-emerald-500" /> : <Plus className="w-4 h-4 text-slate-400" />}
                                 </button>
                             );
                         })}
