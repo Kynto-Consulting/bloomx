@@ -147,6 +147,25 @@ export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         const { to, subject, html, text, from, cc, bcc, attachments, scheduledAt } = body;
+        const timestamp = Date.now();
+
+        const processedAttachments = await Promise.all((attachments || []).map(async (att: any, index: number) => {
+            if (att?.contentBase64) {
+                const safeFilename = (att.filename || `attachment-${index + 1}.bin`).replace(/[^a-zA-Z0-9.-]/g, '_');
+                const key = att.key || `attachments/${sessionUser.email}/${timestamp}-${safeFilename}`;
+                const buffer = Buffer.from(att.contentBase64, 'base64');
+
+                await uploadToStorage(key, buffer, att.mimeType || 'application/octet-stream');
+
+                return {
+                    ...att,
+                    key,
+                    size: att.size || buffer.byteLength,
+                };
+            }
+
+            return att;
+        }));
 
         // Use authenticated user's credentials
         let senderName = sessionUser.name || 'User';
@@ -186,10 +205,19 @@ export async function POST(req: NextRequest) {
         // ----------------------------------------------------
 
         // Prepare attachments for Resend
-        const resendAttachments = attachments?.map((att: any) => ({
-            filename: att.filename,
-            path: att.url,
-        }));
+        const resendAttachments = processedAttachments.map((att: any) => {
+            if (att.contentBase64) {
+                return {
+                    filename: att.filename,
+                    content: Buffer.from(att.contentBase64, 'base64'),
+                };
+            }
+
+            return {
+                filename: att.filename,
+                path: att.url,
+            };
+        });
 
         // Wrapper for Resend payload
         // Resend requires at least 'html' or 'text' to be present.
@@ -208,7 +236,7 @@ export async function POST(req: NextRequest) {
             subject: subject,
             html: finalHtml,
             text: finalText,
-            attachments: resendAttachments
+            attachments: resendAttachments.length > 0 ? resendAttachments : undefined
         };
 
         if (scheduledAt) {
@@ -225,7 +253,6 @@ export async function POST(req: NextRequest) {
 
         // Upload HTML/Text to Storage for persistence
         // We use the same storage as inbound emails
-        const timestamp = Date.now();
         const safeSubject = (subject || 'no-subject').replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
 
         let htmlKey = null;
@@ -266,11 +293,11 @@ export async function POST(req: NextRequest) {
                 scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
                 read: true,
                 attachments: {
-                    create: attachments?.map((att: any) => ({
+                    create: processedAttachments.map((att: any) => ({
                         filename: att.filename,
                         mimeType: att.mimeType || 'application/octet-stream',
                         size: att.size || 0,
-                        key: att.key
+                        key: att.key || `inline/${att.filename || 'attachment.bin'}`
                     }))
                 }
             }

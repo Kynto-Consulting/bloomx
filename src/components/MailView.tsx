@@ -6,7 +6,7 @@ import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertica
 import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
 import { formatDate, cn } from '@/lib/utils';
-import DOMPurify from 'isomorphic-dompurify';
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { toast } from 'sonner';
 import { fetchDeduped } from '@/lib/fetchdedupe';
 
@@ -311,13 +311,7 @@ export function MailView() {
                             // User asked: "el orden al revez pls esta de el mas viejo al mas nuevo. primero el mas nuevo" -> "order reverse pls it is oldest to newest. first the newest".
                             // So we render Newest first (Index 0).
 
-                            const cleanHtml = DOMPurify.sanitize(item.content || "", {
-                                USE_PROFILES: { html: true },
-                                ADD_ATTR: ['class', 'style', 'dir', 'target', 'id', 'start', 'type'],
-                                ADD_TAGS: ['style', 'center', 'font', 'xml'],
-                                ALLOW_DATA_ATTR: true,
-                                ALLOW_UNKNOWN_PROTOCOLS: true
-                            });
+                            const cleanHtml = sanitizeHtml(item.content || "");
 
                             return (
                                 <motion.div

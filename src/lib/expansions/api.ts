@@ -56,7 +56,6 @@ export async function executeExtensionAction(
         return await res.json();
     } catch (error: any) {
         console.error("Extension action failed", error);
-        toast.error(error.message || "Action failed");
         return { success: false, error: error.message };
     }
 }

@@ -13,6 +13,10 @@ export async function middleware(req: NextRequest) {
     if (
         pathname.startsWith('/login') ||
         pathname.startsWith('/register') ||
+        pathname === '/manifest.webmanifest' ||
+        pathname === '/sw.js' ||
+        pathname === '/icon.svg' ||
+        pathname === '/icon-maskable.svg' ||
         pathname.startsWith('/api/register') || // Allow register API
         pathname.startsWith('/api/auth') || // Allow all auth routes
         pathname.startsWith('/api/cron') || // Allow cron routes
@@ -64,5 +68,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-    matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+    matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icon.svg|icon-maskable.svg).*)"],
 };

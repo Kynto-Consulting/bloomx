@@ -9,10 +9,18 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { secureWrite, secureRead } from '@/lib/expansions/client/secure-storage';
 import { executeExtensionAction } from '@/lib/expansions/api';
-import DOMPurify from 'isomorphic-dompurify'; // Ensure safety for markdown/html
+import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { SafeIframe } from '@/components/ui/SafeIframe';
 import { Popover } from '@/components/ui/Popover'; // For TOOLTIP or custom usage
 import * as LucideIcons from 'lucide-react'; // Dynamic icons
+
+const MODAL_WIDTHS: Record<string, string> = {
+    sm: '420px',
+    md: '560px',
+    lg: '720px',
+    xl: '920px',
+    full: '90vw'
+};
 
 
 // --- State Context ---
@@ -155,6 +163,14 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
     const resolvedProps = useMemo(() => resolveProps(props, context, state), [props, context, state]);
 
+    const resolveModalWidth = (width: unknown) => {
+        if (typeof width !== 'string') {
+            return undefined;
+        }
+
+        return MODAL_WIDTHS[width] || width;
+    };
+
 
     const handleAction = async (actionDef: any, e?: any, extraContext: any = {}) => {
         if (!actionDef) return;
@@ -162,10 +178,16 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         // Merge extraContext (like { result: ... }) into the context for resolution
         const processingContext = { ...context, ...extraContext };
 
-        let actions = Array.isArray(actionDef) ? actionDef : [actionDef];
+        let actions = Array.isArray(actionDef)
+            ? actionDef
+            : (Array.isArray(actionDef.actions) ? actionDef.actions : [actionDef]);
 
         for (const act of actions) {
             const resolvedAct = resolveProps(act, processingContext, state);
+            if (Array.isArray(resolvedAct?.actions)) {
+                await handleAction(resolvedAct.actions, e, extraContext);
+                continue;
+            }
             console.log("handleAction executing:", resolvedAct, "with state:", state, "Context:", processingContext);
 
             if (resolvedAct.action === 'SET_STATE') {
@@ -177,11 +199,15 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
                 const overlayDef = context.overlays?.[targetId];
                 if (overlayDef) {
-                    // We need to render the overlay using JsonRenderer recursively.
-                    // Since openOverlay expects a ReactNode, we can pass the JSX directly.
-                    // Ensure we wrap it in a provider if needed, or just pass context.
+                    const overlayContext = {
+                        ...processingContext,
+                        onClose: closeOverlay,
+                        toolbarButtonMode: undefined,
+                    };
+
                     openOverlay(
-                        <InnerJsonRenderer component={overlayDef} context={processingContext} />
+                        <JsonRenderer component={overlayDef} context={overlayContext} />,
+                        { width: resolveModalWidth(overlayDef?.props?.width) }
                     );
                 } else {
                     console.warn(`Overlay ID ${targetId} not found in extension manifest`);
@@ -253,7 +279,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 }
             }
             if (resolvedAct.action === 'TOAST') {
-                toast(resolvedAct.message);
+                if (resolvedAct.variant === 'error') {
+                    toast.error(resolvedAct.message);
+                } else if (resolvedAct.variant === 'success') {
+                    toast.success(resolvedAct.message);
+                } else {
+                    toast(resolvedAct.message);
+                }
             }
             if (resolvedAct.action === 'SET_SUBJECT') {
                 const nextSubject = resolvedAct.subject ?? resolvedAct.value;
@@ -268,15 +300,15 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
                 if (attachment?.url && context.addAttachment) {
                     context.addAttachment(attachment);
-                } else if (attachment?.contentBase64 && context.uploadAttachment) {
+                } else if (attachment?.contentBase64 && context.addAttachment) {
                     const binary = atob(attachment.contentBase64);
                     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-                    const file = new File(
-                        [bytes],
-                        attachment.filename || 'attachment.bin',
-                        { type: attachment.mimeType || 'application/octet-stream' }
-                    );
-                    await context.uploadAttachment(file);
+                    context.addAttachment({
+                        filename: attachment.filename || 'attachment.bin',
+                        mimeType: attachment.mimeType || 'application/octet-stream',
+                        contentBase64: attachment.contentBase64,
+                        size: attachment.size || bytes.byteLength,
+                    });
                 } else {
                     toast.error('Attachment payload invalid');
                 }
@@ -293,6 +325,23 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 // Handle closeOverlay if requested in the same action scope?
                 // Some manifests might omit "closeOverlay" action and expect it.
                 // Zoom manifest has "closeOverlay": true in the action props.
+                if (resolvedAct.closeOverlay) {
+                    closeOverlay();
+                }
+            }
+            if (resolvedAct.action === 'APPEND_BODY') {
+                const nextContent = typeof resolvedAct.content === 'string'
+                    ? resolvedAct.content
+                    : typeof resolvedAct.content?.content === 'string'
+                        ? resolvedAct.content.content
+                        : '';
+
+                if (context.appendBody) {
+                    context.appendBody(nextContent);
+                } else {
+                    toast.error('Cannot append content: Composer context missing');
+                }
+
                 if (resolvedAct.closeOverlay) {
                     closeOverlay();
                 }
@@ -416,10 +465,20 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
     // Auto-run onLoad
     useEffect(() => {
-        if (props.onLoad) {
+        if (!props.onLoad) return;
+
+        const shouldRunOnLoad = resolvedProps.onLoadWhen === undefined
+            ? true
+            : Boolean(
+                typeof resolvedProps.onLoadWhen === 'string'
+                    ? resolvedProps.onLoadWhen.trim()
+                    : resolvedProps.onLoadWhen
+            );
+
+        if (shouldRunOnLoad) {
             handleAction(props.onLoad);
         }
-    }, [props.onLoad]); // Be careful with dependencies
+    }, [props.onLoad, resolvedProps.onLoadWhen]);
 
     const renderIcon = (iconName: string, size: number = 16, className: string = '') => {
         if (!iconName) return null;
@@ -449,16 +508,32 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     switch (type) {
         case 'BUTTON': {
             const providedVariant = resolvedProps.variant || 'default';
-            const variant = providedVariant === 'primary' ? 'default' : providedVariant;
+            const resolvedVariant = providedVariant === 'primary' ? 'default' : providedVariant;
+            const toolbarButtonMode = context?.toolbarButtonMode;
+            const isCompactToolbarButton = toolbarButtonMode === 'compact';
+            const isToolbarMenuButton = toolbarButtonMode === 'menu';
+            const buttonLabel = resolvedProps.label || 'Action';
+            const compactClassName = "h-10 w-10 rounded-xl border border-transparent bg-transparent px-0 text-gray-600 shadow-none hover:bg-gray-100 hover:text-gray-900";
+            const menuClassName = "w-full justify-start rounded-xl border border-transparent bg-transparent px-3 text-gray-700 shadow-none hover:bg-gray-100 hover:text-gray-900";
+            const buttonVariant = (isCompactToolbarButton || isToolbarMenuButton) ? 'ghost' : resolvedVariant;
+            const buttonClassName = isCompactToolbarButton
+                ? compactClassName
+                : isToolbarMenuButton
+                    ? menuClassName
+                    : (resolvedProps.className || "w-full shadow-sm");
             return (
                 <Button
                     onClick={(e) => handleAction(props.onClick, e)}
-                    variant={variant}
+                    variant={buttonVariant}
                     size="sm"
-                    className={resolvedProps.className || "w-full shadow-sm"}
+                    title={buttonLabel}
+                    aria-label={buttonLabel}
+                    className={buttonClassName}
                 >
-                    {resolvedProps.icon && <span className="mr-2">{renderIcon(resolvedProps.icon)}</span>}
-                    {resolvedProps.label}
+                    {resolvedProps.icon && (
+                        <span className={isCompactToolbarButton ? "" : "mr-2"}>{renderIcon(resolvedProps.icon)}</span>
+                    )}
+                    {!isCompactToolbarButton && resolvedProps.label}
                 </Button>
             );
         }
@@ -468,6 +543,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             if (resolvedProps.variant === 'error') className += " text-red-500 bg-red-50 p-3 rounded-md";
             if (resolvedProps.variant === 'success') className += " text-green-600 bg-green-50 p-3 rounded-md";
             if (resolvedProps.variant === 'body') className += " leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100";
+            if (resolvedProps.variant === 'muted') className += " text-gray-500";
             return <div className={className}>{resolvedProps.content}</div>;
         }
         case 'INPUT': {
@@ -558,8 +634,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     </div>
                 </div>
             );
+        case 'HEADLESS':
+            return null;
         case 'WIZARD':
             const step = resolvedProps.steps[wizardStep];
+            if (!step) {
+                return null;
+            }
             return (
                 <div className="space-y-4">
                     <h3 className="text-lg font-medium">{step.title}</h3>
@@ -578,7 +659,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     <label className="text-sm font-medium">{resolvedProps.label}</label>
                     <select
                         className="w-full border rounded p-2"
-                        onChange={(e) => handleAction(props.onChange, { value: e.target.value })}
+                        onChange={(e) => handleAction(props.onChange, undefined, { value: e.target.value })}
                     >
                         <option value="">Select...</option>
                         {resolvedProps.options?.map((opt: any) => (
@@ -595,7 +676,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     {resolvedProps.fields?.map((field: any, i: number) => (
                         <div key={i} className="space-y-1">
                             <label className="text-sm font-medium">{field.label}</label>
-                            {field.type === 'textarea' ? (
+                            {field.type === 'textarea' || field.type === 'richtext' ? (
                                 <textarea className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue} placeholder={field.placeholder} />
                             ) : field.type === 'select' ? (
                                 <select className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue}>
@@ -765,6 +846,28 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
         }
 
+        case 'SMART_REPLY_CHIPS': {
+            const suggestions = Array.isArray(resolvedProps.suggestions) ? resolvedProps.suggestions.filter(Boolean) : [];
+            if (suggestions.length === 0) {
+                return null;
+            }
+
+            return (
+                <div className="flex flex-wrap gap-2">
+                    {suggestions.map((suggestion: string, index: number) => (
+                        <button
+                            key={`${suggestion}-${index}`}
+                            type="button"
+                            onClick={(e) => handleAction(props.onSelect, e, { value: suggestion })}
+                            className="inline-flex max-w-full items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
+                        >
+                            <span className="truncate">{suggestion}</span>
+                        </button>
+                    ))}
+                </div>
+            );
+        }
+
         case 'LOADING':
             return (
                 <div className={`flex items-center justify-center ${resolvedProps.className || 'p-4'}`}>
@@ -876,7 +979,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'MARKDOWN': {
             // Simple subset of markdown or allow HTML if sanitized
             const content = resolvedProps.content || '';
-            const html = DOMPurify.sanitize(
+            const html = sanitizeHtml(
                 content
                     .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
                     .replace(/\*(.*?)\*/g, '<i>$1</i>')

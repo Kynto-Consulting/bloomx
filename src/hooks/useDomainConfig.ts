@@ -2,6 +2,33 @@
 import useSWR from 'swr';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
+
+function getCanonicalExtensionId(extension: any) {
+    const templateId = typeof extension?.template?.id === 'string' ? extension.template.id.trim() : '';
+    const extensionId = typeof extension?.id === 'string' ? extension.id.trim() : '';
+    return templateId || extensionId;
+}
+
+function normalizeExtensions(extensions: any[]) {
+    const uniqueExtensions = new Map<string, any>();
+
+    for (const extension of extensions) {
+        const canonicalId = getCanonicalExtensionId(extension);
+        if (!canonicalId) {
+            continue;
+        }
+
+        if (!uniqueExtensions.has(canonicalId)) {
+            uniqueExtensions.set(canonicalId, {
+                ...extension,
+                id: canonicalId,
+            });
+        }
+    }
+
+    return Array.from(uniqueExtensions.values());
+}
+
 export const DEFAULT_CONFIG = {
     name: process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom',
     displayName: process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom',
@@ -27,7 +54,7 @@ export function useDomainConfig() {
     const config = data.config;
     return {
         config,
-        extensions: data?.extensions || [],
+        extensions: normalizeExtensions(data?.extensions || []),
         isLoading,
         isError: error
     };

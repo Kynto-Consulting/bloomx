@@ -694,6 +694,13 @@ export function ComposeModal({
                     </Popover>
                 )}
 
+                <div className="bg-white px-3 pb-2">
+                    <ExtensionLoader
+                        mountPoint="EMAIL_FOOTER"
+                        context={contextProps}
+                    />
+                </div>
+
                 {/* Footer / Send Button */}
                 <div className="flex items-center justify-between p-3 bg-gray-50/50 relative">
                     <div className="flex items-center gap-2">
