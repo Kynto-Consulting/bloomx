@@ -87,25 +87,22 @@ export default function ContactsPage() {
                 )}
             </AnimatePresence>
 
-            <div className="hidden border-r bg-slate-50 xl:block group w-[1px] opacity-0 hover:w-[240px] hover:opacity-100 transition-all duration-300 absolute h-full z-50 overflow-hidden hover:shadow-2xl">
+            <div className="hidden border-r border-slate-200 xl:block w-[260px] flex-shrink-0 h-full overflow-hidden">
                 <AppSidebar />
             </div>
 
-            <div className="flex-1 flex flex-col h-full overflow-hidden ml-0">
-                <header className="flex h-[64px] items-center justify-between px-4 border-b">
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+                <header className="flex h-[64px] items-center justify-between px-4 border-b border-slate-200">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
-                            <Menu className="w-6 h-6 text-slate-700" />
-                        </button>
-                        <button onClick={() => setIsContactSidebarOpen(!isContactSidebarOpen)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 hidden xl:block">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
                         <div className="flex items-center gap-2 pr-4 text-slate-700">
-                            <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-200">
+                            <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center text-white shadow-sm">
                                 <Users className="w-5 h-5 text-white" />
                             </div>
-                            <span className="text-[22px] font-normal tracking-tight hidden sm:block text-slate-700">Contacts</span>
+                            <span className="text-xl font-normal tracking-tight hidden sm:block text-slate-700">Contacts</span>
                         </div>
                     </div>
 
@@ -123,6 +120,9 @@ export default function ContactsPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
+                        <button onClick={() => setIsContactSidebarOpen(!isContactSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden xl:block">
+                            <Settings className="w-5 h-5 text-slate-700" />
+                        </button>
                         <button onClick={() => setIsContactSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
                             <Settings className="w-5 h-5 text-slate-700" />
                         </button>

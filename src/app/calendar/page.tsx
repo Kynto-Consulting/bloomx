@@ -278,51 +278,29 @@ export default function CalendarPage() {
                 )}
             </AnimatePresence>
 
-            <div className="hidden border-r bg-slate-50 xl:block group w-[1px] opacity-0 hover:w-[240px] hover:opacity-100 transition-all duration-300 absolute h-full z-50 overflow-hidden hover:shadow-2xl">
+            <div className="hidden border-r border-slate-200 xl:block w-[260px] flex-shrink-0 h-full overflow-hidden">
                 <AppSidebar />
             </div>
 
-            <div className="flex-1 flex flex-col h-full overflow-hidden ml-0">
-                <header className="flex h-[64px] items-center justify-between px-4 border-b">
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+                <header className="flex h-[64px] items-center justify-between px-4 border-b border-slate-200">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
-                            <Menu className="w-6 h-6 text-slate-700" />
-                        </button>
-                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-3 -ml-2 mr-2 rounded-full hover:bg-slate-100 hidden xl:block shrink-0">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
-                        <div className="flex items-center gap-2 pr-6 text-slate-700">
-                            <div className="w-9 h-9 rounded bg-blue-600 flex items-center justify-center font-bold text-white shadow-sm shadow-blue-200">
+                        <div className="flex items-center gap-2 pr-2 text-slate-700">
+                            <div className="w-9 h-9 rounded bg-blue-600 flex items-center justify-center font-bold text-white shadow-sm">
                                 {currentDate.getDate()}
                             </div>
-                            <span className="text-[22px] font-normal tracking-tight hidden sm:block text-slate-700">Calendar</span>
+                            <span className="text-xl font-normal tracking-tight hidden sm:block text-slate-700">Calendar</span>
                         </div>
 
-                        <button onClick={setToday} className="border border-slate-300 px-4 py-1.5 rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 hidden md:block shadow-sm">
-                            Today
-                        </button>
-                        
-                        <div className="flex items-center gap-1 mx-4">
-                            <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-slate-700" /></button>
-                            <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-slate-700" /></button>
-                        </div>
-                        
-                        <h2 className="text-[22px] font-normal text-slate-700 whitespace-nowrap min-w-[150px]">
-                            {monthNames[currentMonth]} {currentYear}
-                        </h2>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
-                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
-                            <Settings className="w-5 h-5 text-slate-700" />
-                        </button>
-                        <div className="border border-slate-300 rounded-md bg-white hover:bg-slate-50 hidden md:flex shadow-sm overflow-hidden">
+                        <div className="hidden md:flex items-center border border-slate-300 rounded-md bg-white hover:bg-slate-50 shadow-sm overflow-hidden h-[36px]">
                             <select 
                                 value={viewMode} 
                                 onChange={(e) => setViewMode(e.target.value)}
-                                className="text-sm font-medium text-slate-700 bg-transparent px-3 py-1.5 outline-none cursor-pointer appearance-none pr-8 relative"
+                                className="text-sm font-medium text-slate-700 bg-transparent px-3 py-1 outline-none cursor-pointer appearance-none pr-8 relative h-full"
                                 style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%234A5568" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em' }}
                             >
                                 <option value="Day">Day</option>
@@ -331,6 +309,29 @@ export default function CalendarPage() {
                                 <option value="Year">Year</option>
                             </select>
                         </div>
+
+                        <button onClick={setToday} className="border border-slate-300 px-4 h-[36px] rounded-md text-sm font-medium text-slate-700 hover:bg-slate-50 hidden md:block shadow-sm">
+                            Today
+                        </button>
+                        
+                        <div className="flex items-center gap-1 mx-2">
+                            <button onClick={prevMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-slate-700" /></button>
+                            <button onClick={nextMonth} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-slate-700" /></button>
+                        </div>
+                        
+                        <h2 className="text-xl font-normal text-slate-700 whitespace-nowrap">
+                            {monthNames[currentMonth]} {currentYear}
+                        </h2>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                        <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
+                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden xl:block">
+                            <Settings className="w-5 h-5 text-slate-700" />
+                        </button>
+                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
+                            <Settings className="w-5 h-5 text-slate-700" />
+                        </button>
                     </div>
                 </header>
 
