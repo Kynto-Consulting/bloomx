@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
+import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
+import { CreateContactForm } from '@/components/contacts/CreateContactForm';
 import { Menu, Users, Search, HelpCircle, Settings, User, Plus, MoreVertical, Archive, Phone, Mail, FileText } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -22,10 +24,25 @@ export default function ContactsPage() {
     const [searchQuery, setSearchQuery] = useState('');
     
     // Form
-    const [isCreating, setIsCreating] = useState(false);
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
-    const [notes, setNotes] = useState('');
+    const { openWindow, closeWindow } = useGlobalWindow();
+    
+    const handleOpenCreateContact = () => {
+        openWindow({
+            id: 'create-contact',
+            type: 'contact',
+            title: 'Create Contact',
+            icon: <User className="w-4 h-4"/>,
+            content: (
+                <CreateContactForm
+                    onSaved={() => {
+                        closeWindow('create-contact');
+                        void loadContacts();
+                    }}
+                    onClose={() => closeWindow('create-contact')}
+                />
+            )
+        });
+    };
 
     const loadContacts = async () => {
         const [contactsResponse, settingsResponse] = await Promise.all([
@@ -60,18 +77,6 @@ export default function ContactsPage() {
         if (name && name.length > 0) return name[0].toUpperCase();
         if (email && email.length > 0) return email[0].toUpperCase();
         return '?';
-    };
-
-    const createContact = async (event: React.FormEvent) => {
-        event.preventDefault();
-        await fetch('/api/contacts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, email, notes })
-        });
-
-        setName(''); setEmail(''); setNotes(''); setIsCreating(false);
-        await loadContacts();
     };
 
     return (
@@ -132,35 +137,7 @@ export default function ContactsPage() {
 
                 <div className="flex flex-1 overflow-hidden">
                     <main className="flex-1 bg-white border-t border-slate-200 flex flex-col relative z-0">
-                        {isCreating && (
-                            <div className="absolute top-4 left-4 z-40 w-[450px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
-                                <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
-                                    <div className="flex items-center gap-2 text-slate-600"><User className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Create Contact</span></div>
-                                    <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">×</button>
-                                </div>
-                                <form onSubmit={createContact} className="p-5 space-y-4">
-                                    <div className="flex items-center gap-4 mb-4">
-                                        <div className="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
-                                           <User className="w-8 h-8" />
-                                        </div>
-                                        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Name" className="flex-1 border-b-2 border-slate-100 focus:border-blue-600 focus:outline-none pb-2 text-xl placeholder:text-slate-400" />
-                                    </div>
-                                    <div className="space-y-4 pt-2">
-                                        <div className="flex items-center gap-3">
-                                            <Mail className="w-5 h-5 text-slate-400" />
-                                            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="flex-1 w-full text-sm border-b border-slate-200 focus:border-blue-600 outline-none pb-1 placeholder:text-slate-400" />
-                                        </div>
-                                        <div className="flex flex-col gap-1 pl-8">
-                                            <label className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-2"><FileText className="w-4 h-4 text-slate-400"/> Notes</label>
-                                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full text-sm border-b border-transparent bg-slate-50 hover:bg-slate-100 focus:bg-slate-100 py-2 px-3 rounded transition-colors outline-none focus:border-blue-600 min-h-[80px]" placeholder="Add notes..."></textarea>
-                                        </div>
-                                    </div>
-                                    <div className="flex justify-end pt-4">
-                                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium px-6 py-2 transition-colors">Save</button>
-                                    </div>
-                                </form>
-                            </div>
-                        )}
+                        {/* Global window context handles 'isCreating' modal now */}
 
                         <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4">
                             {filteredContacts.length === 0 ? (
@@ -214,7 +191,7 @@ export default function ContactsPage() {
                                     className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
                                 >
                                     <div className="p-4 py-5 px-4 z-10 w-[256px]">
-                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
+                                    <button onClick={handleOpenCreateContact} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
                                         <Plus className="w-5 h-5 text-white" />
                                         <span className="text-sm font-medium text-white transition-colors">Create contact</span>
                                     </button>

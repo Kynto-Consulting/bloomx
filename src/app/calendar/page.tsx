@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
+import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
+import { CreateEventForm } from '@/components/calendar/CreateEventForm';
+import { AddCalendarForm } from '@/components/calendar/AddCalendarForm';
 import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -37,14 +40,63 @@ export default function CalendarPage() {
     const [isCalSidebarOpen, setIsCalSidebarOpen] = useState(true);
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
-    const [title, setTitle] = useState('');
-    const [location, setLocation] = useState('');
     const [startsAt, setStartsAt] = useState('');
     const [endsAt, setEndsAt] = useState('');
+    const { openWindow, closeWindow } = useGlobalWindow();
 
     const currentDate = new Date();
     const [currentMonth, setCurrentMonth] = useState(currentDate.getMonth());
     const [currentYear, setCurrentYear] = useState(currentDate.getFullYear());
+
+    const handleOpenCreate = (st: string, en: string) => {
+        setStartsAt(st);
+        setEndsAt(en);
+        setIsCreating(true);
+        openWindow({
+            id: 'create-event',
+            type: 'event',
+            title: 'Create Event',
+            icon: <CalendarDays className="w-4 h-4" />,
+            content: (
+                <CreateEventForm
+                    initialStartsAt={st}
+                    initialEndsAt={en}
+                    onSaved={() => {
+                        closeWindow('create-event');
+                        setIsCreating(false);
+                        setStartsAt('');
+                        setEndsAt('');
+                        void loadData();
+                    }}
+                    onClose={() => {
+                        closeWindow('create-event');
+                        setIsCreating(false);
+                        setStartsAt('');
+                        setEndsAt('');
+                    }}
+                />
+            )
+        });
+    };
+
+    const handleOpenAddCalendar = () => {
+        openWindow({
+            id: 'add-calendar',
+            type: 'event', // You can use standard floating window UI styles
+            title: 'Add Calendar',
+            icon: <Plus className="w-4 h-4" />,
+            content: (
+                <AddCalendarForm 
+                    isGoogleLinked={isGoogleLinked} 
+                    onLocalCreate={() => {
+                        // TODO: Provide UI to create local calendar if not using the default one
+                        // Usually you might trigger an API `/api/calendars` POST and reload
+                        alert("Local calendar creation placeholder");
+                    }} 
+                />
+            )
+        });
+    };
 
     const loadData = async () => {
         const [calendarResponse, eventResponse, settingsResponse] = await Promise.all([
@@ -191,10 +243,8 @@ export default function CalendarPage() {
                     key={`day-${i}`} 
                     onDoubleClick={() => {
                         const d = new Date(currentYear, currentMonth, i, 9, 0); // Default to 9:00 AM
-                        setStartsAt(d.toISOString().slice(0, 16));
-                        const dEnd = new Date(d.getTime() + 60 * 60 * 1000); // +1 hour
-                        setEndsAt(dEnd.toISOString().slice(0, 16));
-                        setIsCreating(true);
+                        const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
+                        handleOpenCreate(d.toISOString().slice(0, 16), dEnd.toISOString().slice(0, 16));
                     }}
                     className={`min-h-[120px] p-1 border-r border-slate-200 border-b cursor-pointer transition-colors hover:bg-slate-100/50 ${isToday ? 'bg-blue-50/10' : 'bg-white'}`}
                 >
@@ -212,7 +262,7 @@ export default function CalendarPage() {
                         ))}
                         {hasGhost && (
                             <div className="text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 border-dashed opacity-80 animate-pulse">
-                                {new Date(startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {title || '(No title)'}
+                                {new Date(startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} New Event
                             </div>
                         )}
                     </div>
@@ -232,33 +282,6 @@ export default function CalendarPage() {
 
     const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     const toggleCalendar = (id: string) => setSelectedCalendarIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
-
-    const createEvent = async (e: React.FormEvent) => {
-        e.preventDefault();
-        const localCalendar = calendars.find((calendar) => calendar.source === 'local' && !calendar.isReadOnly);
-        if (!localCalendar || !title || !startsAt || !endsAt) {
-            return;
-        }
-
-        await fetch('/api/calendar/events', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                calendarId: localCalendar.id,
-                title,
-                location,
-                startsAt,
-                endsAt,
-            })
-        });
-
-        setTitle('');
-        setLocation('');
-        setStartsAt('');
-        setEndsAt('');
-        setIsCreating(false);
-        await loadData();
-    };
 
     const miniCalendarDays = useMemo(() => {
         const daysInMonth = getDaysInMonth(currentYear, currentMonth);
@@ -351,31 +374,7 @@ export default function CalendarPage() {
 
                 <div className="flex flex-1 overflow-hidden">
                     <main className="flex-1 bg-white border-t border-slate-200 flex flex-col relative z-0">
-                        {isCreating && (
-                            <div className="absolute top-4 left-4 z-40 w-96 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
-                                <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
-                                    <div className="flex items-center gap-2 text-slate-600"><Menu className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Create Event</span></div>
-                                    <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">×</button>
-                                </div>
-                                <form onSubmit={createEvent} className="p-5 space-y-4">
-                                    <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder="Add title" className="w-full border-b-2 border-slate-100 focus:border-blue-600 focus:outline-none pb-2 text-[22px] mb-2 placeholder:text-slate-400" />
-                                    <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" className="w-full border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400" />
-                                    <div className="flex gap-4">
-                                       <div className="flex-1 space-y-1">
-                                            <label className="text-xs font-medium text-slate-500">Starts</label>
-                                            <input type="datetime-local" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} className="w-full text-sm border-b border-transparent bg-slate-50 hover:bg-slate-100 focus:bg-slate-100 py-1.5 px-2 rounded-t transition-colors outline-none focus:border-blue-600" />
-                                       </div>
-                                       <div className="flex-1 space-y-1">
-                                            <label className="text-xs font-medium text-slate-500">Ends</label>
-                                            <input type="datetime-local" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} className="w-full text-sm border-b border-transparent bg-slate-50 hover:bg-slate-100 focus:bg-slate-100 py-1.5 px-2 rounded-t transition-colors outline-none focus:border-blue-600" />
-                                       </div>
-                                    </div>
-                                    <div className="flex justify-end pt-4">
-                                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium px-6 py-2 transition-colors">Save</button>
-                                    </div>
-                                </form>
-                            </div>
-                        )}
+                        {/* Create Event is now a floating modal */}
 
                         {viewMode === 'Month' ? (
                             <div className="flex-1 grid grid-cols-7 grid-rows-[auto_1fr_1fr_1fr_1fr_1fr] overflow-y-auto overflow-x-hidden">
@@ -398,10 +397,8 @@ export default function CalendarPage() {
                                                 className="relative group hover:bg-blue-50/30 cursor-pointer"
                                                 onDoubleClick={() => {
                                                     const d = new Date(currentYear, currentMonth, currentDate.getDate(), i, 0);
-                                                    setStartsAt(d.toISOString().slice(0, 16));
                                                     const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
-                                                    setEndsAt(dEnd.toISOString().slice(0, 16));
-                                                    setIsCreating(true);
+                                                    handleOpenCreate(d.toISOString().slice(0, 16), dEnd.toISOString().slice(0, 16));
                                                 }}
                                             ></div>
                                         </div>
@@ -434,10 +431,8 @@ export default function CalendarPage() {
                                                         key={j} 
                                                         className="border-l border-slate-100 relative group hover:bg-blue-50/30 cursor-pointer"
                                                         onDoubleClick={() => {
-                                                            setStartsAt(d.toISOString().slice(0, 16));
                                                             const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
-                                                            setEndsAt(dEnd.toISOString().slice(0, 16));
-                                                            setIsCreating(true);
+                                                            handleOpenCreate(d.toISOString().slice(0, 16), dEnd.toISOString().slice(0, 16));
                                                         }}
                                                     ></div>
                                                 );
@@ -488,7 +483,7 @@ export default function CalendarPage() {
                                     className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
                                 >
                                     <div className="p-4 py-5 px-4 z-10 w-[256px]">
-                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
+                                    <button onClick={() => handleOpenCreate(new Date().toISOString().slice(0, 16), new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16))} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
                                         <Plus className="w-5 h-5 text-white" />
                                         <span className="text-sm font-medium text-white transition-colors">Create Event</span>
                                     </button>
@@ -518,9 +513,14 @@ export default function CalendarPage() {
                                 </div>
 
                                 <div className="p-4 flex-1 overflow-y-auto w-[256px] border-t border-slate-100 mt-2">
-                                    <div className="flex items-center gap-2 py-2 cursor-pointer text-slate-700 hover:bg-slate-50 px-2 rounded font-medium">
-                                        <span className="text-sm flex-1">My calendars</span>
-                                        <ChevronRight className="w-4 h-4 transform rotate-90" />
+                                    <div className="flex items-center justify-between py-2 text-slate-700 font-medium px-2 rounded hover:bg-slate-50">
+                                        <div className="flex items-center gap-2 cursor-pointer flex-1">
+                                            <span className="text-sm">My calendars</span>
+                                            <ChevronRight className="w-4 h-4 transform rotate-90" />
+                                        </div>
+                                        <button onClick={handleOpenAddCalendar} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+                                            <Plus className="w-4 h-4" />
+                                        </button>
                                     </div>
                                     <div className="pl-2 space-y-1 mt-1">
                                         {allCalendars.map(calendar => {

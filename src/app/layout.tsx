@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import { SessionProvider } from '@/components/SessionProvider'
 import { ComposeProvider } from '@/contexts/ComposeContext'
+import { GlobalWindowProvider } from '@/contexts/GlobalWindowContext'
 import { CacheProvider } from '@/contexts/CacheContext'
 import { OfflineProvider } from '@/contexts/OfflineContext'
 import { ComposeWindows } from '@/components/ComposeWindows'
@@ -73,21 +74,23 @@ export default function RootLayout({
         <html lang="en" className="light" suppressHydrationWarning>
             <body className={`${inter.variable} font-sans antialiased bg-white text-slate-900`}>
                 <SessionProvider>
-                    <ComposeProvider>
-                        <CacheProvider>
-                            <OfflineProvider>
-                                <ExpansionUIProvider>
-                                    <ThemeProvider>
-                                        {children}
-                                    </ThemeProvider>
-                                    <PwaManager />
-                                    <RealTimeListener />
-                                    <ComposeWindows />
-                                    <Toaster />
-                                </ExpansionUIProvider>
-                            </OfflineProvider>
-                        </CacheProvider>
-                    </ComposeProvider>
+                    <GlobalWindowProvider>
+                        <ComposeProvider>
+                            <CacheProvider>
+                                <OfflineProvider>
+                                    <ExpansionUIProvider>
+                                        <ThemeProvider>
+                                            {children}
+                                        </ThemeProvider>
+                                        <PwaManager />
+                                        <RealTimeListener />
+                                        <ComposeWindows />
+                                        <Toaster />
+                                    </ExpansionUIProvider>
+                                </OfflineProvider>
+                            </CacheProvider>
+                        </ComposeProvider>
+                    </GlobalWindowProvider>
                 </SessionProvider>
             </body>
         </html>
