@@ -32,8 +32,7 @@ interface Extension {
 
 export default function AdminDashboard() {
     const router = useRouter();
-    const { config: domainConfig, isLoading: configLoading } = useDomainConfig();
-    const installedExtensions = domainConfig?.extensions || [];
+    const { config: domainConfig, extensions: installedExtensions, isLoading: configLoading } = useDomainConfig();
 
     const [activeTab, setActiveTab] = useState<'extensions' | 'users' | 'settings'>('extensions');
 
@@ -46,6 +45,7 @@ export default function AdminDashboard() {
     // Extensions State
     const [availableExtensions, setAvailableExtensions] = useState<Extension[]>([]);
     const [loadingExtensions, setLoadingExtensions] = useState(false);
+    const [extensionActionId, setExtensionActionId] = useState<string | null>(null);
 
     // Settings State
     const [settings, setSettings] = useState({
@@ -203,6 +203,8 @@ export default function AdminDashboard() {
     };
 
     const handleInstall = async (ext: Extension) => {
+        setExtensionActionId(ext.id);
+
         if (ext.isPaid && !isInstalled(ext.id)) {
             try {
                 const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev'}/api/payments/create-preference`, {
@@ -224,6 +226,8 @@ export default function AdminDashboard() {
             } catch (e) {
                 console.error("Payment error", e);
                 alert("Payment initialization failed");
+            } finally {
+                setExtensionActionId(null);
             }
             return;
         }
@@ -248,6 +252,42 @@ export default function AdminDashboard() {
         } catch (e) {
             console.error("Install fatal error", e);
             alert("Installation failed");
+        } finally {
+            setExtensionActionId(null);
+        }
+    };
+
+    const handleUninstall = async (ext: { id?: string; extensionId?: string; name?: string }) => {
+        const extensionId = ext.extensionId || ext.id;
+        if (!extensionId || !domainConfig?.id) return;
+
+        const confirmed = window.confirm(`Uninstall ${ext.name || 'this extension'}?`);
+        if (!confirmed) return;
+
+        setExtensionActionId(extensionId);
+
+        try {
+            const res = await fetch('/api/admin/extensions/uninstall', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    domainId: domainConfig.id,
+                    extensionId,
+                })
+            });
+
+            const result = await res.json();
+            if (res.ok) {
+                alert('Extension uninstalled successfully!');
+                window.location.reload();
+            } else {
+                alert(result.error || 'Uninstall failed');
+            }
+        } catch (e) {
+            console.error('Uninstall fatal error', e);
+            alert('Uninstall failed');
+        } finally {
+            setExtensionActionId(null);
         }
     };
 
@@ -325,7 +365,7 @@ export default function AdminDashboard() {
                             <h2 className="text-lg font-semibold text-gray-900 mb-4">Installed Extensions</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {installedExtensions.map((ext: any) => (
-                                    <div key={ext.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                                    <div key={ext.extensionId || ext.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
                                         <div className="flex items-start justify-between mb-4">
                                             <div className="p-3 bg-indigo-50 rounded-lg">
                                                 <Puzzle className="w-6 h-6 text-indigo-600" />
@@ -336,9 +376,18 @@ export default function AdminDashboard() {
                                         </div>
                                         <h3 className="font-semibold text-gray-900 mb-1">{ext.name}</h3>
                                         <p className="text-sm text-gray-500 mb-4">{ext.description || "No description"}</p>
-                                        <button className="w-full py-2 px-4 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
-                                            Configure
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button className="flex-1 py-2 px-4 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                                                Configure
+                                            </button>
+                                            <button
+                                                onClick={() => handleUninstall(ext)}
+                                                disabled={extensionActionId === (ext.extensionId || ext.id)}
+                                                className="py-2 px-4 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {extensionActionId === (ext.extensionId || ext.id) ? '...' : 'Uninstall'}
+                                            </button>
+                                        </div>
                                     </div>
                                 ))}
                                 {installedExtensions.length === 0 && (
@@ -380,9 +429,10 @@ export default function AdminDashboard() {
                                                 {!isInstalled(ext.id) && (
                                                     <button
                                                         onClick={() => handleInstall(ext)}
+                                                        disabled={extensionActionId === ext.id}
                                                         className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm"
                                                     >
-                                                        {ext.isPaid ? 'Buy & Install' : 'Install'}
+                                                        {extensionActionId === ext.id ? 'Working...' : ext.isPaid ? 'Buy & Install' : 'Install'}
                                                     </button>
                                                 )}
                                                 {isInstalled(ext.id) && (
