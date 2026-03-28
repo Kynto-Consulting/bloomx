@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Sidebar } from '@/components/Sidebar';
+import { useEffect, useState, useMemo } from 'react';
+import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
-import { Menu, Users } from 'lucide-react';
+import { Menu, Users, Search, HelpCircle, Settings, User, Plus, MoreVertical, Archive, Phone, Mail, FileText } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
 type ContactRecord = {
@@ -17,7 +17,12 @@ type ContactRecord = {
 export default function ContactsPage() {
     const [contacts, setContacts] = useState<ContactRecord[]>([]);
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
+    const [isContactSidebarOpen, setIsContactSidebarOpen] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
+    
+    // Form
+    const [isCreating, setIsCreating] = useState(false);
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [notes, setNotes] = useState('');
@@ -44,6 +49,19 @@ export default function ContactsPage() {
         return () => window.removeEventListener('bloomx:contacts-sync-complete', handleSyncComplete);
     }, []);
 
+    const filteredContacts = useMemo(() => {
+        return contacts.filter(c => 
+            (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+            (c.email || '').toLowerCase().includes(searchQuery.toLowerCase())
+        );
+    }, [contacts, searchQuery]);
+
+    const getInitial = (name?: string | null, email?: string | null) => {
+        if (name && name.length > 0) return name[0].toUpperCase();
+        if (email && email.length > 0) return email[0].toUpperCase();
+        return '?';
+    };
+
     const createContact = async (event: React.FormEvent) => {
         event.preventDefault();
         await fetch('/api/contacts', {
@@ -52,104 +70,181 @@ export default function ContactsPage() {
             body: JSON.stringify({ name, email, notes })
         });
 
-        setName('');
-        setEmail('');
-        setNotes('');
+        setName(''); setEmail(''); setNotes(''); setIsCreating(false);
         await loadContacts();
     };
 
     return (
-        <div className="flex min-h-screen bg-background">
+        <div className="flex h-screen w-full bg-white overflow-hidden text-slate-900 font-sans">
             <AnimatePresence>
-                {isSidebarOpen && (
+                {isAppSidebarOpen && (
                     <>
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setIsSidebarOpen(false)}
-                            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm md:hidden"
-                        />
-                        <motion.div
-                            initial={{ x: '-100%' }}
-                            animate={{ x: 0 }}
-                            exit={{ x: '-100%' }}
-                            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                            className="fixed inset-y-0 left-0 z-50 w-[80%] max-w-[300px] border-r bg-background shadow-2xl md:hidden"
-                        >
-                            <Sidebar onClose={() => setIsSidebarOpen(false)} />
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
+                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background xl:hidden shadow-2xl">
+                            <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
                         </motion.div>
                     </>
                 )}
             </AnimatePresence>
-            <div className="hidden w-[280px] border-r md:block">
-                <Sidebar />
+
+            <div className="hidden border-r bg-slate-50 xl:block group w-[1px] opacity-0 hover:w-[240px] hover:opacity-100 transition-all duration-300 absolute h-full z-50 overflow-hidden hover:shadow-2xl">
+                <AppSidebar />
             </div>
-            <main className="flex-1 p-6 md:p-8">
-                <div className="mx-auto flex max-w-5xl flex-col gap-8">
-                    <div className="sticky top-0 z-30 -mx-2 flex items-center justify-between rounded-2xl border bg-background/90 px-4 py-3 backdrop-blur md:hidden">
-                        <button type="button" onClick={() => setIsSidebarOpen(true)} className="rounded-full p-2 text-muted-foreground hover:bg-muted">
-                            <Menu className="h-5 w-5" />
+
+            <div className="flex-1 flex flex-col h-full overflow-hidden ml-0">
+                <header className="flex h-[64px] items-center justify-between px-4 border-b">
+                    <div className="flex items-center gap-4">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
+                            <Menu className="w-6 h-6 text-slate-700" />
                         </button>
-                        <div className="text-sm font-semibold text-slate-900">Contacts</div>
-                        <div className="w-9" />
+                        <button onClick={() => setIsContactSidebarOpen(!isContactSidebarOpen)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 hidden xl:block">
+                            <Menu className="w-6 h-6 text-slate-700" />
+                        </button>
+                        
+                        <div className="flex items-center gap-2 pr-4 text-slate-700">
+                            <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center text-white shadow-sm shadow-blue-200">
+                                <Users className="w-5 h-5 text-white" />
+                            </div>
+                            <span className="text-[22px] font-normal tracking-tight hidden sm:block text-slate-700">Contacts</span>
+                        </div>
                     </div>
 
-                    <div className="flex flex-wrap items-center justify-between gap-3 text-slate-900">
-                        <div className="flex items-center gap-3">
-                            <Users className="h-6 w-6" />
-                            <h1 className="text-2xl font-semibold">Contacts</h1>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-3">
-                            <ExtensionLoader
-                                mountPoint="CONTACTS_HEADER"
-                                context={{
-                                    isGoogleLinked,
-                                    contactCount: contacts.length,
-                                }}
+                    <div className="flex-1 max-w-2xl px-4 lg:px-8 hidden sm:block">
+                        <div className="flex items-center bg-slate-100 rounded-lg px-4 py-2 focus-within:bg-white focus-within:shadow-md focus-within:ring-1 focus-within:ring-slate-200 transition-all">
+                            <Search className="w-5 h-5 text-slate-500 mr-3" />
+                            <input 
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                placeholder="Search" 
+                                className="bg-transparent border-none outline-none w-full text-slate-700 placeholder:text-slate-500"
                             />
                         </div>
                     </div>
-                    {!isGoogleLinked && (
-                        <p className="text-sm text-muted-foreground">Vincula Google desde configuración para importar tu libreta de contactos.</p>
-                    )}
 
-                    <div className="grid gap-8 lg:grid-cols-[320px,1fr]">
-                        <div className="space-y-4">
-                            <ExtensionLoader
-                                mountPoint="CONTACTS_SIDEBAR"
-                                context={{
-                                    isGoogleLinked,
-                                    contactCount: contacts.length,
-                                }}
-                            />
+                    <div className="flex items-center gap-2">
+                        <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
+                        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 sm:hidden"><Search className="w-6 h-6" /></button>
+                        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden sm:block"><HelpCircle className="w-6 h-6" /></button>
+                        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden lg:block"><Settings className="w-6 h-6" /></button>
+                        <div className="ml-2 w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 relative overflow-hidden">
+                           <User className="w-5 h-5" />
+                        </div>
+                    </div>
+                </header>
 
-                            <form onSubmit={createContact} className="rounded-3xl border bg-white p-5 shadow-sm">
-                                <div className="space-y-3">
-                                    <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className="h-11 w-full rounded-xl border px-3 text-sm" />
-                                    <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" className="h-11 w-full rounded-xl border px-3 text-sm" />
-                                    <textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notes" className="min-h-[120px] w-full rounded-xl border px-3 py-3 text-sm" />
-                                    <button type="submit" className="w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground">Save contact</button>
+                <div className="flex flex-1 overflow-hidden">
+                    <AnimatePresence initial={false}>
+                        {isContactSidebarOpen && (
+                            <motion.aside 
+                                initial={{ width: 0, opacity: 0 }} 
+                                animate={{ width: 256, opacity: 1 }} 
+                                exit={{ width: 0, opacity: 0 }} 
+                                className="bg-white flex flex-col hidden lg:flex flex-shrink-0 border-r border-slate-100"
+                            >
+                                <div className="p-4 py-5 pl-4">
+                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center gap-3 bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow rounded-full px-4 py-3 pr-6 group">
+                                        <Plus className="w-7 h-7 text-blue-600" />
+                                        <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600 transition-colors">Create contact</span>
+                                    </button>
                                 </div>
-                            </form>
-                        </div>
 
-                        <div className="space-y-3">
-                            {contacts.length === 0 && (
-                                <div className="rounded-3xl border border-dashed p-8 text-center text-sm text-muted-foreground">No contacts yet.</div>
+                                <div className="p-2 flex-1 overflow-y-auto w-[256px]">
+                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer bg-blue-50 text-blue-700 rounded-r-full mr-4 font-medium">
+                                        <Users className="w-5 h-5" />
+                                        <span className="text-sm flex-1">Contacts</span>
+                                        <span className="text-xs">{contacts.length}</span>
+                                    </div>
+                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer text-slate-700 hover:bg-slate-100 rounded-r-full mr-4">
+                                        <Archive className="w-5 h-5" />
+                                        <span className="text-sm font-medium flex-1">Other contacts</span>
+                                    </div>
+                                    <hr className="my-2 border-slate-100 mr-4" />
+                                    <div className="pr-4">
+                                       <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
+                                    </div>
+                                    {!isGoogleLinked && (
+                                        <div className="mt-4 p-4 rounded-xl bg-slate-50 border text-xs text-slate-600 max-w-[220px]">
+                                            Link Google to import your full contacts book.
+                                        </div>
+                                    )}
+                                </div>
+                            </motion.aside>
+                        )}
+                    </AnimatePresence>
+
+                    <main className="flex-1 bg-white border-l border-t border-slate-200 flex flex-col relative ml-[-1px]">
+                        {isCreating && (
+                            <div className="absolute top-4 left-4 z-40 w-[450px] bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
+                                <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
+                                    <div className="flex items-center gap-2 text-slate-600"><User className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Create Contact</span></div>
+                                    <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">×</button>
+                                </div>
+                                <form onSubmit={createContact} className="p-5 space-y-4">
+                                    <div className="flex items-center gap-4 mb-4">
+                                        <div className="w-16 h-16 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center">
+                                           <User className="w-8 h-8" />
+                                        </div>
+                                        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="Name" className="flex-1 border-b-2 border-slate-100 focus:border-blue-600 focus:outline-none pb-2 text-xl placeholder:text-slate-400" />
+                                    </div>
+                                    <div className="space-y-4 pt-2">
+                                        <div className="flex items-center gap-3">
+                                            <Mail className="w-5 h-5 text-slate-400" />
+                                            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="flex-1 w-full text-sm border-b border-slate-200 focus:border-blue-600 outline-none pb-1 placeholder:text-slate-400" />
+                                        </div>
+                                        <div className="flex flex-col gap-1 pl-8">
+                                            <label className="text-xs font-medium text-slate-500 flex items-center gap-2 mt-2"><FileText className="w-4 h-4 text-slate-400"/> Notes</label>
+                                            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full text-sm border-b border-transparent bg-slate-50 hover:bg-slate-100 focus:bg-slate-100 py-2 px-3 rounded transition-colors outline-none focus:border-blue-600 min-h-[80px]" placeholder="Add notes..."></textarea>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end pt-4">
+                                        <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium px-6 py-2 transition-colors">Save</button>
+                                    </div>
+                                </form>
+                            </div>
+                        )}
+
+                        <div className="flex-1 overflow-y-auto px-4 lg:px-8 py-4">
+                            {filteredContacts.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                                    <Users className="w-12 h-12 mb-4 text-slate-300" />
+                                    <p>No contacts found.</p>
+                                </div>
+                            ) : (
+                                <div className="w-full text-sm">
+                                    <div className="grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 py-3 border-b border-slate-200 text-slate-500 font-medium px-2 sticky top-0 bg-white z-10 hidden md:grid">
+                                        <div className="w-10"></div>
+                                        <div>Name</div>
+                                        <div>Email</div>
+                                        <div className="w-24 text-right">Source</div>
+                                        <div className="w-8"></div>
+                                    </div>
+                                    {filteredContacts.map((contact) => (
+                                        <div key={contact.id} className="grid grid-cols-[auto_1fr] md:grid-cols-[auto_1fr_1fr_auto_auto] gap-4 py-3 border-b border-slate-100 items-center px-2 hover:bg-slate-50 group cursor-pointer rounded-lg transition-colors">
+                                            <div className="w-10 flex items-center justify-center">
+                                                <div className="w-9 h-9 rounded-full bg-blue-100 text-blue-700 font-medium flex items-center justify-center">
+                                                    {getInitial(contact.name, contact.email)}
+                                                </div>
+                                            </div>
+                                            <div className="font-medium text-slate-900 truncate pr-4">
+                                                {contact.name || contact.email}
+                                            </div>
+                                            <div className="text-slate-600 truncate hidden md:block">
+                                                {contact.email}
+                                            </div>
+                                            <div className="text-xs uppercase tracking-wider text-slate-400 hidden md:block text-right w-24">
+                                                {contact.source}
+                                            </div>
+                                            <div className="w-8 hidden md:flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <MoreVertical className="w-4 h-4 text-slate-400 hover:text-slate-600" />
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             )}
-                            {contacts.map((contact) => (
-                                <div key={contact.id} className="rounded-3xl border bg-white p-5 shadow-sm">
-                                    <div className="font-medium text-slate-900">{contact.name || contact.email}</div>
-                                    <div className="text-sm text-muted-foreground">{contact.email}</div>
-                                    <div className="mt-2 text-xs uppercase tracking-wide text-muted-foreground">Source: {contact.source}</div>
-                                    {contact.notes && <div className="mt-3 text-sm text-slate-700">{contact.notes}</div>}
-                                </div>
-                            ))}
                         </div>
-                    </div>
+                    </main>
                 </div>
-            </main>
+            </div>
         </div>
     );
 }

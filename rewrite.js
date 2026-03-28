@@ -1,29 +1,15 @@
-'use client';
+const fs = require('fs');
+
+const calendarUI = 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
-import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
-import { formatDate } from '@/lib/utils';
+import { Bell, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-type CalendarRecord = {
-    id: string;
-    name: string;
-    color: string;
-    source: string;
-    isReadOnly: boolean;
-};
-
-type CalendarEventRecord = {
-    id: string;
-    title: string;
-    location?: string | null;
-    startsAt: string;
-    endsAt: string;
-    calendar: CalendarRecord;
-    responseStatus?: string | null;
-};
+type CalendarRecord = { id: string; name: string; color: string; source: string; isReadOnly: boolean; };
+type CalendarEventRecord = { id: string; title: string; location?: string | null; startsAt: string; endsAt: string; calendar: CalendarRecord; responseStatus?: string | null; };
 
 export default function CalendarPage() {
     const [calendars, setCalendars] = useState<CalendarRecord[]>([]);
@@ -33,6 +19,8 @@ export default function CalendarPage() {
     const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
     const [isCalSidebarOpen, setIsCalSidebarOpen] = useState(true);
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+    // Form
     const [isCreating, setIsCreating] = useState(false);
     const [title, setTitle] = useState('');
     const [location, setLocation] = useState('');
@@ -46,7 +34,7 @@ export default function CalendarPage() {
     const loadData = async () => {
         const [calendarResponse, eventResponse, settingsResponse] = await Promise.all([
             fetch('/api/calendars'),
-            fetch(`/api/calendar/events?start=${encodeURIComponent(new Date(currentYear, currentMonth - 1, 1).toISOString())}&end=${encodeURIComponent(new Date(currentYear, currentMonth + 2, 0).toISOString())}`),
+            fetch(\/api/calendar/events?start=\\\&end=\\\\),
             fetch('/api/settings'),
         ]);
 
@@ -57,33 +45,15 @@ export default function CalendarPage() {
         setCalendars(Array.isArray(calendarData) ? calendarData : []);
         setEvents(Array.isArray(eventData) ? eventData : []);
         setIsGoogleLinked(Boolean(settingsData?.isGoogleLinked));
-        setSelectedCalendarIds((current) => current.length > 0 ? current : (Array.isArray(calendarData) ? calendarData.map((calendar: CalendarRecord) => calendar.id) : []));
+        setSelectedCalendarIds((current) => current.length > 0 ? current : (Array.isArray(calendarData) ? calendarData.map((c: CalendarRecord) => c.id) : []));
     };
 
     useEffect(() => {
         void loadData();
         setNotificationsEnabled(typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted');
 
-        const handleSyncComplete = () => {
-            void loadData();
-        };
-
-        const handleNotificationsEnabled = async () => {
-            setNotificationsEnabled(true);
-            const settingsResponse = await fetch('/api/settings', { cache: 'no-store' });
-            const settingsData = await settingsResponse.json().catch(() => ({}));
-
-            void fetch('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    expansionSettings: {
-                        ...(settingsData?.expansionSettings || {}),
-                        calendarNotificationsEnabled: true,
-                    },
-                }),
-            }).catch(() => undefined);
-        };
+        const handleSyncComplete = () => void loadData();
+        const handleNotificationsEnabled = () => setNotificationsEnabled(true);
 
         window.addEventListener('bloomx:calendar-sync-complete', handleSyncComplete);
         window.addEventListener('bloomx:notifications-enabled', handleNotificationsEnabled);
@@ -94,9 +64,7 @@ export default function CalendarPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentMonth, currentYear]);
 
-    const visibleEvents = useMemo(() => {
-        return events.filter((event) => selectedCalendarIds.includes(event.calendar.id));
-    }, [events, selectedCalendarIds]);
+    const visibleEvents = useMemo(() => events.filter((event) => selectedCalendarIds.includes(event.calendar.id)), [events, selectedCalendarIds]);
 
     const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(currentYear + 1); } else { setCurrentMonth(currentMonth + 1); } };
     const prevMonth = () => { if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear(currentYear - 1); } else { setCurrentMonth(currentMonth - 1); } };
@@ -113,13 +81,13 @@ export default function CalendarPage() {
         const headers = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 
         days.push(...headers.map(h => (
-            <div key={`h-${h}`} className="text-center text-[11px] font-medium text-slate-500 py-2 border-r border-slate-200 border-b">
+            <div key={\h-\\\\} className="text-center text-[11px] font-medium text-slate-500 py-2 border-r border-b">
                 {h}
             </div>
         )));
 
         for (let i = 0; i < firstDay; i++) {
-            days.push(<div key={`empty-${i}`} className="min-h-[100px] border-r border-slate-200 border-b bg-slate-50/50"></div>);
+            days.push(<div key={\empty-\\\\} className="min-h-[100px] border-r border-b bg-slate-50/50"></div>);
         }
 
         for (let i = 1; i <= daysInMonth; i++) {
@@ -131,13 +99,13 @@ export default function CalendarPage() {
             });
 
             days.push(
-                <div key={`day-${i}`} className={`min-h-[120px] p-1 border-r border-slate-200 border-b transition-colors hover:bg-slate-50 ${isToday ? 'bg-blue-50/10' : 'bg-white'}`}>
+                <div key={\day-\\\\} className={\min-h-[120px] p-1 border-r border-b transition-colors hover:bg-slate-50 \\\\}>
                     <div className="flex justify-center mb-1">
-                        <span className={`text-xs flex items-center justify-center h-6 w-6 font-medium rounded-full mt-1 ${isToday ? 'bg-blue-600 text-white' : 'text-slate-700'}`}>
+                        <span className={\	ext-xs flex items-center justify-center h-6 w-6 font-medium rounded-full mt-1 \\\\}>
                             {i}
                         </span>
                     </div>
-                    <div className="flex flex-col gap-1 px-1 overflow-hidden">
+                    <div className="flex flex-col gap-1 px-1">
                         {dayEvents.map(ev => (
                             <div key={ev.id} className="text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm text-white font-medium" style={{ backgroundColor: ev.calendar.color }}>
                                 {new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {ev.title}
@@ -151,7 +119,7 @@ export default function CalendarPage() {
         const remainder = (firstDay + daysInMonth) % 7;
         if (remainder > 0 && remainder !== 7) {
             for (let i = 0; i < 7 - remainder; i++) {
-                days.push(<div key={`rem-${i}`} className="min-h-[100px] border-r border-slate-200 border-b bg-slate-50/50"></div>);
+                days.push(<div key={\em-\\\\} className="min-h-[100px] border-r border-b bg-slate-50/50"></div>);
             }
         }
 
@@ -164,27 +132,15 @@ export default function CalendarPage() {
     const createEvent = async (e: React.FormEvent) => {
         e.preventDefault();
         const localCalendar = calendars.find((calendar) => calendar.source === 'local' && !calendar.isReadOnly);
-        if (!localCalendar || !title || !startsAt || !endsAt) {
-            return;
-        }
+        if (!localCalendar || !title || !startsAt || !endsAt) return;
 
         await fetch('/api/calendar/events', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                calendarId: localCalendar.id,
-                title,
-                location,
-                startsAt,
-                endsAt,
-            })
+            body: JSON.stringify({ calendarId: localCalendar.id, title, location, startsAt, endsAt })
         });
-
-        setTitle('');
-        setLocation('');
-        setStartsAt('');
-        setEndsAt('');
-        setIsCreating(false);
+        
+        setTitle(''); setLocation(''); setStartsAt(''); setEndsAt(''); setIsCreating(false);
         await loadData();
     };
 
@@ -193,25 +149,25 @@ export default function CalendarPage() {
             <AnimatePresence>
                 {isAppSidebarOpen && (
                     <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
-                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background xl:hidden shadow-2xl">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm md:hidden" />
+                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background md:hidden">
                             <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
                         </motion.div>
                     </>
                 )}
             </AnimatePresence>
 
-            <div className="hidden border-r bg-slate-50 xl:block group w-[1px] opacity-0 hover:w-[240px] hover:opacity-100 transition-all duration-300 absolute h-full z-50 overflow-hidden hover:shadow-2xl">
+            <div className="hidden border-r bg-slate-50 md:block group w-[1px] opacity-0 hover:w-[240px] hover:opacity-100 transition-all duration-300 absolute h-full z-50 overflow-hidden hover:shadow-2xl">
                 <AppSidebar />
             </div>
 
             <div className="flex-1 flex flex-col h-full overflow-hidden ml-0">
                 <header className="flex h-[64px] items-center justify-between px-4 border-b">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
+                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 hidden lg:block">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
-                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 hidden xl:block">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-3 -ml-2 rounded-full hover:bg-slate-100 lg:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
@@ -242,7 +198,7 @@ export default function CalendarPage() {
                         <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden sm:block"><HelpCircle className="w-6 h-6" /></button>
                         <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden lg:block"><Settings className="w-6 h-6" /></button>
                         <div className="mx-2 h-8 w-px bg-slate-200 hidden sm:block"></div>
-                        <div className="border border-slate-300 rounded-md px-3 py-1.5 items-center bg-white hover:bg-slate-50 cursor-pointer hidden md:flex shadow-sm">
+                        <div className="border border-slate-300 rounded-md px-3 py-1.5 flex items-center bg-white hover:bg-slate-50 cursor-pointer hidden md:flex shadow-sm">
                            <span className="text-sm font-medium text-slate-700">Month</span>
                         </div>
                         <div className="ml-2 w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 relative overflow-hidden">
@@ -258,9 +214,9 @@ export default function CalendarPage() {
                                 initial={{ width: 0, opacity: 0 }} 
                                 animate={{ width: 256, opacity: 1 }} 
                                 exit={{ width: 0, opacity: 0 }} 
-                                className="bg-white flex flex-col hidden lg:flex flex-shrink-0 border-r border-slate-100"
+                                className="bg-white flex flex-col hidden lg:flex flex-shrink-0"
                             >
-                                <div className="p-4 py-5 pl-4">
+                                <div className="p-4 py-5 pl-2">
                                     <button onClick={() => setIsCreating(!isCreating)} className="flex items-center gap-3 bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow rounded-full px-4 py-3 pr-6 group">
                                         <svg width="28" height="28" viewBox="0 0 36 36"><path fill="#34A853" d="M16 16v14h4V20z"></path><path fill="#4285F4" d="M30 16H20l-4 4h14z"></path><path fill="#FBBC05" d="M6 16v4h10l4-4z"></path><path fill="#EA4335" d="M20 16V2h-4v14z"></path><path fill="none" d="M0 0h36v36H0z"></path></svg>
                                         <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600 transition-colors">Create</span>
@@ -280,7 +236,7 @@ export default function CalendarPage() {
                                     </div>
                                     <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
                                         {Array.from({length: 35}).map((_, i) => (
-                                            <div key={i} className={`w-6 h-6 flex items-center justify-center rounded-full mx-auto ${i+1 === currentDate.getDate() ? 'bg-blue-600 text-white' : 'hover:bg-slate-100 text-slate-700 cursor-pointer'}`}>
+                                            <div key={i} className={\w-6 h-6 flex items-center justify-center rounded-full mx-auto \\\\}>
                                                 {(i % 31) + 1}
                                             </div>
                                         ))}
@@ -298,7 +254,7 @@ export default function CalendarPage() {
                                             return (
                                                 <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group" onClick={() => toggleCalendar(calendar.id)}>
                                                     <div className="relative flex items-center justify-center w-5 h-5 rounded hover:bg-slate-100">
-                                                        <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
+                                                        <div className={\w-4 h-4 rounded-sm border-2\} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
                                                             {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
                                                         </div>
                                                     </div>
@@ -313,21 +269,24 @@ export default function CalendarPage() {
                                             Link Google to import calendars.
                                         </div>
                                     )}
+
+                                    <div className="mt-8">
+                                        <ExtensionLoader mountPoint="CALENDAR_SIDEBAR" context={{ isGoogleLinked }} />
+                                    </div>
                                 </div>
                             </motion.aside>
                         )}
                     </AnimatePresence>
 
-                    <main className="flex-1 bg-white border-l border-t border-slate-200 flex flex-col relative ml-[-1px]">
+                    <main className="flex-1 bg-white border-l border-t border-slate-200 flex flex-col relative rounded-tl-2xl ml-[-1px]">
                         {isCreating && (
                             <div className="absolute top-4 left-4 z-40 w-96 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
                                 <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
                                     <div className="flex items-center gap-2 text-slate-600"><Menu className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Edit Event</span></div>
-                                    <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">Ã—</button>
+                                    <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">×</button>
                                 </div>
                                 <form onSubmit={createEvent} className="p-5 space-y-4">
                                     <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus placeholder="Add title" className="w-full border-b-2 border-slate-100 focus:border-blue-600 focus:outline-none pb-2 text-[22px] mb-2 placeholder:text-slate-400" />
-                                    <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location" className="w-full border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400" />
                                     <div className="flex gap-4">
                                        <div className="flex-1 space-y-1">
                                             <label className="text-xs font-medium text-slate-500">Starts</label>
@@ -354,3 +313,7 @@ export default function CalendarPage() {
         </div>
     );
 }
+;
+
+fs.writeFileSync('../bloomx/src/app/calendar/page.tsx', calendarUI);
+console.log('Calendar file written.');
