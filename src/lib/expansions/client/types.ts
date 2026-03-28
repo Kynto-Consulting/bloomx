@@ -3,6 +3,7 @@ import React from 'react';
 export type ClientExpansionMountPoint =
     | 'COMPOSER_OVERLAY' | 'SIDEBAR_PANEL' | 'EMAIL_TOOLBAR' | 'EMAIL_FOOTER' | 'SIDEBAR_HEADER'
     | 'COMPOSER_INIT' | 'COMPOSER_TOOLBAR' | 'EMAIL_HEADER' | 'SIDEBAR_FOOTER'
+    | 'CALENDAR_HEADER' | 'CALENDAR_SIDEBAR' | 'CONTACTS_HEADER' | 'CONTACTS_SIDEBAR'
     | 'SETTINGS_TAB' | 'CUSTOM_SETTINGS_TAB' | 'SLASH_COMMAND' | 'EXTENSION_PAGE'
     | 'BEFORE_SEND_HANDLER'
     | 'ON_BODY_CHANGE_HANDLER' | 'ON_SUBJECT_CHANGE_HANDLER' | 'ON_RECIPIENTS_CHANGE_HANDLER'
@@ -20,6 +21,10 @@ export interface ClientExpansionContext {
     to?: string[];
     cc?: string[];
     bcc?: string[];
+    sender?: {
+        email?: string;
+        name?: string;
+    };
 
     // Actions provided to the component (Renamed: No 'on' prefix for actions)
     setBody?: (content: string) => void;

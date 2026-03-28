@@ -7,6 +7,10 @@ export type MountPoint =
     | 'SIDEBAR_HEADER'
     | 'SIDEBAR_FOOTER'
     | 'COMPOSER_TOOLBAR'
+    | 'CALENDAR_HEADER'
+    | 'CALENDAR_SIDEBAR'
+    | 'CONTACTS_HEADER'
+    | 'CONTACTS_SIDEBAR'
     | 'SETTINGS_TAB'
     | 'OVERLAY';
 
@@ -29,15 +33,18 @@ export type ComponentType =
     | 'SELECT';
 
 export interface ExtensionAction {
-    action: 'CALL_BACKEND' | 'OPEN_OVERLAY' | 'TOAST' | 'INSERT_CONTENT' | 'navigate' | 'SET_STATE' | 'NEXT_STEP' | 'PREV_STEP';
+    action: 'CALL_BACKEND' | 'CALL_API' | 'OPEN_OVERLAY' | 'TOAST' | 'INSERT_CONTENT' | 'navigate' | 'SET_STATE' | 'NEXT_STEP' | 'PREV_STEP';
     function?: string;
     targetId?: string; // For overlay
     message?: string; // For toast
     url?: string;
+    method?: string;
+    headers?: Record<string, string>;
     params?: any;
     args?: any;
     key?: string;
     value?: any;
+    emitEvent?: string;
     debounce?: number;
     onSuccess?: ExtensionAction;
 }

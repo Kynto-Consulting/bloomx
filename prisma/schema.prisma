@@ -21,6 +21,10 @@ model User {
   labels    Label[]
   accounts  Account[]
   moltSessions MoltSession[]
+  pushSubscriptions PushSubscription[]
+  calendars Calendar[]
+  calendarEvents CalendarEvent[]
+  contacts Contact[]
 }
 
 model Account {
@@ -144,4 +148,116 @@ model MoltSession {
 
   @@index([userId])
   @@index([accessToken])
+}
+
+model PushSubscription {
+  id             String   @id
+  userId         String   @map("user_id")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint       String   @unique
+  p256dh         String
+  auth           String
+  expirationTime BigInt?  @map("expiration_time")
+  userAgent      String?  @map("user_agent")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  lastSuccessAt  DateTime? @map("last_success_at")
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+model PushVapidConfig {
+  id         String   @id
+  publicKey  String   @map("public_key")
+  privateKey String   @map("private_key")
+  subject    String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("push_vapid_config")
+}
+
+model Calendar {
+  id           String          @id @default(cuid())
+  userId       String
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  color        String          @default("#2563eb")
+  source       String          @default("local")
+  isReadOnly   Boolean         @default(false)
+  externalId   String?
+  syncToken    String?
+  lastSyncedAt DateTime?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  events       CalendarEvent[]
+
+  @@unique([userId, source, name])
+  @@index([userId])
+  @@index([source])
+}
+
+model CalendarEvent {
+  id             String            @id @default(cuid())
+  userId         String
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendarId     String
+  calendar       Calendar          @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  title          String
+  description    String?           @db.Text
+  location       String?
+  startsAt       DateTime
+  endsAt         DateTime
+  allDay         Boolean           @default(false)
+  status         String            @default("confirmed")
+  responseStatus String?
+  source         String            @default("local")
+  externalId     String?
+  inviteUid      String?
+  organizerEmail String?
+  organizerName  String?
+  sourceEmailId  String?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+  attendees      CalendarAttendee[]
+
+  @@index([userId])
+  @@index([calendarId])
+  @@index([startsAt])
+  @@index([source])
+  @@index([inviteUid])
+}
+
+model CalendarAttendee {
+  id             String        @id @default(cuid())
+  eventId        String
+  event          CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  email          String
+  name           String?
+  responseStatus String?
+  isOrganizer    Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([eventId])
+  @@index([email])
+}
+
+model Contact {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email      String
+  name       String?
+  source     String   @default("local")
+  externalId String?
+  notes      String?  @db.Text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, email])
+  @@index([userId])
+  @@index([source])
 }

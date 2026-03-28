@@ -216,13 +216,10 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             }
             if (resolvedAct.action === 'OAUTH_CONNECT') {
                 const provider = resolvedAct.provider; // e.g. 'google', 'slack'
-                const url = `/api/auth/${provider}`; // Standard pattern
-                const width = 600;
-                const height = 700;
-                const left = (window.innerWidth - width) / 2;
-                const top = (window.innerHeight - height) / 2;
+                const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                const url = resolvedAct.url || `/api/auth/${provider}?returnTo=${encodeURIComponent(returnTo)}`;
 
-                window.open(url, `Connect ${provider}`, `width=${width},height=${height},top=${top},left=${left}`);
+                window.location.href = url;
             }
 
             if (resolvedAct.action === 'COPY_TO_CLIPBOARD') {
@@ -275,6 +272,56 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         await handleAction(act.onError, e, { error: err.message });
                     } else {
                         toast.error(err.message || "Action failed");
+                    }
+                }
+            }
+            if (resolvedAct.action === 'CALL_API') {
+                try {
+                    const method = (resolvedAct.method || 'GET').toUpperCase();
+                    const requestHeaders: Record<string, string> = {
+                        ...(resolvedAct.headers || {}),
+                    };
+                    const requestBody = resolvedAct.body ?? resolvedAct.args ?? resolvedAct.params;
+                    const init: RequestInit = {
+                        method,
+                        headers: requestHeaders,
+                    };
+
+                    if (requestBody !== undefined && method !== 'GET') {
+                        if (!requestHeaders['Content-Type']) {
+                            requestHeaders['Content-Type'] = 'application/json';
+                        }
+                        init.body = requestHeaders['Content-Type'] === 'application/json'
+                            ? JSON.stringify(requestBody)
+                            : requestBody;
+                    }
+
+                    const response = await fetch(resolvedAct.url, init);
+                    const contentType = response.headers.get('content-type') || '';
+                    const result = contentType.includes('application/json')
+                        ? await response.json()
+                        : await response.text();
+
+                    if (!response.ok) {
+                        const errorMessage = typeof result === 'object' && result !== null && 'error' in result
+                            ? String((result as any).error)
+                            : `Request failed with status ${response.status}`;
+                        throw new Error(errorMessage);
+                    }
+
+                    if (resolvedAct.emitEvent && typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent(resolvedAct.emitEvent, { detail: result }));
+                    }
+
+                    if (act.onSuccess) {
+                        await handleAction(act.onSuccess, e, { result });
+                    }
+                } catch (err: any) {
+                    console.error('Client API Call Failed', err);
+                    if (act.onError) {
+                        await handleAction(act.onError, e, { error: err.message });
+                    } else {
+                        toast.error(err.message || 'Action failed');
                     }
                 }
             }
@@ -440,13 +487,6 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 }
             }
 
-            // --- OAuth ---
-            if (resolvedAct.action === 'OAUTH_CONNECT') {
-                const provider = resolvedAct.provider;
-                const extId = context.extensionId;
-                const redirectUrl = encodeURIComponent(window.location.href);
-                window.location.href = `/api/auth/oauth/${provider}?extensionId=${extId}&redirect=${redirectUrl}`;
-            }
             if (resolvedAct.action === 'OAUTH_DISCONNECT') {
                 try {
                     await fetch(`/api/auth/oauth/${resolvedAct.provider}/disconnect`, {

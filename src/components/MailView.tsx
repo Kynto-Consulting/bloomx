@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles } from 'lucide-react';
+import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles, CalendarDays, MapPin } from 'lucide-react';
 import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
 import { formatDate, cn } from '@/lib/utils';
@@ -32,7 +32,41 @@ interface EmailDetails {
         snippet?: string;
     };
     content: string;
+    invitePreview?: {
+        attachmentId: string;
+        filename: string;
+        uid?: string | null;
+        title: string;
+        description?: string | null;
+        location?: string | null;
+        startsAt?: string | null;
+        endsAt?: string | null;
+        method?: string | null;
+        organizerEmail?: string | null;
+        organizerName?: string | null;
+    } | null;
+    inviteResponse?: {
+        response: 'accepted' | 'tentative' | 'declined';
+        respondedAt?: string;
+        organizerEmail?: string;
+        organizerName?: string;
+        uid?: string;
+    } | null;
     thread?: EmailDetails[]; // Thread support
+}
+
+function formatInviteDate(value?: string | null) {
+    if (!value) return '';
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+    }).format(parsed);
 }
 
 export function MailView() {
@@ -42,6 +76,7 @@ export function MailView() {
     const [data, setLocalData] = useState<EmailDetails | null>(null);
     const [loading, setLoading] = useState(false);
     const [summary, setSummary] = useState<string | null>(null);
+    const [inviteActionEmailId, setInviteActionEmailId] = useState<string | null>(null);
 
     const [availableLabels, setAvailableLabels] = useState<any[]>([]);
     const [showLabelMenu, setShowLabelMenu] = useState(false);
@@ -174,6 +209,47 @@ export function MailView() {
 
     const toggleLabel = (labelId: string) => {
         handleUpdate({ toggleLabelId: labelId });
+    };
+
+    const handleInviteResponse = async (emailId: string, response: 'accepted' | 'tentative' | 'declined') => {
+        setInviteActionEmailId(emailId);
+
+        try {
+            const res = await fetch(`/api/emails/${emailId}/rsvp`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ response })
+            });
+
+            const json = await res.json();
+            if (!res.ok) {
+                throw new Error(json.error || 'Failed to send RSVP');
+            }
+
+            setLocalData((current) => {
+                if (!current) return current;
+
+                const updateItem = (item: EmailDetails): EmailDetails => {
+                    if (item.email.id !== emailId) return item;
+                    return {
+                        ...item,
+                        inviteResponse: json.inviteResponse,
+                    };
+                };
+
+                return {
+                    ...current,
+                    inviteResponse: current.email.id === emailId ? json.inviteResponse : current.inviteResponse,
+                    thread: current.thread?.map(updateItem),
+                };
+            });
+
+            toast.success(`Invitation ${response}`);
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to send RSVP');
+        } finally {
+            setInviteActionEmailId(null);
+        }
     };
 
     const trashEmail = async () => {
@@ -312,6 +388,11 @@ export function MailView() {
                             // So we render Newest first (Index 0).
 
                             const cleanHtml = sanitizeHtml(item.content || "");
+                            const invitePreview = item.invitePreview;
+                            const inviteResponse = item.inviteResponse;
+                            const formattedStartsAt = formatInviteDate(invitePreview?.startsAt);
+                            const formattedEndsAt = formatInviteDate(invitePreview?.endsAt);
+                            const isInviteActionPending = inviteActionEmailId === item.email.id;
 
                             return (
                                 <motion.div
@@ -369,6 +450,77 @@ export function MailView() {
                                                 className="overflow-hidden"
                                             >
                                                 <div className="px-4 pb-8 pl-14">
+                                                    {invitePreview && (
+                                                        <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-slate-900">
+                                                            <div className="flex items-start justify-between gap-4">
+                                                                <div className="space-y-2">
+                                                                    <div className="flex items-center gap-2 font-medium text-blue-900">
+                                                                        <CalendarDays className="h-4 w-4" />
+                                                                        <span>Calendar invitation detected</span>
+                                                                    </div>
+                                                                    <div className="text-base font-semibold text-slate-900">{invitePreview.title}</div>
+                                                                    {formattedStartsAt && (
+                                                                        <div className="flex items-center gap-2 text-slate-700">
+                                                                            <Clock className="h-4 w-4" />
+                                                                            <span>
+                                                                                {formattedStartsAt}
+                                                                                {formattedEndsAt ? ` - ${formattedEndsAt}` : ''}
+                                                                            </span>
+                                                                        </div>
+                                                                    )}
+                                                                    {invitePreview.location && (
+                                                                        <div className="flex items-center gap-2 text-slate-700">
+                                                                            <MapPin className="h-4 w-4" />
+                                                                            <span>{invitePreview.location}</span>
+                                                                        </div>
+                                                                    )}
+                                                                    {invitePreview.method && (
+                                                                        <div className="text-xs uppercase tracking-wide text-blue-700">Method: {invitePreview.method}</div>
+                                                                    )}
+                                                                    {inviteResponse?.response && (
+                                                                        <div className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-medium text-blue-900 border border-blue-200">
+                                                                            RSVP: {inviteResponse.response}
+                                                                        </div>
+                                                                    )}
+                                                                    <div className="flex flex-wrap gap-2 pt-1">
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={isInviteActionPending}
+                                                                            onClick={() => handleInviteResponse(item.email.id, 'accepted')}
+                                                                            className="inline-flex items-center rounded-full border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-900 transition-colors hover:bg-emerald-50 disabled:opacity-60"
+                                                                        >
+                                                                            Accept
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={isInviteActionPending}
+                                                                            onClick={() => handleInviteResponse(item.email.id, 'tentative')}
+                                                                            className="inline-flex items-center rounded-full border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-50 disabled:opacity-60"
+                                                                        >
+                                                                            Maybe
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={isInviteActionPending}
+                                                                            onClick={() => handleInviteResponse(item.email.id, 'declined')}
+                                                                            className="inline-flex items-center rounded-full border border-rose-300 bg-white px-3 py-2 text-sm font-medium text-rose-900 transition-colors hover:bg-rose-50 disabled:opacity-60"
+                                                                        >
+                                                                            Decline
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                                <a
+                                                                    href={item.email.attachments.find((attachment: any) => attachment.id === invitePreview.attachmentId)?.url || '#'}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    className="inline-flex items-center rounded-full border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100"
+                                                                >
+                                                                    Open .ics
+                                                                </a>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
                                                     <SafeIframe html={cleanHtml} />
 
                                                     <div className="mt-8 flex gap-2 opacity-100">

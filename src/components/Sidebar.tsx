@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 
-import { useSearchParams } from 'next/navigation';
-import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, MoreHorizontal } from 'lucide-react';
+import { useSearchParams, usePathname } from 'next/navigation';
+import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, MoreHorizontal, CalendarDays, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Icons from 'lucide-react';
 import { useExpansions } from '@/hooks/useExpansions';
@@ -26,8 +26,17 @@ interface SidebarProps {
 }
 
 export function Sidebar({ onClose }: SidebarProps) {
+    return (
+        <Suspense fallback={<div className="h-full bg-muted/10" />}>
+            <SidebarContent onClose={onClose} />
+        </Suspense>
+    );
+}
+
+function SidebarContent({ onClose }: SidebarProps) {
     const { status } = useSession();
     const searchParams = useSearchParams();
+    const pathname = usePathname();
     const currentFolder = searchParams.get('folder') || 'inbox';
     const { openCompose } = useCompose();
     const { getData, setData, subscribe } = useCache();
@@ -172,6 +181,11 @@ export function Sidebar({ onClose }: SidebarProps) {
         { name: 'Archive', icon: Archive, id: 'archive', count: counts.archive },
     ];
 
+    const workspaceNav = [
+        { name: 'Calendar', icon: CalendarDays, href: '/calendar', active: pathname === '/calendar' },
+        { name: 'Contacts', icon: Users, href: '/contacts', active: pathname === '/contacts' },
+    ];
+
     const { config: domainConfig } = useDomainConfig();
     const brandName = domainConfig.displayName || domainConfig.name;
     const brandLogo = domainConfig.logo;
@@ -261,6 +275,26 @@ export function Sidebar({ onClose }: SidebarProps) {
                         </div>
                     );
                 })}
+            </div>
+
+            <div className="mt-4 px-4 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Workspace
+            </div>
+            <div className="mt-2 flex flex-col gap-1 px-2">
+                {workspaceNav.map((item) => (
+                    <Link
+                        key={item.href}
+                        href={item.href}
+                        onClick={() => onClose?.()}
+                        className={cn(
+                            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                            item.active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                        )}
+                    >
+                        <item.icon className="h-4 w-4" />
+                        {item.name}
+                    </Link>
+                ))}
             </div>
 
             {/* Labels Section */}

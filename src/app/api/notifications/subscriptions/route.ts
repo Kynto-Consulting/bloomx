@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { deletePushSubscription, savePushSubscription } from '@/lib/db/push-subscriptions';
+import { getVapidPublicKey } from '@/lib/notifications/web-push-config';
 
 export const runtime = 'nodejs';
+
+export async function GET() {
+    try {
+        const publicKey = await getVapidPublicKey();
+        return NextResponse.json({ publicKey, enabled: true });
+    } catch (error) {
+        console.error('[push] Failed to load VAPID public key:', error);
+        return NextResponse.json({ enabled: false }, { status: 503 });
+    }
+}
 
 export async function POST(req: NextRequest) {
     const user = await getCurrentUser();

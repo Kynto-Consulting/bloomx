@@ -1,9 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { setSessionCookie } from "@/lib/session";
+import { getCurrentUser, setSessionCookie } from "@/lib/session";
+
+function resolveReturnTo(state: string | null) {
+    if (!state) {
+        return '/dashboard';
+    }
+
+    try {
+        const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+        if (typeof decoded?.returnTo === 'string' && decoded.returnTo.startsWith('/')) {
+            return decoded.returnTo;
+        }
+    } catch {
+        // Ignore malformed state.
+    }
+
+    return '/dashboard';
+}
 
 export async function GET(req: NextRequest) {
     const code = req.nextUrl.searchParams.get("code");
+    const returnTo = resolveReturnTo(req.nextUrl.searchParams.get('state'));
     const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
     const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
     const REDIRECT_URI = `${process.env.NEXTAUTH_URL}/api/auth/callback/google`;
@@ -44,8 +62,22 @@ export async function GET(req: NextRequest) {
             return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=NoEmail`);
         }
 
-        // 3. Find or Create User
-        let user = await prisma.user.findUnique({
+        // 3. Link Google to the current Bloomx user when available.
+        const currentUser = await getCurrentUser();
+        const existingGoogleAccount = await prisma.account.findUnique({
+            where: {
+                provider_providerAccountId: {
+                    provider: 'google',
+                    providerAccountId: profile.id,
+                },
+            },
+        });
+
+        if (currentUser && existingGoogleAccount && existingGoogleAccount.userId !== currentUser.id) {
+            return NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}?error=GoogleAlreadyLinked`);
+        }
+
+        let user = currentUser ? await prisma.user.findUnique({ where: { id: currentUser.id } }) : await prisma.user.findUnique({
             where: { email: profile.email },
         });
 
@@ -95,7 +127,7 @@ export async function GET(req: NextRequest) {
             name: user.name,
         });
 
-        return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/dashboard`);
+        return NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}`);
 
     } catch (error) {
         console.error("Google Callback Error:", error);

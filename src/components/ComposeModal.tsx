@@ -15,10 +15,12 @@ import { cn } from '@/lib/utils';
 import { TagInput } from './ui/TagInput';
 import { Editor } from './Editor';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
+import { useSession } from '@/components/SessionProvider';
 // import { ClientExpansions } from '@/lib/expansions/client/renderer'; // Legacy
 import { ClientExpansionContext } from '@/lib/expansions/client/types'; // Legacy
 import { Popover } from './ui/Popover';
 import { motion } from 'framer-motion';
+import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 
 interface ComposeModalProps {
     id: string;
@@ -47,6 +49,7 @@ export function ComposeModal({
 }: ComposeModalProps) {
     const { closeCompose, toggleMinimize, updateCompose, windows } = useCompose();
     const { getData, setData } = useCache();
+    const { data: session } = useSession();
     const router = useRouter();
 
     const [toTags, setToTags] = useState<string[]>(initialTo ? initialTo.split(',').map(s => s.trim()).filter(Boolean) : []);
@@ -67,6 +70,7 @@ export function ComposeModal({
     const [showCcBcc, setShowCcBcc] = useState(!!initialCc || !!initialBcc);
     const [sending, setSending] = useState(false);
     const [draftId, setDraftId] = useState(initialDraftId);
+    const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
 
     // Track if user maximized the window manually (custom state, separate from minimize)
     const [maximized, setMaximized] = useState(false);
@@ -99,6 +103,18 @@ export function ComposeModal({
         };
         e.preventDefault();
     };
+
+    useEffect(() => {
+        fetch('/api/settings', { cache: 'no-store' })
+            .then((response) => response.json())
+            .then((data) => {
+                const groups = data?.expansionSettings?.['core-mail-groups']?.groups;
+                if (groups && typeof groups === 'object') {
+                    setMailGroupAliases(groups);
+                }
+            })
+            .catch(() => undefined);
+    }, []);
 
     useEffect(() => {
         if (!isResizing) return;
@@ -319,10 +335,39 @@ export function ComposeModal({
     // --- Middleware (Event Interceptors) ---
 
     // Helper to run middleware chain
-    // Helper to run middleware chain
     const runMiddleware = async <T,>(mountPoint: 'ON_BODY_CHANGE_HANDLER' | 'ON_SUBJECT_CHANGE_HANDLER' | 'ON_RECIPIENTS_CHANGE_HANDLER', initialValue: T): Promise<T> => {
-        // Local expansions removed.
-        return initialValue;
+        try {
+            const mounts = await fetchExpansions(mountPoint);
+            if (!Array.isArray(mounts) || mounts.length === 0) {
+                return initialValue;
+            }
+
+            let currentValue: any = initialValue;
+
+            for (const mount of mounts) {
+                const extensionId = mount?.extensionId || mount?.id;
+                const handlerName = mount?.handler;
+
+                if (!extensionId || !handlerName) {
+                    continue;
+                }
+
+                const response = await executeExtensionAction(extensionId, handlerName, currentValue, {
+                    secureData: {
+                        'mail-groups-data': mailGroupAliases,
+                    },
+                });
+
+                if (response.success && response.result) {
+                    currentValue = response.result;
+                }
+            }
+
+            return currentValue as T;
+        } catch (error) {
+            console.error(`Failed to run ${mountPoint} middleware`, error);
+            return initialValue;
+        }
     };
 
     // Define Actions separately to avoid TDZ (Temporal Dead Zone) issues
@@ -410,6 +455,10 @@ export function ComposeModal({
         to: toTags,
         cc: ccTags,
         bcc: bccTags,
+        sender: {
+            email: session?.user?.email ?? undefined,
+            name: session?.user?.name ?? undefined,
+        },
         ...actions,
         toast: (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
             if (type === 'success') toast.success(msg);
@@ -599,6 +648,7 @@ export function ComposeModal({
                                 onChange={actions.setTo}
                                 placeholder=""
                                 className="border-none px-0 py-1.5"
+                                suggestionEndpoint="/api/contacts/suggestions"
                             />
                         </div>
                         <div className="pt-1">
@@ -617,13 +667,13 @@ export function ComposeModal({
                             <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200">
                                 <span className="text-sm font-medium text-gray-500 pt-2 w-8">Cc</span>
                                 <div className="flex-1">
-                                    <TagInput value={ccTags} onChange={actions.setCc} className="border-none px-0 py-1.5" />
+                                    <TagInput value={ccTags} onChange={actions.setCc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
                             </div>
                             <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200">
                                 <span className="text-sm font-medium text-gray-500 pt-2 w-8">Bcc</span>
                                 <div className="flex-1">
-                                    <TagInput value={bccTags} onChange={actions.setBcc} className="border-none px-0 py-1.5" />
+                                    <TagInput value={bccTags} onChange={actions.setBcc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
                             </div>
                         </div>

@@ -1,0 +1,1 @@
+Any changes made to schema.prisma should be reflected in the ensure-schema.ts

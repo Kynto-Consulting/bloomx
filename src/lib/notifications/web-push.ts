@@ -4,30 +4,28 @@ import {
     listPushSubscriptions,
     markPushSubscriptionSuccess,
 } from '@/lib/db/push-subscriptions';
+import { getOrCreateVapidConfig } from '@/lib/notifications/web-push-config';
 
 let vapidConfigured = false;
 let vapidWarningShown = false;
 
-function ensureVapidConfiguration() {
+async function ensureVapidConfiguration() {
     if (vapidConfigured) {
         return true;
     }
 
-    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-    const privateKey = process.env.VAPID_PRIVATE_KEY;
-    const subject = process.env.VAPID_SUBJECT || 'mailto:admin@bloomx.local';
-
-    if (!publicKey || !privateKey) {
+    try {
+        const { publicKey, privateKey, subject } = await getOrCreateVapidConfig();
+        webpush.setVapidDetails(subject, publicKey, privateKey);
+        vapidConfigured = true;
+        return true;
+    } catch (error) {
         if (!vapidWarningShown) {
             vapidWarningShown = true;
-            console.warn('[push] Missing NEXT_PUBLIC_VAPID_PUBLIC_KEY or VAPID_PRIVATE_KEY. Push notifications are disabled.');
+            console.warn('[push] Failed to configure VAPID keys. Push notifications are disabled.', error);
         }
         return false;
     }
-
-    webpush.setVapidDetails(subject, publicKey, privateKey);
-    vapidConfigured = true;
-    return true;
 }
 
 export async function sendNewMessagePushNotification(userId: string, payload: {
@@ -38,7 +36,22 @@ export async function sendNewMessagePushNotification(userId: string, payload: {
     icon?: string;
     badge?: string;
 }) {
-    if (!ensureVapidConfiguration()) {
+    await sendPushNotification(userId, {
+        ...payload,
+        tag: payload.tag || 'bloomx-message',
+        url: payload.url || '/',
+    });
+}
+
+export async function sendPushNotification(userId: string, payload: {
+    title: string;
+    body: string;
+    url?: string;
+    tag?: string;
+    icon?: string;
+    badge?: string;
+}) {
+    if (!await ensureVapidConfiguration()) {
         return;
     }
 
@@ -52,7 +65,7 @@ export async function sendNewMessagePushNotification(userId: string, payload: {
         title: payload.title,
         body: payload.body,
         url: payload.url || '/',
-        tag: payload.tag || 'bloomx-message',
+        tag: payload.tag || 'bloomx-notification',
         icon: payload.icon,
         badge: payload.badge,
     });

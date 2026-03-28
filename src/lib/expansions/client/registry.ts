@@ -4,9 +4,24 @@
 // Let's create it as a placeholder or real registry if needed.
 // Based on file structure, this might be where we register default extensions.
 
+import { MailGroupsSettings } from '@/components/expansions/settings/MailGroupsSettings';
+import { Users } from 'lucide-react';
 import { ClientExpansion } from "./types";
 
 const registry: Map<string, ClientExpansion> = new Map();
+
+registry.set('core-mail-groups', {
+    id: 'core-mail-groups',
+    mounts: [
+        {
+            point: 'CUSTOM_SETTINGS_TAB',
+            title: 'Mail Groups',
+            icon: Users,
+            Component: MailGroupsSettings as any,
+        }
+    ],
+    label: 'Mail Groups',
+});
 
 
 export const clientExpansionRegistry = {

@@ -3,6 +3,66 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
+import { parseInviteFromIcs } from '@/lib/calendar/ics';
+
+async function buildInviteState(emailId: string) {
+    const latestRsvp = await prisma.emailEvent.findFirst({
+        where: {
+            emailId,
+            type: 'invite.rsvp'
+        },
+        orderBy: { createdAt: 'desc' }
+    });
+
+    return latestRsvp?.data || null;
+}
+
+async function buildInvitePreview(email: any) {
+    const calendarAttachment = (email.attachments || []).find((attachment: any) => {
+        const mimeType = String(attachment?.mimeType || '').toLowerCase();
+        const filename = String(attachment?.filename || '').toLowerCase();
+        return mimeType.includes('text/calendar') || filename.endsWith('.ics');
+    });
+
+    if (!calendarAttachment?.key) {
+        return null;
+    }
+
+    const rawInvite = await getFromStorage(calendarAttachment.key);
+    const invite = parseInviteFromIcs(rawInvite || '');
+    if (!invite) {
+        return null;
+    }
+
+    return {
+        attachmentId: calendarAttachment.id,
+        filename: calendarAttachment.filename,
+        uid: invite.uid || null,
+        title: invite.summary || email.subject || 'Calendar invitation',
+        description: invite.description || null,
+        location: invite.location || null,
+        startsAt: invite.startsAt || null,
+        endsAt: invite.endsAt || null,
+        method: invite.method || null,
+        organizerEmail: invite.organizerEmail || null,
+        organizerName: invite.organizerName || null,
+    };
+}
+
+async function buildEmailPayload(email: any, content: string, signedAttachments: any[]) {
+    const invitePreview = await buildInvitePreview(email);
+    const inviteResponse = await buildInviteState(email.id);
+
+    return {
+        email: {
+            ...email,
+            attachments: signedAttachments,
+        },
+        content,
+        invitePreview,
+        inviteResponse,
+    };
+}
 
 export async function GET(
     req: NextRequest,
@@ -56,11 +116,6 @@ export async function GET(
         content = await fetchContent(email);
         const attachmentsWithUrls = await signAttachments(email.attachments ?? []);
 
-        const emailWithSignedAttachments = {
-            ...email,
-            attachments: attachmentsWithUrls
-        };
-
         let threadEmails: any[] = [];
 
         if (fetchThread && email.subject) {
@@ -97,17 +152,15 @@ export async function GET(
                 threadEmails = await Promise.all(pEmails.map(async (e) => {
                     const c = await fetchContent(e);
                     const atts = await signAttachments(e.attachments ?? []);
-                    return {
-                        email: { ...e, attachments: atts },
-                        content: c
-                    };
+                    return buildEmailPayload(e, c, atts);
                 }));
             }
         }
 
+        const emailPayload = await buildEmailPayload(email, content, attachmentsWithUrls);
+
         return NextResponse.json({
-            email: emailWithSignedAttachments,
-            content,
+            ...emailPayload,
             thread: threadEmails.length > 0 ? threadEmails : undefined
         });
 

@@ -77,10 +77,6 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     const { from, to, subject, attachments, messageId } = data;
     let { html, text } = data;
 
-    if (!html && !text) {
-        console.warn('WARNING: Received email with NO content (html/text are missing).');
-    }
-
     // Normalize recipient data
     // 'to' can be string, string[], or object[] {name, email}
     let rawRecipients: any[] = [];
@@ -159,7 +155,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // 2. Upload Bodies
     if (!html && !text) {
-        console.warn('WARNING: Received email with NO content. Attempting to fetch from Resend API...');
+        console.log('[resend] Email body missing in webhook payload. Attempting Resend API fallback...');
         try {
             const res = await fetch(`https://api.resend.com/emails/receiving/${data.email_id}`, {
                 headers: { 'Authorization': `Bearer ${process.env.RESEND_API_KEY}` }
@@ -179,6 +175,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     }
 
     if (!html && !text) {
+        console.warn('[resend] Email body was still unavailable after Resend API fallback.');
         // Fallback for missing content if fetch also failed
         const placeholder = '<div style="padding: 20px; text-align: center; color: #666; background: #f9f9f9; border-radius: 8px;"><p><strong>Content Unavailable</strong></p><p>The email provider did not include the message body.</p></div>';
         uploads.push(uploadToStorage(htmlKey, placeholder, 'text/html'));
