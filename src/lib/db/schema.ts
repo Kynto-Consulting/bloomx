@@ -345,16 +345,27 @@ const TABLES: TableSpec[] = [
 
 let ensureSchemaPromise: Promise<void> | null = null;
 
-async function ensureConstraint(pool: Pool, constraint: ConstraintSpec) {
+async function ensureConstraint(pool: Pool, tableName: string, constraint: ConstraintSpec) {
     await pool.query(`
         DO $$
         BEGIN
             IF NOT EXISTS (
                 SELECT 1
-                FROM pg_constraint
-                WHERE conname = $constraint_name$${constraint.name}$constraint_name$
+                FROM pg_constraint constraint_def
+                JOIN pg_class table_def ON table_def.oid = constraint_def.conrelid
+                WHERE constraint_def.conname = $constraint_name$${constraint.name}$constraint_name$
+                  AND table_def.relname = $table_name$${tableName}$table_name$
+            ) AND NOT EXISTS (
+                SELECT 1
+                FROM pg_class relation_def
+                WHERE relation_def.relname = $constraint_name$${constraint.name}$constraint_name$
             ) THEN
-                ${constraint.statement};
+                BEGIN
+                    ${constraint.statement};
+                EXCEPTION
+                    WHEN duplicate_object OR duplicate_table THEN
+                        NULL;
+                END;
             END IF;
         END $$;
     `);
@@ -370,7 +381,7 @@ async function ensureTable(pool: Pool, table: TableSpec) {
     }
 
     for (const constraint of table.constraints || []) {
-        await ensureConstraint(pool, constraint);
+        await ensureConstraint(pool, table.name, constraint);
     }
 
     for (const indexStatement of table.indexes || []) {
