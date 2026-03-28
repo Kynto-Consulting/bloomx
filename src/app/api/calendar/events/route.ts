@@ -35,7 +35,17 @@ export async function GET(req: NextRequest) {
         orderBy: { startsAt: 'asc' }
     });
 
-    return NextResponse.json(events);
+    const enriched = events.map((event) => {
+        const safeTitle = String(event.title || '').trim() || 'Untitled event';
+
+        return {
+            ...event,
+            title: safeTitle,
+            displayTitle: safeTitle,
+        };
+    });
+
+    return NextResponse.json(enriched);
 }
 
 export async function POST(req: NextRequest) {

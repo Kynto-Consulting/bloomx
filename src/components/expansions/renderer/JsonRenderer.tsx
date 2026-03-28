@@ -81,10 +81,52 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     // Ideally, context should have user info.
     const userId = context?.user?.id || 'default-user';
 
+    const parseLiteral = (value: string) => {
+        const trimmed = value.trim();
+
+        if ((trimmed.startsWith("'") && trimmed.endsWith("'")) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
+            return trimmed.slice(1, -1);
+        }
+        if (trimmed === 'true') return true;
+        if (trimmed === 'false') return false;
+        if (trimmed === 'null') return null;
+        if (trimmed === 'undefined') return undefined;
+
+        const numeric = Number(trimmed);
+        if (!Number.isNaN(numeric) && trimmed !== '') {
+            return numeric;
+        }
+
+        return undefined;
+    };
+
     // Helper to look up a single dotted path like "context.from.email" or "state.contact"
     const lookupPath = (key: string, ctx: any, st: any): any => {
         let actualKey = key.trim();
         let invert = false;
+
+        if (actualKey.includes('||')) {
+            const options = actualKey.split('||').map((part) => part.trim()).filter(Boolean);
+            let fallback: any;
+
+            for (const option of options) {
+                const literalValue = parseLiteral(option);
+                const resolved = literalValue !== undefined ? literalValue : lookupPath(option, ctx, st);
+                fallback = resolved;
+
+                if (!(resolved === undefined || resolved === null || resolved === '')) {
+                    return resolved;
+                }
+            }
+
+            return fallback;
+        }
+
+        const literalValue = parseLiteral(actualKey);
+        if (literalValue !== undefined) {
+            return literalValue;
+        }
+
         if (actualKey.startsWith('!')) {
             invert = true;
             actualKey = actualKey.substring(1).trim();
@@ -351,6 +393,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     const binary = atob(attachment.contentBase64);
                     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
                     context.addAttachment({
+                        ...attachment,
                         filename: attachment.filename || 'attachment.bin',
                         mimeType: attachment.mimeType || 'application/octet-stream',
                         contentBase64: attachment.contentBase64,

@@ -345,8 +345,8 @@ export function MailView() {
     const threadItems = (data.thread && data.thread.length > 0) ? data.thread : [data];
 
     return (
-        <div className="flex h-full flex-col bg-background">
-            <div className="flex items-center gap-2 p-2 bg-background/95 backdrop-blur-sm sticky top-0 z-10 border-b">
+        <div className="flex h-full flex-col bg-background overflow-x-hidden">
+            <div className="flex items-center gap-2 p-2 bg-background/95 backdrop-blur-sm sticky top-0 z-10 border-b overflow-x-auto">
                 <button onClick={() => router.push('/')} className="md:hidden p-2"><ArrowLeft className="h-5 w-5" /></button>
                 <div className="flex items-center gap-1">
                     <button onClick={() => {
@@ -371,12 +371,12 @@ export function MailView() {
                 </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto overflow-x-hidden">
                 <div className="p-6 pb-2">
                     <h2 className="text-xl font-semibold leading-tight">{threadItems[0].email.subject || '(No Subject)'}</h2>
                 </div>
 
-                <div className="flex flex-col">
+                <div className="flex flex-col overflow-x-hidden">
                     <AnimatePresence initial={false}>
                         {threadItems.map((item, index) => {
                             const isExpanded = expandedIds.has(item.email.id);
@@ -415,16 +415,17 @@ export function MailView() {
                                             }
                                         }}
                                     >
-                                        <div className="flex items-start justify-between gap-4 cursor-pointer">
-                                            <div className="flex items-center gap-3">
+                                        <div className="flex items-start justify-between gap-4 cursor-pointer min-w-0">
+                                            <div className="flex items-center gap-3 min-w-0 flex-1">
                                                 <div className={cn("flex h-8 w-8 items-center justify-center rounded-full font-semibold text-xs transition-colors", isExpanded ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
                                                     {item.email.from.charAt(0).toUpperCase()}
                                                 </div>
-                                                <div className="flex flex-col">
-                                                    <div className="flex items-baseline gap-2">
-                                                        <span className={cn("text-sm font-medium transition-colors", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
-                                                        <span className="text-xs text-muted-foreground">&lt;{item.email.to}&gt;</span>
+                                                <div className="flex flex-col min-w-0">
+                                                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
+                                                        <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
+                                                        <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
                                                     </div>
+                                                    <span className="text-xs text-muted-foreground sm:hidden">{formatDate(item.email.createdAt)}</span>
                                                     {!isExpanded && (
                                                         <motion.span
                                                             initial={{ opacity: 0 }}
@@ -436,7 +437,7 @@ export function MailView() {
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="text-xs text-muted-foreground whitespace-nowrap">{formatDate(item.email.createdAt)}</div>
+                                            <div className="hidden text-xs text-muted-foreground whitespace-nowrap shrink-0 sm:block">{formatDate(item.email.createdAt)}</div>
                                         </div>
                                     </div>
 
@@ -449,10 +450,10 @@ export function MailView() {
                                                 transition={{ duration: 0.3, ease: "easeInOut" }}
                                                 className="overflow-hidden"
                                             >
-                                                <div className="px-4 pb-8 pl-14">
+                                                <div className="px-4 pb-8 pl-4 sm:pl-14 min-w-0 overflow-x-hidden">
                                                     {invitePreview && (
                                                         <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-slate-900">
-                                                            <div className="flex items-start justify-between gap-4">
+                                                            <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
                                                                 <div className="space-y-2">
                                                                     <div className="flex items-center gap-2 font-medium text-blue-900">
                                                                         <CalendarDays className="h-4 w-4" />

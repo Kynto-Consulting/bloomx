@@ -29,16 +29,23 @@ function formatIcsDate(value: string | Date | null | undefined) {
 }
 
 function normalizeEmailList(value: unknown): string[] {
+    const extractEmail = (entry: string) => {
+        const normalized = String(entry || '').trim();
+        const angled = normalized.match(/<([^>]+)>/);
+        const candidate = angled?.[1] ? angled[1].trim() : normalized;
+        return candidate.includes('@') ? candidate.toLowerCase() : '';
+    };
+
     if (Array.isArray(value)) {
         return value
-            .map((entry) => String(entry || '').trim().toLowerCase())
+            .map((entry) => extractEmail(String(entry || '')))
             .filter((entry) => entry.includes('@'));
     }
 
     if (typeof value === 'string') {
         return value
             .split(',')
-            .map((entry) => entry.trim().toLowerCase())
+            .map((entry) => extractEmail(entry))
             .filter((entry) => entry.includes('@'));
     }
 
@@ -63,6 +70,7 @@ function buildIcsFromEvent(options: {
     organizer: { email: string; name?: string | null };
     attendees: EventAttendeeRecord[];
     uid: string;
+    sequence: number;
 }) {
     const lines = [
         'BEGIN:VCALENDAR',
@@ -79,7 +87,7 @@ function buildIcsFromEvent(options: {
         `DESCRIPTION:${escapeIcsText(options.description || options.title || 'Event invitation')}`,
         `LOCATION:${escapeIcsText(options.location || '')}`,
         `ORGANIZER;CN=${escapeIcsText(options.organizer.name || options.organizer.email)}:mailto:${options.organizer.email}`,
-        'SEQUENCE:0',
+        `SEQUENCE:${Number.isFinite(options.sequence) ? options.sequence : 0}`,
         'STATUS:CONFIRMED',
         'TRANSP:OPAQUE',
     ];
@@ -109,12 +117,12 @@ export async function POST(
 
     try {
         const { id } = await params;
-        const body = await req.json();
+        const body = await req.json().catch(() => ({}));
 
         const recipients = Array.from(new Set([
             ...normalizeEmailList(body?.to),
             ...normalizeEmailList(body?.cc),
-        ])).filter((email) => email !== user.email?.toLowerCase());
+        ])).filter(Boolean);
 
         const event = await prisma.calendarEvent.findFirst({
             where: { id, userId: user.id },
@@ -128,66 +136,197 @@ export async function POST(
             return NextResponse.json({ error: 'Event not found' }, { status: 404 });
         }
 
-        if (!event.calendar.isReadOnly && recipients.length > 0) {
-            const existingEmails = new Set(event.attendees.map((attendee) => attendee.email.toLowerCase()));
-            const attendeesToCreate = recipients.filter((email) => !existingEmails.has(email));
+        const providedOrganizerEmail = String(body?.organizerEmail || '').trim().toLowerCase();
+        const providedOrganizerName = String(body?.organizerName || '').trim();
+        const organizerEmail = providedOrganizerEmail || event.organizerEmail || user.email || 'noreply@bloomx.local';
+        const organizerName = providedOrganizerName || event.organizerName || user.name || organizerEmail;
 
-            if (attendeesToCreate.length > 0) {
-                await prisma.calendarAttendee.createMany({
-                    data: attendeesToCreate.map((email) => ({
-                        eventId: event.id,
-                        email,
-                        name: null,
-                        responseStatus: 'needsAction',
-                        isOrganizer: false,
-                    })),
-                    skipDuplicates: true,
-                });
-            }
-        }
+        const nextTitle = typeof body?.title === 'string' && body.title.trim()
+            ? body.title.trim()
+            : event.title;
+        const nextDescription = body?.description !== undefined
+            ? (body.description ? String(body.description) : null)
+            : event.description;
+        const nextLocation = body?.location !== undefined
+            ? (body.location ? String(body.location) : null)
+            : event.location;
 
-        const latestAttendees = await prisma.calendarAttendee.findMany({
-            where: { eventId: event.id },
-        });
+        const parsedStartsAt = body?.startsAt ? new Date(body.startsAt) : null;
+        const parsedEndsAt = body?.endsAt ? new Date(body.endsAt) : null;
+        const nextStartsAt = parsedStartsAt && !Number.isNaN(parsedStartsAt.getTime()) ? parsedStartsAt : event.startsAt;
+        const nextEndsAt = parsedEndsAt && !Number.isNaN(parsedEndsAt.getTime()) ? parsedEndsAt : event.endsAt;
 
-        const organizerFromAttendees = latestAttendees.find((attendee) => attendee.isOrganizer);
-        const organizerEmail = organizerFromAttendees?.email || event.organizerEmail || user.email || 'noreply@bloomx.local';
-        const organizerName = organizerFromAttendees?.name || event.organizerName || user.name || organizerEmail;
-        const eventUid = event.inviteUid || event.externalId || `${event.id}@bloomx.local`;
+        const requestedInviteUid = String(body?.inviteUid || '').trim();
+        const eventUid = requestedInviteUid || event.inviteUid || event.externalId || `${event.id}@bloomx.local`;
+        const replaceAttendees = body?.replaceAttendees !== false;
 
-        if (!event.inviteUid || !event.organizerEmail || !event.organizerName) {
-            await prisma.calendarEvent.update({
+        let latestEvent = event;
+
+        if (!event.calendar.isReadOnly) {
+            latestEvent = await prisma.calendarEvent.update({
                 where: { id: event.id },
                 data: {
+                    title: nextTitle,
+                    description: nextDescription,
+                    location: nextLocation,
+                    startsAt: nextStartsAt,
+                    endsAt: nextEndsAt,
                     inviteUid: eventUid,
                     organizerEmail,
                     organizerName,
                 },
+                include: {
+                    calendar: true,
+                    attendees: true,
+                }
+            });
+
+            const organizerAttendee = latestEvent.attendees.find((attendee) => attendee.isOrganizer);
+
+            if (organizerAttendee) {
+                if (organizerAttendee.email !== organizerEmail || (organizerAttendee.name || '') !== (organizerName || '')) {
+                    await prisma.calendarAttendee.update({
+                        where: { id: organizerAttendee.id },
+                        data: {
+                            email: organizerEmail,
+                            name: organizerName,
+                            responseStatus: 'accepted',
+                            isOrganizer: true,
+                        }
+                    });
+                }
+            } else {
+                await prisma.calendarAttendee.create({
+                    data: {
+                        eventId: latestEvent.id,
+                        email: organizerEmail,
+                        name: organizerName,
+                        responseStatus: 'accepted',
+                        isOrganizer: true,
+                    }
+                });
+            }
+
+            const attendeeRecipients = recipients.filter((email) => email !== organizerEmail.toLowerCase());
+
+            if (replaceAttendees) {
+                if (attendeeRecipients.length > 0) {
+                    await prisma.calendarAttendee.deleteMany({
+                        where: {
+                            eventId: latestEvent.id,
+                            isOrganizer: false,
+                            email: { notIn: attendeeRecipients }
+                        }
+                    });
+                } else {
+                    await prisma.calendarAttendee.deleteMany({
+                        where: {
+                            eventId: latestEvent.id,
+                            isOrganizer: false,
+                        }
+                    });
+                }
+            }
+
+            if (attendeeRecipients.length > 0) {
+                const existingEmails = new Set(
+                    latestEvent.attendees
+                        .filter((attendee) => !attendee.isOrganizer)
+                        .map((attendee) => attendee.email.toLowerCase())
+                );
+                const attendeesToCreate = attendeeRecipients.filter((email) => !existingEmails.has(email));
+
+                if (attendeesToCreate.length > 0) {
+                    await prisma.calendarAttendee.createMany({
+                        data: attendeesToCreate.map((email) => ({
+                            eventId: latestEvent.id,
+                            email,
+                            name: null,
+                            responseStatus: 'needsAction',
+                            isOrganizer: false,
+                        })),
+                        skipDuplicates: true,
+                    });
+                }
+            }
+
+            latestEvent = await prisma.calendarEvent.findFirstOrThrow({
+                where: { id: latestEvent.id, userId: user.id },
+                include: {
+                    calendar: true,
+                    attendees: true,
+                }
             });
         }
+        const latestAttendees = await prisma.calendarAttendee.findMany({
+            where: { eventId: latestEvent.id },
+        });
+
+        let attendeesForIcs: EventAttendeeRecord[] = latestAttendees;
+        if (event.calendar.isReadOnly && recipients.length > 0) {
+            const organizerAttendee = latestAttendees.find((attendee) => attendee.isOrganizer) || {
+                email: organizerEmail,
+                name: organizerName,
+                responseStatus: 'accepted',
+                isOrganizer: true,
+            };
+
+            const virtualAttendees: EventAttendeeRecord[] = recipients
+                .filter((email) => email !== organizerEmail.toLowerCase())
+                .map((email) => ({
+                    email,
+                    name: null,
+                    responseStatus: 'needsAction',
+                    isOrganizer: false,
+                }));
+
+            attendeesForIcs = [organizerAttendee, ...virtualAttendees];
+        }
+
+        const sequenceBase = new Date(latestEvent.updatedAt || new Date()).getTime();
+        const computedSequence = Number.isFinite(sequenceBase) ? Math.floor(sequenceBase / 1000) : 0;
 
         const icsContent = buildIcsFromEvent({
-            title: event.title,
-            description: event.description,
-            location: event.location,
-            startsAt: event.startsAt,
-            endsAt: event.endsAt,
+            title: latestEvent.title,
+            description: latestEvent.description,
+            location: latestEvent.location,
+            startsAt: latestEvent.startsAt,
+            endsAt: latestEvent.endsAt,
             organizer: {
                 email: organizerEmail,
                 name: organizerName,
             },
-            attendees: latestAttendees,
+            attendees: attendeesForIcs,
             uid: eventUid,
+            sequence: computedSequence,
         });
+
+        const attendeeEmails = attendeesForIcs
+            .filter((attendee) => !attendee.isOrganizer)
+            .map((attendee) => attendee.email.toLowerCase());
 
         return NextResponse.json({
             success: true,
-            subject: event.title,
-            syncedAttendees: latestAttendees.filter((attendee) => !attendee.isOrganizer).length,
+            eventId: latestEvent.id,
+            inviteUid: eventUid,
+            subject: latestEvent.title,
+            syncedAttendees: attendeeEmails.length,
             attachment: {
-                filename: `${(event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`,
+                filename: `${(latestEvent.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`,
                 mimeType: 'text/calendar;charset=utf-8',
                 contentBase64: Buffer.from(icsContent, 'utf8').toString('base64'),
+                calendarEvent: {
+                    syncedEventId: latestEvent.id,
+                    inviteUid: eventUid,
+                    title: latestEvent.title,
+                    description: latestEvent.description,
+                    location: latestEvent.location,
+                    startsAt: latestEvent.startsAt?.toISOString?.() || latestEvent.startsAt,
+                    endsAt: latestEvent.endsAt?.toISOString?.() || latestEvent.endsAt,
+                    organizerEmail,
+                    organizerName,
+                    attendees: attendeeEmails,
+                },
             },
         });
     } catch (error: any) {

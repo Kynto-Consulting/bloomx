@@ -27,6 +27,14 @@ export function SafeIframe({ html, className }: SafeIframeProps) {
                 <html>
                 <head>
                     <style>
+                        * {
+                            box-sizing: border-box;
+                        }
+                        html {
+                            width: 100%;
+                            max-width: 100%;
+                            overflow-x: hidden;
+                        }
                         body {
                             margin: 0;
                             padding: 0;
@@ -34,14 +42,38 @@ export function SafeIframe({ html, className }: SafeIframeProps) {
                             font-size: 14px;
                             line-height: 1.5;
                             color: #1a1a1a;
+                            width: 100%;
+                            max-width: 100%;
+                            overflow-x: hidden;
                             word-break: break-word;
+                            overflow-wrap: anywhere;
+                        }
+                        table {
+                            width: 100% !important;
+                            max-width: 100% !important;
+                            table-layout: fixed;
+                        }
+                        th, td {
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
                         }
                         img { max-width: 100%; height: auto; }
-                        a { color: #2563eb; text-decoration: underline; }
+                        a {
+                            color: #2563eb;
+                            text-decoration: underline;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
+                        }
+                        pre, code {
+                            white-space: pre-wrap;
+                            word-break: break-word;
+                            overflow-wrap: anywhere;
+                        }
                         blockquote {
                             margin: 0 0 0 .8ex;
                             border-left: 1px #999 solid;
                             padding-left: 1ex;
+                            max-width: 100%;
                         }
                         .gmail_quote_toggle {
                             display: inline-flex;
@@ -63,6 +95,9 @@ export function SafeIframe({ html, className }: SafeIframeProps) {
                         #content {
                             display: block;
                             padding: 1px; /* Prevent margin collapse */
+                            width: 100%;
+                            max-width: 100%;
+                            overflow-x: hidden;
                         }
                     </style>
                 </head>
@@ -222,7 +257,7 @@ export function SafeIframe({ html, className }: SafeIframeProps) {
         <iframe
             ref={iframeRef}
             className={className}
-            style={{ width: '100%', height, border: 'none', overflow: 'auto' }}
+            style={{ width: '100%', maxWidth: '100%', height, border: 'none', overflow: 'hidden' }}
             title="Email Content"
             sandbox="allow-popups allow-popups-to-escape-sandbox allow-scripts allow-same-origin"
         />

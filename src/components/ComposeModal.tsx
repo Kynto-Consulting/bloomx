@@ -30,6 +30,19 @@ function extractPlainTextFromHtml(value: string) {
         .trim();
 }
 
+function normalizeRecipientEmails(values: string[]) {
+    const normalized = values
+        .map((value) => String(value || '').trim())
+        .map((value) => {
+            const angled = value.match(/<([^>]+)>/);
+            const candidate = angled?.[1] ? angled[1].trim() : value;
+            return candidate.toLowerCase();
+        })
+        .filter((email) => email.includes('@'));
+
+    return Array.from(new Set(normalized));
+}
+
 interface ComposeModalProps {
     id: string;
     initialTo?: string;
@@ -201,74 +214,134 @@ export function ComposeModal({
     ) => {
         const attachmentsToSync = currentAttachments
             .map((attachment, index) => ({ attachment, index }))
-            .filter(({ attachment }) => attachment?.calendarEvent && !attachment?.calendarEvent?.syncedEventId);
+            .filter(({ attachment }) => attachment?.calendarEvent);
 
         if (attachmentsToSync.length === 0) {
             return currentAttachments;
         }
 
-        const calendarsResponse = await fetch('/api/calendars', { cache: 'no-store' });
-        if (!calendarsResponse.ok) {
-            throw new Error('No se pudo consultar los calendarios para guardar la invitacion');
+        const hasUnsyncedEvents = attachmentsToSync.some(({ attachment }) => !attachment?.calendarEvent?.syncedEventId);
+        let writableCalendar: any = null;
+
+        if (hasUnsyncedEvents) {
+            const calendarsResponse = await fetch('/api/calendars', { cache: 'no-store' });
+            if (!calendarsResponse.ok) {
+                throw new Error('No se pudo consultar los calendarios para guardar la invitacion');
+            }
+
+            const calendars = await calendarsResponse.json();
+            writableCalendar = Array.isArray(calendars)
+                ? (calendars.find((calendar: any) => calendar.source === 'local' && !calendar.isReadOnly)
+                    || calendars.find((calendar: any) => !calendar.isReadOnly))
+                : null;
+
+            if (!writableCalendar?.id) {
+                throw new Error('No hay un calendario editable disponible para registrar el evento');
+            }
         }
 
-        const calendars = await calendarsResponse.json();
-        const writableCalendar = Array.isArray(calendars)
-            ? (calendars.find((calendar: any) => calendar.source === 'local' && !calendar.isReadOnly)
-                || calendars.find((calendar: any) => !calendar.isReadOnly))
-            : null;
-
-        if (!writableCalendar?.id) {
-            throw new Error('No hay un calendario editable disponible para registrar el evento');
-        }
-
-        const fallbackRecipients = Array.from(new Set(
-            [...currentTo, ...currentCc]
-                .map((email) => String(email || '').trim().toLowerCase())
-                .filter((email) => email.includes('@'))
-        ));
+        const composerRecipients = normalizeRecipientEmails([...currentTo, ...currentCc]);
 
         const nextAttachments = [...currentAttachments];
 
         for (const { attachment, index } of attachmentsToSync) {
             const calendarEvent = attachment.calendarEvent || {};
-            const attendees = Array.isArray(calendarEvent.attendees) && calendarEvent.attendees.length > 0
-                ? Array.from(new Set(calendarEvent.attendees.map((email: string) => String(email || '').trim().toLowerCase()).filter((email: string) => email.includes('@'))))
-                : fallbackRecipients;
+            const attendees = composerRecipients;
 
             if (!calendarEvent.startsAt || !calendarEvent.endsAt) {
                 throw new Error('La invitacion no tiene fecha de inicio y fin validas para guardar en calendario');
             }
 
-            const createEventResponse = await fetch('/api/calendar/events', {
+            const organizerEmail = String(calendarEvent.organizerEmail || session?.user?.email || '').trim().toLowerCase() || null;
+            const organizerName = String(calendarEvent.organizerName || session?.user?.name || organizerEmail || '').trim() || null;
+
+            let syncedEventId = calendarEvent.syncedEventId || null;
+
+            if (!syncedEventId) {
+                const createEventResponse = await fetch('/api/calendar/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        calendarId: writableCalendar.id,
+                        title: calendarEvent.title || subject || 'New Event',
+                        description: calendarEvent.description || null,
+                        location: calendarEvent.location || null,
+                        startsAt: calendarEvent.startsAt,
+                        endsAt: calendarEvent.endsAt,
+                        attendees,
+                        inviteUid: calendarEvent.inviteUid || null,
+                        organizerEmail,
+                        organizerName,
+                        source: 'local',
+                    }),
+                });
+
+                const createEventResult = await createEventResponse.json().catch(() => null);
+                if (!createEventResponse.ok) {
+                    throw new Error(createEventResult?.error || 'No se pudo guardar el evento en calendario');
+                }
+
+                syncedEventId = createEventResult?.id || createEventResult?.eventId || null;
+            } else {
+                const updateEventResponse = await fetch(`/api/calendar/events/${syncedEventId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: calendarEvent.title || subject || 'New Event',
+                        location: calendarEvent.location || null,
+                        startsAt: calendarEvent.startsAt,
+                        endsAt: calendarEvent.endsAt,
+                        attendees,
+                    }),
+                });
+
+                if (!updateEventResponse.ok) {
+                    const updateResult = await updateEventResponse.json().catch(() => null);
+                    const updateError = String(updateResult?.error || '').toLowerCase();
+                    if (!updateError.includes('read-only')) {
+                        throw new Error(updateResult?.error || 'No se pudo actualizar el evento en calendario');
+                    }
+                }
+            }
+
+            if (!syncedEventId) {
+                throw new Error('No se pudo sincronizar el evento antes de enviar la invitacion');
+            }
+
+            const inviteAttachmentResponse = await fetch(`/api/calendar/events/${syncedEventId}/attach-invite`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    calendarId: writableCalendar.id,
                     title: calendarEvent.title || subject || 'New Event',
                     description: calendarEvent.description || null,
                     location: calendarEvent.location || null,
                     startsAt: calendarEvent.startsAt,
                     endsAt: calendarEvent.endsAt,
-                    attendees,
+                    to: attendees,
                     inviteUid: calendarEvent.inviteUid || null,
-                    organizerEmail: calendarEvent.organizerEmail || session?.user?.email || null,
-                    organizerName: calendarEvent.organizerName || session?.user?.name || null,
-                    source: 'local',
+                    organizerEmail,
+                    organizerName,
+                    replaceAttendees: true,
                 }),
             });
 
-            const createEventResult = await createEventResponse.json().catch(() => null);
-            if (!createEventResponse.ok) {
-                throw new Error(createEventResult?.error || 'No se pudo guardar el evento en calendario');
+            const inviteAttachmentResult = await inviteAttachmentResponse.json().catch(() => null);
+            if (!inviteAttachmentResponse.ok || !inviteAttachmentResult?.attachment) {
+                throw new Error(inviteAttachmentResult?.error || 'No se pudo actualizar el adjunto de invitacion');
             }
 
             nextAttachments[index] = {
                 ...attachment,
+                ...inviteAttachmentResult.attachment,
                 calendarEvent: {
                     ...calendarEvent,
-                    syncedEventId: createEventResult?.id || createEventResult?.eventId || true,
-                },
+                    ...inviteAttachmentResult?.attachment?.calendarEvent,
+                    syncedEventId: inviteAttachmentResult?.eventId || syncedEventId,
+                    inviteUid: inviteAttachmentResult?.inviteUid || calendarEvent.inviteUid,
+                    organizerEmail,
+                    organizerName,
+                    attendees,
+                }
             };
         }
 
