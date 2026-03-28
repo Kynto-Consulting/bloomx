@@ -141,7 +141,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     const resolveProps = (p: any, ctx: any, st: any): any => {
         if (typeof p === 'object' && p !== null) {
             if (Array.isArray(p)) {
-                return p.map(item => resolveProps(item, ctx, st));
+                return p.map((item: any) => resolveProps(item, ctx, st));
             }
             const newObj: any = {};
             for (const k in p) {
@@ -497,20 +497,20 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <Card>
                     <CardHeader><CardTitle>{resolvedProps.title}</CardTitle></CardHeader>
                     <CardContent>
-                        {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                     </CardContent>
                 </Card>
             );
         case 'ROW':
             return (
                 <div className="flex flex-row gap-2 items-center">
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
         case 'COLUMN':
             return (
                 <div className="flex flex-col gap-2">
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
         case 'CONDITIONAL':
@@ -554,7 +554,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         </div>
                     )}
                     <div className="flex flex-col gap-4 text-sm text-gray-700 overflow-y-auto custom-scrollbar">
-                        {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                     </div>
                 </div>
             );
@@ -823,7 +823,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             const cols = resolvedProps.columns || 2;
             return (
                 <div className={`grid gap-${resolvedProps.gap || 2} max-h-${resolvedProps.maxHeight || 60} overflow-y-auto`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
         }
@@ -931,7 +931,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'BLOCK':
             return (
                 <div className={resolvedProps.className} style={resolvedProps.style}>
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 
@@ -951,11 +951,11 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
             return (
                 <>
-                    {loopItems.map((item, i) => {
+                    {loopItems.map((item: any, i: number) => {
                         const itemContext = { ...context, [alias]: item, [indexAlias]: i };
                         return (
                             <React.Fragment key={i}>
-                                {children?.map((child, k) => <InnerJsonRenderer key={k} component={child} context={itemContext} />)}
+                                {children?.map((child: any, k: number) => <InnerJsonRenderer key={k} component={child} context={itemContext} />)}
                             </React.Fragment>
                         );
                     })}
@@ -973,19 +973,30 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'CONDITION': {
             const ifValue = resolvedProps.if;
+            const truthyBranch = Array.isArray(children) ? children : resolvedProps.true;
+            const falsyBranch = resolvedProps.false ?? resolvedProps.else;
+
             if (ifValue) {
-                return <>{children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                if (Array.isArray(truthyBranch)) {
+                    return <>{truthyBranch.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                }
+
+                return truthyBranch ? <InnerJsonRenderer component={truthyBranch} context={context} /> : null;
             }
-            // Optional 'else' handling if we had a structure for it, but for now just don't render
-            return null;
+
+            if (Array.isArray(falsyBranch)) {
+                return <>{falsyBranch.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+            }
+
+            return falsyBranch ? <InnerJsonRenderer component={falsyBranch} context={context} /> : null;
         }
 
         case 'SWITCH': {
             const value = resolvedProps.value;
-            const cases = children?.filter(c => c.type === 'CASE') || [];
-            const defaultCase = children?.find(c => c.type === 'DEFAULT');
+            const cases = children?.filter((child: any) => child.type === 'CASE') || [];
+            const defaultCase = children?.find((child: any) => child.type === 'DEFAULT');
 
-            const match = cases.find(c => c.props.value === value);
+            const match = cases.find((child: any) => child.props.value === value);
 
             if (match) {
                 return <InnerJsonRenderer component={match} context={context} />;
@@ -998,7 +1009,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'CASE':
         case 'DEFAULT':
             // These just render their children, logic is handled by parent SWITCH
-            return <>{children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+            return <>{children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
 
         case 'SET_VAR':
             // Invisible component to set state logic
@@ -1073,7 +1084,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             // Let's use standard title for MVP or a relative group.
             return (
                 <div className="group relative inline-block" title={resolvedProps.text}>
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 
@@ -1120,7 +1131,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'ACCORDION':
             return (
                 <div className="border rounded divide-y">
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 
@@ -1134,7 +1145,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         </span>
                     </summary>
                     <div className="p-4 pt-0 text-sm text-gray-600">
-                        {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                     </div>
                 </details>
             );
@@ -1172,7 +1183,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         }
 
         case 'TAB_ITEM':
-            return <>{children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+            return <>{children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
 
         case 'BADGE':
             return (
@@ -1206,7 +1217,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             'bg-blue-50 text-blue-900 border-blue-200'
                     } ${resolvedProps.className}`}>
                     {resolvedProps.title && <h5 className="font-medium mb-1">{resolvedProps.title}</h5>}
-                    <div className="text-sm">{resolvedProps.description || children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}</div>
+                    <div className="text-sm">{resolvedProps.description || children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</div>
                 </div>
             );
 
@@ -1222,7 +1233,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...resolvedProps.style
                     }}
                 >
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 
@@ -1238,7 +1249,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...resolvedProps.style
                     }}
                 >
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 
@@ -1256,7 +1267,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...resolvedProps.style,
                     }}
                 >
-                    {children?.map((child, i) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                 </div>
             );
 

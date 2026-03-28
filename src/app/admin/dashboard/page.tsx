@@ -229,7 +229,7 @@ export default function AdminDashboard() {
         }
 
         try {
-            const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev'}/api/manager/extensions/install`, {
+            const res = await fetch('/api/admin/extensions/install', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
