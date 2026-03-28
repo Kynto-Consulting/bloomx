@@ -124,11 +124,6 @@ export default function ContactsPage() {
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
                         <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 sm:hidden"><Search className="w-6 h-6" /></button>
-                        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden sm:block"><HelpCircle className="w-6 h-6" /></button>
-                        <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden lg:block"><Settings className="w-6 h-6" /></button>
-                        <div className="ml-2 w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 relative overflow-hidden">
-                           <User className="w-5 h-5" />
-                        </div>
                     </div>
                 </header>
 
@@ -142,9 +137,9 @@ export default function ContactsPage() {
                                 className="bg-white flex flex-col hidden lg:flex flex-shrink-0 border-r border-slate-100"
                             >
                                 <div className="p-4 py-5 pl-4">
-                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center gap-3 bg-white border border-slate-200 shadow-sm hover:shadow-md transition-shadow rounded-full px-4 py-3 pr-6 group">
-                                        <Plus className="w-7 h-7 text-blue-600" />
-                                        <span className="text-sm font-medium text-slate-700 group-hover:text-blue-600 transition-colors">Create contact</span>
+                                    <button onClick={() => setIsCreating(!isCreating)} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
+                                        <Plus className="w-5 h-5 text-white" />
+                                        <span className="text-sm font-medium text-white transition-colors">Create contact</span>
                                     </button>
                                 </div>
 
@@ -154,19 +149,14 @@ export default function ContactsPage() {
                                         <span className="text-sm flex-1">Contacts</span>
                                         <span className="text-xs">{contacts.length}</span>
                                     </div>
-                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer text-slate-700 hover:bg-slate-100 rounded-r-full mr-4">
-                                        <Archive className="w-5 h-5" />
-                                        <span className="text-sm font-medium flex-1">Other contacts</span>
-                                    </div>
                                     <hr className="my-2 border-slate-100 mr-4" />
                                     <div className="pr-4">
                                        <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
                                     </div>
-                                    {!isGoogleLinked && (
-                                        <div className="mt-4 p-4 rounded-xl bg-slate-50 border text-xs text-slate-600 max-w-[220px]">
-                                            Link Google to import your full contacts book.
-                                        </div>
-                                    )}
+                                    
+                                    <div className="mt-4 pr-4">
+                                        <ExtensionLoader mountPoint="CONTACTS_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
+                                    </div>
                                 </div>
                             </motion.aside>
                         )}
