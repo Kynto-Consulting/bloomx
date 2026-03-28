@@ -176,6 +176,15 @@ export default function CalendarPage() {
                 const eventDate = new Date(e.startsAt);
                 return eventDate.getDate() === i && eventDate.getMonth() === currentMonth && eventDate.getFullYear() === currentYear;
             });
+            
+            // Check if user is currently creating an event on this day
+            let hasGhost = false;
+            if (isCreating && startsAt) {
+                const creationDate = new Date(startsAt);
+                if (creationDate.getDate() === i && creationDate.getMonth() === currentMonth && creationDate.getFullYear() === currentYear) {
+                    hasGhost = true;
+                }
+            }
 
             days.push(
                 <div 
@@ -201,6 +210,11 @@ export default function CalendarPage() {
                                 {ev.title}
                             </div>
                         ))}
+                        {hasGhost && (
+                            <div className="text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 border-dashed opacity-80 animate-pulse">
+                                {new Date(startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} {title || '(No title)'}
+                            </div>
+                        )}
                     </div>
                 </div>
             );
@@ -340,7 +354,7 @@ export default function CalendarPage() {
                         {isCreating && (
                             <div className="absolute top-4 left-4 z-40 w-96 bg-white shadow-[0_4px_24px_rgba(0,0,0,0.15)] rounded-2xl border flex flex-col animate-in fade-in zoom-in-95 overflow-hidden">
                                 <div className="flex items-center justify-between p-3 border-b bg-slate-50/50">
-                                    <div className="flex items-center gap-2 text-slate-600"><Menu className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Edit Event</span></div>
+                                    <div className="flex items-center gap-2 text-slate-600"><Menu className="w-4 h-4"/><span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Create Event</span></div>
                                     <button onClick={() => setIsCreating(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-200">×</button>
                                 </div>
                                 <form onSubmit={createEvent} className="p-5 space-y-4">
