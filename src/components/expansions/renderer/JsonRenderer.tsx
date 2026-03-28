@@ -662,11 +662,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                                 {resolvedProps.icon && renderIcon(resolvedProps.icon, 18, "text-purple-600")}
                                 {resolvedProps.title}
                             </h2>
-                            {context?.onClose && (
-                                <button onClick={context.onClose} className="rounded-full p-1.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 active:scale-90 active:bg-gray-200 transition-all duration-200">
-                                    {renderIcon('X', 16)}
-                                </button>
-                            )}
+                            {/* Removing the double X button as it's handled by GlobalWindow context popup */}
                         </div>
                     )}
                     <div className="flex flex-col gap-4 text-sm text-gray-700 overflow-y-auto custom-scrollbar">

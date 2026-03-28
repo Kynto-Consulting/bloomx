@@ -34,7 +34,7 @@ export default function CalendarPage() {
     const [events, setEvents] = useState<CalendarEventRecord[]>([]);
     const [selectedCalendarIds, setSelectedCalendarIds] = useState<string[]>([]);
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
-    const [countryCode, setCountryCode] = useState('');
+    const [holidayCountries, setHolidayCountries] = useState<string[]>([]);
     const [holidays, setHolidays] = useState<CalendarEventRecord[]>([]);
     const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
     const [isCalSidebarOpen, setIsCalSidebarOpen] = useState(true);
@@ -79,6 +79,41 @@ export default function CalendarPage() {
         });
     };
 
+    const handleOpenEvent = (event: CalendarEventRecord, e: React.MouseEvent) => {
+        e.stopPropagation(); // prevent triggering the container double-click
+        openWindow({
+            id: `event-${event.id}`,
+            type: 'event',
+            title: event.calendar.isReadOnly ? 'View Event' : 'Edit Event',
+            icon: <CalendarDays className="w-4 h-4" />,
+            content: (
+                <CreateEventForm
+                    eventId={event.id}
+                    calendarId={event.calendar.id}
+                    initialTitle={event.title}
+                    initialLocation={event.location || ''}
+                    initialStartsAt={event.startsAt}
+                    initialEndsAt={event.endsAt}
+                    isReadOnly={event.calendar.isReadOnly}
+                    onSaved={() => {
+                        closeWindow(`event-${event.id}`);
+                        void loadData();
+                    }}
+                    onClose={() => closeWindow(`event-${event.id}`)}
+                />
+            )
+        });
+    };
+
+    const handleAddHolidayProvider = (code: string) => {
+        if (!holidayCountries.includes(code)) {
+            const newCountries = [...holidayCountries, code];
+            setHolidayCountries(newCountries);
+            localStorage.setItem('bloomx_holiday_countries', JSON.stringify(newCountries));
+            setSelectedCalendarIds(prev => [...prev, `holidays-${code}`]); // Enable it by default
+        }
+    };
+
     const handleOpenAddCalendar = () => {
         openWindow({
             id: 'add-calendar',
@@ -88,6 +123,8 @@ export default function CalendarPage() {
             content: (
                 <AddCalendarForm 
                     isGoogleLinked={isGoogleLinked} 
+                    currentHolidayProviders={holidayCountries}
+                    onAddHolidayProvider={handleAddHolidayProvider}
                     onLocalCreate={() => {
                         // TODO: Provide UI to create local calendar if not using the default one
                         // Usually you might trigger an API `/api/calendars` POST and reload
@@ -112,12 +149,55 @@ export default function CalendarPage() {
         setCalendars(Array.isArray(calendarData) ? calendarData : []);
         setEvents(Array.isArray(eventData) ? eventData : []);
         setIsGoogleLinked(Boolean(settingsData?.isGoogleLinked));
-        setSelectedCalendarIds((current) => current.length > 0 ? current : (Array.isArray(calendarData) ? [...calendarData.map((c: CalendarRecord) => c.id), 'holidays'] : ['holidays']));
+        
+        // Wait for holiday countries to also resolve the IDs or check missing selected states
+        setSelectedCalendarIds((current) => current.length > 0 ? current : (Array.isArray(calendarData) ? [...calendarData.map((c: CalendarRecord) => c.id)] : []));
     };
+
+    useEffect(() => {
+        // Force include holidays on first load if missing from selection but exists in fetched list (meaning clean state)
+        if (holidayCountries.length > 0 && selectedCalendarIds.length === calendars.length && calendars.length > 0) {
+            const holsIds = holidayCountries.map(c => `holidays-${c}`);
+            const missing = holsIds.filter(id => !selectedCalendarIds.includes(id));
+            if (missing.length > 0) {
+                setSelectedCalendarIds(prev => [...prev, ...missing]);
+            }
+        }
+    }, [holidayCountries, calendars.length, selectedCalendarIds.length]);
 
     useEffect(() => {
         void loadData();
         setNotificationsEnabled(typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted');
+
+        // Load holiday countries from storage or default to IP/Peru
+        const savedHolidays = localStorage.getItem('bloomx_holiday_countries');
+        if (savedHolidays) {
+            try {
+                const parsed = JSON.parse(savedHolidays);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                    setHolidayCountries(parsed);
+                } else {
+                    throw new Error('invalid format');
+                }
+            } catch {
+                setHolidayCountries(['PE']);
+            }
+        } else {
+            const fetchCountry = async () => {
+                 try {
+                     const res = await fetch('https://ipapi.co/json/');
+                     const data = await res.json();
+                     if (data.country_code) {
+                         setHolidayCountries(['PE', data.country_code]); // Always include PE based on user request as default alongside IP
+                     } else {
+                         setHolidayCountries(['PE']);
+                     }
+                 } catch(e) {
+                     setHolidayCountries(['PE']); // Default fallback
+                 }
+            }
+            void fetchCountry();
+        }
 
         const handleSyncComplete = () => {
             void loadData();
@@ -150,44 +230,44 @@ export default function CalendarPage() {
     }, [currentMonth, currentYear]);
 
     useEffect(() => {
-        const fetchCountry = async () => {
-             try {
-                 const res = await fetch('https://ipapi.co/json/');
-                 const data = await res.json();
-                 if (data.country_code) setCountryCode(data.country_code);
-             } catch(e) {
-                 const locale = navigator.language;
-                 setCountryCode(locale.split('-')[1] || 'US');
-             }
-        }
-        void fetchCountry();
-    }, []);
-
-    useEffect(() => {
-        if (!countryCode) return;
+        if (!holidayCountries.length) return;
+        
         const fetchHols = async () => {
-             try {
-                const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/${countryCode}`);
-                if (res.ok) {
-                   const data = await res.json();
-                   const holidayCal: CalendarRecord = { id: 'holidays', name: 'Public Holidays', color: '#00897B', source: 'public', isReadOnly: true };
-                   setHolidays(data.map((h: any) => ({
-                       id: `hol-${h.date}-${h.name}`,
-                       title: h.name,
-                       startsAt: `${h.date}T00:00:00`,
-                       endsAt: `${h.date}T23:59:59`,
-                       calendar: holidayCal,
-                   })));
-                }
-             } catch(e) {}
+            try {
+                const allFetchedHolidays: CalendarEventRecord[] = [];
+                
+                await Promise.all(holidayCountries.map(async (code) => {
+                    const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/${code}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        const holidayCal: CalendarRecord = { id: `holidays-${code}`, name: `Holidays (${code})`, color: '#00897B', source: 'public', isReadOnly: true };
+                        const parsed = data.map((h: any) => ({
+                            id: `hol-${code}-${h.date}-${h.name}`,
+                            title: h.name,
+                            startsAt: `${h.date}T00:00:00`,
+                            endsAt: `${h.date}T23:59:59`,
+                            calendar: holidayCal,
+                        }));
+                        allFetchedHolidays.push(...parsed);
+                    }
+                }));
+                
+                setHolidays(allFetchedHolidays);
+            } catch(e) {}
         }
         void fetchHols();
-    }, [countryCode, currentYear]);
+    }, [holidayCountries, currentYear]);
 
     const allCalendars = useMemo(() => {
-        const holidayCal: CalendarRecord = { id: 'holidays', name: `Holidays (${countryCode || 'US'})`, color: '#00897B', source: 'public', isReadOnly: true };
-        return [...calendars, holidayCal];
-    }, [calendars, countryCode]);
+        const holidayCals = holidayCountries.map(code => ({
+            id: `holidays-${code}`, 
+            name: `Holidays (${code})`, 
+            color: '#00897B', 
+            source: 'public', 
+            isReadOnly: true 
+        }));
+        return [...calendars, ...holidayCals];
+    }, [calendars, holidayCountries]);
 
     const allEvents = useMemo(() => {
         return [...events, ...holidays];
@@ -255,8 +335,13 @@ export default function CalendarPage() {
                     </div>
                     <div className="flex flex-col gap-1 px-1 overflow-hidden">
                         {dayEvents.map(ev => (
-                            <div key={ev.id} className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium ${ev.calendar.id === 'holidays' ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`} style={ev.calendar.id !== 'holidays' ? { backgroundColor: ev.calendar.color } : {}}>
-                                {ev.calendar.id !== 'holidays' && `${new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} `}
+                            <div 
+                                key={ev.id} 
+                                onClick={(e) => handleOpenEvent(ev, e)}
+                                className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`} 
+                                style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: ev.calendar.color } : {}}
+                            >
+                                {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} `}
                                 {ev.title}
                             </div>
                         ))}
