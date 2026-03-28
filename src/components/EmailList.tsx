@@ -29,6 +29,22 @@ interface Email {
     labels?: string[];
 }
 
+function formatMobileDate(date: string) {
+    if (!date) return '';
+
+    const parsed = new Date(date);
+    if (Number.isNaN(parsed.getTime())) {
+        return '';
+    }
+
+    return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    }).format(parsed);
+}
+
 export function EmailList() {
     const searchParams = useSearchParams();
     const folder = searchParams.get('folder') || 'inbox';
@@ -948,7 +964,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                 </div>
 
                 <div className="flex-1 min-w-0">
-                    <div className="flex w-full items-center justify-between gap-2">
+                    <div className="flex w-full items-start sm:items-center justify-between gap-2">
                         <div className={cn(
                             "font-semibold truncate",
                             "text-foreground",
@@ -962,11 +978,15 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                             )}
                         </div>
                         <div className={cn(
-                            "text-[10px] whitespace-nowrap shrink-0",
+                            "hidden sm:block text-[10px] whitespace-nowrap shrink-0",
                             "text-muted-foreground"
                         )}>
                             {formatDate(email.createdAt)}
                         </div>
+                    </div>
+
+                    <div className="sm:hidden text-[10px] text-muted-foreground mt-0.5 truncate">
+                        {formatMobileDate(email.createdAt)}
                     </div>
 
                     <div className={cn(

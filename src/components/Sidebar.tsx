@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 
 import { useSearchParams, usePathname } from 'next/navigation';
-import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, MoreHorizontal, CalendarDays, Users } from 'lucide-react';
+import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, ChevronDown, ArrowUp, ArrowDown, MoreHorizontal, CalendarDays, Users } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Icons from 'lucide-react';
 import { useExpansions } from '@/hooks/useExpansions';
@@ -24,6 +24,17 @@ import { useDomainConfig } from '@/hooks/useDomainConfig';
 interface SidebarProps {
     onClose?: () => void;
 }
+
+type SidebarSectionKey = 'main' | 'workspace' | 'labels';
+
+const SIDEBAR_SECTION_STATE_KEY = 'bloomx:sidebar:sections:v1';
+const SIDEBAR_SECTION_ORDER_KEY = 'bloomx:sidebar:section-order:v1';
+const DEFAULT_SECTION_STATE: Record<SidebarSectionKey, boolean> = {
+    main: false,
+    workspace: false,
+    labels: false,
+};
+const DEFAULT_SECTION_ORDER: SidebarSectionKey[] = ['main', 'workspace', 'labels'];
 
 export function Sidebar({ onClose }: SidebarProps) {
     return (
@@ -80,6 +91,121 @@ function SidebarContent({ onClose }: SidebarProps) {
     const [isSubmittingLabel, setIsSubmittingLabel] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
+    const [collapsedSections, setCollapsedSections] = useState<Record<SidebarSectionKey, boolean>>(DEFAULT_SECTION_STATE);
+    const [sectionOrder, setSectionOrder] = useState<SidebarSectionKey[]>(DEFAULT_SECTION_ORDER);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        try {
+            const storedState = window.localStorage.getItem(SIDEBAR_SECTION_STATE_KEY);
+            if (storedState) {
+                const parsed = JSON.parse(storedState);
+                setCollapsedSections((prev) => ({
+                    ...prev,
+                    main: Boolean(parsed?.main),
+                    workspace: Boolean(parsed?.workspace),
+                    labels: Boolean(parsed?.labels),
+                }));
+            }
+        } catch {
+            // Ignore malformed localStorage value.
+        }
+
+        try {
+            const storedOrder = window.localStorage.getItem(SIDEBAR_SECTION_ORDER_KEY);
+            if (storedOrder) {
+                const parsed = JSON.parse(storedOrder);
+                if (Array.isArray(parsed)) {
+                    const nextOrder = parsed.filter((value: string) => DEFAULT_SECTION_ORDER.includes(value as SidebarSectionKey));
+                    const missing = DEFAULT_SECTION_ORDER.filter((key) => !nextOrder.includes(key));
+                    const merged = [...nextOrder, ...missing] as SidebarSectionKey[];
+                    if (merged.length > 0) {
+                        setSectionOrder(merged);
+                    }
+                }
+            }
+        } catch {
+            // Ignore malformed localStorage value.
+        }
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(SIDEBAR_SECTION_STATE_KEY, JSON.stringify(collapsedSections));
+    }, [collapsedSections]);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(SIDEBAR_SECTION_ORDER_KEY, JSON.stringify(sectionOrder));
+    }, [sectionOrder]);
+
+    const toggleSection = (section: SidebarSectionKey) => {
+        setCollapsedSections((prev) => ({
+            ...prev,
+            [section]: !prev[section],
+        }));
+    };
+
+    const moveSection = (section: SidebarSectionKey, direction: -1 | 1) => {
+        setSectionOrder((prev) => {
+            const currentIndex = prev.indexOf(section);
+            if (currentIndex === -1) return prev;
+
+            const nextIndex = currentIndex + direction;
+            if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+
+            const updated = [...prev];
+            const [entry] = updated.splice(currentIndex, 1);
+            updated.splice(nextIndex, 0, entry);
+            return updated;
+        });
+    };
+
+    const sectionMeta: Record<SidebarSectionKey, { title: string }> = {
+        main: { title: 'Mailboxes' },
+        workspace: { title: 'Workspace' },
+        labels: { title: 'Labels' },
+    };
+
+    const renderSectionHeader = (section: SidebarSectionKey, extraAction?: React.ReactNode) => {
+        const isCollapsed = collapsedSections[section];
+        const index = sectionOrder.indexOf(section);
+
+        return (
+            <div className="px-2 mb-1 flex items-center gap-1">
+                <button
+                    type="button"
+                    onClick={() => toggleSection(section)}
+                    className="flex flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-muted/60"
+                >
+                    {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+                    <span>{sectionMeta[section].title}</span>
+                </button>
+
+                {extraAction}
+
+                <button
+                    type="button"
+                    onClick={() => moveSection(section, -1)}
+                    disabled={index <= 0}
+                    className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Move up"
+                >
+                    <ArrowUp className="h-3 w-3" />
+                </button>
+                <button
+                    type="button"
+                    onClick={() => moveSection(section, 1)}
+                    disabled={index >= sectionOrder.length - 1}
+                    className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                    title="Move down"
+                >
+                    <ArrowDown className="h-3 w-3" />
+                </button>
+            </div>
+        );
+    };
 
     useEffect(() => {
         async function loadData() {
@@ -192,7 +318,7 @@ function SidebarContent({ onClose }: SidebarProps) {
     const brandColor = domainConfig.theme?.primaryColor;
 
     return (
-        <div className="flex h-full flex-col bg-muted/10 group">
+        <div className="flex h-full min-h-0 flex-col bg-muted/10 group">
             {/* Account / Compose */}
             <div className="flex px-4 py-4 items-center justify-between">
                 <div className="flex items-center gap-2 text-primary font-bold text-lg tracking-tight">
@@ -233,157 +359,181 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </motion.button>
             </div>
 
-            {/* Main Navigation */}
-            <div className="flex flex-col gap-1 px-2">
-                {mainNav.map((item) => {
-                    const isActive = currentFolder === item.id;
+            <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">
+                {sectionOrder.map((section) => {
+                    if (section === 'main') {
+                        return (
+                            <div key={section} className="mt-1">
+                                {renderSectionHeader('main')}
+                                {!collapsedSections.main && (
+                                    <div className="flex flex-col gap-1">
+                                        {mainNav.map((item) => {
+                                            const isActive = currentFolder === item.id;
+                                            return (
+                                                <div key={item.id} className="relative">
+                                                    {isActive && (
+                                                        <motion.div
+                                                            layoutId="sidebar-nav-active"
+                                                            className="absolute inset-0 bg-primary/10 rounded-lg"
+                                                            initial={false}
+                                                            transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                                                        />
+                                                    )}
+                                                    <Link
+                                                        href={`/?folder=${item.id}`}
+                                                        onClick={() => onClose?.()}
+                                                        className={cn(
+                                                            "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors group/item",
+                                                            isActive
+                                                                ? "text-primary"
+                                                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                                        )}
+                                                    >
+                                                        <item.icon className={cn("h-4 w-4 transition-colors", isActive ? "text-primary" : "text-muted-foreground group-hover/item:text-foreground")} />
+                                                        {item.name}
+                                                        {item.count > 0 && (
+                                                            <motion.span
+                                                                key={item.count}
+                                                                initial={{ scale: 0.8, opacity: 0 }}
+                                                                animate={{ scale: 1, opacity: 1 }}
+                                                                className={cn(
+                                                                    "ml-auto text-xs font-semibold px-2 py-0.5 rounded-full",
+                                                                    "bg-primary text-primary-foreground"
+                                                                )}
+                                                            >
+                                                                {item.count}
+                                                            </motion.span>
+                                                        )}
+                                                    </Link>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    }
+
+                    if (section === 'workspace') {
+                        return (
+                            <div key={section} className="mt-5">
+                                {renderSectionHeader('workspace')}
+                                {!collapsedSections.workspace && (
+                                    <div className="mt-1 flex flex-col gap-1">
+                                        {workspaceNav.map((item) => (
+                                            <Link
+                                                key={item.href}
+                                                href={item.href}
+                                                onClick={() => onClose?.()}
+                                                className={cn(
+                                                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                                                    item.active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                                )}
+                                            >
+                                                <item.icon className="h-4 w-4" />
+                                                {item.name}
+                                            </Link>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    }
+
                     return (
-                        <div key={item.id} className="relative">
-                            {isActive && (
-                                <motion.div
-                                    layoutId="sidebar-nav-active"
-                                    className="absolute inset-0 bg-primary/10 rounded-lg"
-                                    initial={false}
-                                    transition={{ type: "spring", stiffness: 500, damping: 30 }}
-                                />
+                        <div key={section} className="mt-5">
+                            {renderSectionHeader(
+                                'labels',
+                                <div className="flex items-center gap-1">
+                                    <ExtensionLoader mountPoint="SIDEBAR_HEADER" />
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsCreatingLabel(!isCreatingLabel)}
+                                        className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                        title="Create Label"
+                                    >
+                                        <Plus className="h-3 w-3" />
+                                    </button>
+                                </div>
                             )}
-                            <Link
-                                href={`/?folder=${item.id}`}
-                                onClick={() => onClose?.()}
-                                className={cn(
-                                    "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors group/item",
-                                    isActive
-                                        ? "text-primary"
-                                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                                )}
-                            >
-                                <item.icon className={cn("h-4 w-4 transition-colors", isActive ? "text-primary" : "text-muted-foreground group-hover/item:text-foreground")} />
-                                {item.name}
-                                {item.count > 0 && (
-                                    <motion.span
-                                        key={item.count}
-                                        initial={{ scale: 0.8, opacity: 0 }}
-                                        animate={{ scale: 1, opacity: 1 }}
-                                        className={cn(
-                                            "ml-auto text-xs font-semibold px-2 py-0.5 rounded-full",
-                                            "bg-primary text-primary-foreground" // Always brand color for unread
-                                        )}>
-                                        {item.count}
-                                    </motion.span>
-                                )}
-                            </Link>
+
+                            {!collapsedSections.labels && (
+                                <>
+                                    {isCreatingLabel && (
+                                        <motion.div
+                                            initial={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            className="mb-2 px-2 pb-2 bg-muted/30 rounded-lg p-2 border border-border/50 overflow-hidden"
+                                        >
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    autoFocus
+                                                    type="text"
+                                                    placeholder="Label name..."
+                                                    value={newLabelName}
+                                                    onChange={(e) => setNewLabelName(e.target.value)}
+                                                    className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleCreateLabel();
+                                                        if (e.key === 'Escape') setIsCreatingLabel(false);
+                                                    }}
+                                                />
+                                                <button onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
+                                                    <Check className="h-3 w-3" />
+                                                </button>
+                                                <button onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
+                                                    <X className="h-3 w-3" />
+                                                </button>
+                                            </div>
+                                        </motion.div>
+                                    )}
+
+                                    <nav className="grid gap-0.5">
+                                        {labels.length === 0 && !isCreatingLabel && (
+                                            <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">No labels</div>
+                                        )}
+                                        {labels.map((label: any) => {
+                                            const isActive = activeLabels.includes(label.name.toLowerCase());
+                                            return (
+                                                <Link
+                                                    key={label.name}
+                                                    href={getLabelUrl(label.name)}
+                                                    className={cn(
+                                                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                                                        isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                    )}
+                                                >
+                                                    <div className="flex items-center justify-center w-4 relative">
+                                                        <span
+                                                            className="h-2.5 w-2.5 rounded-full ring-2 ring-transparent group-hover:ring-border transition-all"
+                                                            style={{ backgroundColor: label.color }}
+                                                        />
+                                                        {isActive && (
+                                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                                <div className="h-4 w-4 bg-primary/20 rounded-full animate-pulse" />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <span className={cn("flex-1", isActive && "font-bold")}>{label.name}</span>
+                                                    {label.count > 0 && (
+                                                        <span className="ml-auto text-xs text-muted-foreground">{label.count}</span>
+                                                    )}
+                                                    {isActive && <Check className="h-3 w-3 text-primary ml-1" />}
+                                                </Link>
+                                            );
+                                        })}
+                                    </nav>
+                                </>
+                            )}
                         </div>
                     );
                 })}
-            </div>
 
-            <div className="mt-4 px-4 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Workspace
-            </div>
-            <div className="mt-2 flex flex-col gap-1 px-2">
-                {workspaceNav.map((item) => (
-                    <Link
-                        key={item.href}
-                        href={item.href}
-                        onClick={() => onClose?.()}
-                        className={cn(
-                            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                            item.active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-                        )}
-                    >
-                        <item.icon className="h-4 w-4" />
-                        {item.name}
-                    </Link>
-                ))}
-            </div>
-
-            {/* Labels Section */}
-            <div className="mt-8 px-4 flex items-center justify-between mb-2">
-                <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Labels</span>
-
-                    {/* Dynamic Header Actions */}
-                    <ExtensionLoader mountPoint="SIDEBAR_HEADER" />
+                <div className="mt-4">
+                    <ExtensionLoader mountPoint="SIDEBAR_FOOTER" />
                 </div>
-                <button
-                    onClick={() => setIsCreatingLabel(!isCreatingLabel)}
-                    className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
-                    title="Create Label"
-                >
-                    <Plus className="h-3 w-3" />
-                </button>
             </div>
-
-            <div className="flex-1 overflow-y-auto px-2 pb-4">
-                {isCreatingLabel && (
-                    <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="mb-2 px-2 pb-2 bg-muted/30 rounded-lg p-2 border border-border/50 overflow-hidden"
-                    >
-                        <div className="flex items-center gap-1">
-                            <input
-                                autoFocus
-                                type="text"
-                                placeholder="Label name..."
-                                value={newLabelName}
-                                onChange={(e) => setNewLabelName(e.target.value)}
-                                className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter') handleCreateLabel();
-                                    if (e.key === 'Escape') setIsCreatingLabel(false);
-                                }}
-                            />
-                            <button onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
-                                <Check className="h-3 w-3" />
-                            </button>
-                            <button onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
-                                <X className="h-3 w-3" />
-                            </button>
-                        </div>
-                    </motion.div>
-                )}
-
-                <nav className="grid gap-0.5">
-                    {labels.length === 0 && !isCreatingLabel && (
-                        <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">No labels</div>
-                    )}
-                    {labels.map((label: any) => {
-                        const isActive = activeLabels.includes(label.name.toLowerCase());
-                        return (
-                            <Link
-                                key={label.name}
-                                href={getLabelUrl(label.name)}
-                                className={cn(
-                                    "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                                    isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                )}
-                            >
-                                <div className="flex items-center justify-center w-4 relative">
-                                    <span
-                                        className="h-2.5 w-2.5 rounded-full ring-2 ring-transparent group-hover:ring-border transition-all"
-                                        style={{ backgroundColor: label.color }}
-                                    />
-                                    {isActive && (
-                                        <div className="absolute inset-0 flex items-center justify-center">
-                                            <div className="h-4 w-4 bg-primary/20 rounded-full animate-pulse" />
-                                        </div>
-                                    )}
-                                </div>
-                                <span className={cn("flex-1", isActive && "font-bold")}>{label.name}</span>
-                                {label.count > 0 && (
-                                    <span className="ml-auto text-xs text-muted-foreground">{label.count}</span>
-                                )}
-                                {isActive && <Check className="h-3 w-3 text-primary ml-1" />}
-                            </Link>
-                        );
-                    })}
-                </nav>
-            </div>
-
-            {/* Client Expansions: Sidebar Footer */}
-            <ExtensionLoader mountPoint="SIDEBAR_FOOTER" />
 
             {/* User Profile / Settings stub - Hidden on Mobile */}
             <div className="p-4 mt-auto hidden md:block">
