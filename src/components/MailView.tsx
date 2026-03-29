@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles, CalendarDays, MapPin } from 'lucide-react';
 import { useCache } from '@/contexts/CacheContext';
@@ -14,6 +14,7 @@ import * as Icons from 'lucide-react';
 import { SafeIframe } from './ui/SafeIframe';
 import { ExtensionLoader } from './expansions/ExtensionLoader';
 import { motion, AnimatePresence } from 'framer-motion';
+import { Popover } from './ui/Popover';
 
 const ENABLE_THREAD_VIEW = true;
 
@@ -80,6 +81,7 @@ export function MailView() {
 
     const [availableLabels, setAvailableLabels] = useState<any[]>([]);
     const [showLabelMenu, setShowLabelMenu] = useState(false);
+    const labelMenuTriggerRef = useRef<HTMLButtonElement>(null);
     const { getData, setData: setCacheData, invalidate } = useCache();
 
     const { openCompose } = useCompose();
@@ -209,6 +211,46 @@ export function MailView() {
 
     const toggleLabel = (labelId: string) => {
         handleUpdate({ toggleLabelId: labelId });
+    };
+
+    const createAndApplyLabel = async () => {
+        const rawName = window.prompt('Label name');
+        const name = String(rawName || '').trim();
+
+        if (!name) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/labels', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name }),
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to create label');
+            }
+
+            const label = await response.json();
+
+            setAvailableLabels((prev) => {
+                const exists = prev.some((item) => item.id === label.id);
+                if (exists) return prev;
+                return [...prev, label].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            });
+
+            const cachedLabels = (await getData<any[]>('labels-all')) || [];
+            if (!cachedLabels.some((item) => item.id === label.id)) {
+                setCacheData('labels-all', [...cachedLabels, label]);
+            }
+
+            toggleLabel(label.id);
+            setShowLabelMenu(false);
+            toast.success('Label created');
+        } catch (error) {
+            toast.error('Failed to create label');
+        }
     };
 
     const handleInviteResponse = async (emailId: string, response: 'accepted' | 'tentative' | 'declined') => {
@@ -359,12 +401,64 @@ export function MailView() {
                     <button onClick={() => handleUpdate({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md"><Archive className="h-4 w-4" /></button>
                     <button onClick={() => handleUpdate({ folder: 'spam' })} className="p-2 hover:bg-muted rounded-md"><ArchiveX className="h-4 w-4" /></button>
                     <button onClick={trashEmail} className="p-2 hover:bg-muted rounded-md"><Trash2 className="h-4 w-4" /></button>
+                    <button
+                        ref={labelMenuTriggerRef}
+                        onClick={() => setShowLabelMenu((current) => !current)}
+                        className="p-2 hover:bg-muted rounded-md"
+                        title="Labels"
+                    >
+                        <Tag className="h-4 w-4" />
+                    </button>
                     <button onClick={handleReply} className="p-2 hover:bg-muted rounded-md"><Reply className="h-4 w-4 text-muted-foreground" /></button>
                     <button onClick={handleForward} className="p-2 hover:bg-muted rounded-md"><Forward className="h-4 w-4 text-muted-foreground" /></button>
 
                     {/* JSON Extensions Toolbar */}
                     <ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email} />
                 </div>
+
+                <Popover
+                    trigger={labelMenuTriggerRef}
+                    isOpen={showLabelMenu}
+                    onClose={() => setShowLabelMenu(false)}
+                    width={260}
+                    header={false}
+                    className="rounded-xl border border-gray-200 bg-white p-2 shadow-2xl"
+                >
+                    <div className="flex flex-col gap-1">
+                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Labels</div>
+
+                        {availableLabels.length === 0 ? (
+                            <div className="px-2 py-2 text-sm text-gray-500">No labels yet</div>
+                        ) : (
+                            availableLabels.map((label) => {
+                                const selected = Boolean(data?.email?.labels?.some((item: any) => item.id === label.id));
+
+                                return (
+                                    <button
+                                        key={label.id}
+                                        type="button"
+                                        onClick={() => toggleLabel(label.id)}
+                                        className="flex items-center justify-between rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                    >
+                                        <span className="truncate">{label.name}</span>
+                                        {selected ? <Check className="h-4 w-4 text-green-600" /> : null}
+                                    </button>
+                                );
+                            })
+                        )}
+
+                        <div className="my-1 border-t border-gray-100" />
+
+                        <button
+                            type="button"
+                            onClick={createAndApplyLabel}
+                            className="rounded-lg px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50"
+                        >
+                            Create label
+                        </button>
+                    </div>
+                </Popover>
+
                 <div className="h-5 w-px bg-border mx-1" />
                 <button onClick={() => handleUpdate({ starred: !data.email?.starred })} className={cn("p-2 hover:bg-muted rounded-md", data.email?.starred && "text-yellow-500")}>
                     <Star className={cn("h-4 w-4", data.email?.starred && "fill-current")} />
