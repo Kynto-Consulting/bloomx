@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
     Users,
@@ -25,7 +25,7 @@ import { ThemePreview } from '@/components/admin/ThemePreview';
 interface Extension {
     id: string;
     name: string;
-    description: string;
+    description?: string;
     version?: string;
     authType?: string;
     template?: any;
@@ -34,11 +34,26 @@ interface Extension {
     currency: string;
 }
 
+function normalizeTemplate(template: any) {
+    if (!template) return null;
+    if (typeof template === 'string') {
+        try {
+            return JSON.parse(template);
+        } catch {
+            return null;
+        }
+    }
+    if (typeof template === 'object') {
+        return template;
+    }
+    return null;
+}
+
 function inferRequiredEnvVars(extension: Extension | null) {
     if (!extension) return [] as string[];
 
     const vars = new Set<string>();
-    const template = extension.template || {};
+    const template = normalizeTemplate(extension.template) || {};
 
     if (Array.isArray(template?.permissions)) {
         for (const permission of template.permissions) {
@@ -49,7 +64,7 @@ function inferRequiredEnvVars(extension: Extension | null) {
         }
     }
 
-    const authType = String(extension.authType || '').toUpperCase();
+    const authType = String(extension.authType || template?.auth?.type || '').toUpperCase();
     const provider = String(template?.auth?.provider || '').toLowerCase();
 
     if (authType === 'OAUTH2') {
@@ -103,6 +118,51 @@ export default function AdminDashboard() {
     const [loadingExtensions, setLoadingExtensions] = useState(false);
     const [extensionActionId, setExtensionActionId] = useState<string | null>(null);
     const [selectedExtension, setSelectedExtension] = useState<Extension | null>(null);
+
+    const installedExtensionsById = useMemo(() => {
+        const map = new Map<string, any>();
+        for (const ext of installedExtensions as any[]) {
+            const id = ext?.id || ext?.extensionId || ext?.template?.id;
+            if (typeof id === 'string' && id.trim()) {
+                map.set(id.trim(), ext);
+            }
+        }
+        return map;
+    }, [installedExtensions]);
+
+    const buildExtensionDetails = (catalogExtension: Extension): Extension => {
+        const installedExt = installedExtensionsById.get(catalogExtension.id);
+
+        const catalogTemplate = normalizeTemplate(catalogExtension.template);
+        const installedTemplate = normalizeTemplate(installedExt?.template);
+        const template = catalogTemplate || installedTemplate || undefined;
+
+        const version =
+            catalogExtension.version ||
+            installedExt?.version ||
+            template?.version ||
+            undefined;
+
+        const authType =
+            catalogExtension.authType ||
+            installedExt?.authType ||
+            template?.auth?.type ||
+            undefined;
+
+        const description =
+            catalogExtension.description ||
+            installedExt?.description ||
+            template?.description ||
+            '';
+
+        return {
+            ...catalogExtension,
+            description,
+            version,
+            authType,
+            template,
+        };
+    };
 
     // Settings State
     const [settings, setSettings] = useState({
@@ -483,7 +543,7 @@ export default function AdminDashboard() {
                                             <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-100">
                                                 <button
                                                     type="button"
-                                                    onClick={() => setSelectedExtension(ext)}
+                                                    onClick={() => setSelectedExtension(buildExtensionDetails(ext))}
                                                     className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-xs"
                                                 >
                                                     <Info className="w-3 h-3" /> Details
@@ -793,15 +853,15 @@ export default function AdminDashboard() {
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                                     <div className="text-xs uppercase tracking-wider text-gray-500">Version</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.version || 'N/A'}</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.version || normalizeTemplate(selectedExtension.template)?.version || 'N/A'}</div>
                                 </div>
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                                     <div className="text-xs uppercase tracking-wider text-gray-500">Auth Type</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.authType || 'NONE'}</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.authType || normalizeTemplate(selectedExtension.template)?.auth?.type || 'NONE'}</div>
                                 </div>
                                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
                                     <div className="text-xs uppercase tracking-wider text-gray-500">Manifest Version</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.template?.manifestVersion || 'N/A'}</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{normalizeTemplate(selectedExtension.template)?.manifestVersion || 'N/A'}</div>
                                 </div>
                             </div>
 
