@@ -346,32 +346,34 @@ export function CreateEventForm({
             />
             
             <div className="space-y-4 flex-1">
-                <input 
-                    value={location} 
-                    onChange={(e) => setLocation(e.target.value)} 
-                    placeholder="Location" 
-                    readOnly={isReadOnly}
-                    className="w-full border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none" 
-                />
+                <div className="flex items-end gap-2">
+                    <input 
+                        value={location} 
+                        onChange={(e) => setLocation(e.target.value)} 
+                        placeholder="Location" 
+                        readOnly={isReadOnly}
+                        className="w-full flex-1 border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none" 
+                    />
 
-                {!isReadOnly && (
-                    <div className="pt-1">
-                        <ExtensionLoader
-                            mountPoint="EVENT_LOCATION_BUILDER"
-                            context={{
-                                eventTitle: title,
-                                startsAt,
-                                endsAt,
-                                currentLocation: location,
-                                attendees: attendeeTags.filter((tag) => tag.includes('@')),
-                                setLocation,
-                                openOverlay: expansionUI?.openModal,
-                                close: expansionUI?.closeModal,
-                                onClose: expansionUI?.closeModal,
-                            }}
-                        />
-                    </div>
-                )}
+                    {!isReadOnly && (
+                        <div className="shrink-0 pb-1">
+                            <ExtensionLoader
+                                mountPoint="EVENT_LOCATION_BUILDER"
+                                context={{
+                                    eventTitle: title,
+                                    startsAt,
+                                    endsAt,
+                                    currentLocation: location,
+                                    attendees: attendeeTags.filter((tag) => tag.includes('@')),
+                                    setLocation,
+                                    openOverlay: expansionUI?.openModal,
+                                    close: expansionUI?.closeModal,
+                                    onClose: expansionUI?.closeModal,
+                                }}
+                            />
+                        </div>
+                    )}
+                </div>
 
                 <div className="space-y-1">
                     {isReadOnly ? (
