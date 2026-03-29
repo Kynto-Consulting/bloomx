@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useExpansionUI } from '@/contexts/ExpansionUIContext';
+import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { secureWrite, secureRead } from '@/lib/expansions/client/secure-storage';
@@ -12,6 +12,7 @@ import { executeExtensionAction } from '@/lib/expansions/api';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { SafeIframe } from '@/components/ui/SafeIframe';
 import { Popover } from '@/components/ui/Popover'; // For TOOLTIP or custom usage
+import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import * as LucideIcons from 'lucide-react'; // Dynamic icons
 
 const MODAL_WIDTHS: Record<string, string> = {
@@ -50,6 +51,130 @@ interface JsonComponentProps {
     children?: JsonComponentProps[];
 }
 
+interface JsonFormRendererProps {
+    fields: any[];
+    submitLabel?: string;
+    onSubmit?: any;
+    context?: any;
+    handleAction: (actionDef: any, e?: any, extraContext?: any) => Promise<void>;
+}
+
+const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
+    fields,
+    submitLabel,
+    onSubmit,
+    context,
+    handleAction,
+}) => {
+    const [formValues, setFormValues] = useState<Record<string, any>>({});
+
+    useEffect(() => {
+        const initialValues: Record<string, any> = {};
+        for (const field of fields) {
+            if (!field?.name) {
+                continue;
+            }
+            initialValues[field.name] = field.defaultValue ?? '';
+        }
+        setFormValues(initialValues);
+    }, [fields]);
+
+    const setFieldValue = (fieldName: string, value: any) => {
+        setFormValues((prev) => ({
+            ...prev,
+            [fieldName]: value ?? '',
+        }));
+    };
+
+    const buildMountContext = (field: any) => {
+        const fieldName = String(field?.name || 'value');
+        const setterName = field.contextSetter || `set${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
+
+        return {
+            ...context,
+            formData: formValues,
+            eventTitle: formValues.title || context?.eventTitle,
+            startsAt: formValues.startsAt || context?.startsAt,
+            endsAt: formValues.endsAt || context?.endsAt,
+            currentLocation: formValues.location || context?.currentLocation || '',
+            [setterName]: (value: any) => setFieldValue(fieldName, value),
+        };
+    };
+
+    return (
+        <div className="space-y-4">
+            {fields.map((field: any, i: number) => {
+                const fieldValue = formValues[field.name] ?? '';
+                const inlineMount = Boolean(field.mountPoint && field.mountInline);
+
+                const fieldInput = field.type === 'textarea' || field.type === 'richtext' ? (
+                    <textarea
+                        className="w-full border rounded p-2"
+                        name={field.name}
+                        value={fieldValue}
+                        readOnly={field.readOnly}
+                        placeholder={field.placeholder}
+                        onChange={(e) => setFieldValue(field.name, e.target.value)}
+                    />
+                ) : field.type === 'select' ? (
+                    <select
+                        className="w-full border rounded p-2"
+                        name={field.name}
+                        value={fieldValue}
+                        disabled={field.readOnly}
+                        onChange={(e) => setFieldValue(field.name, e.target.value)}
+                    >
+                        {field.options?.map((opt: any) => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                    </select>
+                ) : (
+                    <Input
+                        type={field.type || 'text'}
+                        name={field.name}
+                        value={fieldValue}
+                        readOnly={field.readOnly}
+                        placeholder={field.placeholder}
+                        onChange={(e) => setFieldValue(field.name, e.target.value)}
+                    />
+                );
+
+                return (
+                    <div key={i} className="space-y-2">
+                        <label className="text-sm font-medium">{field.label}</label>
+                        {inlineMount ? (
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 min-w-0">{fieldInput}</div>
+                                <div className="shrink-0">
+                                    <ExtensionLoader
+                                        mountPoint={field.mountPoint}
+                                        context={buildMountContext(field)}
+                                    />
+                                </div>
+                            </div>
+                        ) : (
+                            fieldInput
+                        )}
+
+                        {field.mountPoint && !inlineMount ? (
+                            <div className="pt-1">
+                                <ExtensionLoader
+                                    mountPoint={field.mountPoint}
+                                    context={buildMountContext(field)}
+                                />
+                            </div>
+                        ) : null}
+                    </div>
+                );
+            })}
+
+            <Button onClick={() => handleAction(onSubmit, null, { formData: formValues })}>
+                {submitLabel || 'Submit'}
+            </Button>
+        </div>
+    );
+};
+
 export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context }) => {
     // If not already inside a provider (top level), we might need one, 
     // but usually the ExtensionLoader should wrap it or the Overlay.
@@ -80,11 +205,15 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     }
 
     const children = component.children || props?.children;
-    // const { openOverlay, closeOverlay } = useExpansionUI(); // Use remapped context below
-    const { openModal: openOverlay, closeModal: closeOverlay } = useExpansionUI(); // Remap for compatibility
+    const expansionUI = useOptionalExpansionUI();
+    const openOverlay = expansionUI?.openModal || context?.openOverlay;
+    const closeOverlay = expansionUI?.closeModal || context?.onClose || context?.close;
     const { state, setState } = useContext(ExtensionStateContext);
     const [wizardStep, setWizardStep] = useState<number>(0);
     const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({});
+    const [fallbackMenuOpen, setFallbackMenuOpen] = useState(false);
+    const [fallbackMenuTrigger, setFallbackMenuTrigger] = useState<HTMLElement | null>(null);
+    const [fallbackMenuOptions, setFallbackMenuOptions] = useState<any[]>([]);
     const router = useRouter();
 
     // Assume userId is available in context or we need to fetch it?
@@ -250,18 +379,27 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 const { targetId } = resolvedAct;
                 console.log("Opening overlay", targetId);
 
-                const overlayDef = context.overlays?.[targetId];
+                const activeOverlays = resolvedAct.overlays || processingContext.overlays || context.overlays;
+                const activeExtensionId = resolvedAct.extensionId || processingContext.extensionId || context.extensionId;
+                const overlayDef = activeOverlays?.[targetId];
                 if (overlayDef) {
                     const overlayContext = {
                         ...processingContext,
+                        extensionId: activeExtensionId,
+                        overlays: activeOverlays,
                         onClose: closeOverlay,
                         toolbarButtonMode: undefined,
                     };
 
-                    openOverlay(
-                        <JsonRenderer component={overlayDef} context={overlayContext} />,
-                        { width: resolveModalWidth(overlayDef?.props?.width) }
-                    );
+                    if (openOverlay) {
+                        openOverlay(
+                            <JsonRenderer component={overlayDef} context={overlayContext} />,
+                            { width: resolveModalWidth(overlayDef?.props?.width) }
+                        );
+                    } else {
+                        console.warn('No overlay handler available in context');
+                        toast.error('Overlay UI is unavailable in this context');
+                    }
                 } else {
                     console.warn(`Overlay ID ${targetId} not found in extension manifest`);
                     toast.error("Overlay not found");
@@ -448,7 +586,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 }
             }
             if (resolvedAct.action === 'CLOSE_OVERLAY') {
-                closeOverlay();
+                if (closeOverlay) {
+                    closeOverlay();
+                }
             }
             if (resolvedAct.action === 'SET_CONTEXT_VALUE') {
                 const targetKey = resolvedAct.key;
@@ -615,6 +755,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 type="button"
                 onClick={(e) => {
                     handleAction(option?.onClick, e);
+                    setFallbackMenuOpen(false);
                     if (context?.close) {
                         context.close();
                     }
@@ -628,18 +769,27 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     };
 
     const openButtonMenu = (target: EventTarget | null, menuOptions: any[]) => {
-        if (!context?.openPopover || !target || !Array.isArray(menuOptions) || menuOptions.length === 0) {
+        if (!target || !Array.isArray(menuOptions) || menuOptions.length === 0) {
             return;
         }
 
-        const anchor = target as HTMLElement;
-        context.openPopover(
-            anchor,
-            <div className="flex min-w-[200px] flex-col gap-1 p-1">
-                {menuOptions.map((option, index) => renderMenuOptionButton(option, index))}
-            </div>,
-            { width: 220, header: false }
-        );
+        if (context?.openPopover) {
+            const anchor = target as HTMLElement;
+            context.openPopover(
+                anchor,
+                <div className="flex min-w-[200px] flex-col gap-1 p-1">
+                    {menuOptions.map((option, index) => renderMenuOptionButton(option, index))}
+                </div>,
+                { width: 220, header: false }
+            );
+            return;
+        }
+
+        if (target instanceof HTMLElement) {
+            setFallbackMenuTrigger(target);
+            setFallbackMenuOptions(menuOptions);
+            setFallbackMenuOpen(true);
+        }
     };
 
     switch (type) {
@@ -649,6 +799,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             const toolbarButtonMode = context?.toolbarButtonMode;
             const isCompactToolbarButton = toolbarButtonMode === 'compact';
             const isToolbarMenuButton = toolbarButtonMode === 'menu';
+            const shouldRenderLabel = !isCompactToolbarButton && resolvedProps.showLabel !== false;
             const buttonLabel = resolvedProps.label || 'Action';
             const compactClassName = "h-10 w-10 rounded-xl border border-transparent bg-transparent px-0 text-gray-600 shadow-none hover:bg-gray-100 hover:text-gray-900";
             const menuClassName = "w-full justify-start rounded-xl border border-transparent bg-transparent px-3 text-gray-700 shadow-none hover:bg-gray-100 hover:text-gray-900";
@@ -690,20 +841,37 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             };
 
             return (
-                <Button
-                    onClick={handleButtonClick}
-                    onMouseEnter={handleDesktopHover}
-                    variant={buttonVariant}
-                    size="sm"
-                    title={buttonLabel}
-                    aria-label={buttonLabel}
-                    className={buttonClassName}
-                >
-                    {resolvedProps.icon && (
-                        <span className={isCompactToolbarButton ? "" : "mr-2"}>{renderIcon(resolvedProps.icon)}</span>
+                <>
+                    <Button
+                        onClick={handleButtonClick}
+                        onMouseEnter={handleDesktopHover}
+                        variant={buttonVariant}
+                        size="sm"
+                        title={buttonLabel}
+                        aria-label={buttonLabel}
+                        className={buttonClassName}
+                    >
+                        {resolvedProps.icon && (
+                            <span className={isCompactToolbarButton ? "" : "mr-2"}>{renderIcon(resolvedProps.icon)}</span>
+                        )}
+                        {shouldRenderLabel && resolvedProps.label}
+                    </Button>
+
+                    {fallbackMenuTrigger && (
+                        <Popover
+                            trigger={fallbackMenuTrigger}
+                            isOpen={fallbackMenuOpen}
+                            onClose={() => setFallbackMenuOpen(false)}
+                            width={220}
+                            header={false}
+                            className="rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl"
+                        >
+                            <div className="flex min-w-[200px] flex-col gap-1">
+                                {fallbackMenuOptions.map((option, index) => renderMenuOptionButton(option, index))}
+                            </div>
+                        </Popover>
                     )}
-                    {!isCompactToolbarButton && resolvedProps.label}
-                </Button>
+                </>
             );
         }
         case 'TEXT': {
@@ -842,32 +1010,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
         case 'FORM':
             return (
-                <div className="space-y-4">
-                    {resolvedProps.fields?.map((field: any, i: number) => (
-                        <div key={i} className="space-y-1">
-                            <label className="text-sm font-medium">{field.label}</label>
-                            {field.type === 'textarea' || field.type === 'richtext' ? (
-                                <textarea className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue} placeholder={field.placeholder} />
-                            ) : field.type === 'select' ? (
-                                <select className="w-full border rounded p-2" name={field.name} defaultValue={field.defaultValue}>
-                                    {field.options?.map((opt: any) => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
-                            ) : (
-                                <Input type={field.type || 'text'} name={field.name} defaultValue={field.defaultValue} readOnly={field.readOnly} placeholder={field.placeholder} />
-                            )}
-                        </div>
-                    ))}
-                    <Button onClick={() => {
-                        const formData: Record<string, any> = {};
-                        resolvedProps.fields?.forEach((field: any) => {
-                            const el = document.querySelector(`[name="${field.name}"]`) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
-                            if (el) formData[field.name] = el.value;
-                        });
-                        handleAction(props.onSubmit, null, { formData });
-                    }}>{resolvedProps.submitLabel || 'Submit'}</Button>
-                </div>
+                <JsonFormRenderer
+                    fields={Array.isArray(resolvedProps.fields) ? resolvedProps.fields : []}
+                    submitLabel={resolvedProps.submitLabel}
+                    onSubmit={props.onSubmit}
+                    context={context}
+                    handleAction={handleAction}
+                />
             );
         case 'LIST':
             // Renders a list of items using a template

@@ -124,3 +124,7 @@ export function useExpansionUI() {
     }
     return context;
 }
+
+export function useOptionalExpansionUI() {
+    return useContext(ExpansionUIContext);
+}

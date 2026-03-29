@@ -171,6 +171,58 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
         ) : null
     );
 
+    const eventLocationBuilderMount = useMemo(() => {
+        if (mountPoint !== 'EVENT_LOCATION_BUILDER' || mounts.length === 0) {
+            return null;
+        }
+
+        const menuOptions = mounts
+            .filter((mount: any) => mount?.component?.type === 'BUTTON' && mount?.component?.props?.onClick)
+            .map((mount: any, index: number) => {
+                const baseOnClick = mount.component.props.onClick;
+                const optionLabel = mount.component.props.label || `Provider ${index + 1}`;
+                const optionIcon = mount.component.props.icon || 'Video';
+
+                if (typeof baseOnClick !== 'object' || baseOnClick === null) {
+                    return {
+                        label: optionLabel,
+                        icon: optionIcon,
+                        onClick: baseOnClick,
+                    };
+                }
+
+                return {
+                    label: optionLabel,
+                    icon: optionIcon,
+                    onClick: {
+                        ...baseOnClick,
+                        extensionId: mount.extensionId,
+                        overlays: mount.overlays,
+                    },
+                };
+            });
+
+        if (menuOptions.length === 0) {
+            return null;
+        }
+
+        return {
+            extensionId: 'event-location-builder',
+            overlays: {},
+            component: {
+                type: 'BUTTON',
+                props: {
+                    label: 'Video meeting',
+                    showLabel: false,
+                    icon: 'Video',
+                    variant: 'outline',
+                    className: 'h-10 w-10 rounded-md border border-slate-200 bg-white px-0 text-slate-600 hover:bg-slate-50 hover:text-slate-900 shadow-none',
+                    menuOptions,
+                },
+            },
+        };
+    }, [mountPoint, mounts]);
+
     // Sort by priority if needed (not implemented deep sort yet)
 
     if (isLoading) {
@@ -211,6 +263,14 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                 )}
             </div>
         );
+    }
+
+    if (mountPoint === 'EVENT_LOCATION_BUILDER') {
+        if (!eventLocationBuilderMount) {
+            return null;
+        }
+
+        return renderMount(eventLocationBuilderMount, 0);
     }
 
     return (
