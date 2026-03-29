@@ -38,7 +38,7 @@ export default function CalendarPage() {
     const [holidayCountries, setHolidayCountries] = useState<string[]>([]);
     const [holidays, setHolidays] = useState<CalendarEventRecord[]>([]);
     const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
-    const [isCalSidebarOpen, setIsCalSidebarOpen] = useState(true);
+    const [isCalSidebarOpen, setIsCalSidebarOpen] = useState(false);
     const [notificationsEnabled, setNotificationsEnabled] = useState(false);
     const [isCreating, setIsCreating] = useState(false);
     const [startsAt, setStartsAt] = useState('');
@@ -401,27 +401,92 @@ export default function CalendarPage() {
         return days;
     }, [currentMonth, currentYear]);
 
+    const renderCalendarSidebarContent = () => (
+        <>
+            <div className="p-4 py-5 px-4 z-10 w-[256px]">
+                <button onClick={() => handleOpenCreate(new Date().toISOString().slice(0, 16), new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16))} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
+                    <Plus className="w-5 h-5 text-white" />
+                    <span className="text-sm font-medium text-white transition-colors">Create Event</span>
+                </button>
+            </div>
+
+            <div className="px-6 pb-2 w-[256px]">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-[13px] font-medium text-slate-700">{monthNames[currentMonth]} {currentYear}</span>
+                    <div className="flex gap-1">
+                        <ChevronLeft className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={prevMonth} />
+                        <ChevronRight className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={nextMonth} />
+                    </div>
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-slate-500 font-medium pb-2">
+                    {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
+                </div>
+                <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
+                    {miniCalendarDays.map((dateObj, i) => {
+                        const isToday = dateObj.isCurrentMonth && dateObj.day === currentDate.getDate() && currentMonth === currentDate.getMonth() && currentYear === currentDate.getFullYear();
+                        return (
+                            <div key={i} className={`w-6 h-6 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-blue-600 text-white' : dateObj.isCurrentMonth ? 'hover:bg-slate-100 text-slate-700 cursor-pointer' : 'text-slate-400'}`}>
+                                {dateObj.day}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto w-[256px] border-t border-slate-100 mt-2">
+                <div className="flex items-center justify-between py-2 text-slate-700 font-medium px-2 rounded hover:bg-slate-50">
+                    <div className="flex items-center gap-2 cursor-pointer flex-1">
+                        <span className="text-sm">My calendars</span>
+                        <ChevronRight className="w-4 h-4 transform rotate-90" />
+                    </div>
+                    <button onClick={handleOpenAddCalendar} className="p-1 hover:bg-slate-200 rounded text-slate-500">
+                        <Plus className="w-4 h-4" />
+                    </button>
+                </div>
+                <div className="pl-2 space-y-1 mt-1">
+                    {allCalendars.map(calendar => {
+                        const active = selectedCalendarIds.includes(calendar.id);
+                        return (
+                            <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group px-2 rounded-md hover:bg-slate-50" onClick={() => toggleCalendar(calendar.id)}>
+                                <div className="relative flex items-center justify-center w-5 h-5 rounded">
+                                    <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
+                                        {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
+                                    </div>
+                                </div>
+                                <span className="text-sm text-slate-700 truncate">{calendar.name}</span>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                <div className="mt-6">
+                    <ExtensionLoader mountPoint="CALENDAR_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
+                </div>
+            </div>
+        </>
+    );
+
     return (
         <div className="flex h-screen w-full bg-white overflow-hidden text-slate-900 font-sans">
             <AnimatePresence>
                 {isAppSidebarOpen && (
                     <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
-                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background xl:hidden shadow-2xl">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background lg:hidden shadow-2xl">
                             <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
                         </motion.div>
                     </>
                 )}
             </AnimatePresence>
 
-            <div className="hidden border-r border-slate-200 xl:block w-[260px] flex-shrink-0 h-full overflow-hidden">
+            <div className="hidden border-r border-slate-200 lg:block w-[260px] flex-shrink-0 h-full overflow-hidden">
                 <AppSidebar />
             </div>
 
             <div className="flex-1 flex flex-col h-full overflow-hidden">
                 <header className="flex h-[64px] items-center justify-between px-4 border-b border-slate-200">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 lg:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
@@ -462,10 +527,7 @@ export default function CalendarPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
-                        <button onClick={() => setIsCalSidebarOpen(!isCalSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden xl:block">
-                            <Settings className="w-5 h-5 text-slate-700" />
-                        </button>
-                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
+                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 lg:hidden">
                             <Settings className="w-5 h-5 text-slate-700" />
                         </button>
                     </div>
@@ -571,77 +633,22 @@ export default function CalendarPage() {
                         )}
                     </main>
 
+                    <aside className="hidden lg:flex bg-white flex-col flex-shrink-0 border-l border-slate-200 h-full w-[256px]">
+                        {renderCalendarSidebarContent()}
+                    </aside>
+
                     <AnimatePresence initial={false}>
                         {isCalSidebarOpen && (
                             <>
-                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCalSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
-                                <motion.aside 
-                                    initial={{ width: 0, opacity: 0 }} 
-                                    animate={{ width: 256, opacity: 1 }} 
-                                    exit={{ width: 0, opacity: 0 }} 
-                                    className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCalSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                                <motion.aside
+                                    initial={{ x: 256, opacity: 0 }}
+                                    animate={{ x: 0, opacity: 1 }}
+                                    exit={{ x: 256, opacity: 0 }}
+                                    className="bg-white flex flex-col border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full w-[256px] lg:hidden"
                                 >
-                                    <div className="p-4 py-5 px-4 z-10 w-[256px]">
-                                    <button onClick={() => handleOpenCreate(new Date().toISOString().slice(0, 16), new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16))} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
-                                        <Plus className="w-5 h-5 text-white" />
-                                        <span className="text-sm font-medium text-white transition-colors">Create Event</span>
-                                    </button>
-                                </div>
-
-                                <div className="px-6 pb-2 w-[256px]">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <span className="text-[13px] font-medium text-slate-700">{monthNames[currentMonth]} {currentYear}</span>
-                                        <div className="flex gap-1">
-                                            <ChevronLeft className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={prevMonth} />
-                                            <ChevronRight className="w-4 h-4 text-slate-600 cursor-pointer hover:bg-slate-100 rounded" onClick={nextMonth} />
-                                        </div>
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-slate-500 font-medium pb-2">
-                                        {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
-                                    </div>
-                                    <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
-                                        {miniCalendarDays.map((dateObj, i) => {
-                                            const isToday = dateObj.isCurrentMonth && dateObj.day === currentDate.getDate() && currentMonth === currentDate.getMonth() && currentYear === currentDate.getFullYear();
-                                            return (
-                                                <div key={i} className={`w-6 h-6 flex items-center justify-center rounded-full mx-auto ${isToday ? 'bg-blue-600 text-white' : dateObj.isCurrentMonth ? 'hover:bg-slate-100 text-slate-700 cursor-pointer' : 'text-slate-400'}`}>
-                                                    {dateObj.day}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="p-4 flex-1 overflow-y-auto w-[256px] border-t border-slate-100 mt-2">
-                                    <div className="flex items-center justify-between py-2 text-slate-700 font-medium px-2 rounded hover:bg-slate-50">
-                                        <div className="flex items-center gap-2 cursor-pointer flex-1">
-                                            <span className="text-sm">My calendars</span>
-                                            <ChevronRight className="w-4 h-4 transform rotate-90" />
-                                        </div>
-                                        <button onClick={handleOpenAddCalendar} className="p-1 hover:bg-slate-200 rounded text-slate-500">
-                                            <Plus className="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                    <div className="pl-2 space-y-1 mt-1">
-                                        {allCalendars.map(calendar => {
-                                            const active = selectedCalendarIds.includes(calendar.id);
-                                            return (
-                                                <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group px-2 rounded-md hover:bg-slate-50" onClick={() => toggleCalendar(calendar.id)}>
-                                                    <div className="relative flex items-center justify-center w-5 h-5 rounded">
-                                                        <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
-                                                            {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
-                                                        </div>
-                                                    </div>
-                                                    <span className="text-sm text-slate-700 truncate">{calendar.name}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                    
-                                    <div className="mt-6">
-                                        <ExtensionLoader mountPoint="CALENDAR_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
-                                    </div>
-                                </div>
-                            </motion.aside>
+                                    {renderCalendarSidebarContent()}
+                                </motion.aside>
                             </>
                         )}
                     </AnimatePresence>

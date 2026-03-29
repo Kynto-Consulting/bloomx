@@ -20,7 +20,7 @@ export default function ContactsPage() {
     const [contacts, setContacts] = useState<ContactRecord[]>([]);
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
     const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
-    const [isContactSidebarOpen, setIsContactSidebarOpen] = useState(true);
+    const [isContactSidebarOpen, setIsContactSidebarOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     
     // Form
@@ -79,27 +79,54 @@ export default function ContactsPage() {
         return '?';
     };
 
+    const renderContactSidebarContent = () => (
+        <>
+            <div className="p-4 py-5 px-4 z-10 w-[256px]">
+                <button onClick={handleOpenCreateContact} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
+                    <Plus className="w-5 h-5 text-white" />
+                    <span className="text-sm font-medium text-white transition-colors">Create contact</span>
+                </button>
+            </div>
+
+            <div className="p-2 flex-1 overflow-y-auto w-[256px]">
+                <div className="flex items-center gap-4 py-3 px-4 cursor-pointer bg-blue-50 text-blue-700 rounded-lg mx-2 font-medium">
+                    <Users className="w-5 h-5" />
+                    <span className="text-sm flex-1">Contacts</span>
+                    <span className="text-xs">{contacts.length}</span>
+                </div>
+                <hr className="my-3 border-slate-100 mx-4" />
+                <div className="px-4">
+                    <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
+                </div>
+
+                <div className="mt-4 px-4">
+                    <ExtensionLoader mountPoint="CONTACTS_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
+                </div>
+            </div>
+        </>
+    );
+
     return (
         <div className="flex h-screen w-full bg-white overflow-hidden text-slate-900 font-sans">
             <AnimatePresence>
                 {isAppSidebarOpen && (
                     <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
-                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background xl:hidden shadow-2xl">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background lg:hidden shadow-2xl">
                             <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
                         </motion.div>
                     </>
                 )}
             </AnimatePresence>
 
-            <div className="hidden border-r border-slate-200 xl:block w-[260px] flex-shrink-0 h-full overflow-hidden">
+            <div className="hidden border-r border-slate-200 lg:block w-[260px] flex-shrink-0 h-full overflow-hidden">
                 <AppSidebar />
             </div>
 
             <div className="flex-1 flex flex-col h-full overflow-hidden">
                 <header className="flex h-[64px] items-center justify-between px-4 border-b border-slate-200">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 xl:hidden">
+                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-slate-100 lg:hidden">
                             <Menu className="w-6 h-6 text-slate-700" />
                         </button>
                         
@@ -125,10 +152,7 @@ export default function ContactsPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
-                        <button onClick={() => setIsContactSidebarOpen(!isContactSidebarOpen)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 hidden xl:block">
-                            <Settings className="w-5 h-5 text-slate-700" />
-                        </button>
-                        <button onClick={() => setIsContactSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 xl:hidden">
+                        <button onClick={() => setIsContactSidebarOpen(true)} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 lg:hidden">
                             <Settings className="w-5 h-5 text-slate-700" />
                         </button>
                         <button className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600 sm:hidden"><Search className="w-6 h-6" /></button>
@@ -180,39 +204,22 @@ export default function ContactsPage() {
                         </div>
                     </main>
 
+                    <aside className="hidden lg:flex bg-white flex-col flex-shrink-0 border-l border-slate-200 h-full w-[256px]">
+                        {renderContactSidebarContent()}
+                    </aside>
+
                     <AnimatePresence initial={false}>
                         {isContactSidebarOpen && (
                             <>
-                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsContactSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm xl:hidden" />
-                                <motion.aside 
-                                    initial={{ width: 0, opacity: 0 }} 
-                                    animate={{ width: 256, opacity: 1 }} 
-                                    exit={{ width: 0, opacity: 0 }} 
-                                    className="bg-white flex flex-col flex-shrink-0 border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full xl:relative xl:z-auto"
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsContactSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                                <motion.aside
+                                    initial={{ x: 256, opacity: 0 }}
+                                    animate={{ x: 0, opacity: 1 }}
+                                    exit={{ x: 256, opacity: 0 }}
+                                    className="bg-white flex flex-col border-l border-slate-200 fixed right-0 top-0 bottom-0 z-[70] h-full w-[256px] lg:hidden"
                                 >
-                                    <div className="p-4 py-5 px-4 z-10 w-[256px]">
-                                    <button onClick={handleOpenCreateContact} className="flex items-center justify-center gap-2 bg-blue-600 border border-blue-700 shadow-sm hover:bg-blue-700 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
-                                        <Plus className="w-5 h-5 text-white" />
-                                        <span className="text-sm font-medium text-white transition-colors">Create contact</span>
-                                    </button>
-                                </div>
-
-                                <div className="p-2 flex-1 overflow-y-auto w-[256px]">
-                                    <div className="flex items-center gap-4 py-3 px-4 cursor-pointer bg-blue-50 text-blue-700 rounded-lg mx-2 font-medium">
-                                        <Users className="w-5 h-5" />
-                                        <span className="text-sm flex-1">Contacts</span>
-                                        <span className="text-xs">{contacts.length}</span>
-                                    </div>
-                                    <hr className="my-3 border-slate-100 mx-4" />
-                                    <div className="px-4">
-                                       <ExtensionLoader mountPoint="CONTACTS_SIDEBAR" context={{ isGoogleLinked }} />
-                                    </div>
-                                    
-                                    <div className="mt-4 px-4">
-                                        <ExtensionLoader mountPoint="CONTACTS_SIDEBAR_BOTTOM" context={{ isGoogleLinked }} />
-                                    </div>
-                                </div>
-                            </motion.aside>
+                                    {renderContactSidebarContent()}
+                                </motion.aside>
                             </>
                         )}
                     </AnimatePresence>
