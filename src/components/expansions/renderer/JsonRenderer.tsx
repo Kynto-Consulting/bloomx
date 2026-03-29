@@ -46,7 +46,7 @@ export const ExtensionStateProvider: React.FC<{ children: React.ReactNode }> = (
 
 interface JsonComponentProps {
     type: string;
-    props: any;
+    props?: any;
     children?: JsonComponentProps[];
 }
 
@@ -67,7 +67,18 @@ export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: a
 };
 
 const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context }) => {
-    const { type, props } = component;
+    if (!component || typeof component !== 'object') {
+        return null;
+    }
+
+    const type = typeof component.type === 'string' ? component.type : '';
+    const props = component.props ?? {};
+
+    if (!type) {
+        console.warn('[JsonRenderer] Skipping invalid component without type', component);
+        return null;
+    }
+
     const children = component.children || props?.children;
     // const { openOverlay, closeOverlay } = useExpansionUI(); // Use remapped context below
     const { openModal: openOverlay, closeModal: closeOverlay } = useExpansionUI(); // Remap for compatibility
@@ -556,7 +567,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
     // Auto-run onLoad
     useEffect(() => {
-        if (!props.onLoad) return;
+        if (!props?.onLoad) return;
 
         const shouldRunOnLoad = resolvedProps.onLoadWhen === undefined
             ? true
@@ -569,7 +580,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         if (shouldRunOnLoad) {
             handleAction(props.onLoad);
         }
-    }, [props.onLoad, resolvedProps.onLoadWhen]);
+    }, [props?.onLoad, resolvedProps.onLoadWhen]);
 
     const renderIcon = (iconName: string, size: number = 16, className: string = '') => {
         if (!iconName) return null;
@@ -756,14 +767,19 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'LINK':
             return <a href={resolvedProps.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{resolvedProps.label}</a>;
         case 'TABS':
+            const tabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
+            if (tabs.length === 0) {
+                return null;
+            }
+
             return (
-                <Tabs defaultValue={resolvedProps.tabs[0]?.label}>
+                <Tabs defaultValue={tabs[0]?.label}>
                     <TabsList>
-                        {resolvedProps.tabs.map((tab: any, i: number) => (
+                        {tabs.map((tab: any, i: number) => (
                             <TabsTrigger key={i} value={tab.label}>{tab.label}</TabsTrigger>
                         ))}
                     </TabsList>
-                    {resolvedProps.tabs.map((tab: any, i: number) => (
+                    {tabs.map((tab: any, i: number) => (
                         <TabsContent key={i} value={tab.label}>
                             {tab.content?.map((child: any, k: number) => <InnerJsonRenderer key={k} component={child} context={context} />)}
                         </TabsContent>
