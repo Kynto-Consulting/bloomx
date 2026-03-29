@@ -214,7 +214,21 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
     const [fallbackMenuOpen, setFallbackMenuOpen] = useState(false);
     const [fallbackMenuTrigger, setFallbackMenuTrigger] = useState<HTMLElement | null>(null);
     const [fallbackMenuOptions, setFallbackMenuOptions] = useState<any[]>([]);
+    const [fallbackOverlay, setFallbackOverlay] = useState<{
+        component: JsonComponentProps;
+        context: any;
+        width?: string;
+    } | null>(null);
     const router = useRouter();
+
+    const closeAnyOverlay = useCallback(() => {
+        if (closeOverlay) {
+            closeOverlay();
+            return;
+        }
+
+        setFallbackOverlay(null);
+    }, [closeOverlay]);
 
     // Assume userId is available in context or we need to fetch it?
     // For now, prompt User or use a default if context.userId is missing.
@@ -387,7 +401,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...processingContext,
                         extensionId: activeExtensionId,
                         overlays: activeOverlays,
-                        onClose: closeOverlay,
+                        onClose: closeOverlay || (() => setFallbackOverlay(null)),
                         toolbarButtonMode: undefined,
                     };
 
@@ -397,8 +411,11 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             { width: resolveModalWidth(overlayDef?.props?.width) }
                         );
                     } else {
-                        console.warn('No overlay handler available in context');
-                        toast.error('Overlay UI is unavailable in this context');
+                        setFallbackOverlay({
+                            component: overlayDef,
+                            context: overlayContext,
+                            width: resolveModalWidth(overlayDef?.props?.width),
+                        });
                     }
                 } else {
                     console.warn(`Overlay ID ${targetId} not found in extension manifest`);
@@ -565,7 +582,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 // Some manifests might omit "closeOverlay" action and expect it.
                 // Zoom manifest has "closeOverlay": true in the action props.
                 if (resolvedAct.closeOverlay) {
-                    closeOverlay();
+                    closeAnyOverlay();
                 }
             }
             if (resolvedAct.action === 'APPEND_BODY') {
@@ -582,13 +599,11 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 }
 
                 if (resolvedAct.closeOverlay) {
-                    closeOverlay();
+                    closeAnyOverlay();
                 }
             }
             if (resolvedAct.action === 'CLOSE_OVERLAY') {
-                if (closeOverlay) {
-                    closeOverlay();
-                }
+                closeAnyOverlay();
             }
             if (resolvedAct.action === 'SET_CONTEXT_VALUE') {
                 const targetKey = resolvedAct.key;
@@ -870,6 +885,42 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                                 {fallbackMenuOptions.map((option, index) => renderMenuOptionButton(option, index))}
                             </div>
                         </Popover>
+                    )}
+
+                    {fallbackOverlay && (
+                        <div
+                            className="fixed inset-0 z-[160] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+                            onClick={(event) => {
+                                if (event.target === event.currentTarget) {
+                                    setFallbackOverlay(null);
+                                }
+                            }}
+                        >
+                            <div
+                                className="relative max-h-[85vh] overflow-y-auto rounded-xl bg-white shadow-2xl"
+                                style={{ width: fallbackOverlay.width || 'auto', maxWidth: '90vw' }}
+                            >
+                                <button
+                                    type="button"
+                                    onClick={() => setFallbackOverlay(null)}
+                                    className="absolute right-3 top-3 z-10 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                >
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <line x1="18" y1="6" x2="6" y2="18" />
+                                        <line x1="6" y1="6" x2="18" y2="18" />
+                                    </svg>
+                                </button>
+
+                                <JsonRenderer
+                                    component={fallbackOverlay.component}
+                                    context={{
+                                        ...fallbackOverlay.context,
+                                        close: () => setFallbackOverlay(null),
+                                        onClose: () => setFallbackOverlay(null),
+                                    }}
+                                />
+                            </div>
+                        </div>
                     )}
                 </>
             );
