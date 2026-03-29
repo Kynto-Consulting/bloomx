@@ -16,7 +16,8 @@ import {
     Globe,
     Info,
     Palette,
-    Lock
+    Lock,
+    X
 } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { ThemePreview } from '@/components/admin/ThemePreview';
@@ -25,9 +26,64 @@ interface Extension {
     id: string;
     name: string;
     description: string;
+    version?: string;
+    authType?: string;
+    template?: any;
     isPaid: boolean;
     price: string;
     currency: string;
+}
+
+function inferRequiredEnvVars(extension: Extension | null) {
+    if (!extension) return [] as string[];
+
+    const vars = new Set<string>();
+    const template = extension.template || {};
+
+    if (Array.isArray(template?.permissions)) {
+        for (const permission of template.permissions) {
+            if (typeof permission === 'string' && permission.startsWith('ENV_READ:')) {
+                const envKey = permission.slice('ENV_READ:'.length).trim();
+                if (envKey) vars.add(envKey);
+            }
+        }
+    }
+
+    const authType = String(extension.authType || '').toUpperCase();
+    const provider = String(template?.auth?.provider || '').toLowerCase();
+
+    if (authType === 'OAUTH2') {
+        if (provider === 'google') {
+            vars.add('GOOGLE_CLIENT_ID');
+            vars.add('GOOGLE_CLIENT_SECRET');
+        } else if (provider === 'hubspot') {
+            vars.add('HUBSPOT_CLIENT_ID');
+            vars.add('HUBSPOT_CLIENT_SECRET');
+        } else if (provider === 'notion') {
+            vars.add('NOTION_CLIENT_ID');
+            vars.add('NOTION_CLIENT_SECRET');
+        } else if (provider) {
+            vars.add(`${provider.toUpperCase()}_CLIENT_ID`);
+            vars.add(`${provider.toUpperCase()}_CLIENT_SECRET`);
+        } else {
+            vars.add('OAUTH_CLIENT_ID');
+            vars.add('OAUTH_CLIENT_SECRET');
+        }
+    }
+
+    if (authType === 'API_KEY') {
+        vars.add('API_KEY');
+    }
+
+    if (Array.isArray(template?.requiredEnv)) {
+        for (const envKey of template.requiredEnv) {
+            if (typeof envKey === 'string' && envKey.trim()) {
+                vars.add(envKey.trim());
+            }
+        }
+    }
+
+    return Array.from(vars).sort((a, b) => a.localeCompare(b));
 }
 
 export default function AdminDashboard() {
@@ -46,6 +102,7 @@ export default function AdminDashboard() {
     const [availableExtensions, setAvailableExtensions] = useState<Extension[]>([]);
     const [loadingExtensions, setLoadingExtensions] = useState(false);
     const [extensionActionId, setExtensionActionId] = useState<string | null>(null);
+    const [selectedExtension, setSelectedExtension] = useState<Extension | null>(null);
 
     // Settings State
     const [settings, setSettings] = useState({
@@ -291,6 +348,8 @@ export default function AdminDashboard() {
         }
     };
 
+    const requiredEnvVars = inferRequiredEnvVars(selectedExtension);
+
     if (configLoading) {
         return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
     }
@@ -422,7 +481,11 @@ export default function AdminDashboard() {
                                             <p className="text-gray-500 text-sm mb-4 line-clamp-2 flex-1">{ext.description}</p>
 
                                             <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-100">
-                                                <button className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-xs">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedExtension(ext)}
+                                                    className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-xs"
+                                                >
                                                     <Info className="w-3 h-3" /> Details
                                                 </button>
 
@@ -700,6 +763,75 @@ export default function AdminDashboard() {
                     </div>
                 )}
             </main>
+
+            {selectedExtension && (
+                <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+                    <button
+                        type="button"
+                        className="absolute inset-0 bg-black/40"
+                        onClick={() => setSelectedExtension(null)}
+                        aria-label="Close details"
+                    />
+
+                    <div className="relative z-[121] w-full max-w-2xl rounded-2xl border border-gray-200 bg-white shadow-2xl">
+                        <div className="flex items-start justify-between px-6 py-5 border-b border-gray-100">
+                            <div>
+                                <h3 className="text-lg font-semibold text-gray-900">{selectedExtension.name}</h3>
+                                <p className="text-xs text-gray-500 mt-1">{selectedExtension.id}</p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setSelectedExtension(null)}
+                                className="rounded-lg p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                                aria-label="Close"
+                            >
+                                <X className="w-4 h-4" />
+                            </button>
+                        </div>
+
+                        <div className="px-6 py-5 space-y-5 max-h-[75vh] overflow-y-auto">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-gray-500">Version</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.version || 'N/A'}</div>
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-gray-500">Auth Type</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.authType || 'NONE'}</div>
+                                </div>
+                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-gray-500">Manifest Version</div>
+                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.template?.manifestVersion || 'N/A'}</div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-semibold text-gray-900">Description</h4>
+                                <p className="text-sm text-gray-600 mt-1">{selectedExtension.description || 'No description provided.'}</p>
+                            </div>
+
+                            <div>
+                                <h4 className="text-sm font-semibold text-gray-900">Required Environment Variables</h4>
+                                <p className="text-xs text-gray-500 mt-1">Detected from extension manifest and auth configuration.</p>
+
+                                {requiredEnvVars.length > 0 ? (
+                                    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                        <div className="space-y-1 font-mono text-xs text-gray-700">
+                                            {requiredEnvVars.map((envVar) => (
+                                                <div key={envVar}>{envVar}=</div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-500">
+                                        No required environment variables were detected for this extension.
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
