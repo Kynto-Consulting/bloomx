@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { TagInput } from '@/components/ui/TagInput';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
+import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
 import { toast } from 'sonner';
 
 type EventAttendee = {
@@ -54,6 +55,7 @@ export function CreateEventForm({
     onSaved: () => void;
     onClose?: () => void;
 }) {
+    const expansionUI = useOptionalExpansionUI();
     const [title, setTitle] = useState(initialTitle);
     const [location, setLocation] = useState(initialLocation);
     const [startsAt, setStartsAt] = useState(initialStartsAt || '');
@@ -363,6 +365,9 @@ export function CreateEventForm({
                                 currentLocation: location,
                                 attendees: attendeeTags.filter((tag) => tag.includes('@')),
                                 setLocation,
+                                openOverlay: expansionUI?.openModal,
+                                close: expansionUI?.closeModal,
+                                onClose: expansionUI?.closeModal,
                             }}
                         />
                     </div>
