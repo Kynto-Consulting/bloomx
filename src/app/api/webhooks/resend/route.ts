@@ -99,6 +99,20 @@ function parseMailbox(value: unknown): { email: string; name: string | null } {
     return { email: '', name: null };
 }
 
+function resolveRecipientAccountEmail(rawRecipients: string[], userEmail: string): string {
+    const normalizedUser = normalizeEmail(userEmail);
+
+    for (const rawRecipient of rawRecipients) {
+        const recipient = String(rawRecipient || '').trim().toLowerCase();
+        if (!recipient) continue;
+        if (normalizeEmail(recipient) === normalizedUser) {
+            return recipient;
+        }
+    }
+
+    return userEmail.toLowerCase();
+}
+
 function decodeQuotedPrintable(input: string) {
     return String(input || '')
         .replace(/=(\r?\n)/g, '')
@@ -365,10 +379,20 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         rawRecipients = [to];
     }
 
-    const recipients = rawRecipients.map(r => {
-        if (typeof r === 'string') return r;
-        return r.email || '';
-    }).filter(Boolean); // Clean string emails
+    const recipients = rawRecipients
+        .map((recipient) => {
+            const parsed = parseMailbox(recipient);
+            if (parsed.email) {
+                return parsed.email;
+            }
+
+            if (typeof recipient === 'string') {
+                return recipient.trim().toLowerCase();
+            }
+
+            return String((recipient as any)?.email || '').trim().toLowerCase();
+        })
+        .filter(Boolean); // Clean string emails
 
     // Normalize all recipients for validation, but store RAW for display
     const normalizedRecipients = recipients.map(email => normalizeEmail(email));
@@ -589,6 +613,8 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // 4. Store in Postgres (Per User)
     for (const user of users) {
+        const accountEmail = resolveRecipientAccountEmail(uniqueRawRecipients, user.email);
+
         // Identify Labels for THIS user
         const matchingLabels: { id: string }[] = [];
 
@@ -637,6 +663,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 userId: user.id, // Assign to correct user
                 from: formattedFrom,
                 to: toField,
+                accountEmail,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
                 messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid), // Ensure unique messageId per record if multipule users? 

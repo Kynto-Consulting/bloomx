@@ -93,6 +93,7 @@ const TABLES: TableSpec[] = [
             "messageId" TEXT NOT NULL,
             "from" TEXT NOT NULL,
             "to" TEXT NOT NULL,
+            "accountEmail" TEXT,
             "subject" TEXT,
             "snippet" TEXT,
             "htmlKey" TEXT,
@@ -113,6 +114,7 @@ const TABLES: TableSpec[] = [
             { name: 'messageId', definition: 'TEXT NOT NULL' },
             { name: 'from', definition: 'TEXT NOT NULL' },
             { name: 'to', definition: 'TEXT NOT NULL' },
+            { name: 'accountEmail', definition: 'TEXT' },
             { name: 'subject', definition: 'TEXT' },
             { name: 'snippet', definition: 'TEXT' },
             { name: 'htmlKey', definition: 'TEXT' },
@@ -137,6 +139,7 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "Email_folder_idx" ON "Email" ("folder")',
             'CREATE INDEX IF NOT EXISTS "Email_createdAt_idx" ON "Email" ("createdAt")',
             'CREATE INDEX IF NOT EXISTS "Email_userId_idx" ON "Email" ("userId")',
+            'CREATE INDEX IF NOT EXISTS "Email_accountEmail_idx" ON "Email" ("accountEmail")',
         ],
     },
     {

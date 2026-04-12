@@ -23,6 +23,7 @@ interface EmailDetails {
         id: string;
         from: string;
         to: string;
+        accountEmail?: string | null;
         subject: string;
         createdAt: string;
         read: boolean;
@@ -342,6 +343,7 @@ export function MailView() {
 
         openCompose({
             id: crypto.randomUUID(),
+            from: targetEmail.accountEmail || undefined,
             to: targetEmail.from,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
             body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
@@ -358,6 +360,7 @@ export function MailView() {
 
         openCompose({
             id: crypto.randomUUID(),
+            from: targetEmail.accountEmail || undefined,
             to: '',
             subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
             body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${targetContent}`,
@@ -517,6 +520,11 @@ export function MailView() {
                                                 <div className="flex flex-col min-w-0">
                                                     <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
                                                         <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
+                                                        {item.email.accountEmail && (
+                                                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                                                {item.email.accountEmail}
+                                                            </span>
+                                                        )}
                                                         <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
                                                     </div>
                                                     <span className="text-xs text-muted-foreground sm:hidden">{formatDate(item.email.createdAt)}</span>

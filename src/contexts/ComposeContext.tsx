@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useCallback, useEffect } fr
 
 interface ComposeWindow {
     id: string;
+    from?: string;
     to: string;
     cc?: string;
     bcc?: string;
@@ -55,6 +56,7 @@ export function ComposeProvider({ children }: { children: React.ReactNode }) {
 
             const newWindow: ComposeWindow = {
                 id: draft?.id || crypto.randomUUID(),
+                from: draft?.from,
                 to: draft?.to || '',
                 cc: draft?.cc,
                 bcc: draft?.bcc,

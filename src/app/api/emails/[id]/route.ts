@@ -126,19 +126,26 @@ export async function GET(
             };
 
             const normalized = normalizeSubject(email.subject);
+            const accountEmail = String(email.accountEmail || '').trim().toLowerCase();
 
             // Only search if not empty and length sufficient to be a "topic"
             if (normalized && normalized.length >= 3) {
+                const threadWhere: any = {
+                    userId: user.id,
+                    OR: [
+                        { subject: { equals: normalized, mode: 'insensitive' } },
+                        { subject: { startsWith: 'Re: ' + normalized, mode: 'insensitive' } }, // Simple heuristic
+                        { subject: { contains: normalized, mode: 'insensitive' } } // Broader search, filter in code
+                    ]
+                };
+
+                if (accountEmail) {
+                    threadWhere.accountEmail = accountEmail;
+                }
+
                 // Find all emails with this subject (ignoring prefixes)
                 const threadCandidates = await prisma.email.findMany({
-                    where: {
-                        userId: user.id,
-                        OR: [
-                            { subject: { equals: normalized, mode: 'insensitive' } },
-                            { subject: { startsWith: 'Re: ' + normalized, mode: 'insensitive' } }, // Simple heuristic
-                            { subject: { contains: normalized, mode: 'insensitive' } } // Broader search, filter in code
-                        ]
-                    },
+                    where: threadWhere,
                     orderBy: { createdAt: 'desc' }, // Newest first
                     include: {
                         labels: true,

@@ -2,6 +2,65 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 
+function extractEmailAddress(value: string): string {
+    const raw = String(value || '').trim();
+    const bracketMatch = raw.match(/<([^>]+)>/);
+    return (bracketMatch?.[1] || raw).trim().toLowerCase();
+}
+
+function normalizeMailboxIdentity(email: string): string {
+    const [localPart, domain] = String(email || '').trim().toLowerCase().split('@');
+    if (!localPart || !domain) return '';
+
+    let normalizedLocal = localPart.replace(/\./g, '');
+    const plusIndex = normalizedLocal.indexOf('+');
+    if (plusIndex !== -1) {
+        normalizedLocal = normalizedLocal.substring(0, plusIndex);
+    }
+
+    return `${normalizedLocal}@${domain}`;
+}
+
+async function resolveAuthorizedSenders(userId: string, fallbackEmail: string): Promise<Set<string>> {
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+            email: true,
+            accounts: {
+                select: {
+                    providerAccountId: true,
+                }
+            },
+            emails: {
+                where: {
+                    accountEmail: {
+                        not: null,
+                    }
+                },
+                select: {
+                    accountEmail: true,
+                },
+                take: 200,
+                orderBy: {
+                    createdAt: 'desc',
+                }
+            }
+        }
+    });
+
+    const allowed = new Set<string>([
+        String(user?.email || fallbackEmail || '').trim().toLowerCase(),
+        ...((user?.accounts || [])
+            .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
+            .filter((email) => email.includes('@'))),
+        ...((user?.emails || [])
+            .map((email) => String(email.accountEmail || '').trim().toLowerCase())
+            .filter((email) => email.includes('@'))),
+    ]);
+
+    return allowed;
+}
+
 // Get all drafts
 // Get all drafts for the authenticated user
 export async function GET() {
@@ -11,8 +70,14 @@ export async function GET() {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
+        const authorizedSenderEmails = Array.from(await resolveAuthorizedSenders(user.id, user.email));
+
         const drafts = await prisma.draft.findMany({
-            where: { from: user.email },
+            where: {
+                from: {
+                    in: authorizedSenderEmails,
+                }
+            },
             orderBy: { updatedAt: 'desc' },
             take: 50,
             include: { attachments: true }
@@ -33,7 +98,21 @@ export async function POST(req: NextRequest) {
         }
 
         const body = await req.json();
-        const { id, to, cc, bcc, subject, body: draftBody, attachments } = body;
+        const { id, to, cc, bcc, subject, body: draftBody, attachments, from } = body;
+        const authorizedSenderEmails = await resolveAuthorizedSenders(user.id, user.email);
+        const authorizedSenderIdentities = new Set<string>(
+            Array.from(authorizedSenderEmails)
+                .map(normalizeMailboxIdentity)
+                .filter(Boolean)
+        );
+
+        const requestedFrom = from ? extractEmailAddress(String(from)) : '';
+        const requestedIdentity = requestedFrom ? normalizeMailboxIdentity(requestedFrom) : '';
+        const ownerFrom = requestedFrom
+            && (authorizedSenderEmails.has(requestedFrom)
+                || (requestedIdentity ? authorizedSenderIdentities.has(requestedIdentity) : false))
+            ? requestedFrom
+            : user.email.toLowerCase();
 
         let draft;
         if (id) {
@@ -46,12 +125,26 @@ export async function POST(req: NextRequest) {
 
             // First, update basic fields
             try {
+                const existingDraft = await prisma.draft.findFirst({
+                    where: {
+                        id,
+                        from: {
+                            in: Array.from(authorizedSenderEmails),
+                        }
+                    },
+                    select: { id: true }
+                });
+
+                if (!existingDraft) {
+                    return NextResponse.json({ error: 'Draft not found' }, { status: 404 });
+                }
+
                 draft = await prisma.draft.update({
                     where: {
                         id,
-                        from: user.email // Ensure ownership
                     },
                     data: {
+                        from: ownerFrom,
                         to: to || null,
                         cc: cc || null,
                         bcc: bcc || null,
@@ -89,7 +182,7 @@ export async function POST(req: NextRequest) {
             // Create new draft
             draft = await prisma.draft.create({
                 data: {
-                    from: user.email,
+                    from: ownerFrom,
                     to: to || null,
                     cc: cc || null,
                     bcc: bcc || null,

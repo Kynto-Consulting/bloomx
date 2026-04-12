@@ -12,10 +12,13 @@ import { useCache } from '@/contexts/CacheContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { fetchDeduped } from '@/lib/fetchdedupe';
 import { useOffline } from '@/contexts/OfflineContext';
+import { AccountManager } from '@/lib/account-manager';
 
 interface Email {
     id: string;
     from: string;
+    accountEmail?: string | null;
+    draftFrom?: string;
     subject: string;
     snippet: string;
     createdAt: string;
@@ -66,6 +69,7 @@ export function EmailList() {
     const [emails, setEmails] = useState<Email[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
+    const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
 
     // Selection State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -90,6 +94,7 @@ export function EmailList() {
         filteredEmails.forEach(email => {
             const rawSubject = email.subject || '';
             const normalized = normalizeSubject(rawSubject);
+            const accountKey = String(email.accountEmail || '').toLowerCase();
 
             // Don't group "No Subject" or very short subjects to avoid false positives
             if (!normalized || normalized.length < 3 || normalized === '(No Subject)') {
@@ -98,10 +103,11 @@ export function EmailList() {
                 return;
             }
 
-            if (!groups[normalized]) {
-                groups[normalized] = [];
+            const threadKey = `${accountKey}::${normalized}`;
+            if (!groups[threadKey]) {
+                groups[threadKey] = [];
             }
-            groups[normalized].push(email);
+            groups[threadKey].push(email);
         });
 
         // Convert back to array for rendering
@@ -129,6 +135,7 @@ export function EmailList() {
     const [filterHasAttachment, setFilterHasAttachment] = useState(false);
     const [filterSince, setFilterSince] = useState('');
     const [filterUntil, setFilterUntil] = useState('');
+    const accountFilter = searchParams.get('account') || '';
 
     // Initialize filters from URL
     useEffect(() => {
@@ -137,6 +144,35 @@ export function EmailList() {
         setFilterSince(searchParams.get('since') || '');
         setFilterUntil(searchParams.get('until') || '');
     }, [searchParams]);
+
+    useEffect(() => {
+        const accountSet = new Set<string>();
+
+        try {
+            const storedAccounts = AccountManager.getAccounts();
+            storedAccounts.forEach((account) => {
+                const email = String(account?.email || '').trim().toLowerCase();
+                if (email.includes('@')) {
+                    accountSet.add(email);
+                }
+            });
+        } catch {
+            // Ignore local storage parsing errors.
+        }
+
+        emails.forEach((email) => {
+            const account = String(email.accountEmail || '').trim().toLowerCase();
+            if (account.includes('@')) {
+                accountSet.add(account);
+            }
+        });
+
+        if (accountFilter) {
+            accountSet.add(accountFilter.toLowerCase());
+        }
+
+        setAvailableAccounts(Array.from(accountSet));
+    }, [emails, accountFilter]);
 
     const applyFilters = () => {
         const params = new URLSearchParams(searchParams);
@@ -207,7 +243,9 @@ export function EmailList() {
         if (mode === 'loadMore' && (loading || loadingMore)) return;
         if (mode === 'refresh' && loadingMore) return;
         const labelParam = searchParams.get('label');
-        const cacheKey = labelParam ? `emails-label-${labelParam}` : `emails-${folder}`;
+        const accountParam = searchParams.get('account');
+        const cacheKeyBase = labelParam ? `emails-label-${labelParam}` : `emails-${folder}`;
+        const cacheKey = accountParam ? `${cacheKeyBase}-account-${accountParam}` : cacheKeyBase;
 
         try {
             if (mode === 'refresh') {
@@ -217,10 +255,12 @@ export function EmailList() {
             }
 
             let currentEmails = [...emails];
-            const labelParam = searchParams.get('label');
             let url = `/api/emails?folder=${folder}`;
             if (labelParam) {
                 url += `&label=${labelParam}`;
+            }
+            if (accountParam) {
+                url += `&account=${encodeURIComponent(accountParam)}`;
             }
 
             // 1. Initial Load / Refresh
@@ -270,6 +310,8 @@ export function EmailList() {
                     const mapped = data.drafts.map((d: any) => ({
                         id: d.id,
                         from: d.to ? `To: ${d.to}` : '(No Recipients)',
+                        draftFrom: d.from,
+                        accountEmail: d.from,
                         subject: d.subject || '(No Subject)',
                         snippet: d.body ? d.body.replace(/<[^>]+>/g, '') : '',
                         createdAt: d.updatedAt,
@@ -341,22 +383,25 @@ export function EmailList() {
     // Track previous nav state to avoid clearing on cache updates
     const prevFolder = useRef(folder);
     const prevLabel = useRef(searchParams.get('label'));
+    const prevAccount = useRef(searchParams.get('account'));
 
     // Initial Sync on Mount/Folder Change/Label Change
     useEffect(() => {
         const currentLabel = searchParams.get('label');
-        const hasNavigated = folder !== prevFolder.current || currentLabel !== prevLabel.current;
+        const currentAccount = searchParams.get('account');
+        const hasNavigated = folder !== prevFolder.current || currentLabel !== prevLabel.current || currentAccount !== prevAccount.current;
 
         if (hasNavigated) {
             setEmails([]); // Reset only on navigation
             setHasMore(true);
             prevFolder.current = folder;
             prevLabel.current = currentLabel;
+            prevAccount.current = currentAccount;
         }
 
         syncEmails('refresh');
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [folder, searchParams.get('label'), cacheVersion]);
+    }, [folder, searchParams.get('label'), searchParams.get('account'), cacheVersion]);
 
     // Scroll Handler for Infinite Scroll
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -376,6 +421,7 @@ export function EmailList() {
                 openCompose({
                     id: draft.id,
                     draftId: draft.id,
+                    from: draft.draftFrom || undefined,
                     to: draft.to || '',
                     cc: draft.cc || '',
                     bcc: draft.bcc || '',
@@ -757,6 +803,32 @@ export function EmailList() {
                         </div>
                     )}
                 </div>
+
+                {availableAccounts.length > 0 && folder !== 'drafts' && (
+                    <div className="mt-2 flex items-center gap-2">
+                        <label className="text-xs font-medium text-muted-foreground">Account</label>
+                        <select
+                            value={accountFilter}
+                            onChange={(event) => {
+                                const params = new URLSearchParams(searchParams);
+                                const value = event.target.value;
+                                if (value) {
+                                    params.set('account', value);
+                                } else {
+                                    params.delete('account');
+                                }
+                                params.delete('id');
+                                router.push(`/?${params.toString()}`);
+                            }}
+                            className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                        >
+                            <option value="">All accounts</option>
+                            {availableAccounts.map((account) => (
+                                <option key={account} value={account}>{account}</option>
+                            ))}
+                        </select>
+                    </div>
+                )}
             </div>
 
             <div className="flex-1 overflow-y-auto px-2" onScroll={handleScroll}>
@@ -985,6 +1057,14 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                         </div>
                     </div>
 
+                    {email.accountEmail && (
+                        <div className="mt-1">
+                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                                {email.accountEmail}
+                            </span>
+                        </div>
+                    )}
+
                     <div className="sm:hidden text-[10px] text-muted-foreground mt-0.5 truncate">
                         {formatMobileDate(email.createdAt)}
                     </div>
@@ -1030,6 +1110,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
         prevProps.email.id !== nextProps.email.id ||
         prevProps.email.read !== nextProps.email.read ||
         prevProps.email.starred !== nextProps.email.starred ||
+        prevProps.email.accountEmail !== nextProps.email.accountEmail ||
         prevProps.email.subject !== nextProps.email.subject ||
         prevProps.email.snippet !== nextProps.email.snippet ||
         prevProps.email.createdAt !== nextProps.email.createdAt;

@@ -12,6 +12,7 @@ export function ComposeWindows() {
                 <ComposeModal
                     key={window.id}
                     id={window.id}
+                    initialFrom={window.from}
                     initialTo={window.to}
                     initialCc={window.cc}
                     initialBcc={window.bcc}

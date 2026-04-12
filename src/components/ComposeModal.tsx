@@ -21,6 +21,7 @@ import { ClientExpansionContext } from '@/lib/expansions/client/types'; // Legac
 import { Popover } from './ui/Popover';
 import { motion } from 'framer-motion';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
+import { AccountManager } from '@/lib/account-manager';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -45,6 +46,7 @@ function normalizeRecipientEmails(values: string[]) {
 
 interface ComposeModalProps {
     id: string;
+    initialFrom?: string;
     initialTo?: string;
     initialCc?: string;
     initialBcc?: string;
@@ -58,6 +60,7 @@ interface ComposeModalProps {
 
 export function ComposeModal({
     id,
+    initialFrom = '',
     initialTo = '',
     initialCc = '',
     initialBcc = '',
@@ -74,6 +77,8 @@ export function ComposeModal({
     const router = useRouter();
 
     const [toTags, setToTags] = useState<string[]>(initialTo ? initialTo.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const [senderOptions, setSenderOptions] = useState<string[]>([]);
+    const [fromAddress, setFromAddress] = useState(String(initialFrom || '').trim().toLowerCase());
     const [subject, setSubject] = useState(initialSubject);
     const [body, setBody] = useState(initialBody);
     const [attachments, setAttachments] = useState<any[]>(initialAttachments);
@@ -124,6 +129,45 @@ export function ComposeModal({
         };
         e.preventDefault();
     };
+
+    useEffect(() => {
+        const collectSenderOptions = () => {
+            const options = new Set<string>();
+
+            if (session?.user?.email) {
+                options.add(String(session.user.email).trim().toLowerCase());
+            }
+
+            if (initialFrom) {
+                options.add(String(initialFrom).trim().toLowerCase());
+            }
+
+            try {
+                const storedAccounts = AccountManager.getAccounts();
+                storedAccounts.forEach((account) => {
+                    const email = String(account?.email || '').trim().toLowerCase();
+                    if (email.includes('@')) {
+                        options.add(email);
+                    }
+                });
+            } catch {
+                // Ignore local storage parsing errors.
+            }
+
+            const nextOptions = Array.from(options);
+            setSenderOptions(nextOptions);
+
+            if (!fromAddress && nextOptions.length > 0) {
+                setFromAddress(nextOptions[0]);
+            }
+        };
+
+        collectSenderOptions();
+        if (typeof window !== 'undefined') {
+            window.addEventListener('account-change', collectSenderOptions);
+            return () => window.removeEventListener('account-change', collectSenderOptions);
+        }
+    }, [session?.user?.email, initialFrom, fromAddress]);
 
     useEffect(() => {
         fetch('/api/settings', { cache: 'no-store' })
@@ -189,6 +233,7 @@ export function ComposeModal({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         id: draftId,
+                        from: fromAddress || session?.user?.email,
                         to: toTags.join(', '),
                         cc: ccTags.join(', '),
                         bcc: bccTags.join(', '),
@@ -205,7 +250,7 @@ export function ComposeModal({
         return () => {
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
         };
-    }, [toTags, ccTags, bccTags, subject, body, draftId]);
+    }, [toTags, ccTags, bccTags, subject, body, draftId, fromAddress, session?.user?.email]);
 
     const syncCalendarEventsFromAttachments = async (
         currentTo: string[],
@@ -369,6 +414,7 @@ export function ComposeModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: toTags.join(', '),
+                    from: fromAddress || session?.user?.email,
                     cc: ccTags.length > 0 ? ccTags.join(', ') : undefined,
                     bcc: bccTags.length > 0 ? bccTags.join(', ') : undefined,
                     subject,
@@ -426,6 +472,7 @@ export function ComposeModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: finalTo.join(', '),
+                    from: fromAddress || session?.user?.email,
                     cc: finalCc.length > 0 ? finalCc.join(', ') : undefined,
                     bcc: finalBcc.length > 0 ? finalBcc.join(', ') : undefined,
                     subject: finalSubject,
@@ -647,7 +694,7 @@ export function ComposeModal({
         cc: ccTags,
         bcc: bccTags,
         sender: {
-            email: session?.user?.email ?? undefined,
+            email: fromAddress || session?.user?.email || undefined,
             name: session?.user?.name ?? undefined,
         },
         ...actions,
@@ -829,6 +876,27 @@ export function ComposeModal({
             {/* Form */}
             <div className="flex flex-col flex-1 h-full overflow-hidden relative">
                 <div className="px-3 py-1 flex flex-col gap-1 bg-white">
+                    <div className="flex items-center gap-2 border-b border-transparent focus-within:border-gray-200 transition-colors">
+                        <span className="text-sm font-medium text-gray-500 w-10">From</span>
+                        <div className="flex-1 py-1.5">
+                            {senderOptions.length > 1 ? (
+                                <select
+                                    value={fromAddress}
+                                    onChange={(event) => setFromAddress(event.target.value)}
+                                    className="w-full bg-transparent text-sm text-gray-700 outline-none"
+                                >
+                                    {senderOptions.map((email) => (
+                                        <option key={email} value={email}>{email}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <div className="text-sm text-gray-700 truncate">
+                                    {fromAddress || session?.user?.email || 'Unknown sender'}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
                     <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200 transition-colors">
                         <div className="pt-2">
                             <span className="text-sm font-medium text-gray-500">To</span>

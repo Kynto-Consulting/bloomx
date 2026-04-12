@@ -6,6 +6,25 @@ import { getCurrentUser } from "@/lib/session";
 import { uploadToStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 
+function extractEmailAddress(value: string): string {
+    const raw = String(value || '').trim();
+    const bracketMatch = raw.match(/<([^>]+)>/);
+    return (bracketMatch?.[1] || raw).trim().toLowerCase();
+}
+
+function normalizeMailboxIdentity(email: string): string {
+    const [localPart, domain] = String(email || '').trim().toLowerCase().split('@');
+    if (!localPart || !domain) return '';
+
+    let normalizedLocal = localPart.replace(/\./g, '');
+    const plusIndex = normalizedLocal.indexOf('+');
+    if (plusIndex !== -1) {
+        normalizedLocal = normalizedLocal.substring(0, plusIndex);
+    }
+
+    return `${normalizedLocal}@${domain}`;
+}
+
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const folder = searchParams.get('folder') || 'inbox';
@@ -13,6 +32,7 @@ export async function GET(req: NextRequest) {
     const label = searchParams.get('label');
     const page = parseInt(searchParams.get('page') || '1');
     const since = searchParams.get('since'); // Date string ISO
+    const account = String(searchParams.get('account') || '').trim().toLowerCase();
     const limit = 20;
     const skip = (page - 1) * limit;
 
@@ -71,6 +91,10 @@ export async function GET(req: NextRequest) {
                     { cleanTo: { contains: q, mode: 'insensitive' } }
                 ]
             });
+        }
+
+        if (account) {
+            whereObj.AND.push({ accountEmail: account });
         }
 
         // Advanced Filters
@@ -200,31 +224,69 @@ export async function POST(req: NextRequest) {
         let senderEmail = sessionUser.email;
 
         const user = await prisma.user.findUnique({
-            where: { email: senderEmail },
-            select: { id: true }
+            where: { id: sessionUser.id },
+            select: {
+                id: true,
+                email: true,
+                accounts: {
+                    select: {
+                        providerAccountId: true,
+                    }
+                },
+                emails: {
+                    where: {
+                        accountEmail: {
+                            not: null,
+                        }
+                    },
+                    select: {
+                        accountEmail: true,
+                    },
+                    take: 200,
+                    orderBy: {
+                        createdAt: 'desc',
+                    }
+                }
+            }
         });
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+        const allowedSenderEmails = new Set<string>([
+            user.email.toLowerCase(),
+            ...user.accounts
+                .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
+                .filter((email) => email.includes('@')),
+            ...user.emails
+                .map((email) => String(email.accountEmail || '').trim().toLowerCase())
+                .filter((email) => email.includes('@')),
+        ]);
+
+        const allowedSenderIdentities = new Set<string>(
+            Array.from(allowedSenderEmails)
+                .map(normalizeMailboxIdentity)
+                .filter(Boolean)
+        );
 
         // Allow overriding ONLY if the domain matches (for aliasing)
         // or just strictly enforce the user's email for now to prevent spoofing
         if (from) {
-            // ... existing checks ...
-            const fromEmail = from.split('@')[0];
-            const sessionEmail = sessionUser.email.split('@')[0];
-            //check the domain is the same
-            if (from.split('@')[1] !== sessionUser.email.split('@')[1]) {
-                return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+            const requestedSender = extractEmailAddress(from);
+            if (!requestedSender.includes('@')) {
+                return NextResponse.json({ error: 'Invalid sender email' }, { status: 400 });
             }
-            if (fromEmail !== sessionEmail) {
-                let cleanedFromEmail = fromEmail.replace(/\./g, '').replace(/\+/g, '');
-                let cleanedSessionEmail = sessionEmail.replace(/\./g, '').replace(/\+/g, '');
-                if (cleanedFromEmail !== cleanedSessionEmail) {
-                    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-                }
+
+            const requestedIdentity = normalizeMailboxIdentity(requestedSender);
+            const isAuthorizedSender = allowedSenderEmails.has(requestedSender)
+                || (requestedIdentity ? allowedSenderIdentities.has(requestedIdentity) : false);
+
+            if (!isAuthorizedSender) {
+                return NextResponse.json({ error: 'Unauthorized sender account' }, { status: 401 });
             }
+
+            senderEmail = requestedSender;
         }
 
-        const formattedFrom = `${senderName} <${senderEmail} > `;
+        const formattedFrom = `${senderName} <${senderEmail}>`;
 
         // ----------------------------------------------------
         // MIDDLEWARE: Pre-Send Hooks
@@ -315,6 +377,7 @@ export async function POST(req: NextRequest) {
                 userId: user.id, // Link to User
                 from: formattedFrom, // Store in "Name <email>" format
                 to: to,
+                accountEmail: senderEmail.toLowerCase(),
                 cleanTo: to.split(',').map((email: string) => { // Use same logic as before or extract helper
                     const [local, domain] = email.trim().toLowerCase().split('@');
                     if (!domain) return email.trim();
