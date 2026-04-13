@@ -83,7 +83,6 @@ export function ComposeModal({
     const [body, setBody] = useState(initialBody);
     const [attachments, setAttachments] = useState<any[]>(initialAttachments);
     const [isUploading, setIsUploading] = useState(false);
-    const [unifiedRepliesEnabled, setUnifiedRepliesEnabled] = useState(false);
 
     // Slash Commands Registry (Computed)
     const [activeSlashComponent, setActiveSlashComponent] = useState<{ Component: React.ComponentType<any>, id: string, args?: string } | null>(null);
@@ -178,20 +177,12 @@ export function ComposeModal({
                 if (groups && typeof groups === 'object') {
                     setMailGroupAliases(groups);
                 }
-
-                const mailboxModeEnabled = Boolean(data?.expansionSettings?.['core-mailbox']?.unifiedRepliesEnabled);
-                setUnifiedRepliesEnabled(mailboxModeEnabled);
-
-                if (!mailboxModeEnabled) {
-                    setFromAddress(String(session?.user?.email || initialFrom || '').trim().toLowerCase());
-                }
             })
             .catch(() => undefined);
-    }, [initialFrom, session?.user?.email]);
+    }, []);
 
-    const effectiveSenderEmail = unifiedRepliesEnabled
-        ? (fromAddress || session?.user?.email || '')
-        : (session?.user?.email || fromAddress || '');
+    // Always honor the selected/from address first so reply/forward uses the correct mailbox.
+    const effectiveSenderEmail = fromAddress || session?.user?.email || '';
 
     const resolveSenderHeaders = () => {
         const token = AccountManager.getTokenForEmail(effectiveSenderEmail);
@@ -202,7 +193,7 @@ export function ComposeModal({
         return headers;
     };
 
-    const canSwitchSender = unifiedRepliesEnabled && senderOptions.length > 1;
+    const canSwitchSender = senderOptions.length > 1;
 
     useEffect(() => {
         if (!isResizing) return;
