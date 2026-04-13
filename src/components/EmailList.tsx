@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Archive, Trash2, Star, Tag } from 'lucide-react'; // Imports for icons
 import { formatDate, cn } from '@/lib/utils';
-import { Loader2, Search, Menu, Plus, User, SlidersHorizontal, ChevronDown } from 'lucide-react';
+import { Loader2, Search, Menu, Plus, User, SlidersHorizontal, ChevronDown, Check } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCompose } from '@/contexts/ComposeContext';
 import { useCache } from '@/contexts/CacheContext';
@@ -235,6 +235,8 @@ export function EmailList() {
     const [filterSince, setFilterSince] = useState('');
     const [filterUntil, setFilterUntil] = useState('');
     const [accountFilter, setAccountFilter] = useState('');
+    const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
+    const accountMenuRef = useRef<HTMLDivElement | null>(null);
 
     const labelFilter = searchParams.get('label') || '';
     const searchFilter = searchParams.get('q') || '';
@@ -245,6 +247,30 @@ export function EmailList() {
     const accountFilterFromUrl = (searchParams.get('account') || '').trim().toLowerCase();
     const resolvedAccountFilter = accountFilterFromUrl || accountFilter;
     const effectiveAccountFilter = multiAccountEnabled ? resolvedAccountFilter : '';
+    const accountOptions = useMemo(() => {
+        const seen = new Set<string>();
+
+        return storedAccounts
+            .map((account) => String(account?.email || '').trim().toLowerCase())
+            .filter((email) => {
+                if (!email.includes('@') || seen.has(email)) {
+                    return false;
+                }
+
+                seen.add(email);
+                return true;
+            })
+            .map((email) => ({ value: email, label: email }));
+    }, [storedAccounts]);
+
+    const selectedAccountLabel = useMemo(() => {
+        if (!effectiveAccountFilter) {
+            return 'All accounts';
+        }
+
+        const selected = accountOptions.find((option) => option.value === effectiveAccountFilter);
+        return selected?.label || effectiveAccountFilter;
+    }, [accountOptions, effectiveAccountFilter]);
 
     const mailboxTargets = useMemo(() => {
         const connectedAccounts = storedAccounts.filter((account) => {
@@ -348,6 +374,21 @@ export function EmailList() {
         params.delete('id');
         router.replace(`/?${params.toString()}`);
     }, [multiAccountEnabled, accountFilterFromUrl, router, searchParams]);
+
+    useEffect(() => {
+        if (!isAccountMenuOpen) {
+            return;
+        }
+
+        const handleOutsideClick = (event: MouseEvent) => {
+            if (!accountMenuRef.current?.contains(event.target as Node)) {
+                setIsAccountMenuOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleOutsideClick);
+        return () => document.removeEventListener('mousedown', handleOutsideClick);
+    }, [isAccountMenuOpen]);
 
     const applyFilters = () => {
         const params = new URLSearchParams(searchParams);
@@ -680,6 +721,7 @@ export function EmailList() {
     const updateAccountFilter = useCallback((value: string) => {
         const normalized = value.trim().toLowerCase();
         setAccountFilter(normalized);
+        setIsAccountMenuOpen(false);
 
         if (typeof window !== 'undefined') {
             if (normalized) {
@@ -1067,23 +1109,64 @@ export function EmailList() {
                 {folder !== 'drafts' && multiAccountEnabled && storedAccounts.length > 0 && (
                     <div className="mt-2 flex items-center gap-2">
                         <label className="text-xs font-medium text-muted-foreground shrink-0">Account</label>
-                        <div className="relative min-w-[220px] max-w-full">
-                            <select
-                                value={accountFilter}
-                                onChange={(event) => updateAccountFilter(event.target.value)}
-                                className="h-9 w-full appearance-none rounded-xl border border-border bg-background/90 pl-3 pr-9 text-sm shadow-sm transition-colors hover:border-primary/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        <div ref={accountMenuRef} className="relative min-w-[220px] max-w-full">
+                            <button
+                                type="button"
+                                aria-haspopup="listbox"
+                                aria-expanded={isAccountMenuOpen}
+                                onClick={() => setIsAccountMenuOpen((previous) => !previous)}
+                                className="group h-9 w-full rounded-xl border border-border bg-gradient-to-b from-background to-muted/40 pl-3 pr-9 text-left text-sm shadow-sm transition-all hover:border-primary/40 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
                             >
-                                <option value="">All accounts</option>
-                                {storedAccounts.map((account) => {
-                                    const email = String(account?.email || '').trim().toLowerCase();
-                                    return email.includes('@') ? (
-                                        <option key={account.id} value={email}>
-                                            {email}
-                                        </option>
-                                    ) : null;
-                                })}
-                            </select>
-                            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <span className="line-clamp-1 pr-1 text-foreground">{selectedAccountLabel}</span>
+                                <ChevronDown className={cn(
+                                    'pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground transition-transform',
+                                    isAccountMenuOpen && 'rotate-180 text-foreground'
+                                )} />
+                            </button>
+
+                            {isAccountMenuOpen && (
+                                <div className="absolute top-11 z-50 w-full overflow-hidden rounded-xl border border-border/70 bg-popover/95 shadow-xl backdrop-blur">
+                                    <div className="max-h-64 overflow-y-auto p-1">
+                                        <button
+                                            type="button"
+                                            role="option"
+                                            aria-selected={!effectiveAccountFilter}
+                                            onClick={() => updateAccountFilter('')}
+                                            className={cn(
+                                                'flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-sm transition-colors',
+                                                !effectiveAccountFilter
+                                                    ? 'bg-primary text-primary-foreground'
+                                                    : 'text-foreground hover:bg-muted'
+                                            )}
+                                        >
+                                            <span>All accounts</span>
+                                            {!effectiveAccountFilter && <Check className="h-4 w-4" />}
+                                        </button>
+
+                                        {accountOptions.map((option) => {
+                                            const isSelected = effectiveAccountFilter === option.value;
+                                            return (
+                                                <button
+                                                    key={option.value}
+                                                    type="button"
+                                                    role="option"
+                                                    aria-selected={isSelected}
+                                                    onClick={() => updateAccountFilter(option.value)}
+                                                    className={cn(
+                                                        'mt-1 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-sm transition-colors',
+                                                        isSelected
+                                                            ? 'bg-primary text-primary-foreground'
+                                                            : 'text-foreground hover:bg-muted'
+                                                    )}
+                                                >
+                                                    <span className="line-clamp-1 text-left">{option.label}</span>
+                                                    {isSelected && <Check className="h-4 w-4 shrink-0" />}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
