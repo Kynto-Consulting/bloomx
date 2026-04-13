@@ -264,6 +264,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                             type="checkbox"
                                             checked={Boolean(mailboxSettings.unifiedRepliesEnabled)}
                                             onChange={(event) => {
+                                                // When disabling multi-account, clear the account filter
+                                                if (!event.target.checked && typeof window !== 'undefined') {
+                                                    window.localStorage.removeItem('bloomx:mailbox:account-filter:v1');
+                                                }
                                                 setExpansionSettings((prev: any) => ({
                                                     ...prev,
                                                     'core-mailbox': {
