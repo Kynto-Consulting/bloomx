@@ -37,8 +37,67 @@ export async function GET(req: NextRequest) {
     const limit = 20;
     const skip = (page - 1) * limit;
 
-    const user = await getCurrentUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const sessionUser = await getCurrentUser();
+    if (!sessionUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const user = await prisma.user.findUnique({
+        where: { id: sessionUser.id },
+        select: {
+            id: true,
+            email: true,
+            accounts: {
+                select: {
+                    providerAccountId: true,
+                }
+            }
+        }
+    });
+
+    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+    const accountCandidates = Array.from(new Set([
+        accountRaw,
+        accountNormalized,
+    ].filter(Boolean)));
+
+    const connectedMailboxEmails = new Set<string>([
+        user.email.toLowerCase(),
+        ...user.accounts
+            .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
+            .filter((email) => email.includes('@')),
+    ]);
+
+    let mailboxUserId = user.id;
+
+    if (accountCandidates.length > 0) {
+        const selectedAccount = accountCandidates.find((candidate) => {
+            if (connectedMailboxEmails.has(candidate)) return true;
+            const normalizedCandidate = normalizeMailboxIdentity(candidate);
+            return normalizedCandidate ? connectedMailboxEmails.has(normalizedCandidate) : false;
+        });
+
+        if (selectedAccount) {
+            const targetUser = await prisma.user.findFirst({
+                where: {
+                    OR: [
+                        { email: selectedAccount },
+                        {
+                            accounts: {
+                                some: {
+                                    providerAccountId: selectedAccount,
+                                }
+                            }
+                        }
+                    ]
+                },
+                select: { id: true }
+            });
+
+            if (targetUser) {
+                mailboxUserId = targetUser.id;
+            }
+        }
+    }
 
     // Local expansions removed.
     // const { ensureCoreExpansions, expansionRegistry } = await import('@/lib/expansions/server');
@@ -49,7 +108,7 @@ export async function GET(req: NextRequest) {
     try {
         await prisma.email.updateMany({
             where: {
-                userId: user.id,
+                userId: mailboxUserId,
                 folder: 'snoozed',
                 scheduledAt: { lte: new Date() }
             },
@@ -65,7 +124,7 @@ export async function GET(req: NextRequest) {
     try {
         const whereObj: any = {
             AND: [
-                { userId: user.id } // Force User Isolation
+                { userId: mailboxUserId } // Force mailbox isolation by selected account
             ]
         };
 
