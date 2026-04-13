@@ -15,16 +15,15 @@ export async function setSessionCookie(payload: any) {
 }
 
 export async function getSessionCookie() {
-    const cookieStore = await cookies();
-    let token = cookieStore.get(COOKIE_NAME)?.value;
+    const headersList = await headers();
+    const authHeader = headersList.get("authorization");
+    let token = authHeader && authHeader.startsWith("Bearer ")
+        ? authHeader.substring(7)
+        : null;
 
-    // Check Authorization Header if Cookie is missing or as override
     if (!token) {
-        const headersList = await headers();
-        const authHeader = headersList.get("authorization");
-        if (authHeader && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        }
+        const cookieStore = await cookies();
+        token = cookieStore.get(COOKIE_NAME)?.value || null;
     }
 
     if (!token) return null;

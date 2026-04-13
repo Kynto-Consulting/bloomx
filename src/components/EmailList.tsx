@@ -12,9 +12,12 @@ import { useCache } from '@/contexts/CacheContext';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { fetchDeduped } from '@/lib/fetchdedupe';
 import { useOffline } from '@/contexts/OfflineContext';
-import { AccountManager } from '@/lib/account-manager';
+import { AccountManager, type StoredAccount } from '@/lib/account-manager';
 
 const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
+const MAILBOX_MODE_STORAGE_KEY = 'bloomx:mailbox:mode:v1';
+
+type MailboxMode = 'single' | 'unified';
 
 interface Email {
     id: string;
@@ -70,6 +73,15 @@ function getRecipientThreadKey(email: Pick<Email, 'to' | 'cleanTo'>): string {
     return String(email.cleanTo || email.to || '').trim().toLowerCase();
 }
 
+function getEmailMergeKey(email: Email): string {
+    const from = String(email.from || '').trim().toLowerCase();
+    const recipients = extractRecipientEmails(email.cleanTo || email.to).join(',');
+    const subject = String(email.subject || '').trim().toLowerCase();
+    const snippet = String(email.snippet || '').trim().toLowerCase().slice(0, 160);
+    const createdAt = String(email.createdAt || '').trim();
+    return [from, recipients, subject, snippet, createdAt].join('|');
+}
+
 export function EmailList() {
     const searchParams = useSearchParams();
     const folder = searchParams.get('folder') || 'inbox';
@@ -92,6 +104,8 @@ export function EmailList() {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
     const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
+    const [storedAccounts, setStoredAccounts] = useState<StoredAccount[]>([]);
+    const [mailboxMode, setMailboxMode] = useState<MailboxMode>('unified');
     const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
 
     // Selection State
@@ -102,6 +116,30 @@ export function EmailList() {
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
     const [nextPage, setNextPage] = useState(2);
+    const [mailboxPaging, setMailboxPaging] = useState<Record<string, { nextPage: number; hasMore: boolean }>>({});
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+
+        const loadAccounts = () => setStoredAccounts(AccountManager.getAccounts());
+        loadAccounts();
+
+        const storedMode = window.localStorage.getItem(MAILBOX_MODE_STORAGE_KEY);
+        if (storedMode === 'single' || storedMode === 'unified') {
+            setMailboxMode(storedMode);
+        } else {
+            setMailboxMode(AccountManager.getAccounts().length > 1 ? 'unified' : 'single');
+        }
+
+        const handleAccountChange = () => loadAccounts();
+        window.addEventListener('account-change', handleAccountChange);
+        return () => window.removeEventListener('account-change', handleAccountChange);
+    }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        window.localStorage.setItem(MAILBOX_MODE_STORAGE_KEY, mailboxMode);
+    }, [mailboxMode]);
 
     const filteredEmails = activeTab === 'unread' ? emails.filter(e => !e.read) : emails;
 
@@ -185,6 +223,39 @@ export function EmailList() {
     const accountFilterFromUrl = (searchParams.get('account') || '').trim().toLowerCase();
     const resolvedAccountFilter = accountFilterFromUrl || accountFilter;
 
+    const mailboxTargets = useMemo(() => {
+        const connectedAccounts = storedAccounts.filter((account) => {
+            const email = String(account?.email || '').trim().toLowerCase();
+            return email.includes('@') && Boolean(account?.token);
+        });
+
+        if (mailboxMode === 'unified') {
+            return connectedAccounts;
+        }
+
+        const selectedAccount = resolvedAccountFilter
+            ? connectedAccounts.find((account) => String(account.email || '').trim().toLowerCase() === resolvedAccountFilter)
+            : null;
+
+        if (selectedAccount) {
+            return [selectedAccount];
+        }
+
+        const activeAccount = AccountManager.getActiveAccount();
+        if (activeAccount?.email && activeAccount.token) {
+            return [activeAccount];
+        }
+
+        return [];
+    }, [mailboxMode, storedAccounts, resolvedAccountFilter]);
+
+    const mailboxTargetSignature = useMemo(
+        () => mailboxTargets.map((account) => String(account.email || '').trim().toLowerCase()).sort().join(','),
+        [mailboxTargets]
+    );
+
+    const contextAccountFilter = mailboxMode === 'single' ? resolvedAccountFilter : '';
+
     const queryContextKey = useMemo(() => {
         return JSON.stringify({
             folder,
@@ -194,7 +265,9 @@ export function EmailList() {
             hasAttachment: hasAttachmentFilter,
             since: sinceFilter,
             until: untilFilter,
-            account: resolvedAccountFilter,
+            account: contextAccountFilter,
+            mailboxMode,
+            mailboxTargetSignature,
         });
     }, [
         folder,
@@ -204,7 +277,9 @@ export function EmailList() {
         hasAttachmentFilter,
         sinceFilter,
         untilFilter,
-        resolvedAccountFilter,
+        contextAccountFilter,
+        mailboxMode,
+        mailboxTargetSignature,
     ]);
 
     // Initialize filters from URL
@@ -238,7 +313,6 @@ export function EmailList() {
         const accountSet = new Set<string>();
 
         try {
-            const storedAccounts = AccountManager.getAccounts();
             storedAccounts.forEach((account) => {
                 const email = String(account?.email || '').trim().toLowerCase();
                 if (email.includes('@')) {
@@ -262,7 +336,7 @@ export function EmailList() {
         }
 
         setAvailableAccounts(Array.from(accountSet));
-    }, [emails, accountFilter]);
+    }, [emails, accountFilter, storedAccounts]);
 
     const applyFilters = () => {
         const params = new URLSearchParams(searchParams);
@@ -333,7 +407,7 @@ export function EmailList() {
         if (mode === 'loadMore' && (loading || loadingMore)) return;
         if (mode === 'loadMore' && !hasMore) return;
         if (mode === 'refresh' && loadingMore) return;
-        const cacheKey = `emails:${queryContextKey}`;
+        const cacheKey = `emails:${mailboxMode}:${mailboxTargetSignature || 'cookie'}:${queryContextKey}`;
 
         const requestParams = new URLSearchParams();
         requestParams.set('folder', folder);
@@ -343,8 +417,24 @@ export function EmailList() {
         if (hasAttachmentFilter) requestParams.set('hasAttachment', 'true');
         if (sinceFilter) requestParams.set('since', sinceFilter);
         if (untilFilter) requestParams.set('until', untilFilter);
-        if (resolvedAccountFilter) requestParams.set('account', resolvedAccountFilter);
-        requestParams.set('page', mode === 'loadMore' ? String(nextPage) : '1');
+
+        const buildEmailUrl = (page: number) => {
+            const params = new URLSearchParams(requestParams);
+            params.set('page', String(page));
+            return `/api/emails?${params.toString()}`;
+        };
+
+        const mergeEmailLists = (...lists: Array<Email[]>) => {
+            const byKey = new Map<string, Email>();
+            lists.flat().forEach((email) => {
+                byKey.set(getEmailMergeKey(email), email);
+            });
+
+            return Array.from(byKey.values()).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        };
+
+        const targetAccounts = mailboxTargets;
+        const canUseTokenRequests = targetAccounts.length > 0;
 
         try {
             if (mode === 'refresh') {
@@ -352,8 +442,6 @@ export function EmailList() {
             } else {
                 setLoadingMore(true);
             }
-
-            const url = `/api/emails?${requestParams.toString()}`;
 
             // 1. Initial Load / Refresh
             if (mode === 'refresh') {
@@ -367,66 +455,133 @@ export function EmailList() {
                 }
             }
 
-            // Drafts special case (no sync logic yet, just full fetch)
-            if (folder === 'drafts') {
-                if (mode === 'loadMore') return; // No pagination for drafts yet
-                const res = await fetch('/api/drafts');
-                const data = await res.json();
-                if (data.drafts) {
-                    const mapped = data.drafts.map((d: any) => ({
-                        id: d.id,
-                        from: d.to ? `To: ${d.to}` : '(No Recipients)',
-                        draftFrom: d.from,
-                        cleanTo: d.to,
-                        subject: d.subject || '(No Subject)',
-                        snippet: d.body ? d.body.replace(/<[^>]+>/g, '') : '',
-                        createdAt: d.updatedAt,
-                        read: true,
-                        to: d.to,
-                        cc: d.cc,
-                        bcc: d.bcc,
-                        originalBody: d.body,
-                        attachments: d.attachments
-                    }));
-                    setEmails(mapped);
-                    setData(cacheKey, mapped, { silent: true });
-                    setHasMore(false);
+            if (folder === 'drafts' || !canUseTokenRequests) {
+                if (folder === 'drafts') {
+                    if (mode === 'loadMore') return; // No pagination for drafts yet
+                    const res = await fetch('/api/drafts');
+                    const data = await res.json();
+                    if (data.drafts) {
+                        const mapped = data.drafts.map((d: any) => ({
+                            id: d.id,
+                            from: d.to ? `To: ${d.to}` : '(No Recipients)',
+                            draftFrom: d.from,
+                            cleanTo: d.to,
+                            subject: d.subject || '(No Subject)',
+                            snippet: d.body ? d.body.replace(/<[^>]+>/g, '') : '',
+                            createdAt: d.updatedAt,
+                            read: true,
+                            to: d.to,
+                            cc: d.cc,
+                            bcc: d.bcc,
+                            originalBody: d.body,
+                            attachments: d.attachments
+                        }));
+                        setEmails(mapped);
+                        setData(cacheKey, mapped, { silent: true });
+                        setHasMore(false);
+                    }
+                    setLoading(false);
+                    return;
                 }
-                setLoading(false);
+
+                const url = buildEmailUrl(mode === 'loadMore' ? nextPage : 1);
+                const data = await fetchDeduped(url);
+
+                if (data.emails) {
+                    if (mode === 'refresh') {
+                        const fresh = Array.isArray(data.emails) ? data.emails : [];
+                        setEmails(fresh);
+                        setData(cacheKey, fresh, { silent: true });
+
+                        const currentPage = Number(data.page || 1);
+                        const totalPages = Number(data.pages || 1);
+                        setHasMore(currentPage < totalPages);
+                        setNextPage(Math.max(currentPage + 1, 2));
+                    } else {
+                        const incoming = Array.isArray(data.emails) ? data.emails : [];
+                        if (incoming.length > 0) {
+                            const merged = mergeEmailLists(emails, incoming);
+                            setEmails(merged);
+                            setData(cacheKey, merged, { silent: true });
+
+                            const currentPage = Number(data.page || nextPage);
+                            const totalPages = Number(data.pages || currentPage);
+                            setHasMore(currentPage < totalPages);
+                            setNextPage(currentPage + 1);
+                        } else {
+                            setHasMore(false);
+                        }
+                    }
+                }
                 return;
             }
 
-            // Fetch
-            const data = await fetchDeduped(url);
+            const fetchPlan = targetAccounts.map((account) => {
+                const paging = mailboxPaging[account.email] || { nextPage: 1, hasMore: true };
+                const page = mode === 'refresh' ? 1 : paging.nextPage;
+                return { account, page, hasMore: paging.hasMore };
+            }).filter((plan) => mode === 'refresh' || plan.hasMore);
 
-            if (data.emails) {
+            if (fetchPlan.length === 0) {
+                setHasMore(false);
+                return;
+            }
+
+            const settled = await Promise.allSettled(fetchPlan.map(async ({ account, page }) => {
+                const url = buildEmailUrl(page);
+                const data = await fetchDeduped(url, {
+                    headers: {
+                        Authorization: `Bearer ${account.token}`,
+                    },
+                });
+
+                return {
+                    accountEmail: account.email,
+                    page,
+                    data,
+                };
+            }));
+
+            const responses = settled
+                .filter((result): result is PromiseFulfilledResult<{ accountEmail: string; page: number; data: any }> => result.status === 'fulfilled')
+                .map((result) => result.value);
+
+            const nextPaging: Record<string, { nextPage: number; hasMore: boolean }> = {};
+            const collectedEmails: Email[] = [];
+
+            responses.forEach(({ accountEmail, data }) => {
+                const incoming = Array.isArray(data?.emails) ? data.emails : [];
+                collectedEmails.push(...incoming);
+
+                const currentPage = Number(data?.page || 1);
+                const totalPages = Number(data?.pages || 1);
+                nextPaging[accountEmail] = {
+                    nextPage: Math.max(currentPage + 1, 2),
+                    hasMore: currentPage < totalPages,
+                };
+            });
+
+            if (Object.keys(nextPaging).length > 0) {
+                setMailboxPaging((previous) => ({
+                    ...previous,
+                    ...nextPaging,
+                }));
+            }
+
+            if (responses.length > 0) {
+                const merged = mode === 'refresh'
+                    ? mergeEmailLists(collectedEmails)
+                    : mergeEmailLists(emails, collectedEmails);
+
+                setEmails(merged);
+                setData(cacheKey, merged, { silent: true });
+                setHasMore(Object.values(nextPaging).some((entry) => entry.hasMore));
+
                 if (mode === 'refresh') {
-                    const fresh = Array.isArray(data.emails) ? data.emails : [];
-                    setEmails(fresh);
-                    setData(cacheKey, fresh, { silent: true });
-
-                    const currentPage = Number(data.page || 1);
-                    const totalPages = Number(data.pages || 1);
-                    setHasMore(currentPage < totalPages);
-                    setNextPage(Math.max(currentPage + 1, 2));
-                } else {
-                    // Load More
-                    const incoming = Array.isArray(data.emails) ? data.emails : [];
-                    if (incoming.length > 0) {
-                        const existingIds = new Set(emails.map((email) => email.id));
-                        const appendOnly = incoming.filter((email: Email) => !existingIds.has(email.id));
-                        const merged = [...emails, ...appendOnly];
-                        setEmails(merged);
-                        setData(cacheKey, merged, { silent: true }); // Update cache with extended list
-
-                        const currentPage = Number(data.page || nextPage);
-                        const totalPages = Number(data.pages || currentPage);
-                        setHasMore(currentPage < totalPages);
-                        setNextPage(currentPage + 1);
-                    } else {
-                        setHasMore(false); // End of list
-                    }
+                    setNextPage(2);
                 }
+            } else if (mode === 'loadMore') {
+                setHasMore(false);
             }
         } catch (e) {
             console.error(e);
@@ -466,6 +621,7 @@ export function EmailList() {
             setEmails([]); // Reset only on navigation
             setHasMore(true);
             setNextPage(2);
+            setMailboxPaging({});
             prevFolder.current = folder;
             prevContextKey.current = queryContextKey;
         }
@@ -897,19 +1053,49 @@ export function EmailList() {
                     )}
                 </div>
 
-                {availableAccounts.length > 0 && folder !== 'drafts' && unifiedReplyModeEnabled && (
-                    <div className="mt-2 flex items-center gap-2">
-                        <label className="text-xs font-medium text-muted-foreground">Account</label>
-                        <select
-                            value={accountFilter}
-                            onChange={(event) => updateAccountFilter(event.target.value)}
-                            className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
-                        >
-                            <option value="">All accounts</option>
-                            {availableAccounts.map((account) => (
-                                <option key={account} value={account}>{account}</option>
-                            ))}
-                        </select>
+                {storedAccounts.length > 1 && folder !== 'drafts' && (
+                    <div className="mt-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                            <label className="text-xs font-medium text-muted-foreground">Mailbox mode</label>
+                            <div className="inline-flex rounded-lg border border-input bg-background p-1 text-xs">
+                                <button
+                                    type="button"
+                                    onClick={() => setMailboxMode('single')}
+                                    className={cn(
+                                        'rounded-md px-2 py-1 transition-colors',
+                                        mailboxMode === 'single' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                >
+                                    Single account
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setMailboxMode('unified')}
+                                    className={cn(
+                                        'rounded-md px-2 py-1 transition-colors',
+                                        mailboxMode === 'unified' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
+                                    )}
+                                >
+                                    All accounts
+                                </button>
+                            </div>
+                        </div>
+
+                        {mailboxMode === 'single' && availableAccounts.length > 0 && unifiedReplyModeEnabled && (
+                            <div className="flex items-center gap-2">
+                                <label className="text-xs font-medium text-muted-foreground">Account</label>
+                                <select
+                                    value={accountFilter}
+                                    onChange={(event) => updateAccountFilter(event.target.value)}
+                                    className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                                >
+                                    <option value="">Active account</option>
+                                    {availableAccounts.map((account) => (
+                                        <option key={account} value={account}>{account}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>

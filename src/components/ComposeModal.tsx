@@ -193,6 +193,15 @@ export function ComposeModal({
         ? (fromAddress || session?.user?.email || '')
         : (session?.user?.email || fromAddress || '');
 
+    const resolveSenderHeaders = () => {
+        const token = AccountManager.getTokenForEmail(effectiveSenderEmail);
+        const headers: Record<string, string> = {};
+        if (token) {
+            headers.Authorization = `Bearer ${token}`;
+        }
+        return headers;
+    };
+
     const canSwitchSender = unifiedRepliesEnabled && senderOptions.length > 1;
 
     useEffect(() => {
@@ -244,7 +253,10 @@ export function ComposeModal({
             try {
                 const res = await fetch('/api/drafts', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...resolveSenderHeaders(),
+                    },
                     body: JSON.stringify({
                         id: draftId,
                             from: effectiveSenderEmail,
@@ -425,7 +437,10 @@ export function ComposeModal({
             const attachmentsForSend = await syncCalendarEventsFromAttachments(toTags, ccTags, attachments);
             const res = await fetch('/api/emails', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...resolveSenderHeaders(),
+                },
                 body: JSON.stringify({
                     to: toTags.join(', '),
                     from: effectiveSenderEmail,
@@ -483,7 +498,10 @@ export function ComposeModal({
             const attachmentsForSend = await syncCalendarEventsFromAttachments(finalTo, finalCc, attachments);
             const res = await fetch('/api/emails', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...resolveSenderHeaders(),
+                },
                 body: JSON.stringify({
                     to: finalTo.join(', '),
                     from: effectiveSenderEmail,

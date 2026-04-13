@@ -6,6 +6,10 @@ export interface StoredAccount {
     token: string;
 }
 
+function normalizeEmail(value: string) {
+    return String(value || '').trim().toLowerCase();
+}
+
 const STORAGE_KEY = 'bloomx_accounts';
 const ACTIVE_ACCOUNT_KEY = 'bloomx_active_account_id';
 
@@ -70,5 +74,18 @@ export const AccountManager = {
         if (!activeId) return null;
         const accounts = AccountManager.getAccounts();
         return accounts.find(a => a.id === activeId) || null;
+    },
+
+    getAccountByEmail: (email: string): StoredAccount | null => {
+        const normalized = normalizeEmail(email);
+        if (!normalized) return null;
+
+        const accounts = AccountManager.getAccounts();
+        return accounts.find((account) => normalizeEmail(account.email) === normalized) || null;
+    },
+
+    getTokenForEmail: (email: string): string | null => {
+        const account = AccountManager.getAccountByEmail(email);
+        return account?.token || null;
     }
 };
