@@ -6,6 +6,7 @@ import { resend } from '@/lib/resend';
 import { sendNewMessagePushNotification } from '@/lib/notifications/web-push';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { ParsedInvite, parseInviteFromIcs } from '@/lib/calendar/ics';
+import { classifySpamFromHeaders } from '@/lib/spam-headers';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -365,7 +366,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     console.log(`Payload Size: ${rawPayload.length} bytes`);
     console.log('-------------------------');
     const { from, to, subject, attachments, messageId } = data;
-    const headersMap = (data?.headers && typeof data.headers === 'object') ? data.headers : {};
+    let headersMap = (data?.headers && typeof data.headers === 'object') ? data.headers : {};
     const webhookEmailId = String(data?.email_id || data?.id || '').trim();
     const resolvedMessageId = String(messageId || data?.message_id || '').trim();
     let { html, text } = data;
@@ -489,8 +490,12 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 fetchedReceivingData = await res.json();
                 if (fetchedReceivingData?.html) html = fetchedReceivingData.html;
                 if (fetchedReceivingData?.text) text = fetchedReceivingData.text;
-                if (!data?.headers && fetchedReceivingData?.headers) {
-                    data.headers = fetchedReceivingData.headers;
+                if (fetchedReceivingData?.headers && typeof fetchedReceivingData.headers === 'object') {
+                    headersMap = {
+                        ...(headersMap as Record<string, unknown>),
+                        ...(fetchedReceivingData.headers as Record<string, unknown>),
+                    };
+                    data.headers = headersMap;
                 }
                 console.log('Successfully fetched missing content from Resend API.');
             } else {
@@ -611,6 +616,14 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     await Promise.all(uploads);
 
+    const spamThresholdRaw = Number.parseFloat(String(process.env.SPAM_SCORE_THRESHOLD || '60'));
+    const spamThreshold = Number.isFinite(spamThresholdRaw)
+        ? Math.min(100, Math.max(0, spamThresholdRaw))
+        : 60;
+    const autoSpamEnabled = String(process.env.ENABLE_AUTO_SPAM_DETECTION || 'true').toLowerCase() !== 'false';
+    const spamClassification = classifySpamFromHeaders(headersMap as Record<string, unknown>, spamThreshold);
+    const deliveryFolder = autoSpamEnabled && spamClassification.isSpam ? 'spam' : 'inbox';
+
     // 4. Store in Postgres (Per User)
     for (const user of users) {
         const accountEmail = resolveRecipientAccountEmail(uniqueRawRecipients, user.email);
@@ -679,7 +692,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 htmlKey: (html || (!html && !text)) ? htmlKey : null,
                 textKey: text ? textKey : null,
                 rawKey: rawKey,
-                folder: 'inbox',
+                folder: deliveryFolder,
                 attachments: {
                     create: attachmentRecords.map(a => ({ ...a, emailId: undefined })) // Create new attachment records for each email? 
                     // Attachment schema links to Email via emailId.
@@ -704,12 +717,14 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             }
         }
 
-        await sendNewMessagePushNotification(user.id, {
-            title: senderName || senderEmail,
-            body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
-            url: '/?folder=inbox',
-            tag: `email-${resolvedMessageId || uuid}-${user.id}`,
-        });
+        if (deliveryFolder === 'inbox') {
+            await sendNewMessagePushNotification(user.id, {
+                title: senderName || senderEmail,
+                body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
+                url: '/?folder=inbox',
+                tag: `email-${resolvedMessageId || uuid}-${user.id}`,
+            });
+        }
     }
 }
 
