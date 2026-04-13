@@ -5,6 +5,17 @@ import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 
+function extractRecipientToken(value?: string | null): string {
+    const source = String(value || '').trim().toLowerCase();
+    if (!source) return '';
+
+    const firstSegment = source.split(',')[0]?.trim() || '';
+    const bracketMatch = firstSegment.match(/<([^>]+)>/);
+    const token = (bracketMatch?.[1] || firstSegment).trim().toLowerCase();
+
+    return token || source;
+}
+
 async function buildInviteState(emailId: string) {
     const latestRsvp = await prisma.emailEvent.findFirst({
         where: {
@@ -126,7 +137,7 @@ export async function GET(
             };
 
             const normalized = normalizeSubject(email.subject);
-            const accountEmail = String(email.accountEmail || '').trim().toLowerCase();
+            const recipientToken = extractRecipientToken(email.cleanTo || email.to);
 
             // Only search if not empty and length sufficient to be a "topic"
             if (normalized && normalized.length >= 3) {
@@ -139,8 +150,15 @@ export async function GET(
                     ]
                 };
 
-                if (accountEmail) {
-                    threadWhere.accountEmail = accountEmail;
+                if (recipientToken) {
+                    threadWhere.AND = [
+                        {
+                            OR: [
+                                { cleanTo: { contains: recipientToken, mode: 'insensitive' } },
+                                { to: { contains: recipientToken, mode: 'insensitive' } }
+                            ]
+                        }
+                    ];
                 }
 
                 // Find all emails with this subject (ignoring prefixes)

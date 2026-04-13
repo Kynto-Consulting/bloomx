@@ -94,7 +94,12 @@ export async function GET(req: NextRequest) {
         }
 
         if (account) {
-            whereObj.AND.push({ accountEmail: account });
+            whereObj.AND.push({
+                OR: [
+                    { cleanTo: { contains: account, mode: 'insensitive' } },
+                    { to: { contains: account, mode: 'insensitive' } }
+                ]
+            });
         }
 
         // Advanced Filters
@@ -232,20 +237,6 @@ export async function POST(req: NextRequest) {
                     select: {
                         providerAccountId: true,
                     }
-                },
-                emails: {
-                    where: {
-                        accountEmail: {
-                            not: null,
-                        }
-                    },
-                    select: {
-                        accountEmail: true,
-                    },
-                    take: 200,
-                    orderBy: {
-                        createdAt: 'desc',
-                    }
                 }
             }
         });
@@ -255,9 +246,6 @@ export async function POST(req: NextRequest) {
             user.email.toLowerCase(),
             ...user.accounts
                 .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
-                .filter((email) => email.includes('@')),
-            ...user.emails
-                .map((email) => String(email.accountEmail || '').trim().toLowerCase())
                 .filter((email) => email.includes('@')),
         ]);
 
@@ -377,7 +365,6 @@ export async function POST(req: NextRequest) {
                 userId: user.id, // Link to User
                 from: formattedFrom, // Store in "Name <email>" format
                 to: to,
-                accountEmail: senderEmail.toLowerCase(),
                 cleanTo: to.split(',').map((email: string) => { // Use same logic as before or extract helper
                     const [local, domain] = email.trim().toLowerCase().split('@');
                     if (!domain) return email.trim();

@@ -53,7 +53,6 @@ model Email {
   messageId   String       @unique
   from        String
   to          String
-  accountEmail String?
   subject     String?
   snippet     String?
   htmlKey     String?
@@ -75,7 +74,6 @@ model Email {
   @@index([folder])
   @@index([createdAt])
   @@index([userId])
-  @@index([accountEmail])
 }
 
 model Attachment {

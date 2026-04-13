@@ -30,20 +30,6 @@ async function resolveAuthorizedSenders(userId: string, fallbackEmail: string): 
                 select: {
                     providerAccountId: true,
                 }
-            },
-            emails: {
-                where: {
-                    accountEmail: {
-                        not: null,
-                    }
-                },
-                select: {
-                    accountEmail: true,
-                },
-                take: 200,
-                orderBy: {
-                    createdAt: 'desc',
-                }
             }
         }
     });
@@ -52,9 +38,6 @@ async function resolveAuthorizedSenders(userId: string, fallbackEmail: string): 
         String(user?.email || fallbackEmail || '').trim().toLowerCase(),
         ...((user?.accounts || [])
             .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
-            .filter((email) => email.includes('@'))),
-        ...((user?.emails || [])
-            .map((email) => String(email.accountEmail || '').trim().toLowerCase())
             .filter((email) => email.includes('@'))),
     ]);
 

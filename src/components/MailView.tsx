@@ -24,7 +24,7 @@ interface EmailDetails {
         id: string;
         from: string;
         to: string;
-        accountEmail?: string | null;
+        cleanTo?: string | null;
         subject: string;
         createdAt: string;
         read: boolean;
@@ -366,7 +366,6 @@ export function MailView() {
 
     const handleReply = () => {
         if (!data) return;
-        const { email } = data; // Usually replies to the last one
         // If threading, we might want to reply to the specific visible message, but standard is last.
         // With reversed order (newest first), we target index 0.
         const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
@@ -376,7 +375,7 @@ export function MailView() {
         const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
 
         const replyFrom = unifiedRepliesEnabled
-            ? (targetEmail.accountEmail || AccountManager.getActiveAccount()?.email || undefined)
+            ? (AccountManager.getActiveAccount()?.email || undefined)
             : undefined;
 
         openCompose({
@@ -391,13 +390,12 @@ export function MailView() {
 
     const handleForward = () => {
         if (!data) return;
-        const { email } = data;
         // With reversed order (newest first), we target index 0.
         const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
         const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
 
         const forwardFrom = unifiedRepliesEnabled
-            ? (targetEmail.accountEmail || AccountManager.getActiveAccount()?.email || undefined)
+            ? (AccountManager.getActiveAccount()?.email || undefined)
             : undefined;
 
         openCompose({
@@ -562,11 +560,6 @@ export function MailView() {
                                                 <div className="flex flex-col min-w-0">
                                                     <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
                                                         <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
-                                                        {item.email.accountEmail && (
-                                                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                                                                {item.email.accountEmail}
-                                                            </span>
-                                                        )}
                                                         <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
                                                     </div>
                                                     <span className="text-xs text-muted-foreground sm:hidden">{formatDate(item.email.createdAt)}</span>

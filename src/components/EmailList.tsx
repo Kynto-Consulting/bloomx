@@ -19,7 +19,7 @@ const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
 interface Email {
     id: string;
     from: string;
-    accountEmail?: string | null;
+    cleanTo?: string | null;
     draftFrom?: string;
     subject: string;
     snippet: string;
@@ -48,6 +48,26 @@ function formatMobileDate(date: string) {
         hour: 'numeric',
         minute: '2-digit',
     }).format(parsed);
+}
+
+function extractRecipientEmails(value?: string | null): string[] {
+    return String(value || '')
+        .split(',')
+        .map((entry) => String(entry || '').trim().toLowerCase())
+        .map((entry) => {
+            const bracketMatch = entry.match(/<([^>]+)>/);
+            return (bracketMatch?.[1] || entry).trim().toLowerCase();
+        })
+        .filter((entry) => entry.includes('@'));
+}
+
+function getRecipientThreadKey(email: Pick<Email, 'to' | 'cleanTo'>): string {
+    const normalizedRecipients = extractRecipientEmails(email.cleanTo || email.to);
+    if (normalizedRecipients.length > 0) {
+        return normalizedRecipients.join(', ');
+    }
+
+    return String(email.cleanTo || email.to || '').trim().toLowerCase();
 }
 
 export function EmailList() {
@@ -97,7 +117,7 @@ export function EmailList() {
         filteredEmails.forEach(email => {
             const rawSubject = email.subject || '';
             const normalized = normalizeSubject(rawSubject);
-            const accountKey = String(email.accountEmail || '').toLowerCase();
+            const recipientKey = getRecipientThreadKey(email);
 
             // Don't group "No Subject" or very short subjects to avoid false positives
             if (!normalized || normalized.length < 3 || normalized === '(No Subject)') {
@@ -106,7 +126,7 @@ export function EmailList() {
                 return;
             }
 
-            const threadKey = `${accountKey}::${normalized}`;
+            const threadKey = `${recipientKey}::${normalized}`;
             if (!groups[threadKey]) {
                 groups[threadKey] = [];
             }
@@ -198,10 +218,11 @@ export function EmailList() {
         }
 
         emails.forEach((email) => {
-            const account = String(email.accountEmail || '').trim().toLowerCase();
-            if (account.includes('@')) {
-                accountSet.add(account);
-            }
+            extractRecipientEmails(email.cleanTo || email.to).forEach((recipient) => {
+                if (recipient.includes('@')) {
+                    accountSet.add(recipient);
+                }
+            });
         });
 
         if (accountFilter) {
@@ -349,7 +370,7 @@ export function EmailList() {
                         id: d.id,
                         from: d.to ? `To: ${d.to}` : '(No Recipients)',
                         draftFrom: d.from,
-                        accountEmail: d.from,
+                        cleanTo: d.to,
                         subject: d.subject || '(No Subject)',
                         snippet: d.body ? d.body.replace(/<[^>]+>/g, '') : '',
                         createdAt: d.updatedAt,
@@ -1107,14 +1128,6 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                         </div>
                     </div>
 
-                    {email.accountEmail && (
-                        <div className="mt-1">
-                            <span className="inline-flex items-center rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700">
-                                {email.accountEmail}
-                            </span>
-                        </div>
-                    )}
-
                     <div className="sm:hidden text-[10px] text-muted-foreground mt-0.5 truncate">
                         {formatMobileDate(email.createdAt)}
                     </div>
@@ -1160,7 +1173,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
         prevProps.email.id !== nextProps.email.id ||
         prevProps.email.read !== nextProps.email.read ||
         prevProps.email.starred !== nextProps.email.starred ||
-        prevProps.email.accountEmail !== nextProps.email.accountEmail ||
+        prevProps.email.cleanTo !== nextProps.email.cleanTo ||
         prevProps.email.subject !== nextProps.email.subject ||
         prevProps.email.snippet !== nextProps.email.snippet ||
         prevProps.email.createdAt !== nextProps.email.createdAt;
