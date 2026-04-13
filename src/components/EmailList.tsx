@@ -72,6 +72,7 @@ export function EmailList() {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
     const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
+    const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
 
     // Selection State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -130,6 +131,21 @@ export function EmailList() {
 
         return groupList;
     }, [filteredEmails]);
+
+    // Load multi-account setting
+    useEffect(() => {
+        const loadSettings = async () => {
+            try {
+                const response = await fetch('/api/settings', { cache: 'no-store' });
+                const data = await response.json();
+                const mailboxSettings = data?.expansionSettings?.['core-mailbox'] || {};
+                setUnifiedReplyModeEnabled(Boolean(mailboxSettings.unifiedRepliesEnabled));
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+            }
+        };
+        loadSettings();
+    }, []);
 
     // Advanced Search State
     const [showFilters, setShowFilters] = useState(false);
@@ -863,7 +879,7 @@ export function EmailList() {
                     )}
                 </div>
 
-                {availableAccounts.length > 0 && folder !== 'drafts' && (
+                {availableAccounts.length > 0 && folder !== 'drafts' && unifiedReplyModeEnabled && (
                     <div className="mt-2 flex items-center gap-2">
                         <label className="text-xs font-medium text-muted-foreground">Account</label>
                         <select

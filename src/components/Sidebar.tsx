@@ -557,26 +557,10 @@ function SidebarContent({ onClose }: SidebarProps) {
 
             {/* User Profile / Settings stub - Hidden on Mobile */}
             <div className="p-4 mt-auto hidden md:block">
-                {unifiedReplyModeEnabled && (
-                    <AccountSwitcher
-                        onOpenSettings={() => setShowSettings(true)}
-                        showConnectedCount={unifiedReplyModeEnabled}
-                    />
-                )}
-                {!unifiedReplyModeEnabled && (
-                    <button
-                        onClick={() => setShowSettings(true)}
-                        className="flex w-full items-center gap-3 hover:bg-muted/50 p-2 rounded-lg transition-colors text-left"
-                    >
-                        <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-pink-500 to-violet-500 flex items-center justify-center text-white font-medium text-xs shrink-0 border border-border">
-                            {(status === 'authenticated' ? 'U' : '?')}
-                        </div>
-                        <div className="flex flex-col overflow-hidden flex-1 min-w-0">
-                            <span className="text-sm font-medium truncate">Settings</span>
-                            <span className="text-xs text-muted-foreground truncate">Account</span>
-                        </div>
-                    </button>
-                )}
+                <AccountSwitcher
+                    onOpenSettings={() => setShowSettings(true)}
+                    showConnectedCount={unifiedReplyModeEnabled}
+                />
             </div>
 
             <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
