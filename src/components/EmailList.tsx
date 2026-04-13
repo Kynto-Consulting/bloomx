@@ -165,7 +165,6 @@ export function EmailList() {
 
     useEffect(() => {
         const urlAccount = searchParams.get('account') || '';
-        const currentFolder = searchParams.get('folder') || 'inbox';
         
         if (urlAccount) {
             const normalized = urlAccount.trim().toLowerCase();
@@ -176,24 +175,10 @@ export function EmailList() {
             return;
         }
 
-        // Clear account filter if explicitly removed from URL
-        // But only load from localStorage if we're staying in the same context
-        const storedFolder = typeof window !== 'undefined' ? window.localStorage.getItem('bloomx:current-folder-context') : null;
-        
-        if (storedFolder === currentFolder && typeof window !== 'undefined') {
+        // Si no hay URL param, cargar del localStorage (persiste al cambiar carpetas)
+        if (typeof window !== 'undefined') {
             const storedAccount = window.localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY) || '';
             setAccountFilter(storedAccount.trim().toLowerCase());
-        } else {
-            // Clear filter when navigating to different folder without explicit account param
-            setAccountFilter('');
-            if (typeof window !== 'undefined') {
-                window.localStorage.removeItem(ACCOUNT_FILTER_STORAGE_KEY);
-            }
-        }
-        
-        // Remember current folder context
-        if (typeof window !== 'undefined') {
-            window.localStorage.setItem('bloomx:current-folder-context', currentFolder);
         }
     }, [searchParams]);
 
