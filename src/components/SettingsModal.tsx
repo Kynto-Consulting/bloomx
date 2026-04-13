@@ -39,6 +39,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const [avatar, setAvatar] = useState('');
     // const [signature, setSignature] = useState(''); // Legacy signature state removed in favor of expansion settings
     const [expansionSettings, setExpansionSettings] = useState<any>({});
+    const mailboxSettings = expansionSettings['core-mailbox'] || {};
 
     const [activeTab, setActiveTab] = useState<'profile' | 'extensions'>('profile');
 
@@ -250,6 +251,36 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                             </div>
                                         </div>
                                     </div>
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+                                    <PenTool className="h-4 w-4" /> Mailbox
+                                </h3>
+                                <div className="bg-muted/30 rounded-xl p-4 space-y-4">
+                                    <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/50 bg-background p-4">
+                                        <input
+                                            type="checkbox"
+                                            checked={Boolean(mailboxSettings.unifiedRepliesEnabled)}
+                                            onChange={(event) => {
+                                                setExpansionSettings((prev: any) => ({
+                                                    ...prev,
+                                                    'core-mailbox': {
+                                                        ...(prev['core-mailbox'] || {}),
+                                                        unifiedRepliesEnabled: event.target.checked,
+                                                    }
+                                                }));
+                                            }}
+                                            className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                                        />
+                                        <div>
+                                            <div className="text-sm font-medium">Unified multi-account replies</div>
+                                            <div className="text-xs text-muted-foreground">
+                                                When enabled, Bloomx replies from the original mailbox of each thread and shows your connected account count instead of the active email.
+                                            </div>
+                                        </div>
+                                    </label>
                                 </div>
                             </div>
 

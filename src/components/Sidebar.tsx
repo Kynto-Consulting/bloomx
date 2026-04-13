@@ -61,6 +61,7 @@ function SidebarContent({ onClose }: SidebarProps) {
         scheduled: 0
     });
     const [labels, setLabels] = useState<any[]>([]);
+    const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
 
     const activeLabels = searchParams.get('label')?.split(',') || [];
 
@@ -80,8 +81,19 @@ function SidebarContent({ onClose }: SidebarProps) {
         } else {
             params.delete('label');
         }
+        const account = searchParams.get('account');
+        if (account) {
+            params.set('account', account);
+        }
         if (params.has('id')) params.delete('id'); // Deselect email on nav
 
+        return `/?${params.toString()}`;
+    };
+
+    const getFolderUrl = (folderId: string) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('folder', folderId);
+        params.delete('id');
         return `/?${params.toString()}`;
     };
 
@@ -227,8 +239,13 @@ function SidebarContent({ onClose }: SidebarProps) {
 
             // Background Refresh
             try {
-                const res = await fetch('/api/counts');
-                const data = await res.json();
+                const [countsResponse, settingsResponse] = await Promise.all([
+                    fetch('/api/counts'),
+                    fetch('/api/settings', { cache: 'no-store' }),
+                ]);
+
+                const data = await countsResponse.json();
+                const settingsData = await settingsResponse.json().catch(() => null);
 
                 if (data.counts) {
                     setCounts(data.counts);
@@ -238,6 +255,9 @@ function SidebarContent({ onClose }: SidebarProps) {
                     setLabels(data.labels);
                     setData(labelsKey, data.labels, { silent: true });
                 }
+
+                const mailboxSettings = settingsData?.expansionSettings?.['core-mailbox'] || {};
+                setUnifiedReplyModeEnabled(Boolean(mailboxSettings.unifiedRepliesEnabled));
             } catch (error) {
                 console.error('Failed to refresh counts:', error);
             }
@@ -380,7 +400,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                         />
                                                     )}
                                                     <Link
-                                                        href={`/?folder=${item.id}`}
+                                                        href={getFolderUrl(item.id)}
                                                         onClick={() => onClose?.()}
                                                         className={cn(
                                                             "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors group/item",
@@ -537,7 +557,10 @@ function SidebarContent({ onClose }: SidebarProps) {
 
             {/* User Profile / Settings stub - Hidden on Mobile */}
             <div className="p-4 mt-auto hidden md:block">
-                <AccountSwitcher onOpenSettings={() => setShowSettings(true)} />
+                <AccountSwitcher
+                    onOpenSettings={() => setShowSettings(true)}
+                    showConnectedCount={unifiedReplyModeEnabled}
+                />
             </div>
 
             <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
@@ -546,7 +569,7 @@ function SidebarContent({ onClose }: SidebarProps) {
     );
 }
 
-function AccountSwitcher({ onOpenSettings }: { onOpenSettings: () => void }) {
+function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSettings: () => void; showConnectedCount: boolean }) {
     const { data: session } = useSession();
     const [isOpen, setIsOpen] = useState(false);
     const [accounts, setAccounts] = useState<StoredAccount[]>([]);
@@ -610,6 +633,11 @@ function AccountSwitcher({ onOpenSettings }: { onOpenSettings: () => void }) {
 
     if (!session?.user) return null;
 
+    const connectedCount = accounts.length;
+    const profileText = showConnectedCount
+        ? `Estas conectado a ${connectedCount} cuenta${connectedCount === 1 ? '' : 's'}`
+        : (session.user.email || '');
+
     return (
         <div className="relative">
             <button
@@ -621,7 +649,7 @@ function AccountSwitcher({ onOpenSettings }: { onOpenSettings: () => void }) {
                 </div>
                 <div className="flex flex-col overflow-hidden flex-1">
                     <span className="text-sm font-medium truncate">{session.user.name || 'User'}</span>
-                    <span className="text-xs text-muted-foreground truncate">{session.user.email}</span>
+                    <span className="text-xs text-muted-foreground truncate">{profileText}</span>
                 </div>
                 <ChevronUp className="h-4 w-4 text-muted-foreground" />
             </button>

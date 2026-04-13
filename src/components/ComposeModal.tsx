@@ -83,6 +83,7 @@ export function ComposeModal({
     const [body, setBody] = useState(initialBody);
     const [attachments, setAttachments] = useState<any[]>(initialAttachments);
     const [isUploading, setIsUploading] = useState(false);
+    const [unifiedRepliesEnabled, setUnifiedRepliesEnabled] = useState(false);
 
     // Slash Commands Registry (Computed)
     const [activeSlashComponent, setActiveSlashComponent] = useState<{ Component: React.ComponentType<any>, id: string, args?: string } | null>(null);
@@ -177,9 +178,22 @@ export function ComposeModal({
                 if (groups && typeof groups === 'object') {
                     setMailGroupAliases(groups);
                 }
+
+                const mailboxModeEnabled = Boolean(data?.expansionSettings?.['core-mailbox']?.unifiedRepliesEnabled);
+                setUnifiedRepliesEnabled(mailboxModeEnabled);
+
+                if (!mailboxModeEnabled) {
+                    setFromAddress(String(session?.user?.email || initialFrom || '').trim().toLowerCase());
+                }
             })
             .catch(() => undefined);
-    }, []);
+    }, [initialFrom, session?.user?.email]);
+
+    const effectiveSenderEmail = unifiedRepliesEnabled
+        ? (fromAddress || session?.user?.email || '')
+        : (session?.user?.email || fromAddress || '');
+
+    const canSwitchSender = unifiedRepliesEnabled && senderOptions.length > 1;
 
     useEffect(() => {
         if (!isResizing) return;
@@ -233,7 +247,7 @@ export function ComposeModal({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         id: draftId,
-                        from: fromAddress || session?.user?.email,
+                            from: effectiveSenderEmail,
                         to: toTags.join(', '),
                         cc: ccTags.join(', '),
                         bcc: bccTags.join(', '),
@@ -250,7 +264,7 @@ export function ComposeModal({
         return () => {
             if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
         };
-    }, [toTags, ccTags, bccTags, subject, body, draftId, fromAddress, session?.user?.email]);
+    }, [toTags, ccTags, bccTags, subject, body, draftId, effectiveSenderEmail]);
 
     const syncCalendarEventsFromAttachments = async (
         currentTo: string[],
@@ -414,7 +428,7 @@ export function ComposeModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: toTags.join(', '),
-                    from: fromAddress || session?.user?.email,
+                    from: effectiveSenderEmail,
                     cc: ccTags.length > 0 ? ccTags.join(', ') : undefined,
                     bcc: bccTags.length > 0 ? bccTags.join(', ') : undefined,
                     subject,
@@ -472,7 +486,7 @@ export function ComposeModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     to: finalTo.join(', '),
-                    from: fromAddress || session?.user?.email,
+                    from: effectiveSenderEmail,
                     cc: finalCc.length > 0 ? finalCc.join(', ') : undefined,
                     bcc: finalBcc.length > 0 ? finalBcc.join(', ') : undefined,
                     subject: finalSubject,
@@ -694,7 +708,7 @@ export function ComposeModal({
         cc: ccTags,
         bcc: bccTags,
         sender: {
-            email: fromAddress || session?.user?.email || undefined,
+            email: effectiveSenderEmail || undefined,
             name: session?.user?.name ?? undefined,
         },
         ...actions,
@@ -879,7 +893,7 @@ export function ComposeModal({
                     <div className="flex items-center gap-2 border-b border-transparent focus-within:border-gray-200 transition-colors">
                         <span className="text-sm font-medium text-gray-500 w-10">From</span>
                         <div className="flex-1 py-1.5">
-                            {senderOptions.length > 1 ? (
+                            {canSwitchSender ? (
                                 <select
                                     value={fromAddress}
                                     onChange={(event) => setFromAddress(event.target.value)}
@@ -891,7 +905,7 @@ export function ComposeModal({
                                 </select>
                             ) : (
                                 <div className="text-sm text-gray-700 truncate">
-                                    {fromAddress || session?.user?.email || 'Unknown sender'}
+                                    {effectiveSenderEmail || session?.user?.email || 'Unknown sender'}
                                 </div>
                             )}
                         </div>

@@ -15,6 +15,7 @@ import { SafeIframe } from './ui/SafeIframe';
 import { ExtensionLoader } from './expansions/ExtensionLoader';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover } from './ui/Popover';
+import { AccountManager } from '@/lib/account-manager';
 
 const ENABLE_THREAD_VIEW = true;
 
@@ -79,6 +80,7 @@ export function MailView() {
     const [loading, setLoading] = useState(false);
     const [summary, setSummary] = useState<string | null>(null);
     const [inviteActionEmailId, setInviteActionEmailId] = useState<string | null>(null);
+    const [unifiedRepliesEnabled, setUnifiedRepliesEnabled] = useState(false);
 
     const [availableLabels, setAvailableLabels] = useState<any[]>([]);
     const [showLabelMenu, setShowLabelMenu] = useState(false);
@@ -173,6 +175,38 @@ export function MailView() {
         }
         fetchEmailAndLabels();
     }, [id, getData, setCacheData]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadMailboxSettings = async () => {
+            try {
+                const cached = await getData<any>('system:expansion-settings-full');
+                if (cached) {
+                    if (!cancelled) {
+                        setUnifiedRepliesEnabled(Boolean(cached?.['core-mailbox']?.unifiedRepliesEnabled));
+                    }
+                    return;
+                }
+
+                const response = await fetch('/api/settings', { cache: 'no-store' });
+                const data = await response.json().catch(() => null);
+                if (!cancelled) {
+                    setUnifiedRepliesEnabled(Boolean(data?.expansionSettings?.['core-mailbox']?.unifiedRepliesEnabled));
+                }
+            } catch {
+                if (!cancelled) {
+                    setUnifiedRepliesEnabled(false);
+                }
+            }
+        };
+
+        loadMailboxSettings();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [getData]);
 
     const handleUpdate = async (updates: any) => {
         if (!data) return;
@@ -341,9 +375,13 @@ export function MailView() {
         const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
         const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
 
+        const replyFrom = unifiedRepliesEnabled
+            ? (targetEmail.accountEmail || AccountManager.getActiveAccount()?.email || undefined)
+            : undefined;
+
         openCompose({
             id: crypto.randomUUID(),
-            from: targetEmail.accountEmail || undefined,
+            from: replyFrom,
             to: targetEmail.from,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
             body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
@@ -358,9 +396,13 @@ export function MailView() {
         const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
         const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
 
+        const forwardFrom = unifiedRepliesEnabled
+            ? (targetEmail.accountEmail || AccountManager.getActiveAccount()?.email || undefined)
+            : undefined;
+
         openCompose({
             id: crypto.randomUUID(),
-            from: targetEmail.accountEmail || undefined,
+            from: forwardFrom,
             to: '',
             subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
             body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${targetContent}`,

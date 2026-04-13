@@ -14,6 +14,8 @@ import { fetchDeduped } from '@/lib/fetchdedupe';
 import { useOffline } from '@/contexts/OfflineContext';
 import { AccountManager } from '@/lib/account-manager';
 
+const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
+
 interface Email {
     id: string;
     from: string;
@@ -135,7 +137,7 @@ export function EmailList() {
     const [filterHasAttachment, setFilterHasAttachment] = useState(false);
     const [filterSince, setFilterSince] = useState('');
     const [filterUntil, setFilterUntil] = useState('');
-    const accountFilter = searchParams.get('account') || '';
+    const [accountFilter, setAccountFilter] = useState('');
 
     // Initialize filters from URL
     useEffect(() => {
@@ -143,6 +145,23 @@ export function EmailList() {
         setFilterHasAttachment(searchParams.get('hasAttachment') === 'true');
         setFilterSince(searchParams.get('since') || '');
         setFilterUntil(searchParams.get('until') || '');
+    }, [searchParams]);
+
+    useEffect(() => {
+        const urlAccount = searchParams.get('account') || '';
+        if (urlAccount) {
+            const normalized = urlAccount.trim().toLowerCase();
+            setAccountFilter(normalized);
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem(ACCOUNT_FILTER_STORAGE_KEY, normalized);
+            }
+            return;
+        }
+
+        if (typeof window !== 'undefined') {
+            const storedAccount = window.localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY) || '';
+            setAccountFilter(storedAccount.trim().toLowerCase());
+        }
     }, [searchParams]);
 
     useEffect(() => {
@@ -243,9 +262,10 @@ export function EmailList() {
         if (mode === 'loadMore' && (loading || loadingMore)) return;
         if (mode === 'refresh' && loadingMore) return;
         const labelParam = searchParams.get('label');
-        const accountParam = searchParams.get('account');
         const cacheKeyBase = labelParam ? `emails-label-${labelParam}` : `emails-${folder}`;
-        const cacheKey = accountParam ? `${cacheKeyBase}-account-${accountParam}` : cacheKeyBase;
+        const accountParam = searchParams.get('account');
+        const effectiveAccount = accountFilter || accountParam || '';
+        const cacheKey = effectiveAccount ? `${cacheKeyBase}-account-${effectiveAccount}` : cacheKeyBase;
 
         try {
             if (mode === 'refresh') {
@@ -259,8 +279,8 @@ export function EmailList() {
             if (labelParam) {
                 url += `&label=${labelParam}`;
             }
-            if (accountParam) {
-                url += `&account=${encodeURIComponent(accountParam)}`;
+            if (effectiveAccount) {
+                url += `&account=${encodeURIComponent(effectiveAccount)}`;
             }
 
             // 1. Initial Load / Refresh
@@ -401,7 +421,7 @@ export function EmailList() {
 
         syncEmails('refresh');
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [folder, searchParams.get('label'), searchParams.get('account'), cacheVersion]);
+    }, [folder, searchParams.get('label'), accountFilter, cacheVersion]);
 
     // Scroll Handler for Infinite Scroll
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
@@ -438,6 +458,28 @@ export function EmailList() {
         params.set('id', id);
         router.push(`/?${params.toString()}`);
     }, [folder, emails, openCompose, searchParams, router]);
+
+    const updateAccountFilter = useCallback((value: string) => {
+        const normalized = value.trim().toLowerCase();
+        setAccountFilter(normalized);
+
+        if (typeof window !== 'undefined') {
+            if (normalized) {
+                window.localStorage.setItem(ACCOUNT_FILTER_STORAGE_KEY, normalized);
+            } else {
+                window.localStorage.removeItem(ACCOUNT_FILTER_STORAGE_KEY);
+            }
+        }
+
+        const params = new URLSearchParams(searchParams);
+        if (normalized) {
+            params.set('account', normalized);
+        } else {
+            params.delete('account');
+        }
+        params.delete('id');
+        router.push(`/?${params.toString()}`);
+    }, [router, searchParams]);
 
     const toggleSelection = useCallback((e: React.MouseEvent, id: string) => {
         e.stopPropagation();
@@ -809,17 +851,7 @@ export function EmailList() {
                         <label className="text-xs font-medium text-muted-foreground">Account</label>
                         <select
                             value={accountFilter}
-                            onChange={(event) => {
-                                const params = new URLSearchParams(searchParams);
-                                const value = event.target.value;
-                                if (value) {
-                                    params.set('account', value);
-                                } else {
-                                    params.delete('account');
-                                }
-                                params.delete('id');
-                                router.push(`/?${params.toString()}`);
-                            }}
+                            onChange={(event) => updateAccountFilter(event.target.value)}
                             className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
                         >
                             <option value="">All accounts</option>
