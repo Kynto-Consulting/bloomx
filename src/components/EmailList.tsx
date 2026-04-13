@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Archive, Trash2, Star, Tag } from 'lucide-react'; // Imports for icons
 import { formatDate, cn } from '@/lib/utils';
-import { Loader2, Search, Menu, Plus, User, SlidersHorizontal } from 'lucide-react';
+import { Loader2, Search, Menu, Plus, User, SlidersHorizontal, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCompose } from '@/contexts/ComposeContext';
 import { useCache } from '@/contexts/CacheContext';
@@ -15,9 +15,6 @@ import { useOffline } from '@/contexts/OfflineContext';
 import { AccountManager, type StoredAccount } from '@/lib/account-manager';
 
 const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
-const MAILBOX_MODE_STORAGE_KEY = 'bloomx:mailbox:mode:v1';
-
-type MailboxMode = 'single' | 'unified';
 
 interface Email {
     id: string;
@@ -103,10 +100,7 @@ export function EmailList() {
     const [emails, setEmails] = useState<Email[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
-    const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
     const [storedAccounts, setStoredAccounts] = useState<StoredAccount[]>([]);
-    const [mailboxMode, setMailboxMode] = useState<MailboxMode>('unified');
-    const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
 
     // Selection State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -124,22 +118,10 @@ export function EmailList() {
         const loadAccounts = () => setStoredAccounts(AccountManager.getAccounts());
         loadAccounts();
 
-        const storedMode = window.localStorage.getItem(MAILBOX_MODE_STORAGE_KEY);
-        if (storedMode === 'single' || storedMode === 'unified') {
-            setMailboxMode(storedMode);
-        } else {
-            setMailboxMode(AccountManager.getAccounts().length > 1 ? 'unified' : 'single');
-        }
-
         const handleAccountChange = () => loadAccounts();
         window.addEventListener('account-change', handleAccountChange);
         return () => window.removeEventListener('account-change', handleAccountChange);
     }, []);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        window.localStorage.setItem(MAILBOX_MODE_STORAGE_KEY, mailboxMode);
-    }, [mailboxMode]);
 
     const filteredEmails = activeTab === 'unread' ? emails.filter(e => !e.read) : emails;
 
@@ -191,21 +173,6 @@ export function EmailList() {
         return groupList;
     }, [filteredEmails]);
 
-    // Load multi-account setting
-    useEffect(() => {
-        const loadSettings = async () => {
-            try {
-                const response = await fetch('/api/settings', { cache: 'no-store' });
-                const data = await response.json();
-                const mailboxSettings = data?.expansionSettings?.['core-mailbox'] || {};
-                setUnifiedReplyModeEnabled(Boolean(mailboxSettings.unifiedRepliesEnabled));
-            } catch (error) {
-                console.error('Failed to load settings:', error);
-            }
-        };
-        loadSettings();
-    }, []);
-
     // Advanced Search State
     const [showFilters, setShowFilters] = useState(false);
     const [filterFrom, setFilterFrom] = useState('');
@@ -229,10 +196,6 @@ export function EmailList() {
             return email.includes('@') && Boolean(account?.token);
         });
 
-        if (mailboxMode === 'unified') {
-            return connectedAccounts;
-        }
-
         const selectedAccount = resolvedAccountFilter
             ? connectedAccounts.find((account) => String(account.email || '').trim().toLowerCase() === resolvedAccountFilter)
             : null;
@@ -246,15 +209,13 @@ export function EmailList() {
             return [activeAccount];
         }
 
-        return [];
-    }, [mailboxMode, storedAccounts, resolvedAccountFilter]);
+        return connectedAccounts;
+    }, [storedAccounts, resolvedAccountFilter]);
 
     const mailboxTargetSignature = useMemo(
         () => mailboxTargets.map((account) => String(account.email || '').trim().toLowerCase()).sort().join(','),
         [mailboxTargets]
     );
-
-    const contextAccountFilter = mailboxMode === 'single' ? resolvedAccountFilter : '';
 
     const queryContextKey = useMemo(() => {
         return JSON.stringify({
@@ -265,8 +226,7 @@ export function EmailList() {
             hasAttachment: hasAttachmentFilter,
             since: sinceFilter,
             until: untilFilter,
-            account: contextAccountFilter,
-            mailboxMode,
+            account: resolvedAccountFilter,
             mailboxTargetSignature,
         });
     }, [
@@ -277,8 +237,7 @@ export function EmailList() {
         hasAttachmentFilter,
         sinceFilter,
         untilFilter,
-        contextAccountFilter,
-        mailboxMode,
+        resolvedAccountFilter,
         mailboxTargetSignature,
     ]);
 
@@ -308,35 +267,6 @@ export function EmailList() {
             setAccountFilter(storedAccount.trim().toLowerCase());
         }
     }, [accountFilterFromUrl]);
-
-    useEffect(() => {
-        const accountSet = new Set<string>();
-
-        try {
-            storedAccounts.forEach((account) => {
-                const email = String(account?.email || '').trim().toLowerCase();
-                if (email.includes('@')) {
-                    accountSet.add(email);
-                }
-            });
-        } catch {
-            // Ignore local storage parsing errors.
-        }
-
-        emails.forEach((email) => {
-            extractRecipientEmails(email.cleanTo || email.to).forEach((recipient) => {
-                if (recipient.includes('@')) {
-                    accountSet.add(recipient);
-                }
-            });
-        });
-
-        if (accountFilter) {
-            accountSet.add(accountFilter.toLowerCase());
-        }
-
-        setAvailableAccounts(Array.from(accountSet));
-    }, [emails, accountFilter, storedAccounts]);
 
     const applyFilters = () => {
         const params = new URLSearchParams(searchParams);
@@ -407,7 +337,7 @@ export function EmailList() {
         if (mode === 'loadMore' && (loading || loadingMore)) return;
         if (mode === 'loadMore' && !hasMore) return;
         if (mode === 'refresh' && loadingMore) return;
-        const cacheKey = `emails:${mailboxMode}:${mailboxTargetSignature || 'cookie'}:${queryContextKey}`;
+        const cacheKey = `emails:${mailboxTargetSignature || 'cookie'}:${queryContextKey}`;
 
         const requestParams = new URLSearchParams();
         requestParams.set('folder', folder);
@@ -1053,49 +983,27 @@ export function EmailList() {
                     )}
                 </div>
 
-                {storedAccounts.length > 1 && folder !== 'drafts' && (
-                    <div className="mt-2 space-y-2">
-                        <div className="flex items-center gap-2">
-                            <label className="text-xs font-medium text-muted-foreground">Mailbox mode</label>
-                            <div className="inline-flex rounded-lg border border-input bg-background p-1 text-xs">
-                                <button
-                                    type="button"
-                                    onClick={() => setMailboxMode('single')}
-                                    className={cn(
-                                        'rounded-md px-2 py-1 transition-colors',
-                                        mailboxMode === 'single' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                                    )}
-                                >
-                                    Single account
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => setMailboxMode('unified')}
-                                    className={cn(
-                                        'rounded-md px-2 py-1 transition-colors',
-                                        mailboxMode === 'unified' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground'
-                                    )}
-                                >
-                                    All accounts
-                                </button>
-                            </div>
+                {folder !== 'drafts' && storedAccounts.length > 0 && (
+                    <div className="mt-2 flex items-center gap-2">
+                        <label className="text-xs font-medium text-muted-foreground shrink-0">Account</label>
+                        <div className="relative min-w-[220px] max-w-full">
+                            <select
+                                value={accountFilter}
+                                onChange={(event) => updateAccountFilter(event.target.value)}
+                                className="h-9 w-full appearance-none rounded-xl border border-border bg-background/90 pl-3 pr-9 text-sm shadow-sm transition-colors hover:border-primary/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
+                            >
+                                <option value="">All accounts</option>
+                                {storedAccounts.map((account) => {
+                                    const email = String(account?.email || '').trim().toLowerCase();
+                                    return email.includes('@') ? (
+                                        <option key={account.id} value={email}>
+                                            {email}
+                                        </option>
+                                    ) : null;
+                                })}
+                            </select>
+                            <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         </div>
-
-                        {mailboxMode === 'single' && availableAccounts.length > 0 && unifiedReplyModeEnabled && (
-                            <div className="flex items-center gap-2">
-                                <label className="text-xs font-medium text-muted-foreground">Account</label>
-                                <select
-                                    value={accountFilter}
-                                    onChange={(event) => updateAccountFilter(event.target.value)}
-                                    className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
-                                >
-                                    <option value="">Active account</option>
-                                    {availableAccounts.map((account) => (
-                                        <option key={account} value={account}>{account}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
                     </div>
                 )}
             </div>
