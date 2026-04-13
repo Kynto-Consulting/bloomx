@@ -101,6 +101,7 @@ export function EmailList() {
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
     const [storedAccounts, setStoredAccounts] = useState<StoredAccount[]>([]);
+    const [multiAccountEnabled, setMultiAccountEnabled] = useState(false);
 
     // Selection State
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -122,6 +123,60 @@ export function EmailList() {
         window.addEventListener('account-change', handleAccountChange);
         return () => window.removeEventListener('account-change', handleAccountChange);
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const applyMailboxSetting = (settings: any) => {
+            if (cancelled) return;
+            const enabled = Boolean(settings?.['core-mailbox']?.unifiedRepliesEnabled);
+            setMultiAccountEnabled(enabled);
+        };
+
+        const loadMailboxSetting = async () => {
+            try {
+                const cached = await getData<any>('system:expansion-settings-full');
+                if (cached) {
+                    applyMailboxSetting(cached);
+                }
+
+                const response = await fetch('/api/settings', { cache: 'no-store' });
+                const data = await response.json().catch(() => null);
+                applyMailboxSetting(data?.expansionSettings || {});
+            } catch {
+                if (!cancelled) {
+                    setMultiAccountEnabled(false);
+                }
+            }
+        };
+
+        loadMailboxSetting();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [getData]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const syncMailboxSettingFromCache = async () => {
+            try {
+                const cached = await getData<any>('system:expansion-settings-full');
+                if (!cancelled && cached) {
+                    setMultiAccountEnabled(Boolean(cached?.['core-mailbox']?.unifiedRepliesEnabled));
+                }
+            } catch {
+                // Ignore cache read errors.
+            }
+        };
+
+        syncMailboxSettingFromCache();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [cacheVersion, getData]);
 
     const filteredEmails = activeTab === 'unread' ? emails.filter(e => !e.read) : emails;
 
@@ -189,6 +244,7 @@ export function EmailList() {
     const untilFilter = searchParams.get('until') || '';
     const accountFilterFromUrl = (searchParams.get('account') || '').trim().toLowerCase();
     const resolvedAccountFilter = accountFilterFromUrl || accountFilter;
+    const effectiveAccountFilter = multiAccountEnabled ? resolvedAccountFilter : '';
 
     const mailboxTargets = useMemo(() => {
         const connectedAccounts = storedAccounts.filter((account) => {
@@ -196,21 +252,30 @@ export function EmailList() {
             return email.includes('@') && Boolean(account?.token);
         });
 
-        const selectedAccount = resolvedAccountFilter
-            ? connectedAccounts.find((account) => String(account.email || '').trim().toLowerCase() === resolvedAccountFilter)
+        const activeAccount = AccountManager.getActiveAccount();
+
+        if (!multiAccountEnabled) {
+            if (activeAccount?.email && activeAccount.token) {
+                return [activeAccount];
+            }
+
+            if (connectedAccounts.length > 0) {
+                return [connectedAccounts[0]];
+            }
+
+            return [];
+        }
+
+        const selectedAccount = effectiveAccountFilter
+            ? connectedAccounts.find((account) => String(account.email || '').trim().toLowerCase() === effectiveAccountFilter)
             : null;
 
         if (selectedAccount) {
             return [selectedAccount];
         }
 
-        const activeAccount = AccountManager.getActiveAccount();
-        if (activeAccount?.email && activeAccount.token) {
-            return [activeAccount];
-        }
-
         return connectedAccounts;
-    }, [storedAccounts, resolvedAccountFilter]);
+    }, [storedAccounts, effectiveAccountFilter, multiAccountEnabled]);
 
     const mailboxTargetSignature = useMemo(
         () => mailboxTargets.map((account) => String(account.email || '').trim().toLowerCase()).sort().join(','),
@@ -226,7 +291,7 @@ export function EmailList() {
             hasAttachment: hasAttachmentFilter,
             since: sinceFilter,
             until: untilFilter,
-            account: resolvedAccountFilter,
+            account: effectiveAccountFilter,
             mailboxTargetSignature,
         });
     }, [
@@ -237,7 +302,7 @@ export function EmailList() {
         hasAttachmentFilter,
         sinceFilter,
         untilFilter,
-        resolvedAccountFilter,
+        effectiveAccountFilter,
         mailboxTargetSignature,
     ]);
 
@@ -250,6 +315,11 @@ export function EmailList() {
     }, [searchParams]);
 
     useEffect(() => {
+        if (!multiAccountEnabled) {
+            setAccountFilter('');
+            return;
+        }
+
         const urlAccount = accountFilterFromUrl;
         
         if (urlAccount) {
@@ -266,7 +336,18 @@ export function EmailList() {
             const storedAccount = window.localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY) || '';
             setAccountFilter(storedAccount.trim().toLowerCase());
         }
-    }, [accountFilterFromUrl]);
+    }, [accountFilterFromUrl, multiAccountEnabled]);
+
+    useEffect(() => {
+        if (multiAccountEnabled || !accountFilterFromUrl) {
+            return;
+        }
+
+        const params = new URLSearchParams(searchParams);
+        params.delete('account');
+        params.delete('id');
+        router.replace(`/?${params.toString()}`);
+    }, [multiAccountEnabled, accountFilterFromUrl, router, searchParams]);
 
     const applyFilters = () => {
         const params = new URLSearchParams(searchParams);
@@ -983,7 +1064,7 @@ export function EmailList() {
                     )}
                 </div>
 
-                {folder !== 'drafts' && storedAccounts.length > 0 && (
+                {folder !== 'drafts' && multiAccountEnabled && storedAccounts.length > 0 && (
                     <div className="mt-2 flex items-center gap-2">
                         <label className="text-xs font-medium text-muted-foreground shrink-0">Account</label>
                         <div className="relative min-w-[220px] max-w-full">
