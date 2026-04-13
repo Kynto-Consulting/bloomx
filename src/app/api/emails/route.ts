@@ -32,7 +32,8 @@ export async function GET(req: NextRequest) {
     const label = searchParams.get('label');
     const page = parseInt(searchParams.get('page') || '1');
     const since = searchParams.get('since'); // Date string ISO
-    const account = String(searchParams.get('account') || '').trim().toLowerCase();
+    const accountRaw = extractEmailAddress(searchParams.get('account') || '');
+    const accountNormalized = normalizeMailboxIdentity(accountRaw);
     const limit = 20;
     const skip = (page - 1) * limit;
 
@@ -93,12 +94,19 @@ export async function GET(req: NextRequest) {
             });
         }
 
-        if (account) {
+        const accountCandidates = Array.from(new Set([
+            accountRaw,
+            accountNormalized,
+        ].filter(Boolean)));
+
+        if (accountCandidates.length > 0) {
+            const accountOrFilters = accountCandidates.flatMap((candidate) => ([
+                { cleanTo: { contains: candidate, mode: 'insensitive' } },
+                { to: { contains: candidate, mode: 'insensitive' } }
+            ]));
+
             whereObj.AND.push({
-                OR: [
-                    { cleanTo: { contains: account, mode: 'insensitive' } },
-                    { to: { contains: account, mode: 'insensitive' } }
-                ]
+                OR: accountOrFilters
             });
         }
 

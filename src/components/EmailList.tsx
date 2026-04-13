@@ -101,6 +101,7 @@ export function EmailList() {
 
     const [loadingMore, setLoadingMore] = useState(false);
     const [hasMore, setHasMore] = useState(true);
+    const [nextPage, setNextPage] = useState(2);
 
     const filteredEmails = activeTab === 'unread' ? emails.filter(e => !e.read) : emails;
 
@@ -175,6 +176,37 @@ export function EmailList() {
     const [filterUntil, setFilterUntil] = useState('');
     const [accountFilter, setAccountFilter] = useState('');
 
+    const labelFilter = searchParams.get('label') || '';
+    const searchFilter = searchParams.get('q') || '';
+    const fromFilter = searchParams.get('from') || '';
+    const hasAttachmentFilter = searchParams.get('hasAttachment') === 'true';
+    const sinceFilter = searchParams.get('since') || '';
+    const untilFilter = searchParams.get('until') || '';
+    const accountFilterFromUrl = (searchParams.get('account') || '').trim().toLowerCase();
+    const resolvedAccountFilter = accountFilterFromUrl || accountFilter;
+
+    const queryContextKey = useMemo(() => {
+        return JSON.stringify({
+            folder,
+            label: labelFilter,
+            q: searchFilter,
+            from: fromFilter,
+            hasAttachment: hasAttachmentFilter,
+            since: sinceFilter,
+            until: untilFilter,
+            account: resolvedAccountFilter,
+        });
+    }, [
+        folder,
+        labelFilter,
+        searchFilter,
+        fromFilter,
+        hasAttachmentFilter,
+        sinceFilter,
+        untilFilter,
+        resolvedAccountFilter,
+    ]);
+
     // Initialize filters from URL
     useEffect(() => {
         setFilterFrom(searchParams.get('from') || '');
@@ -184,7 +216,7 @@ export function EmailList() {
     }, [searchParams]);
 
     useEffect(() => {
-        const urlAccount = searchParams.get('account') || '';
+        const urlAccount = accountFilterFromUrl;
         
         if (urlAccount) {
             const normalized = urlAccount.trim().toLowerCase();
@@ -200,7 +232,7 @@ export function EmailList() {
             const storedAccount = window.localStorage.getItem(ACCOUNT_FILTER_STORAGE_KEY) || '';
             setAccountFilter(storedAccount.trim().toLowerCase());
         }
-    }, [searchParams]);
+    }, [accountFilterFromUrl]);
 
     useEffect(() => {
         const accountSet = new Set<string>();
@@ -299,12 +331,20 @@ export function EmailList() {
     // Main Sync Logic
     const syncEmails = async (mode: 'refresh' | 'loadMore' = 'refresh') => {
         if (mode === 'loadMore' && (loading || loadingMore)) return;
+        if (mode === 'loadMore' && !hasMore) return;
         if (mode === 'refresh' && loadingMore) return;
-        const labelParam = searchParams.get('label');
-        const cacheKeyBase = labelParam ? `emails-label-${labelParam}` : `emails-${folder}`;
-        const accountParam = searchParams.get('account');
-        const effectiveAccount = accountFilter || accountParam || '';
-        const cacheKey = effectiveAccount ? `${cacheKeyBase}-account-${effectiveAccount}` : cacheKeyBase;
+        const cacheKey = `emails:${queryContextKey}`;
+
+        const requestParams = new URLSearchParams();
+        requestParams.set('folder', folder);
+        if (labelFilter) requestParams.set('label', labelFilter);
+        if (searchFilter) requestParams.set('q', searchFilter);
+        if (fromFilter) requestParams.set('from', fromFilter);
+        if (hasAttachmentFilter) requestParams.set('hasAttachment', 'true');
+        if (sinceFilter) requestParams.set('since', sinceFilter);
+        if (untilFilter) requestParams.set('until', untilFilter);
+        if (resolvedAccountFilter) requestParams.set('account', resolvedAccountFilter);
+        requestParams.set('page', mode === 'loadMore' ? String(nextPage) : '1');
 
         try {
             if (mode === 'refresh') {
@@ -313,14 +353,7 @@ export function EmailList() {
                 setLoadingMore(true);
             }
 
-            let currentEmails = [...emails];
-            let url = `/api/emails?folder=${folder}`;
-            if (labelParam) {
-                url += `&label=${labelParam}`;
-            }
-            if (effectiveAccount) {
-                url += `&account=${encodeURIComponent(effectiveAccount)}`;
-            }
+            const url = `/api/emails?${requestParams.toString()}`;
 
             // 1. Initial Load / Refresh
             if (mode === 'refresh') {
@@ -328,36 +361,10 @@ export function EmailList() {
                 if (emails.length === 0 && folder !== 'drafts') {
                     const cached = await getData<{ emails: Email[] }>(cacheKey);
                     if (cached && Array.isArray(cached) && cached.length > 0) {
-                        currentEmails = cached;
                         setEmails(cached);
                         setLoading(false); // Show cache immediately
                     }
                 }
-                // Reload from cache if version changed (external update)
-                else if (emails.length > 0) {
-                    const cached = await getData<{ emails: Email[] }>(cacheKey);
-                    if (cached && Array.isArray(cached) && cached.length > 0) {
-                        currentEmails = cached;
-                        setEmails(cached);
-                        // Don't setLoading(false) here, we might still fetch new stuff
-                    } else {
-                        // Cache invalidated or empty -> Force full refresh
-                        currentEmails = [];
-                        setEmails([]);
-                        setLoading(true); // Force loading if cache cleared
-                    }
-                }
-
-                // Smart Fetch (Since)
-                if (currentEmails.length > 0) {
-                    const latest = currentEmails[0].createdAt;
-                    url += `&since=${latest}`;
-                }
-            }
-            // 2. Load More (Pagination)
-            else if (mode === 'loadMore' && emails.length > 0) {
-                const oldest = emails[emails.length - 1].createdAt;
-                url += `&until=${oldest}`;
             }
 
             // Drafts special case (no sync logic yet, just full fetch)
@@ -394,20 +401,28 @@ export function EmailList() {
 
             if (data.emails) {
                 if (mode === 'refresh') {
-                    if (data.emails.length > 0) {
-                        // Merge New + Current
-                        const newIds = new Set(data.emails.map((e: any) => e.id));
-                        const merged = [...data.emails, ...currentEmails.filter(e => !newIds.has(e.id))];
-                        setEmails(merged);
-                        setData(cacheKey, merged, { silent: true });
-                    }
-                    // If refresh returns 0, we are up to date.
+                    const fresh = Array.isArray(data.emails) ? data.emails : [];
+                    setEmails(fresh);
+                    setData(cacheKey, fresh, { silent: true });
+
+                    const currentPage = Number(data.page || 1);
+                    const totalPages = Number(data.pages || 1);
+                    setHasMore(currentPage < totalPages);
+                    setNextPage(Math.max(currentPage + 1, 2));
                 } else {
                     // Load More
-                    if (data.emails.length > 0) {
-                        const merged = [...emails, ...data.emails];
+                    const incoming = Array.isArray(data.emails) ? data.emails : [];
+                    if (incoming.length > 0) {
+                        const existingIds = new Set(emails.map((email) => email.id));
+                        const appendOnly = incoming.filter((email: Email) => !existingIds.has(email.id));
+                        const merged = [...emails, ...appendOnly];
                         setEmails(merged);
                         setData(cacheKey, merged, { silent: true }); // Update cache with extended list
+
+                        const currentPage = Number(data.page || nextPage);
+                        const totalPages = Number(data.pages || currentPage);
+                        setHasMore(currentPage < totalPages);
+                        setNextPage(currentPage + 1);
                     } else {
                         setHasMore(false); // End of list
                     }
@@ -441,26 +456,23 @@ export function EmailList() {
 
     // Track previous nav state to avoid clearing on cache updates
     const prevFolder = useRef(folder);
-    const prevLabel = useRef(searchParams.get('label'));
-    const prevAccount = useRef(searchParams.get('account'));
+    const prevContextKey = useRef(queryContextKey);
 
     // Initial Sync on Mount/Folder Change/Label Change
     useEffect(() => {
-        const currentLabel = searchParams.get('label');
-        const currentAccount = searchParams.get('account');
-        const hasNavigated = folder !== prevFolder.current || currentLabel !== prevLabel.current || currentAccount !== prevAccount.current;
+        const hasNavigated = folder !== prevFolder.current || queryContextKey !== prevContextKey.current;
 
         if (hasNavigated) {
             setEmails([]); // Reset only on navigation
             setHasMore(true);
+            setNextPage(2);
             prevFolder.current = folder;
-            prevLabel.current = currentLabel;
-            prevAccount.current = currentAccount;
+            prevContextKey.current = queryContextKey;
         }
 
         syncEmails('refresh');
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [folder, searchParams.get('label'), accountFilter, cacheVersion]);
+    }, [folder, queryContextKey, cacheVersion]);
 
     // Scroll Handler for Infinite Scroll
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
