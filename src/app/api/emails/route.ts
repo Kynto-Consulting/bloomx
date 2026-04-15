@@ -243,7 +243,7 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { to, subject, html, text, from, cc, bcc, attachments, scheduledAt } = body;
+        const { to, subject, html, text, from, cc, bcc, attachments, scheduledAt, replyTo, reply_to } = body;
         const timestamp = Date.now();
 
         const processedAttachments = await Promise.all((attachments || []).map(async (att: any, index: number) => {
@@ -397,6 +397,11 @@ export async function POST(req: NextRequest) {
             attachments: resendAttachments.length > 0 ? resendAttachments : undefined
         };
 
+        const requestedReplyTo = extractEmailAddress(replyTo || reply_to || '');
+        if (requestedReplyTo.includes('@')) {
+            payload.reply_to = [requestedReplyTo];
+        }
+
         if (scheduledAt) {
             payload.scheduledAt = scheduledAt;
         }
@@ -432,6 +437,7 @@ export async function POST(req: NextRequest) {
                 userId: user.id, // Link to User
                 from: formattedFrom, // Store in "Name <email>" format
                 to: to,
+                replyTo: requestedReplyTo.includes('@') ? requestedReplyTo : null,
                 cleanTo: to.split(',').map((email: string) => { // Use same logic as before or extract helper
                     const [local, domain] = email.trim().toLowerCase().split('@');
                     if (!domain) return email.trim();

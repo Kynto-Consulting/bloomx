@@ -25,6 +25,7 @@ interface EmailDetails {
         from: string;
         to: string;
         cleanTo?: string | null;
+        replyTo?: string | null;
         subject: string;
         createdAt: string;
         read: boolean;
@@ -366,13 +367,14 @@ export function MailView() {
 
         const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
         const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
+        const replyTarget = targetEmail.replyTo || targetEmail.from;
 
         const replyFrom = resolveSenderFromEmail(targetEmail);
 
         openCompose({
             id: crypto.randomUUID(),
             from: replyFrom,
-            to: targetEmail.from,
+            to: replyTarget,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
             body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
             minimized: false

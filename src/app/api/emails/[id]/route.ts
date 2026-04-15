@@ -5,6 +5,43 @@ import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 
+function extractMailboxEmail(value: unknown): string {
+    if (!value) return '';
+
+    if (typeof value === 'object') {
+        const email = String((value as any)?.email || '').trim().toLowerCase();
+        if (email.includes('@')) {
+            return email;
+        }
+    }
+
+    const raw = String(value || '').trim();
+    const bracketMatch = raw.match(/<([^>]+)>/);
+    const candidate = (bracketMatch?.[1] || raw).trim().toLowerCase();
+    return candidate.includes('@') ? candidate : '';
+}
+
+function pickReplyToCandidate(data: any): unknown {
+    const payloadReplyTo = data?.reply_to;
+    if (Array.isArray(payloadReplyTo) && payloadReplyTo.length > 0) {
+        return payloadReplyTo[0];
+    }
+
+    if (payloadReplyTo) {
+        return payloadReplyTo;
+    }
+
+    const headers = data?.headers;
+    if (headers && typeof headers === 'object') {
+        return (headers as any)['reply-to']
+            || (headers as any)['Reply-To']
+            || (headers as any)['reply_to']
+            || (headers as any)['Reply_To'];
+    }
+
+    return null;
+}
+
 function extractRecipientToken(value?: string | null): string {
     const source = String(value || '').trim().toLowerCase();
     if (!source) return '';
@@ -67,6 +104,7 @@ async function buildEmailPayload(email: any, content: string, signedAttachments:
     return {
         email: {
             ...email,
+            replyTo: email.replyTo || null,
             attachments: signedAttachments,
         },
         content,
@@ -124,6 +162,41 @@ export async function GET(
             }));
         };
 
+        const replyToCache = new Map<string, string | null>();
+        const resolveReplyTo = async (e: any): Promise<string | null> => {
+            const persistedReplyTo = extractMailboxEmail(e?.replyTo);
+            if (persistedReplyTo) {
+                return persistedReplyTo;
+            }
+
+            const rawKey = String(e?.rawKey || '').trim();
+            if (!rawKey) {
+                return null;
+            }
+
+            if (replyToCache.has(rawKey)) {
+                return replyToCache.get(rawKey) || null;
+            }
+
+            try {
+                const rawPayload = await getFromStorage(rawKey);
+                if (!rawPayload) {
+                    replyToCache.set(rawKey, null);
+                    return null;
+                }
+
+                const parsed = JSON.parse(rawPayload);
+                const dataNode = parsed?.data || parsed;
+                const candidate = pickReplyToCandidate(dataNode);
+                const replyTo = extractMailboxEmail(candidate) || null;
+                replyToCache.set(rawKey, replyTo);
+                return replyTo;
+            } catch {
+                replyToCache.set(rawKey, null);
+                return null;
+            }
+        };
+
         content = await fetchContent(email);
         const attachmentsWithUrls = await signAttachments(email.attachments ?? []);
 
@@ -177,12 +250,16 @@ export async function GET(
                 threadEmails = await Promise.all(pEmails.map(async (e) => {
                     const c = await fetchContent(e);
                     const atts = await signAttachments(e.attachments ?? []);
-                    return buildEmailPayload(e, c, atts);
+                    const payload = await buildEmailPayload(e, c, atts);
+                    payload.email.replyTo = await resolveReplyTo(e);
+                    return payload;
                 }));
             }
         }
 
         const emailPayload = await buildEmailPayload(email, content, attachmentsWithUrls);
+        const emailReplyTo = await resolveReplyTo(email);
+        emailPayload.email.replyTo = emailReplyTo;
 
         return NextResponse.json({
             ...emailPayload,

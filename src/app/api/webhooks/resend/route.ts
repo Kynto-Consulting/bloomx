@@ -386,7 +386,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     const replyToCandidate = Array.isArray(data?.reply_to) && data.reply_to.length > 0
         ? data.reply_to[0]
-        : headersMap['reply-to'];
+        : (headersMap['reply-to'] || headersMap['Reply-To'] || headersMap['reply_to']);
 
     // Parse sender using payload + headers to support calendar providers like Google.
     const fromMailbox = parseMailbox(from || headersMap.from || headersMap.sender);
@@ -399,6 +399,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     const senderEmail = senderMailbox.email || 'unknown@unknown.local';
     const senderName = senderMailbox.name || null;
+    const replyToEmail = replyToMailbox.email || null;
     const formattedFrom = senderName ? `${senderName} <${senderEmail}>` : senderEmail;
 
     // Use RAW for storage (Dedupe case-sensitive or insensitive? Let's keep it exact as received)
@@ -660,6 +661,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 userId: user.id, // Assign to correct user
                 from: formattedFrom,
                 to: toField,
+                replyTo: replyToEmail,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
                 messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid), // Ensure unique messageId per record if multipule users? 
