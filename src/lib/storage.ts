@@ -120,23 +120,18 @@ export async function deleteFromStorage(key: string) {
     }
 }
 
-export async function getSignedDownloadUrl(key: string) {
-    if (isS3Configured) {
-        try {
-            const command = new GetObjectCommand({
-                Bucket: BUCKET,
-                Key: key,
-            });
-            return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-        } catch (error) {
-            console.error("Error generating signed URL:", error);
-            return null;
-        }
-    } else {
-        // Local Fallback - Fake URL? 
-        // We can't serve it directly unless we have a route.
-        // For secure messages, we don't use this, so we can return null or a fake local path.
-        return null;
+export async function getSignedDownloadUrl(key: string, filename?: string) {
+    const baseUrl = env.NEXT_PUBLIC_APP_URL || '';
+    // Normalize filename for the URL query param to avoid encoding issues
+    const safeFilename = filename ? filename.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9.\-_]/g, '_') : undefined;
+    
+    // Serve via internal proxy to avoid Outlook Safelinks corrupting long S3 signatures 
+    // and to handle byte-range requests properly.
+    let url = `${baseUrl.replace(/\/$/, '')}/api/assets/${key}`;
+    if (safeFilename) {
+        url += `?filename=${encodeURIComponent(safeFilename)}`;
     }
+    
+    return url;
 }
 

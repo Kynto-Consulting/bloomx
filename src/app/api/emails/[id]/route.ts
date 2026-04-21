@@ -155,7 +155,7 @@ export async function GET(
         const signAttachments = async (list: any[]) => {
             return Promise.all(list.map(async (att) => {
                 if (att.key) {
-                    const url = await import('@/lib/storage').then(m => m.getSignedDownloadUrl(att.key));
+                    const url = await import('@/lib/storage').then(m => m.getSignedDownloadUrl(att.key, att.filename));
                     return { ...att, url };
                 }
                 return att;

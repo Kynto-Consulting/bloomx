@@ -28,6 +28,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
         const command = new GetObjectCommand({
             Bucket: BUCKET,
             Key: key,
+            Range: req.headers.get('range') || undefined,
         });
 
         // 2. Fetch from S3
@@ -38,6 +39,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
         const headers = new Headers();
         headers.set('Content-Type', response.ContentType || 'application/octet-stream');
         headers.set('Cache-Control', 'public, max-age=31536000, immutable'); // Cache aggressively
+        
+        let filename = req.nextUrl.searchParams.get('filename') || key.split('/').pop() || 'download';
+        // Normalize filename to prevent Outlook/Acrobat decoding errors
+        filename = filename.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9.\-_]/g, '_');
+        
+        headers.set('Content-Disposition', `attachment; filename="${filename}"`);
 
         if (response.ContentLength) {
             headers.set('Content-Length', response.ContentLength.toString());
@@ -47,18 +54,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
         // In Next.js App Router (Node runtime), response.Body is a generic stream.
         // We can pass it directly to NextResponse if it's compatible, or read it.
 
-        // This 'transformToWebStream' might be needed if running on Edge, but on Node we can try passing the byte array or stream.
-        // Easiest robust way for small-ish assets (images):
-        const buffer = await response.Body?.transformToByteArray();
+        // Stream directly instead of buffering in memory
+        const stream = response.Body?.transformToWebStream();
 
-        if (!buffer) {
+        if (!stream) {
             return NextResponse.json({ error: 'Empty file' }, { status: 404 });
         }
 
-        // Fix Type Error: NextResponse ctor expects BodyInit which includes Uint8Array in standard definitions but TS might be strict here.
-        // Casting or using Buffer.from() wraps it safely for Node environment.
-        return new NextResponse(Buffer.from(buffer), {
-            status: 200,
+        const status = response.$metadata?.httpStatusCode || 200;
+        if (response.ContentRange) {
+            headers.set('Content-Range', response.ContentRange);
+            headers.set('Accept-Ranges', 'bytes');
+        }
+
+        return new NextResponse(stream, {
+            status,
             headers,
         });
 
