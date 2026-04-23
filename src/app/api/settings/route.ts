@@ -31,10 +31,13 @@ export async function GET(req: NextRequest) {
         const rawSettings = user?.expansionSettings || {};
         const decryptedSettings = decryptObject(rawSettings);
 
+        const isGoogleMeetAvailable = isGoogleLinked || Boolean(process.env.GOOGLE_MEET_ADMIN_REFRESH_TOKEN);
+
         return NextResponse.json({
             signature: user?.signature || '',
             expansionSettings: decryptedSettings,
-            isGoogleLinked
+            isGoogleLinked,
+            isGoogleMeetAvailable,
         });
     } catch (error) {
         return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });

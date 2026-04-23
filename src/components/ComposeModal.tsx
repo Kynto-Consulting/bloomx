@@ -97,6 +97,8 @@ export function ComposeModal({
     const [sending, setSending] = useState(false);
     const [draftId, setDraftId] = useState(initialDraftId);
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
+    const [isGoogleLinked, setIsGoogleLinked] = useState(false);
+    const [isGoogleMeetAvailable, setIsGoogleMeetAvailable] = useState(false);
 
     // Track if user maximized the window manually (custom state, separate from minimize)
     const [maximized, setMaximized] = useState(false);
@@ -177,6 +179,8 @@ export function ComposeModal({
                 if (groups && typeof groups === 'object') {
                     setMailGroupAliases(groups);
                 }
+                setIsGoogleLinked(Boolean(data?.isGoogleLinked));
+                setIsGoogleMeetAvailable(Boolean(data?.isGoogleMeetAvailable));
             })
             .catch(() => undefined);
     }, []);
@@ -720,6 +724,8 @@ export function ComposeModal({
             email: effectiveSenderEmail || undefined,
             name: session?.user?.name ?? undefined,
         },
+        isGoogleLinked,
+        isGoogleMeetAvailable,
         ...actions,
         toast: (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
             if (type === 'success') toast.success(msg);

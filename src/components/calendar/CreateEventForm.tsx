@@ -63,6 +63,8 @@ export function CreateEventForm({
     const [attendeeTags, setAttendeeTags] = useState<string[]>(initialAttendees);
     const [attendeeDetails, setAttendeeDetails] = useState<EventAttendee[]>(initialAttendeeDetails);
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
+    const [isGoogleLinked, setIsGoogleLinked] = useState(false);
+    const [isGoogleMeetAvailable, setIsGoogleMeetAvailable] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isInviting, setIsInviting] = useState(false);
 
@@ -187,6 +189,8 @@ export function CreateEventForm({
                 if (groups && typeof groups === 'object') {
                     setMailGroupAliases(groups);
                 }
+                setIsGoogleLinked(Boolean(data?.isGoogleLinked));
+                setIsGoogleMeetAvailable(Boolean(data?.isGoogleMeetAvailable));
             })
             .catch(() => undefined);
     }, []);
@@ -369,6 +373,8 @@ export function CreateEventForm({
                                     openOverlay: expansionUI?.openModal,
                                     close: expansionUI?.closeModal,
                                     onClose: expansionUI?.closeModal,
+                                    isGoogleLinked,
+                                    isGoogleMeetAvailable,
                                 }}
                             />
                         </div>
