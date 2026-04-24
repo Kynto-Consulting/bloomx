@@ -23,6 +23,83 @@ function unfoldIcs(source: string) {
     return String(source || '').replace(/\r?\n[ \t]/g, '');
 }
 
+function extractIcsDateField(source: string, key: string) {
+    const unfolded = unfoldIcs(source);
+    const match = unfolded.match(new RegExp(`^${key}([^:]*):(.+)$`, 'im'));
+    if (!match?.[2]) {
+        return null;
+    }
+
+    const params = String(match[1] || '');
+    const value = match[2].trim();
+    const tzMatch = params.match(/TZID=([^;:]+)/i);
+
+    return {
+        value,
+        timeZone: tzMatch?.[1]?.trim().replace(/^"|"$/g, ''),
+    };
+}
+
+function parseIcsLocalDateParts(value: string) {
+    const match = String(value || '').trim().match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?$/);
+    if (!match) {
+        return null;
+    }
+
+    return {
+        year: Number(match[1]),
+        month: Number(match[2]),
+        day: Number(match[3]),
+        hour: Number(match[4]),
+        minute: Number(match[5]),
+        second: Number(match[6] || '0'),
+    };
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+    });
+
+    const parts = formatter.formatToParts(date);
+    const year = Number(parts.find((part) => part.type === 'year')?.value || '0');
+    const month = Number(parts.find((part) => part.type === 'month')?.value || '1');
+    const day = Number(parts.find((part) => part.type === 'day')?.value || '1');
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value || '0');
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value || '0');
+    const second = Number(parts.find((part) => part.type === 'second')?.value || '0');
+
+    const asUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    return asUtc - date.getTime();
+}
+
+function toDateInTimeZone(parts: ReturnType<typeof parseIcsLocalDateParts>, timeZone: string) {
+    if (!parts) {
+        return null;
+    }
+
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone }).format(new Date());
+    } catch {
+        return null;
+    }
+
+    const guess = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second));
+    const firstOffset = getTimeZoneOffsetMs(guess, timeZone);
+    const firstPass = new Date(guess.getTime() - firstOffset);
+    const secondOffset = getTimeZoneOffsetMs(firstPass, timeZone);
+    const parsed = new Date(guess.getTime() - secondOffset);
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function extractIcsValue(source: string, key: string) {
     const unfolded = unfoldIcs(source);
     const match = unfolded.match(new RegExp(`^${key}[^:]*:(.+)$`, 'im'));
@@ -59,7 +136,7 @@ export function extractDisplayName(value: string) {
     return extractEmail(normalized);
 }
 
-export function formatInviteDate(value: string) {
+export function formatInviteDate(value: string, timeZone?: string) {
     if (!value) return '';
 
     const trimmed = value.trim();
@@ -73,6 +150,14 @@ export function formatInviteDate(value: string) {
     }
 
     const [, year, month, day, hour, minute, second = '00', isUtc] = match;
+
+    if (!isUtc && timeZone) {
+        const zoned = toDateInTimeZone(parseIcsLocalDateParts(trimmed), timeZone);
+        if (zoned) {
+            return zoned.toISOString();
+        }
+    }
+
     const isoValue = isUtc
         ? `${year}-${month}-${day}T${hour}:${minute}:${second}Z`
         : `${year}-${month}-${day}T${hour}:${minute}:${second}`;
@@ -127,13 +212,16 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
         .filter(Boolean) as ParsedInvite['attendees'];
 
     const organizerLine = extractIcsValue(source, 'ORGANIZER');
+    const startsAtField = extractIcsDateField(source, 'DTSTART');
+    const endsAtField = extractIcsDateField(source, 'DTEND');
+
     const parsed = {
         uid: extractIcsValue(source, 'UID') || undefined,
         summary: extractIcsValue(source, 'SUMMARY') || undefined,
         description: extractIcsValue(source, 'DESCRIPTION') || undefined,
         location: extractIcsValue(source, 'LOCATION') || undefined,
-        startsAt: formatInviteDate(extractIcsValue(source, 'DTSTART')) || undefined,
-        endsAt: formatInviteDate(extractIcsValue(source, 'DTEND')) || undefined,
+        startsAt: formatInviteDate(startsAtField?.value || '', startsAtField?.timeZone) || undefined,
+        endsAt: formatInviteDate(endsAtField?.value || '', endsAtField?.timeZone) || undefined,
         method: (extractIcsValue(source, 'METHOD') || '').toUpperCase() || undefined,
         sequence: Number.parseInt(extractIcsValue(source, 'SEQUENCE') || '0', 10),
         organizerEmail: extractEmail(organizerLine) || undefined,

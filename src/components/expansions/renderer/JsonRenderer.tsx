@@ -86,19 +86,69 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
         }));
     };
 
+    const toIsoIfValid = useCallback((value: any) => {
+        const raw = String(value ?? '').trim();
+        if (!raw) return '';
+
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) {
+            return raw;
+        }
+
+        return parsed.toISOString();
+    }, []);
+
     const buildMountContext = (field: any) => {
         const fieldName = String(field?.name || 'value');
         const setterName = field.contextSetter || `set${fieldName.charAt(0).toUpperCase()}${fieldName.slice(1)}`;
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const startsAtValue = formValues.startsAt || context?.startsAt;
+        const endsAtValue = formValues.endsAt || context?.endsAt;
 
         return {
             ...context,
             formData: formValues,
             eventTitle: formValues.title || context?.eventTitle,
-            startsAt: formValues.startsAt || context?.startsAt,
-            endsAt: formValues.endsAt || context?.endsAt,
+            startsAt: startsAtValue,
+            endsAt: endsAtValue,
+            startsAtIso: toIsoIfValid(startsAtValue),
+            endsAtIso: toIsoIfValid(endsAtValue),
+            timeZone,
             currentLocation: formValues.location || context?.currentLocation || '',
             [setterName]: (value: any) => setFieldValue(fieldName, value),
         };
+    };
+    const handleInternalSubmit = () => {
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const submissionData: Record<string, any> = {
+            ...formValues,
+            timeZone,
+            timezone: timeZone,
+            submittedAt: new Date().toISOString(),
+        };
+
+        for (const field of fields) {
+            if (field?.type !== 'datetime-local' || !field?.name) {
+                continue;
+            }
+
+            const fieldName = String(field.name);
+            const rawValue = String(formValues[fieldName] ?? '').trim();
+            if (!rawValue) {
+                continue;
+            }
+
+            const parsed = new Date(rawValue);
+            if (Number.isNaN(parsed.getTime())) {
+                continue;
+            }
+
+            submissionData[fieldName] = parsed.toISOString();
+            submissionData[`${fieldName}Local`] = rawValue;
+            submissionData[`${fieldName}TimeZone`] = timeZone;
+        }
+
+        handleAction(onSubmit, null, { formData: submissionData });
     };
 
     return (
@@ -128,6 +178,25 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
                             <option key={opt.value} value={opt.value}>{opt.label}</option>
                         ))}
                     </select>
+                ) : field.type === 'checkbox' ? (
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="checkbox"
+                            name={field.name}
+                            checked={Boolean(fieldValue)}
+                            disabled={field.readOnly}
+                            onChange={(e) => setFieldValue(field.name, e.target.checked)}
+                        />
+                        <span>{field.label}</span>
+                    </div>
+                ) : field.type === 'datetime-local' ? (
+                    <input
+                        type="datetime-local"
+                        name={field.name}
+                        value={fieldValue}
+                        disabled={field.readOnly}
+                        onChange={(e) => setFieldValue(field.name, e.target.value)}
+                    />
                 ) : (
                     <Input
                         type={field.type || 'text'}
@@ -168,7 +237,7 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
                 );
             })}
 
-            <Button onClick={() => handleAction(onSubmit, null, { formData: formValues })}>
+            <Button onClick={handleInternalSubmit}>
                 {submitLabel || 'Submit'}
             </Button>
         </div>

@@ -131,16 +131,33 @@ export function CreateEventForm({
         return normalizeTags(attendeeTags).filter((tag) => tag.includes('@'));
     }, [attendeeTags, normalizeTags]);
 
+    const toIsoIfValid = useCallback((value?: string) => {
+        const raw = String(value || '').trim();
+        if (!raw) return '';
+        const parsed = new Date(raw);
+        if (Number.isNaN(parsed.getTime())) {
+            return raw;
+        }
+        return parsed.toISOString();
+    }, []);
+
     const buildEventPayload = useCallback((targetCalendarId?: string) => {
+        const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const startsAtIso = toIsoIfValid(startsAt);
+        const endsAtIso = toIsoIfValid(endsAt);
+
         return {
             calendarId: targetCalendarId,
             title: title || 'New Event',
             location,
-            startsAt,
-            endsAt,
+            startsAt: startsAtIso,
+            endsAt: endsAtIso,
+            startsAtLocal: startsAt,
+            endsAtLocal: endsAt,
+            timeZone,
             attendees: getAttendeeList(),
         };
-    }, [title, location, startsAt, endsAt, getAttendeeList]);
+    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid]);
 
     const markAttendeesAsPending = useCallback((emails: string[]) => {
         const normalizedEmails = normalizeTags(emails);
@@ -367,6 +384,9 @@ export function CreateEventForm({
                                     eventTitle: title,
                                     startsAt,
                                     endsAt,
+                                    startsAtIso: toIsoIfValid(startsAt),
+                                    endsAtIso: toIsoIfValid(endsAt),
+                                    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
                                     currentLocation: location,
                                     attendees: attendeeTags.filter((tag) => tag.includes('@')),
                                     setLocation,
