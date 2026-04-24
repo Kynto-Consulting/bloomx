@@ -979,32 +979,34 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
         case 'CONDITIONAL':
             if (resolvedProps.condition) {
-                return <>{resolvedProps.true?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                return <>{(props as any).true?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
             } else {
-                return <>{resolvedProps.false?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                return <>{(props as any).false?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
             }
         case 'LINK':
             return <a href={resolvedProps.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{resolvedProps.label}</a>;
-        case 'TABS':
-            const tabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
-            if (tabs.length === 0) {
+        case 'TABS': {
+            const rawTabs = Array.isArray(props.tabs) ? props.tabs : [];
+            const resolvedTabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
+            if (rawTabs.length === 0) {
                 return null;
             }
 
             return (
-                <Tabs defaultValue={tabs[0]?.label}>
+                <Tabs defaultValue={resolvedTabs[0]?.label || rawTabs[0]?.label}>
                     <TabsList>
-                        {tabs.map((tab: any, i: number) => (
+                        {resolvedTabs.map((tab: any, i: number) => (
                             <TabsTrigger key={i} value={tab.label}>{tab.label}</TabsTrigger>
                         ))}
                     </TabsList>
-                    {tabs.map((tab: any, i: number) => (
-                        <TabsContent key={i} value={tab.label}>
+                    {rawTabs.map((tab: any, i: number) => (
+                        <TabsContent key={i} value={resolvedTabs[i]?.label || tab.label}>
                             {tab.content?.map((child: any, k: number) => <InnerJsonRenderer key={k} component={child} context={context} />)}
                         </TabsContent>
                     ))}
                 </Tabs>
             );
+        }
         case 'MODAL':
             // Render as a proper local pseudo-modal card for inside-the-page overlays
             return (
@@ -1099,7 +1101,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'FOR_EACH': {
             const forItems = resolvedProps.items;
             if (!Array.isArray(forItems) || forItems.length === 0) {
-                return resolvedProps.empty ? <InnerJsonRenderer component={resolvedProps.empty} context={context} /> : null;
+                return props.empty ? <InnerJsonRenderer component={props.empty} context={context} /> : null;
             }
             const alias = resolvedProps.as || 'item';
             const indexAlias = resolvedProps.index || 'index';
@@ -1107,7 +1109,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <>
                     {forItems.map((item: any, idx: number) => {
                         const itemContext = { ...context, [alias]: item, [indexAlias]: idx };
-                        return <InnerJsonRenderer key={idx} component={resolvedProps.template} context={itemContext} />;
+                        return <InnerJsonRenderer key={idx} component={props.template} context={itemContext} />;
                     })}
                 </>
             );
