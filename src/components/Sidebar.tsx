@@ -330,6 +330,7 @@ function SidebarContent({ onClose }: SidebarProps) {
     const workspaceNav = [
         { name: 'Calendar', icon: CalendarDays, href: '/calendar', active: pathname === '/calendar' },
         { name: 'Contacts', icon: Users, href: '/contacts', active: pathname === '/contacts' },
+        { name: 'Appointments', icon: Clock, href: '/appointments', active: pathname === '/appointments' },
     ];
 
     const { config: domainConfig } = useDomainConfig();

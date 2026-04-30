@@ -25,6 +25,7 @@ model User {
   calendars Calendar[]
   calendarEvents CalendarEvent[]
   contacts Contact[]
+  appointmentSchedules AppointmentSchedule[]
 }
 
 model Account {
@@ -261,4 +262,57 @@ model Contact {
   @@unique([userId, email])
   @@index([userId])
   @@index([source])
+}
+
+model AppointmentSchedule {
+  id           String                    @id @default(cuid())
+  userId       String
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name         String
+  description  String?                   @db.Text
+  duration     Int                       @default(30)
+  color        String                    @default("#2563eb")
+  timezone     String                    @default("UTC")
+  isActive     Boolean                   @default(true)
+  conferencing String?
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  availability AppointmentAvailability[]
+  bookings     AppointmentBooking[]
+
+  @@index([userId])
+}
+
+model AppointmentAvailability {
+  id         String              @id @default(cuid())
+  scheduleId String
+  schedule   AppointmentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  dayOfWeek  Int
+  startTime  String
+  endTime    String
+  isEnabled  Boolean             @default(true)
+
+  @@index([scheduleId])
+}
+
+model AppointmentBooking {
+  id              String              @id @default(cuid())
+  scheduleId      String
+  schedule        AppointmentSchedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  calendarEventId String?
+  guestName       String
+  guestEmail      String
+  guestNotes      String?             @db.Text
+  startsAt        DateTime
+  endsAt          DateTime
+  meetUrl         String?
+  status          String              @default("confirmed")
+  cancelToken     String?             @unique
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([scheduleId])
+  @@index([startsAt])
+  @@index([guestEmail])
+  @@index([cancelToken])
 }
