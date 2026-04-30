@@ -177,7 +177,12 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
 
     const unfolded = unfoldIcs(source);
 
-    const attendeeLines = unfolded
+    // Scope field extraction to VEVENT to avoid matching fields in VTIMEZONE or other components
+    // (e.g. VTIMEZONE has its own DTSTART:19700101T000000 which would shadow the real event date)
+    const veventMatch = unfolded.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/i);
+    const veventBlock = veventMatch?.[0] || unfolded;
+
+    const attendeeLines = veventBlock
         .split(/\r?\n/)
         .filter((line) => /^ATTENDEE/i.test(line));
 
@@ -211,19 +216,19 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
         })
         .filter(Boolean) as ParsedInvite['attendees'];
 
-    const organizerLine = extractIcsValue(source, 'ORGANIZER');
-    const startsAtField = extractIcsDateField(source, 'DTSTART');
-    const endsAtField = extractIcsDateField(source, 'DTEND');
+    const organizerLine = extractIcsValue(veventBlock, 'ORGANIZER');
+    const startsAtField = extractIcsDateField(veventBlock, 'DTSTART');
+    const endsAtField = extractIcsDateField(veventBlock, 'DTEND');
 
     const parsed = {
-        uid: extractIcsValue(source, 'UID') || undefined,
-        summary: extractIcsValue(source, 'SUMMARY') || undefined,
-        description: extractIcsValue(source, 'DESCRIPTION') || undefined,
-        location: extractIcsValue(source, 'LOCATION') || undefined,
+        uid: extractIcsValue(veventBlock, 'UID') || undefined,
+        summary: extractIcsValue(veventBlock, 'SUMMARY') || undefined,
+        description: extractIcsValue(veventBlock, 'DESCRIPTION') || undefined,
+        location: extractIcsValue(veventBlock, 'LOCATION') || undefined,
         startsAt: formatInviteDate(startsAtField?.value || '', startsAtField?.timeZone) || undefined,
         endsAt: formatInviteDate(endsAtField?.value || '', endsAtField?.timeZone) || undefined,
         method: (extractIcsValue(source, 'METHOD') || '').toUpperCase() || undefined,
-        sequence: Number.parseInt(extractIcsValue(source, 'SEQUENCE') || '0', 10),
+        sequence: Number.parseInt(extractIcsValue(veventBlock, 'SEQUENCE') || '0', 10),
         organizerEmail: extractEmail(organizerLine) || undefined,
         organizerName: extractDisplayName(organizerLine) || undefined,
         attendees,
