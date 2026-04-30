@@ -107,6 +107,7 @@ export function MailView() {
     const [loading, setLoading] = useState(false);
     const [summary, setSummary] = useState<string | null>(null);
     const [inviteActionEmailId, setInviteActionEmailId] = useState<string | null>(null);
+    const [addCalendarEmailId, setAddCalendarEmailId] = useState<string | null>(null);
 
     const [availableLabels, setAvailableLabels] = useState<any[]>([]);
     const [showLabelMenu, setShowLabelMenu] = useState(false);
@@ -320,6 +321,46 @@ export function MailView() {
             toast.error(error.message || 'Failed to send RSVP');
         } finally {
             setInviteActionEmailId(null);
+        }
+    };
+
+    const handleAddToCalendar = async (emailId: string, invitePreview: NonNullable<EmailDetails['invitePreview']>) => {
+        setAddCalendarEmailId(emailId);
+        try {
+            const calendarsRes = await fetch('/api/calendars');
+            if (!calendarsRes.ok) throw new Error('No se pudieron obtener los calendarios');
+            const calendars: any[] = await calendarsRes.json();
+
+            const target = calendars.find((c) => c.source === 'shared' && !c.isReadOnly)
+                || calendars.find((c) => !c.isReadOnly);
+
+            if (!target) throw new Error('No hay un calendario disponible');
+
+            const res = await fetch('/api/calendar/events', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    calendarId: target.id,
+                    title: invitePreview.title,
+                    description: invitePreview.description || null,
+                    location: invitePreview.location || null,
+                    startsAt: invitePreview.startsAt,
+                    endsAt: invitePreview.endsAt,
+                    inviteUid: invitePreview.uid || null,
+                    organizerEmail: invitePreview.organizerEmail || null,
+                    organizerName: invitePreview.organizerName || null,
+                    source: 'shared',
+                }),
+            });
+
+            const json = await res.json();
+            if (!res.ok) throw new Error(json.error || 'No se pudo agregar el evento');
+
+            toast.success('Evento agregado al calendario');
+        } catch (error: any) {
+            toast.error(error.message || 'Error al agregar al calendario');
+        } finally {
+            setAddCalendarEmailId(null);
         }
     };
 
@@ -603,14 +644,6 @@ export function MailView() {
                                                                             <span>{invitePreview.location}</span>
                                                                         </div>
                                                                     )}
-                                                                    {invitePreview.method && (
-                                                                        <div className="text-xs uppercase tracking-wide text-blue-700">Method: {invitePreview.method}</div>
-                                                                    )}
-                                                                    {inviteResponse?.response && (
-                                                                        <div className="inline-flex rounded-full bg-white px-3 py-1 text-xs font-medium text-blue-900 border border-blue-200">
-                                                                            RSVP: {inviteResponse.response}
-                                                                        </div>
-                                                                    )}
                                                                     <div className="flex flex-wrap gap-2 pt-1">
                                                                         <button
                                                                             type="button"
@@ -638,14 +671,15 @@ export function MailView() {
                                                                         </button>
                                                                     </div>
                                                                 </div>
-                                                                <a
-                                                                    href={item.email.attachments.find((attachment: any) => attachment.id === invitePreview.attachmentId)?.url || '#'}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="inline-flex items-center rounded-full border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100"
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={addCalendarEmailId === item.email.id}
+                                                                    onClick={() => handleAddToCalendar(item.email.id, invitePreview)}
+                                                                    className="inline-flex items-center gap-2 rounded-full border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100 disabled:opacity-60"
                                                                 >
-                                                                    Open .ics
-                                                                </a>
+                                                                    <CalendarDays className="h-4 w-4" />
+                                                                    Agregar al calendario
+                                                                </button>
                                                             </div>
                                                         </div>
                                                     )}
