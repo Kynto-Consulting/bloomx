@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { use } from 'react';
-import { Clock, MapPin, Video, ChevronLeft, ChevronRight, Check, Loader2, Calendar } from 'lucide-react';
+import { Clock, Video, ChevronLeft, ChevronRight, Check, Loader2, Globe, CalendarDays } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type Availability = { dayOfWeek: number; startTime: string; endTime: string; isEnabled: boolean };
@@ -19,86 +19,115 @@ type Schedule = {
 };
 
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-const DAY_NAMES_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-const DAY_COLS = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+const DAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-function formatSlotTime(iso: string, tz: string) {
-    return new Intl.DateTimeFormat(undefined, {
-        timeZone: tz,
-        hour: 'numeric',
-        minute: '2-digit',
-        hour12: true,
-    }).format(new Date(iso));
+function fmt(iso: string, tz: string, opts: Intl.DateTimeFormatOptions) {
+    return new Intl.DateTimeFormat(undefined, { timeZone: tz, ...opts }).format(new Date(iso));
 }
 
-function formatDateKey(date: Date, tz: string) {
-    return new Intl.DateTimeFormat('sv-SE', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
+function dateKey(d: Date) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-function formatDateHeader(date: Date, tz: string) {
-    return new Intl.DateTimeFormat(undefined, { timeZone: tz, weekday: 'short', day: 'numeric' }).format(date);
+// ─── Host header ─────────────────────────────────────────────────────────────
+
+function HostHeader({ schedule }: { schedule: Schedule }) {
+    const c = schedule.color;
+    return (
+        <div className="flex items-center gap-4 mb-8">
+            {schedule.user.avatar ? (
+                <img src={schedule.user.avatar} alt="" className="h-14 w-14 rounded-full object-cover ring-2 ring-offset-1 shrink-0" />
+            ) : (
+                <div className="h-14 w-14 rounded-full flex items-center justify-center text-white text-xl font-bold shrink-0" style={{ backgroundColor: c }}>
+                    {(schedule.user.name || schedule.user.email)[0].toUpperCase()}
+                </div>
+            )}
+            <div className="min-w-0">
+                <p className="text-sm text-muted-foreground truncate">{schedule.user.name || schedule.user.email}</p>
+                <h1 className="text-xl font-bold truncate">{schedule.name}</h1>
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                        <Clock className="h-3.5 w-3.5" />{schedule.duration} min
+                    </span>
+                    {schedule.conferencing && (
+                        <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                            <Video className="h-3.5 w-3.5" />
+                            {schedule.conferencing === 'meet' ? 'Google Meet' : 'Zoom'}
+                        </span>
+                    )}
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground/70">
+                        <Globe className="h-3 w-3" />{schedule.timezone}
+                    </span>
+                </div>
+                {schedule.description && (
+                    <p className="text-sm text-muted-foreground mt-1">{schedule.description}</p>
+                )}
+            </div>
+        </div>
+    );
 }
 
-function formatConfirmDate(iso: string, tz: string) {
-    return new Intl.DateTimeFormat(undefined, {
-        timeZone: tz,
-        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-        hour: 'numeric', minute: '2-digit', hour12: true,
-    }).format(new Date(iso));
-}
+// ─── Month calendar ───────────────────────────────────────────────────────────
 
-function getDayOfWeekInTz(date: Date, tz: string): number {
-    const label = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(date);
-    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(label);
-}
-
-function MiniCalendar({
-    year, month, selectedDate, onSelect, availableDays, tz
+function MonthCalendar({
+    year, month, onPrev, onNext, selectedDay, onSelectDay, availableDayNums, slotsCache, color,
 }: {
-    year: number; month: number; selectedDate: Date | null;
-    onSelect: (d: Date) => void; availableDays: Set<string>; tz: string;
+    year: number; month: number; onPrev: () => void; onNext: () => void;
+    selectedDay: string | null; onSelectDay: (key: string, date: Date) => void;
+    availableDayNums: Set<number>; slotsCache: Record<string, string[]>; color: string;
 }) {
-    const firstDay = new Date(year, month, 1);
-    const startDow = firstDay.getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const today = new Date();
-    today.setHours(0,0,0,0);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month+1, 0).getDate();
+    const cells: (Date|null)[] = [];
+    for (let i=0; i<firstDow; i++) cells.push(null);
+    for (let d=1; d<=daysInMonth; d++) cells.push(new Date(year, month, d));
 
-    const cells: (Date | null)[] = [];
-    for (let i = 0; i < startDow; i++) cells.push(null);
-    for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
+    const todayKey = dateKey(today);
 
     return (
-        <div className="w-full">
+        <div>
+            <div className="flex items-center justify-between mb-4">
+                <button onClick={onPrev} className="p-1.5 rounded-full hover:bg-muted transition-colors">
+                    <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="font-semibold text-sm">{MONTH_NAMES[month]} {year}</span>
+                <button onClick={onNext} className="p-1.5 rounded-full hover:bg-muted transition-colors">
+                    <ChevronRight className="h-4 w-4" />
+                </button>
+            </div>
             <div className="grid grid-cols-7 mb-1">
-                {DAY_NAMES_SHORT.map(d => (
-                    <div key={d} className="text-center text-xs font-medium text-white/50 py-1">{d}</div>
+                {DAY_SHORT.map(d => (
+                    <div key={d} className="text-center text-xs font-medium text-muted-foreground py-1">{d}</div>
                 ))}
             </div>
-            <div className="grid grid-cols-7 gap-0.5">
+            <div className="grid grid-cols-7 gap-y-0.5">
                 {cells.map((date, i) => {
-                    if (!date) return <div key={i} />;
-                    const key = formatDateKey(date, tz);
+                    if (!date) return <div key={`e${i}`} />;
+                    const key = dateKey(date);
                     const isPast = date < today;
-                    const isAvail = availableDays.has(String(date.getDay()));
-                    const isSelected = selectedDate && formatDateKey(date, tz) === formatDateKey(selectedDate, tz);
-                    const isToday = date.toDateString() === today.toDateString();
+                    const isAvail = availableDayNums.has(date.getDay());
+                    const hasSlots = slotsCache[key] && slotsCache[key].length > 0;
                     const disabled = isPast || !isAvail;
+                    const isSelected = selectedDay === key;
+                    const isToday = key === todayKey;
 
                     return (
                         <button
                             key={key}
-                            onClick={() => !disabled && onSelect(date)}
+                            onClick={() => !disabled && onSelectDay(key, date)}
                             disabled={disabled}
-                            className={`
-                                aspect-square rounded-full text-sm flex items-center justify-center transition-colors
-                                ${isSelected ? 'bg-white text-slate-900 font-bold' : ''}
-                                ${!isSelected && isToday ? 'ring-1 ring-white text-white' : ''}
-                                ${!isSelected && !isToday && !disabled ? 'text-white hover:bg-white/20' : ''}
-                                ${disabled ? 'text-white/20 cursor-not-allowed' : ''}
-                            `}
+                            className="aspect-square rounded-full text-sm flex items-center justify-center mx-auto w-9 transition-all font-medium relative"
+                            style={isSelected ? { backgroundColor: color, color: '#fff' }
+                                : isToday ? { outline: `2px solid ${color}`, outlineOffset: -2, color }
+                                : disabled ? {} : {}}
                         >
-                            {date.getDate()}
+                            <span className={disabled ? 'text-muted-foreground/30' : isSelected ? '' : isToday ? '' : 'hover:bg-muted rounded-full w-full h-full flex items-center justify-center'}>
+                                {date.getDate()}
+                            </span>
+                            {!disabled && hasSlots && !isSelected && (
+                                <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full" style={{ backgroundColor: color }} />
+                            )}
                         </button>
                     );
                 })}
@@ -107,163 +136,109 @@ function MiniCalendar({
     );
 }
 
-function WeekView({
-    weekStart, slots, selectedSlot, onSelectSlot, tz, color
+// ─── Time slot picker ─────────────────────────────────────────────────────────
+
+function SlotPicker({
+    dayKey, slots, tz, color, onSelect,
 }: {
-    weekStart: Date; slots: Record<string, string[]>;
-    selectedSlot: string | null; onSelectSlot: (iso: string) => void;
-    tz: string; color: string;
+    dayKey: string; slots: string[]; tz: string; color: string;
+    onSelect: (iso: string) => void;
 }) {
-    const days: Date[] = [];
-    for (let i = 0; i < 7; i++) {
-        const d = new Date(weekStart);
-        d.setDate(weekStart.getDate() + i);
-        days.push(d);
-    }
+    const date = new Date(dayKey + 'T12:00:00');
+    const label = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(date);
 
-    const allTimes = new Set<string>();
-    Object.values(slots).forEach(daySlots => daySlots.forEach(s => {
-        allTimes.add(formatSlotTime(s, tz));
-    }));
-
-    if (Object.values(slots).every(s => s.length === 0)) {
-        return (
-            <div className="flex-1 flex items-center justify-center text-muted-foreground py-20">
-                <div className="text-center">
-                    <Calendar className="h-8 w-8 mx-auto mb-2 opacity-40" />
-                    <p className="text-sm">No slots available this week</p>
-                </div>
-            </div>
-        );
-    }
+    if (slots.length === 0) return (
+        <motion.div
+            initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }}
+            className="flex flex-col items-center justify-center py-16 text-muted-foreground text-sm gap-2"
+        >
+            <CalendarDays className="h-8 w-8 opacity-30" />
+            No available slots on this day
+        </motion.div>
+    );
 
     return (
-        <div className="flex-1 overflow-y-auto">
-            <div className="grid grid-cols-7 border-b sticky top-0 bg-background z-10">
-                {days.map((d, i) => {
-                    const key = formatDateKey(d, tz);
-                    const hasSlots = (slots[key] || []).length > 0;
-                    const parts = formatDateHeader(d, tz).split(' ');
-                    return (
-                        <div key={i} className="text-center py-3 px-1">
-                            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                                {parts[0]}
-                            </div>
-                            <div className={`text-xl font-semibold mt-0.5 ${!hasSlots ? 'text-muted-foreground/40' : ''}`}>
-                                {parts[1] || d.getDate()}
-                            </div>
-                        </div>
-                    );
-                })}
+        <motion.div
+            initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }}
+        >
+            <p className="text-sm font-semibold mb-3">{label}</p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-72 overflow-y-auto pr-1">
+                {slots.map(iso => (
+                    <button
+                        key={iso}
+                        onClick={() => onSelect(iso)}
+                        className="rounded-xl border-2 py-2.5 text-sm font-medium transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        style={{ borderColor: color, color }}
+                    >
+                        {fmt(iso, tz, { hour: 'numeric', minute: '2-digit', hour12: true })}
+                    </button>
+                ))}
             </div>
-            <div className="grid grid-cols-7 min-h-[400px]">
-                {days.map((d, i) => {
-                    const key = formatDateKey(d, tz);
-                    const daySlots = slots[key] || [];
-                    return (
-                        <div key={i} className="border-r last:border-r-0 p-1.5 space-y-1.5">
-                            {daySlots.length === 0 ? (
-                                <div className="text-center pt-4 text-muted-foreground/30 text-lg">—</div>
-                            ) : daySlots.map(iso => {
-                                const isSelected = selectedSlot === iso;
-                                return (
-                                    <button
-                                        key={iso}
-                                        onClick={() => onSelectSlot(iso)}
-                                        className="w-full rounded-full border py-1.5 text-sm font-medium transition-all"
-                                        style={isSelected ? { backgroundColor: color, borderColor: color, color: '#fff' } : {}}
-                                    >
-                                        {isSelected ? (
-                                            <span className="flex items-center justify-center gap-1">
-                                                <Check className="h-3.5 w-3.5" />
-                                                {formatSlotTime(iso, tz)}
-                                            </span>
-                                        ) : (
-                                            <span className="text-primary">{formatSlotTime(iso, tz)}</span>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    );
-                })}
-            </div>
-        </div>
+        </motion.div>
     );
 }
 
+// ─── Booking form ─────────────────────────────────────────────────────────────
+
 function BookingForm({
-    slot, schedule, onConfirm, onBack, submitting
+    slot, schedule, onBack, onConfirm, submitting,
 }: {
-    slot: string; schedule: Schedule;
-    onConfirm: (name: string, email: string, notes: string) => void;
-    onBack: () => void; submitting: boolean;
+    slot: string; schedule: Schedule; onBack: () => void;
+    onConfirm: (name: string, email: string, notes: string) => void; submitting: boolean;
 }) {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
     const [notes, setNotes] = useState('');
+    const c = schedule.color;
+    const slotLabel = fmt(slot, schedule.timezone, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+
+    const inputCls = "w-full rounded-xl border-2 border-muted px-3 py-2.5 text-sm outline-none focus:border-[var(--accent)] transition-colors bg-background";
 
     return (
         <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            className="flex-1 overflow-y-auto p-6 max-w-sm w-full mx-auto"
+            initial={{ opacity: 0, x: 16 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -16 }}
         >
-            <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6">
-                <ChevronLeft className="h-4 w-4" /> Back
+            <button onClick={onBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-5 transition-colors">
+                <ChevronLeft className="h-4 w-4" /> Change time
             </button>
 
-            <div className="rounded-xl border p-4 mb-6 space-y-2">
-                <p className="font-semibold">{schedule.name}</p>
-                <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                    <Clock className="h-4 w-4" />
-                    <span>{schedule.duration} min</span>
+            {/* Selected slot summary */}
+            <div className="rounded-2xl p-4 mb-6 text-sm" style={{ backgroundColor: `${c}12`, border: `1.5px solid ${c}30` }}>
+                <p className="font-semibold" style={{ color: c }}>{schedule.name}</p>
+                <p className="text-muted-foreground mt-0.5">{slotLabel}</p>
+                <div className="flex items-center gap-3 mt-1.5 text-muted-foreground">
+                    <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{schedule.duration} min</span>
+                    {schedule.conferencing && (
+                        <span className="flex items-center gap-1">
+                            <Video className="h-3.5 w-3.5" />
+                            {schedule.conferencing === 'meet' ? 'Google Meet' : 'Zoom'} link will be sent
+                        </span>
+                    )}
                 </div>
-                <div className="flex items-start gap-1.5 text-sm text-muted-foreground">
-                    <Calendar className="h-4 w-4 mt-0.5 shrink-0" />
-                    <span>{formatConfirmDate(slot, schedule.timezone)}</span>
-                </div>
-                {schedule.conferencing && (
-                    <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <Video className="h-4 w-4" />
-                        <span>{schedule.conferencing === 'meet' ? 'Google Meet link will be sent' : 'Zoom link will be sent'}</span>
-                    </div>
-                )}
             </div>
 
             <div className="space-y-4">
-                <div className="space-y-1">
-                    <label className="text-sm font-medium">Your name *</label>
-                    <input
-                        value={name} onChange={e => setName(e.target.value)}
-                        placeholder="John Doe"
-                        className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary bg-background"
-                    />
+                <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Your name <span className="text-rose-500">*</span></label>
+                    <input value={name} onChange={e => setName(e.target.value)} placeholder="John Doe" className={inputCls} style={{'--accent': c} as any} />
                 </div>
-                <div className="space-y-1">
-                    <label className="text-sm font-medium">Email address *</label>
-                    <input
-                        type="email" value={email} onChange={e => setEmail(e.target.value)}
-                        placeholder="john@example.com"
-                        className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary bg-background"
-                    />
+                <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Email address <span className="text-rose-500">*</span></label>
+                    <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="john@example.com" className={inputCls} style={{'--accent': c} as any} />
                 </div>
-                <div className="space-y-1">
-                    <label className="text-sm font-medium">Notes <span className="text-muted-foreground">(optional)</span></label>
-                    <textarea
-                        value={notes} onChange={e => setNotes(e.target.value)}
-                        rows={3} placeholder="Anything you'd like to share before the meeting…"
-                        className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary bg-background resize-none"
-                    />
+                <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Notes <span className="text-muted-foreground font-normal">(optional)</span></label>
+                    <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3}
+                        placeholder="Anything you'd like to share before the meeting…"
+                        className={`${inputCls} resize-none`} style={{'--accent': c} as any} />
                 </div>
                 <button
                     onClick={() => onConfirm(name, email, notes)}
                     disabled={!name.trim() || !email.includes('@') || submitting}
-                    className="w-full rounded-full py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-                    style={{ backgroundColor: schedule.color }}
+                    className="w-full rounded-xl py-3 text-sm font-semibold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90 disabled:opacity-40"
+                    style={{ backgroundColor: c }}
                 >
-                    {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
                     {submitting ? 'Confirming…' : 'Confirm appointment'}
                 </button>
             </div>
@@ -271,122 +246,115 @@ function BookingForm({
     );
 }
 
-function ConfirmationView({ booking, schedule }: { booking: any; schedule: Schedule }) {
+// ─── Confirmation ─────────────────────────────────────────────────────────────
+
+function Confirmed({ booking, schedule }: { booking: any; schedule: Schedule }) {
+    const c = schedule.color;
     return (
         <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex-1 flex items-center justify-center p-8"
+            initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
+            className="text-center py-6"
         >
-            <div className="text-center max-w-sm">
-                <div
-                    className="h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-5"
-                    style={{ backgroundColor: schedule.color }}
-                >
-                    <Check className="h-8 w-8 text-white" />
-                </div>
-                <h2 className="text-2xl font-bold mb-2">You're confirmed!</h2>
-                <p className="text-muted-foreground mb-6">
-                    A calendar invitation has been created for your appointment with{' '}
-                    <span className="font-medium text-foreground">{schedule.user.name}</span>.
-                </p>
-
-                <div className="rounded-xl border p-4 text-left space-y-3 mb-6">
-                    <div className="font-semibold">{schedule.name}</div>
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                        <Clock className="h-4 w-4" />
-                        {schedule.duration} min
-                    </div>
-                    <div className="flex items-start gap-2 text-sm text-muted-foreground">
-                        <Calendar className="h-4 w-4 mt-0.5 shrink-0" />
-                        {formatConfirmDate(booking.startsAt, schedule.timezone)}
-                    </div>
-                    {booking.meetUrl && (
-                        <div className="flex items-start gap-2 text-sm">
-                            <Video className="h-4 w-4 mt-0.5 shrink-0 text-blue-500" />
-                            <a
-                                href={booking.meetUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-500 underline break-all"
-                            >
-                                {booking.meetUrl}
-                            </a>
-                        </div>
-                    )}
-                </div>
-
-                <p className="text-xs text-muted-foreground">Check your email for a confirmation message.</p>
+            <div className="h-16 w-16 rounded-full flex items-center justify-center mx-auto mb-5" style={{ backgroundColor: c }}>
+                <Check className="h-8 w-8 text-white" strokeWidth={3} />
             </div>
+            <h2 className="text-2xl font-bold mb-1">Confirmed!</h2>
+            <p className="text-muted-foreground text-sm mb-6">
+                Your appointment with <span className="font-medium text-foreground">{schedule.user.name || schedule.user.email}</span> is booked.
+            </p>
+
+            <div className="rounded-2xl p-5 text-left space-y-3 mb-5 text-sm" style={{ backgroundColor: `${c}10`, border: `1.5px solid ${c}25` }}>
+                <p className="font-semibold text-base">{schedule.name}</p>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    {fmt(booking.startsAt, schedule.timezone, { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                    <Clock className="h-4 w-4 shrink-0 opacity-0" />
+                    {schedule.duration} min
+                </div>
+                {booking.meetUrl && (
+                    <div className="flex items-start gap-2">
+                        <Video className="h-4 w-4 mt-0.5 shrink-0" style={{ color: c }} />
+                        <a href={booking.meetUrl} target="_blank" rel="noopener noreferrer"
+                            className="break-all font-medium hover:underline" style={{ color: c }}>
+                            {booking.meetUrl}
+                        </a>
+                    </div>
+                )}
+            </div>
+
+            <p className="text-xs text-muted-foreground">A confirmation email with a calendar invite has been sent to you.</p>
         </motion.div>
     );
 }
 
+// ─── Main page ────────────────────────────────────────────────────────────────
+
 export default function BookingPage({ params }: { params: Promise<{ scheduleId: string }> }) {
     const { scheduleId } = use(params);
     const [schedule, setSchedule] = useState<Schedule | null>(null);
-    const [error, setError] = useState('');
     const [loadingSchedule, setLoadingSchedule] = useState(true);
+    const [error, setError] = useState('');
 
-    // Calendar state
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const [calMonth, setCalMonth] = useState(today.getMonth());
+    const today = new Date(); today.setHours(0,0,0,0);
     const [calYear, setCalYear] = useState(today.getFullYear());
-    const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-    const [weekStart, setWeekStart] = useState<Date>(() => {
-        const d = new Date(today);
-        d.setDate(today.getDate() - today.getDay());
-        return d;
-    });
+    const [calMonth, setCalMonth] = useState(today.getMonth());
 
-    // Slots
-    const [slots, setSlots] = useState<Record<string, string[]>>({});
+    const [selectedDayKey, setSelectedDayKey] = useState<string | null>(null);
+    const [slotsCache, setSlotsCache] = useState<Record<string, string[]>>({});
     const [loadingSlots, setLoadingSlots] = useState(false);
-    const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
 
-    // Booking
-    const [step, setStep] = useState<'pick' | 'form' | 'done'>('pick');
+    const [step, setStep] = useState<'calendar' | 'form' | 'done'>('calendar');
+    const [selectedSlot, setSelectedSlot] = useState<string | null>(null);
     const [booking, setBooking] = useState<any>(null);
     const [submitting, setSubmitting] = useState(false);
 
-    // Load schedule
     useEffect(() => {
         fetch(`/api/appointments/schedules/${scheduleId}/public`)
-            .then(r => r.ok ? r.json() : Promise.reject('Not found'))
+            .then(r => r.ok ? r.json() : Promise.reject())
             .then(setSchedule)
             .catch(() => setError('This scheduling page is not available.'))
             .finally(() => setLoadingSchedule(false));
     }, [scheduleId]);
 
-    // Load slots for current week
-    const loadSlots = useCallback(async (start: Date) => {
-        setLoadingSlots(true);
-        const dateStr = start.toISOString().split('T')[0];
-        const res = await fetch(`/api/appointments/schedules/${scheduleId}/slots?date=${dateStr}`);
-        if (res.ok) {
-            const data = await res.json();
-            setSlots(data.slots || {});
+    // Prefetch slots for current month view (week by week)
+    const prefetchMonth = useCallback(async (year: number, month: number) => {
+        const starts = new Date(year, month, 1);
+        const ends = new Date(year, month+1, 0);
+        const promises: Promise<void>[] = [];
+
+        let cursor = new Date(starts);
+        cursor.setDate(cursor.getDate() - cursor.getDay()); // align to week start
+        while (cursor <= ends) {
+            const key = cursor.toISOString().split('T')[0];
+            const c = new Date(cursor);
+            promises.push(
+                fetch(`/api/appointments/schedules/${scheduleId}/slots?date=${key}`)
+                    .then(r => r.ok ? r.json() : null)
+                    .then(data => {
+                        if (data?.slots) setSlotsCache(prev => ({ ...prev, ...data.slots }));
+                    })
+            );
+            cursor.setDate(cursor.getDate() + 7);
         }
+        setLoadingSlots(true);
+        await Promise.all(promises);
         setLoadingSlots(false);
     }, [scheduleId]);
 
-    useEffect(() => { void loadSlots(weekStart); }, [weekStart, loadSlots]);
+    useEffect(() => {
+        if (schedule) void prefetchMonth(calYear, calMonth);
+    }, [schedule, calYear, calMonth, prefetchMonth]);
 
-    const handleDateSelect = (date: Date) => {
-        setSelectedDate(date);
-        // Align week to the Monday of the selected date
-        const d = new Date(date);
-        d.setDate(date.getDate() - date.getDay());
-        setWeekStart(d);
+    const handleDaySelect = (key: string) => {
+        setSelectedDayKey(key);
         setSelectedSlot(null);
     };
 
-    const handleWeekNav = (dir: -1 | 1) => {
-        const d = new Date(weekStart);
-        d.setDate(weekStart.getDate() + dir * 7);
-        setWeekStart(d);
-        setSelectedSlot(null);
+    const handleSlotSelect = (iso: string) => {
+        setSelectedSlot(iso);
+        setStep('form');
     };
 
     const handleConfirm = async (guestName: string, guestEmail: string, guestNotes: string) => {
@@ -409,186 +377,108 @@ export default function BookingPage({ params }: { params: Promise<{ scheduleId: 
         }
     };
 
-    if (loadingSchedule) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-        );
-    }
+    if (loadingSchedule) return (
+        <div className="min-h-screen flex items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+    );
 
-    if (error || !schedule) {
-        return (
-            <div className="min-h-screen flex items-center justify-center text-muted-foreground">
-                <p>{error || 'Schedule not found.'}</p>
-            </div>
-        );
-    }
+    if (error || !schedule) return (
+        <div className="min-h-screen flex items-center justify-center text-muted-foreground text-sm">
+            {error || 'Schedule not found.'}
+        </div>
+    );
 
-    const tz = schedule.timezone;
-    const availableDays = new Set(schedule.availability.filter(a => a.isEnabled).map(a => String(a.dayOfWeek)));
-    const weekLabel = (() => {
-        const end = new Date(weekStart);
-        end.setDate(weekStart.getDate() + 6);
-        const fmt = (d: Date) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(d);
-        return `${fmt(weekStart)} – ${fmt(end)}`;
-    })();
+    const availableDayNums = new Set(schedule.availability.filter(a => a.isEnabled).map(a => a.dayOfWeek));
+    const selectedDaySlots = selectedDayKey ? (slotsCache[selectedDayKey] || []) : [];
+    const c = schedule.color;
 
     return (
-        <div className="min-h-screen flex flex-col md:flex-row bg-background">
-            {/* Left panel */}
-            <div
-                className="md:w-72 md:min-h-screen shrink-0 p-6 md:p-8 flex flex-col gap-5"
-                style={{ backgroundColor: schedule.color }}
-            >
-                {/* Avatar + name */}
-                <div className="flex items-center gap-3">
-                    {schedule.user.avatar ? (
-                        <img
-                            src={schedule.user.avatar}
-                            alt={schedule.user.name || ''}
-                            className="h-12 w-12 rounded-full object-cover ring-2 ring-white/30"
-                        />
-                    ) : (
-                        <div className="h-12 w-12 rounded-full bg-white/20 flex items-center justify-center text-white font-bold text-lg">
-                            {(schedule.user.name || schedule.user.email)[0].toUpperCase()}
-                        </div>
-                    )}
-                    <div>
-                        <p className="text-white font-semibold">{schedule.user.name || schedule.user.email}</p>
-                        <p className="text-white/60 text-xs">{schedule.user.email}</p>
-                    </div>
-                </div>
+        <div className="min-h-screen bg-muted/30 flex items-start justify-center py-10 px-4">
+            <div className="w-full max-w-4xl">
+                {/* Card */}
+                <div className="bg-background rounded-3xl shadow-xl overflow-hidden">
+                    {/* Colored top bar */}
+                    <div className="h-1.5 w-full" style={{ backgroundColor: c }} />
 
-                {/* Schedule info */}
-                <div>
-                    <h1 className="text-white text-xl font-bold leading-tight">{schedule.name}</h1>
-                    {schedule.description && (
-                        <p className="text-white/70 text-sm mt-1">{schedule.description}</p>
-                    )}
-                </div>
+                    <div className="p-6 sm:p-8">
+                        <HostHeader schedule={schedule} />
 
-                <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-white/80 text-sm">
-                        <Clock className="h-4 w-4 shrink-0" />
-                        <span>{schedule.duration} min</span>
-                    </div>
-                    {schedule.conferencing && (
-                        <div className="flex items-center gap-2 text-white/80 text-sm">
-                            <Video className="h-4 w-4 shrink-0" />
-                            <span>
-                                {schedule.conferencing === 'meet' ? 'Google Meet' : 'Zoom'}
-                                {' '}· Video call details provided upon confirmation
-                            </span>
-                        </div>
-                    )}
-                    <div className="flex items-center gap-2 text-white/60 text-xs">
-                        <MapPin className="h-3.5 w-3.5 shrink-0" />
-                        <span>{tz}</span>
-                    </div>
-                </div>
-
-                {/* Mini calendar */}
-                <div className="mt-2">
-                    <div className="flex items-center justify-between mb-3">
-                        <button
-                            onClick={() => {
-                                let m = calMonth - 1, y = calYear;
-                                if (m < 0) { m = 11; y--; }
-                                setCalMonth(m); setCalYear(y);
-                            }}
-                            className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10"
-                        >
-                            <ChevronLeft className="h-4 w-4" />
-                        </button>
-                        <span className="text-white text-sm font-semibold">{MONTH_NAMES[calMonth]} {calYear}</span>
-                        <button
-                            onClick={() => {
-                                let m = calMonth + 1, y = calYear;
-                                if (m > 11) { m = 0; y++; }
-                                setCalMonth(m); setCalYear(y);
-                            }}
-                            className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10"
-                        >
-                            <ChevronRight className="h-4 w-4" />
-                        </button>
-                    </div>
-                    <MiniCalendar
-                        year={calYear}
-                        month={calMonth}
-                        selectedDate={selectedDate}
-                        onSelect={handleDateSelect}
-                        availableDays={availableDays}
-                        tz={tz}
-                    />
-                </div>
-            </div>
-
-            {/* Right panel */}
-            <div className="flex-1 flex flex-col overflow-hidden">
-                <AnimatePresence mode="wait">
-                    {step === 'done' && booking ? (
-                        <ConfirmationView key="done" booking={booking} schedule={schedule} />
-                    ) : step === 'form' && selectedSlot ? (
-                        <BookingForm
-                            key="form"
-                            slot={selectedSlot}
-                            schedule={schedule}
-                            onConfirm={handleConfirm}
-                            onBack={() => setStep('pick')}
-                            submitting={submitting}
-                        />
-                    ) : (
-                        <motion.div
-                            key="pick"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            className="flex-1 flex flex-col overflow-hidden"
-                        >
-                            {/* Week nav header */}
-                            <div className="flex items-center justify-between px-4 py-3 border-b">
-                                <button
-                                    onClick={() => handleWeekNav(-1)}
-                                    disabled={weekStart <= today}
-                                    className="p-1.5 rounded-full hover:bg-muted disabled:opacity-30"
-                                >
-                                    <ChevronLeft className="h-5 w-5" />
-                                </button>
-                                <span className="text-sm font-medium">{weekLabel}</span>
-                                <button
-                                    onClick={() => handleWeekNav(1)}
-                                    className="p-1.5 rounded-full hover:bg-muted"
-                                >
-                                    <ChevronRight className="h-5 w-5" />
-                                </button>
-                            </div>
-
-                            {/* Timezone indicator */}
-                            <div className="px-4 py-2 text-xs text-muted-foreground border-b">
-                                {`(${new Intl.DateTimeFormat(undefined, { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find(p => p.type === 'timeZoneName')?.value || tz}) ${tz}`}
-                            </div>
-
-                            {loadingSlots ? (
-                                <div className="flex-1 flex items-center justify-center">
-                                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                                </div>
-                            ) : (
-                                <WeekView
-                                    weekStart={weekStart}
-                                    slots={slots}
-                                    selectedSlot={selectedSlot}
-                                    onSelectSlot={(iso) => {
-                                        setSelectedSlot(iso);
-                                        setStep('form');
-                                    }}
-                                    tz={tz}
-                                    color={schedule.color}
+                        <AnimatePresence mode="wait">
+                            {step === 'done' && booking ? (
+                                <Confirmed key="done" booking={booking} schedule={schedule} />
+                            ) : step === 'form' && selectedSlot ? (
+                                <BookingForm
+                                    key="form"
+                                    slot={selectedSlot}
+                                    schedule={schedule}
+                                    onBack={() => setStep('calendar')}
+                                    onConfirm={handleConfirm}
+                                    submitting={submitting}
                                 />
+                            ) : (
+                                <motion.div
+                                    key="calendar"
+                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                    className="grid grid-cols-1 md:grid-cols-2 gap-8"
+                                >
+                                    {/* Left: month calendar */}
+                                    <div>
+                                        {loadingSlots && (
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
+                                                <Loader2 className="h-3 w-3 animate-spin" /> Loading availability…
+                                            </div>
+                                        )}
+                                        <MonthCalendar
+                                            year={calYear}
+                                            month={calMonth}
+                                            onPrev={() => {
+                                                if (calMonth === 0) { setCalMonth(11); setCalYear(y => y-1); }
+                                                else setCalMonth(m => m-1);
+                                            }}
+                                            onNext={() => {
+                                                if (calMonth === 11) { setCalMonth(0); setCalYear(y => y+1); }
+                                                else setCalMonth(m => m+1);
+                                            }}
+                                            selectedDay={selectedDayKey}
+                                            onSelectDay={(key) => handleDaySelect(key)}
+                                            availableDayNums={availableDayNums}
+                                            slotsCache={slotsCache}
+                                            color={c}
+                                        />
+                                    </div>
+
+                                    {/* Right: slots for selected day */}
+                                    <div className="min-h-[200px] flex flex-col justify-start">
+                                        <AnimatePresence mode="wait">
+                                            {selectedDayKey ? (
+                                                <SlotPicker
+                                                    key={selectedDayKey}
+                                                    dayKey={selectedDayKey}
+                                                    slots={selectedDaySlots}
+                                                    tz={schedule.timezone}
+                                                    color={c}
+                                                    onSelect={handleSlotSelect}
+                                                />
+                                            ) : (
+                                                <motion.div
+                                                    key="hint"
+                                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                                                    className="flex flex-col items-center justify-center h-full py-12 text-muted-foreground/50 text-sm gap-2"
+                                                >
+                                                    <CalendarDays className="h-8 w-8" />
+                                                    <p>Select a day to see available times</p>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
+                                    </div>
+                                </motion.div>
                             )}
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                        </AnimatePresence>
+                    </div>
+                </div>
+
+                <p className="text-center text-xs text-muted-foreground mt-4">Powered by BloomX</p>
             </div>
         </div>
     );
