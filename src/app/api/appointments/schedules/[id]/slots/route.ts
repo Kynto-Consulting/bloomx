@@ -94,30 +94,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     for (let i = 0; i < 7; i++) {
         const day = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
         const dow = dayOfWeekInTz(day, tz);
-        const avail = schedule.availability.find(a => a.dayOfWeek === dow && a.isEnabled);
-        if (!avail) continue;
-
-        const dayStart = dateAtTimeInTz(day, avail.startTime, tz);
-        const dayEnd = dateAtTimeInTz(day, avail.endTime, tz);
+        const dayAvail = schedule.availability.filter(a => a.dayOfWeek === dow && a.isEnabled);
+        if (!dayAvail.length) continue;
 
         const dayKey = new Intl.DateTimeFormat('sv-SE', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(day);
         slotsByDay[dayKey] = [];
 
-        let cursor = dayStart;
-        while (cursor < dayEnd) {
-            const slotEnd = new Date(cursor.getTime() + duration * 60 * 1000);
-            if (slotEnd > dayEnd) break;
+        for (const avail of dayAvail) {
+            const rangeStart = dateAtTimeInTz(day, avail.startTime, tz);
+            const rangeEnd = dateAtTimeInTz(day, avail.endTime, tz);
 
-            // Skip past slots (with 15min buffer)
-            if (cursor.getTime() > now.getTime() - 15 * 60 * 1000) {
-                const overlaps = busy.some(b => slotsOverlap(cursor, slotEnd, b.start, b.end));
-                if (!overlaps) {
-                    slotsByDay[dayKey].push(cursor.toISOString());
+            let cursor = rangeStart;
+            while (cursor < rangeEnd) {
+                const slotEnd = new Date(cursor.getTime() + duration * 60 * 1000);
+                if (slotEnd > rangeEnd) break;
+
+                if (cursor.getTime() > now.getTime() - 15 * 60 * 1000) {
+                    const overlaps = busy.some(b => slotsOverlap(cursor, slotEnd, b.start, b.end));
+                    if (!overlaps) {
+                        slotsByDay[dayKey].push(cursor.toISOString());
+                    }
                 }
-            }
 
-            cursor = slotEnd;
+                cursor = slotEnd;
+            }
         }
+
+        // Remove duplicate slots that could arise from overlapping ranges
+        slotsByDay[dayKey] = [...new Set(slotsByDay[dayKey])].sort();
     }
 
     return NextResponse.json({ scheduleId: id, duration, timezone: tz, slots: slotsByDay });
