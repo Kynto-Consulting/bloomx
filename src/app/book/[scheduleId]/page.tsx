@@ -124,7 +124,7 @@ function BookingModal({
         hour: 'numeric', minute: '2-digit', hour12: true,
     });
 
-    const inputCls = `w-full rounded-xl px-3 py-2.5 text-sm outline-none transition-colors border bg-background focus:ring-2`;
+    const inputCls = `w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all bg-muted/50 hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0`;
 
     const handleSubmit = async () => {
         setSubmitting(true);

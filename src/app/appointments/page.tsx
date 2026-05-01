@@ -150,7 +150,7 @@ function ScheduleForm({
             ...d, ranges: d.ranges.filter((_, ri) => ri !== rangeIdx),
         }));
 
-    const inputCls = `w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 transition-colors`;
+    const inputCls = `w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all bg-muted/50 hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0`;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -224,7 +224,7 @@ function ScheduleForm({
                                     <div className="flex gap-2">
                                         {[{ value: '', label: 'None' }, { value: 'meet', label: 'Google Meet' }, { value: 'zoom', label: 'Zoom' }].map(opt => (
                                             <button key={opt.value} type="button" onClick={() => set('conferencing', opt.value)}
-                                                className="flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors"
+                                                className="flex-1 rounded-xl bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/70"
                                                 style={form.conferencing === opt.value
                                                     ? { borderColor: accent, backgroundColor: `${accent}15`, color: accent }
                                                     : {}}>
@@ -245,7 +245,7 @@ function ScheduleForm({
 
                                 <div className="space-y-1">
                                     <label className="text-sm font-medium">Weekly hours</label>
-                                    <div className="rounded-xl border divide-y overflow-hidden">
+                                    <div className="rounded-xl bg-muted/30 divide-y divide-muted overflow-hidden">
                                         {form.days.map(d => (
                                             <div key={d.dayOfWeek} className="px-3 py-2.5">
                                                 <div className="flex items-center gap-3 min-h-[28px]">
@@ -265,11 +265,11 @@ function ScheduleForm({
                                                                 <div key={ri} className="flex items-center gap-1.5">
                                                                     <input type="time" value={r.startTime}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'startTime', e.target.value)}
-                                                                        className="rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 flex-1" />
+                                                                        className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     <span className="text-muted-foreground text-xs">–</span>
                                                                     <input type="time" value={r.endTime}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'endTime', e.target.value)}
-                                                                        className="rounded border bg-background px-2 py-1 text-xs outline-none focus:ring-1 flex-1" />
+                                                                        className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     {d.ranges.length > 1 && (
                                                                         <button type="button" onClick={() => removeRange(d.dayOfWeek, ri)}
                                                                             className="text-muted-foreground hover:text-rose-500 transition-colors">
