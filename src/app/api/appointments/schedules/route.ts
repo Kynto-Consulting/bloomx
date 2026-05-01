@@ -9,7 +9,7 @@ const DEFAULT_AVAILABILITY = [0, 1, 2, 3, 4, 5, 6].map((day) => ({
     isEnabled: day >= 1 && day <= 5, // Mon–Fri enabled by default
 }));
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
@@ -19,7 +19,10 @@ export async function GET() {
         orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json(schedules);
+    const origin = process.env.NEXT_PUBLIC_APP_URL || `${req.nextUrl.protocol}//${req.nextUrl.host}`;
+    const withUrls = schedules.map(s => ({ ...s, bookingUrl: `${origin}/book/${s.id}` }));
+
+    return NextResponse.json(withUrls);
 }
 
 export async function POST(req: NextRequest) {
