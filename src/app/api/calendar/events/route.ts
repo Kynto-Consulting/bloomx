@@ -92,7 +92,25 @@ export async function POST(req: NextRequest) {
         });
 
         if (existingEvent) {
-            return NextResponse.json(existingEvent);
+            // Update the existing event in case dates or other fields were wrong (e.g. epoch from VTIMEZONE bug)
+            const updated = await prisma.calendarEvent.update({
+                where: { id: existingEvent.id },
+                data: {
+                    calendarId,
+                    title,
+                    description: body?.description || null,
+                    location: body?.location || null,
+                    startsAt,
+                    endsAt,
+                    organizerEmail,
+                    organizerName,
+                },
+                include: {
+                    calendar: true,
+                    attendees: true,
+                }
+            });
+            return NextResponse.json(updated);
         }
     }
 

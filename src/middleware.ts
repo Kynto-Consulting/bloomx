@@ -30,7 +30,10 @@ export async function middleware(req: NextRequest) {
         pathname.startsWith('/static') ||
         pathname.startsWith('/api/admin') || // Allow admin APIs (auth handled in route)
         pathname.startsWith('/admin') ||
-        pathname.startsWith('/docs')
+        pathname.startsWith('/docs') ||
+        pathname.startsWith('/book') ||
+        pathname.startsWith('/api/appointments/book') ||
+        (pathname.startsWith('/api/appointments/schedules/') && (pathname.includes('/slots') || pathname.includes('/public')))
     ) {
         return NextResponse.next();
     }
