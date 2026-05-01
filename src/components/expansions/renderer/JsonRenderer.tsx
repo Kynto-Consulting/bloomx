@@ -159,7 +159,7 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
 
                 const fieldInput = field.type === 'textarea' || field.type === 'richtext' ? (
                     <textarea
-                        className="w-full border rounded p-2"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all min-h-[80px] resize-y"
                         name={field.name}
                         value={fieldValue}
                         readOnly={field.readOnly}
@@ -168,7 +168,7 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
                     />
                 ) : field.type === 'select' ? (
                     <select
-                        className="w-full border rounded p-2"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all"
                         name={field.name}
                         value={fieldValue}
                         disabled={field.readOnly}
@@ -844,7 +844,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         context.close();
                     }
                 }}
-                className="inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                className="inline-flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-foreground transition-colors hover:bg-muted"
             >
                 {option?.icon ? <span>{renderIcon(option.icon, 16)}</span> : null}
                 <span>{optionLabel}</span>
@@ -885,8 +885,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             const isToolbarMenuButton = toolbarButtonMode === 'menu';
             const shouldRenderLabel = !isCompactToolbarButton && resolvedProps.showLabel !== false;
             const buttonLabel = resolvedProps.label || 'Action';
-            const compactClassName = "h-10 w-10 rounded-xl border border-transparent bg-transparent px-0 text-gray-600 shadow-none hover:bg-gray-100 hover:text-gray-900";
-            const menuClassName = "w-full justify-start rounded-xl border border-transparent bg-transparent px-3 text-gray-700 shadow-none hover:bg-gray-100 hover:text-gray-900";
+            const compactClassName = "h-10 w-10 rounded-xl bg-transparent px-0 text-muted-foreground shadow-none hover:bg-muted";
+            const menuClassName = "w-full justify-start rounded-xl bg-transparent px-3 text-foreground shadow-none hover:bg-muted";
             const buttonVariant = (isCompactToolbarButton || isToolbarMenuButton) ? 'ghost' : resolvedVariant;
             const buttonClassName = isCompactToolbarButton
                 ? compactClassName
@@ -948,7 +948,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             onClose={() => setFallbackMenuOpen(false)}
                             width={220}
                             header={false}
-                            className="rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl"
+                            className="rounded-2xl bg-background border p-2 shadow-2xl"
                         >
                             <div className="flex min-w-[200px] flex-col gap-1">
                                 {fallbackMenuOptions.map((option, index) => renderMenuOptionButton(option, index))}
@@ -966,13 +966,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             }}
                         >
                             <div
-                                className="relative max-h-[85vh] overflow-y-auto rounded-xl bg-white shadow-2xl"
+                                className="relative max-h-[85vh] overflow-y-auto rounded-xl bg-background shadow-2xl border"
                                 style={{ width: fallbackOverlay.width || 'auto', maxWidth: '90vw' }}
                             >
                                 <button
                                     type="button"
                                     onClick={() => setFallbackOverlay(null)}
-                                    className="absolute right-3 top-3 z-10 rounded-full p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+                                    className="absolute right-3 top-3 z-10 rounded-full p-1.5 text-muted-foreground transition-colors hover:bg-muted"
                                 >
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                         <line x1="18" y1="6" x2="6" y2="18" />
@@ -995,12 +995,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
         }
         case 'TEXT': {
-            let className = resolvedProps.className || "text-sm text-gray-700 whitespace-pre-wrap";
-            if (resolvedProps.variant === 'h4') return <h4 className={`text-lg font-semibold text-gray-800 ${resolvedProps.className || ''}`}>{resolvedProps.content}</h4>;
+            let className = resolvedProps.className || "text-sm text-foreground whitespace-pre-wrap";
+            if (resolvedProps.variant === 'h4') return <h4 className={`text-base font-semibold ${resolvedProps.className || ''}`}>{resolvedProps.content}</h4>;
             if (resolvedProps.variant === 'error') className += " text-red-500 bg-red-50 p-3 rounded-md";
             if (resolvedProps.variant === 'success') className += " text-green-600 bg-green-50 p-3 rounded-md";
-            if (resolvedProps.variant === 'body') className += " leading-relaxed bg-gray-50 p-3 rounded-lg border border-gray-100";
-            if (resolvedProps.variant === 'muted') className += " text-gray-500";
+            if (resolvedProps.variant === 'body') className += " leading-relaxed bg-muted/40 p-3 rounded-lg";
+            if (resolvedProps.variant === 'muted') className += " text-muted-foreground";
             return <div className={className}>{resolvedProps.content}</div>;
         }
         case 'INPUT': {
@@ -1019,7 +1019,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     <textarea 
                         {...textareaProps}
                         onChange={handleChange}
-                        className="flex min-h-[80px] w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm transition-all duration-200 hover:border-gray-300 placeholder:text-gray-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="w-full min-h-[80px] rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all resize-y placeholder:text-muted-foreground disabled:opacity-50"
                     />
                 );
             }
@@ -1079,17 +1079,17 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'MODAL':
             // Render as a proper local pseudo-modal card for inside-the-page overlays
             return (
-                <div className="bg-white border border-gray-200 rounded-xl shadow-2xl p-4 shadow-black/10 w-full text-left flex flex-col gap-4 max-h-full overflow-y-auto">
+                <div className="bg-background rounded-xl shadow-lg p-4 w-full text-left flex flex-col gap-4 max-h-full overflow-y-auto">
                     {resolvedProps.title && (
-                        <div className="flex justify-between items-center pb-2 border-b border-gray-100 flex-shrink-0">
-                            <h2 className="text-lg font-bold flex items-center gap-2 text-gray-800">
-                                {resolvedProps.icon && renderIcon(resolvedProps.icon, 18, "text-purple-600")}
+                        <div className="flex justify-between items-center pb-2 border-b flex-shrink-0">
+                            <h2 className="text-base font-semibold flex items-center gap-2">
+                                {resolvedProps.icon && renderIcon(resolvedProps.icon, 18, "text-primary")}
                                 {resolvedProps.title}
                             </h2>
                             {/* Removing the double X button as it's handled by GlobalWindow context popup */}
                         </div>
                     )}
-                    <div className="flex flex-col gap-4 text-sm text-gray-700 overflow-y-auto custom-scrollbar">
+                    <div className="flex flex-col gap-4 text-sm text-foreground overflow-y-auto custom-scrollbar">
                         {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                     </div>
                 </div>
@@ -1118,7 +1118,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <div className="space-y-2">
                     <label className="text-sm font-medium">{resolvedProps.label}</label>
                     <select
-                        className="w-full border rounded p-2"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all"
                         onChange={(e) => handleAction(props.onChange, undefined, { value: e.target.value })}
                     >
                         <option value="">Select...</option>
@@ -1158,7 +1158,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'IMAGE_BUTTON':
             return (
                 <button
-                    className="hover:opacity-80 transition-opacity border rounded overflow-hidden"
+                    className="hover:opacity-80 transition-opacity rounded-xl overflow-hidden"
                     onClick={(e) => handleAction(props.onClick, e)}
                 >
                     <img src={resolvedProps.src} alt={resolvedProps.alt} className="w-full h-auto object-cover" />
@@ -1200,7 +1200,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <label className="flex items-center gap-2 cursor-pointer">
                     <input
                         type="checkbox"
-                        className="w-4 h-4 rounded border-gray-300"
+                        className="w-4 h-4 rounded accent-primary"
                         checked={resolvedProps.checked || state[resolvedProps.bindTo] || false}
                         onChange={(e) => {
                             if (resolvedProps.bindTo) setState(resolvedProps.bindTo, e.target.checked);
@@ -1216,7 +1216,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             return (
                 <label className="flex items-center gap-3 cursor-pointer">
                     <div
-                        className={`relative w-10 h-5 rounded-full transition-colors ${toggleVal ? 'bg-blue-500' : 'bg-gray-300'}`}
+                        className={`relative w-10 h-5 rounded-full transition-colors ${toggleVal ? 'bg-primary' : 'bg-muted-foreground/30'}`}
                         onClick={() => {
                             const newVal = !toggleVal;
                             if (resolvedProps.bindTo) setState(resolvedProps.bindTo, newVal);
@@ -1234,7 +1234,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <div className="space-y-1">
                     {resolvedProps.label && <label className="text-sm font-medium">{resolvedProps.label}</label>}
                     <textarea
-                        className="w-full border rounded p-2 min-h-[80px] resize-y"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 transition-all min-h-[80px] resize-y"
                         name={resolvedProps.name}
                         placeholder={resolvedProps.placeholder}
                         defaultValue={resolvedProps.defaultValue}
@@ -1249,8 +1249,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'BADGE':
             const badgeVariants: Record<string, string> = {
-                default: 'bg-gray-100 text-gray-700',
-                primary: 'bg-blue-100 text-blue-700',
+                default: 'bg-muted text-muted-foreground',
+                primary: 'bg-primary/10 text-primary',
                 success: 'bg-green-100 text-green-700',
                 warning: 'bg-yellow-100 text-yellow-700',
                 error: 'bg-red-100 text-red-700',
@@ -1262,7 +1262,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
 
         case 'DIVIDER':
-            return <hr className={`border-gray-200 ${resolvedProps.className || 'my-3'}`} />;
+            return <hr className={`border-border ${resolvedProps.className || 'my-3'}`} />;
 
         case 'SPACER':
             return <div style={{ height: resolvedProps.size || 16 }} />;
@@ -1274,12 +1274,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     {resolvedProps.label && (
                         <div className="flex justify-between text-sm">
                             <span>{resolvedProps.label}</span>
-                            <span className="text-gray-500">{pct}%</span>
+                            <span className="text-muted-foreground">{pct}%</span>
                         </div>
                     )}
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
                         <div
-                            className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                            className="h-full bg-primary rounded-full transition-all duration-300"
                             style={{ width: `${pct}%` }}
                         />
                     </div>
@@ -1300,7 +1300,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             key={`${suggestion}-${index}`}
                             type="button"
                             onClick={(e) => handleAction(props.onSelect, e, { value: suggestion })}
-                            className="inline-flex max-w-full items-center rounded-full border border-gray-200 bg-white px-3 py-1.5 text-sm text-gray-700 shadow-sm transition-colors hover:border-gray-300 hover:bg-gray-50"
+                            className="inline-flex max-w-full items-center rounded-full bg-muted/60 px-3 py-1.5 text-sm text-foreground transition-colors hover:bg-muted"
                         >
                             <span className="truncate">{suggestion}</span>
                         </button>
@@ -1312,8 +1312,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'LOADING':
             return (
                 <div className={`flex items-center justify-center ${resolvedProps.className || 'p-4'}`}>
-                    <div className="w-6 h-6 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" />
-                    {resolvedProps.label && <span className="ml-2 text-sm text-gray-500">{resolvedProps.label}</span>}
+                    <div className="w-6 h-6 border-2 border-muted-foreground/30 border-t-primary rounded-full animate-spin" />
+                    {resolvedProps.label && <span className="ml-2 text-sm text-muted-foreground">{resolvedProps.label}</span>}
                 </div>
             );
 
@@ -1340,11 +1340,11 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'ACCORDION': {
             const [openSections, setOpenSections] = useState<Record<number, boolean>>({});
             return (
-                <div className="space-y-1 border rounded-lg divide-y">
+                <div className="rounded-xl bg-muted/20 divide-y divide-border overflow-hidden">
                     {resolvedProps.sections?.map((section: any, i: number) => (
                         <div key={i}>
                             <button
-                                className="w-full flex justify-between items-center p-3 text-sm font-medium text-left hover:bg-gray-50"
+                                className="w-full flex justify-between items-center p-3 text-sm font-medium text-left hover:bg-muted/60 transition-colors"
                                 onClick={() => setOpenSections(prev => ({ ...prev, [i]: !prev[i] }))}
                             >
                                 {section.title}
@@ -1377,19 +1377,19 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             const columns = resolvedProps.columns || [];
             if (!Array.isArray(tableData)) return null;
             return (
-                <div className="overflow-x-auto rounded-lg border">
+                <div className="overflow-x-auto rounded-xl border">
                     <table className="w-full text-sm">
-                        <thead className="bg-gray-50">
+                        <thead className="bg-muted/40">
                             <tr>
                                 {columns.map((col: any, i: number) => (
-                                    <th key={i} className="px-4 py-2 text-left font-medium text-gray-600">{col.label}</th>
+                                    <th key={i} className="px-4 py-2 text-left font-medium text-muted-foreground">{col.label}</th>
                                 ))}
                                 {resolvedProps.actions && <th className="px-4 py-2 w-[100px]">Actions</th>}
                             </tr>
                         </thead>
                         <tbody className="divide-y">
                             {tableData.map((row: any, ri: number) => (
-                                <tr key={ri} className="hover:bg-gray-50">
+                                <tr key={ri} className="hover:bg-muted/30">
                                     {columns.map((col: any, ci: number) => (
                                         <td key={ci} className="px-4 py-2">{row[col.key]}</td>
                                     ))}
@@ -1509,8 +1509,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'DEBUG':
             return (
-                <details className="mt-2 text-xs bg-gray-100 p-2 rounded border overflow-auto max-h-40">
-                    <summary className="cursor-pointer font-bold text-gray-500">Debug Context</summary>
+                <details className="mt-2 text-xs bg-muted/50 p-2 rounded border overflow-auto max-h-40">
+                    <summary className="cursor-pointer font-bold text-muted-foreground">Debug Context</summary>
                     <pre>{JSON.stringify({ context, state, props: resolvedProps }, null, 2)}</pre>
                 </details>
             );
@@ -1576,7 +1576,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     {resolvedProps.label && <label className="text-sm font-medium">{resolvedProps.label}</label>}
                     <input
                         type="date"
-                        className="w-full border rounded p-2"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all"
                         value={resolvedProps.value || state[resolvedProps.bindTo] || ''}
                         onChange={(e) => {
                             if (resolvedProps.bindTo) setState(resolvedProps.bindTo, e.target.value);
@@ -1611,11 +1611,11 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'AVATAR':
             return (
-                <div className={`relative inline-block rounded-full overflow-hidden bg-gray-200 ${resolvedProps.className}`} style={{ width: resolvedProps.size || 32, height: resolvedProps.size || 32 }}>
+                <div className={`relative inline-block rounded-full overflow-hidden bg-muted ${resolvedProps.className}`} style={{ width: resolvedProps.size || 32, height: resolvedProps.size || 32 }}>
                     {resolvedProps.src ? (
                         <img src={resolvedProps.src} alt={resolvedProps.alt || 'Avatar'} className="w-full h-full object-cover" />
                     ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-500 font-bold">
+                        <div className="w-full h-full flex items-center justify-center text-muted-foreground font-bold">
                             {(resolvedProps.initials || '?').substring(0, 2).toUpperCase()}
                         </div>
                     )}
@@ -1634,9 +1634,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'EMPTY_STATE':
             return (
-                <div className="flex flex-col items-center justify-center p-8 text-center text-gray-500 space-y-3">
+                <div className="flex flex-col items-center justify-center p-8 text-center text-muted-foreground space-y-3">
                     {resolvedProps.icon && <div className="text-4xl opacity-50">{resolvedProps.icon}</div>}
-                    {resolvedProps.title && <h3 className="text-lg font-medium text-gray-700">{resolvedProps.title}</h3>}
+                    {resolvedProps.title && <h3 className="text-lg font-medium text-foreground">{resolvedProps.title}</h3>}
                     {resolvedProps.description && <p className="text-sm max-w-xs">{resolvedProps.description}</p>}
                     {resolvedProps.action && (
                         <Button
@@ -1653,7 +1653,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             return (
                 <SafeIframe
                     html={resolvedProps.html || ''}
-                    className={resolvedProps.className || 'w-full border rounded'}
+                    className={resolvedProps.className || 'w-full rounded-xl border'}
                 />
             );
 
@@ -1662,7 +1662,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 <div className="space-y-1">
                     {resolvedProps.label && <label className="text-sm font-medium">{resolvedProps.label}</label>}
                     <textarea
-                        className="w-full border rounded p-2 font-mono text-xs bg-slate-50 min-h-[100px]"
+                        className="w-full rounded-xl bg-muted/50 px-3.5 py-2.5 font-mono text-xs outline-none hover:bg-muted/70 focus:bg-background focus:ring-1 transition-all min-h-[100px]"
                         value={resolvedProps.value || state[resolvedProps.bindTo] || ''}
                         onChange={(e) => {
                             if (resolvedProps.bindTo) setState(resolvedProps.bindTo, e.target.value);
@@ -1682,13 +1682,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'ACCORDION_ITEM':
             return (
                 <details className="group">
-                    <summary className="flex cursor-pointer items-center justify-between p-4 font-medium hover:bg-gray-50">
+                    <summary className="flex cursor-pointer items-center justify-between p-4 font-medium hover:bg-muted/30">
                         {resolvedProps.title}
                         <span className="transition group-open:rotate-180">
                             <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
                         </span>
                     </summary>
-                    <div className="p-4 pt-0 text-sm text-gray-600">
+                    <div className="p-4 pt-0 text-sm text-muted-foreground">
                         {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
                     </div>
                 </details>
@@ -1705,8 +1705,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                             <button
                                 key={i}
                                 className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === child.props.value
-                                    ? 'border-blue-500 text-blue-600'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                                    ? 'border-primary text-primary'
+                                    : 'border-transparent text-muted-foreground hover:text-foreground'
                                     }`}
                                 onClick={() => setActiveTab(child.props.value)}
                             >
@@ -1742,8 +1742,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'PROGRESS':
             return (
-                <div className="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
-                    <div className="bg-blue-600 h-2.5 rounded-full" style={{ width: `${Math.min(100, Math.max(0, resolvedProps.value || 0))}%` }}></div>
+                <div className="w-full bg-muted rounded-full h-2.5">
+                    <div className="bg-primary h-2.5 rounded-full" style={{ width: `${Math.min(100, Math.max(0, resolvedProps.value || 0))}%` }}></div>
                 </div>
             );
 
@@ -1816,7 +1816,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
 
         case 'SEPARATOR':
-            return <hr className={`my-4 border-gray-200 ${resolvedProps.className || ''}`} />;
+            return <hr className={`my-4 border-border ${resolvedProps.className || ''}`} />;
 
         default:
             console.warn(`[JsonRenderer] Unknown component type: ${type}`);

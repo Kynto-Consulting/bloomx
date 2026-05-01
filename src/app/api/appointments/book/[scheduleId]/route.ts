@@ -80,7 +80,7 @@ async function createGoogleMeetRoom(refreshToken: string, topic: string, startsA
     const { access_token } = await tokenRes.json();
 
     const eventRes = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1',
+        'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none',
         {
             method: 'POST',
             headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
@@ -88,7 +88,6 @@ async function createGoogleMeetRoom(refreshToken: string, topic: string, startsA
                 summary: topic,
                 start: { dateTime: startsAt.toISOString() },
                 end: { dateTime: endsAt.toISOString() },
-                attendees: [{ email: guestEmail }],
                 conferenceData: {
                     createRequest: { requestId: randomBytes(8).toString('hex'), conferenceSolutionKey: { type: 'hangoutsMeet' } },
                 },
