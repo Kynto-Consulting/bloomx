@@ -24,13 +24,45 @@ function foldLine(line: string) {
 }
 
 function buildBookingIcs({
-    uid, title, description, location, startsAt, endsAt,
-    organizerEmail, organizerName, guestEmail, guestName,
+    uid, title, description, meetUrl, startsAt, endsAt,
+    organizerEmail, organizerName, guestEmail, guestName, timezone,
 }: {
-    uid: string; title: string; description?: string | null; location?: string | null;
+    uid: string; title: string; description?: string | null; meetUrl?: string | null;
     startsAt: Date; endsAt: Date; organizerEmail: string; organizerName: string;
-    guestEmail: string; guestName: string;
+    guestEmail: string; guestName: string; timezone: string;
 }): string {
+    const isZoom = meetUrl?.includes('zoom.us');
+    const isGoogleMeet = meetUrl?.includes('meet.google.com');
+
+    const fmt = (d: Date) => new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone, weekday: 'long', year: 'numeric', month: 'long',
+        day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
+    }).format(d);
+
+    // Build a rich plain-text description
+    const descParts = [
+        `You have a confirmed appointment.`,
+        ``,
+        `When: ${fmt(startsAt)}`,
+        `With: ${organizerName} (${organizerEmail})`,
+        description ? `Notes: ${description}` : null,
+        meetUrl ? `` : null,
+        meetUrl ? `Join: ${meetUrl}` : null,
+    ].filter(v => v !== null) as string[];
+    const richDescription = descParts.join('\\n');
+
+    // Conference property (RFC 7986 + vendor extensions)
+    const conferenceLines: (string | null)[] = meetUrl ? [
+        `URL:${meetUrl}`,
+        isGoogleMeet
+            ? `CONFERENCE;VALUE=URI;FEATURE=VIDEO;LABEL=Join Google Meet:${meetUrl}`
+            : isZoom
+                ? `CONFERENCE;VALUE=URI;FEATURE=VIDEO;LABEL=Join Zoom Meeting:${meetUrl}`
+                : `CONFERENCE;VALUE=URI;FEATURE=VIDEO;LABEL=Join Meeting:${meetUrl}`,
+        isGoogleMeet ? `X-GOOGLE-CONFERENCE:${meetUrl}` : null,
+        isZoom ? `X-ZOOM-JOIN-URL:${meetUrl}` : null,
+    ] : [];
+
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
@@ -43,18 +75,19 @@ function buildBookingIcs({
         `DTSTART:${formatIcsDate(startsAt)}`,
         `DTEND:${formatIcsDate(endsAt)}`,
         `SUMMARY:${escapeIcs(title)}`,
-        description ? `DESCRIPTION:${escapeIcs(description)}` : `DESCRIPTION:${escapeIcs(title)}`,
-        location ? `LOCATION:${escapeIcs(location)}` : null,
-        `ORGANIZER;CN=${escapeIcs(organizerName)}:mailto:${organizerEmail}`,
-        `ATTENDEE;RSVP=FALSE;PARTSTAT=ACCEPTED;CN=${escapeIcs(organizerName)}:mailto:${organizerEmail}`,
-        `ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${escapeIcs(guestName)}:mailto:${guestEmail}`,
+        `DESCRIPTION:${richDescription}`,
+        meetUrl ? `LOCATION:${escapeIcs(meetUrl)}` : null,
+        ...conferenceLines,
+        `ORGANIZER;CN="${escapeIcs(organizerName)}":mailto:${organizerEmail}`,
+        `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE;CN="${escapeIcs(organizerName)}":mailto:${organizerEmail}`,
+        `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN="${escapeIcs(guestName)}":mailto:${guestEmail}`,
         'SEQUENCE:0',
         'STATUS:CONFIRMED',
         'TRANSP:OPAQUE',
         'BEGIN:VALARM',
         'TRIGGER:-PT15M',
         'ACTION:DISPLAY',
-        'DESCRIPTION:Reminder',
+        `DESCRIPTION:Reminder: ${escapeIcs(title)}`,
         'END:VALARM',
         'END:VEVENT',
         'END:VCALENDAR',
@@ -406,13 +439,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
         uid: inviteUid,
         title: eventTitle,
         description: body?.guestNotes ? String(body.guestNotes) : null,
-        location: meetUrl,
+        meetUrl,
         startsAt,
         endsAt,
         organizerEmail: hostEmail,
         organizerName: hostName,
         guestEmail,
         guestName,
+        timezone: tz,
     });
 
     if (hostEmail) {
