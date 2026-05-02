@@ -60,11 +60,18 @@ export function DateTimePicker({
     const [open, setOpen] = useState(false);
     const [mounted, setMounted] = useState(false);
     const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; width: number }>({ left: 0, width: 380 });
+
+    // Local committed value — updates instantly on user interaction so the
+    // trigger button reflects changes without waiting for the parent re-render
+    // (needed when the form is rendered inside a GlobalWindowContext snapshot).
+    const [localValue, setLocalValue] = useState(value);
+    useEffect(() => { setLocalValue(value); }, [value]);
+
     const [timeInput, setTimeInput] = useState('');
 
     useEffect(() => { setMounted(true); }, []);
 
-    const { date: selDate, time: selTime } = parseValue(value);
+    const { date: selDate, time: selTime } = parseValue(localValue);
 
     const baseDate = selDate ? new Date(`${selDate}T00:00`) : new Date();
     const [calYear, setCalYear] = useState(baseDate.getFullYear());
@@ -138,15 +145,25 @@ export function DateTimePicker({
 
     const handleDayClick = (day: Date) => {
         const key = `${day.getFullYear()}-${pad(day.getMonth() + 1)}-${pad(day.getDate())}`;
-        if (dateOnly) { onChange(key); setOpen(false); return; }
+        if (dateOnly) {
+            setLocalValue(key);
+            onChange(key);
+            setOpen(false);
+            return;
+        }
         const time = selTime || '09:00';
-        onChange(`${key}T${time}`);
+        const next = `${key}T${time}`;
+        setLocalValue(next);
+        onChange(next);
     };
 
     const applyTime = (time: string) => {
         const today = new Date();
         const key = selDate || `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-        onChange(`${key}T${time}`);
+        const next = `${key}T${time}`;
+        setLocalValue(next);
+        onChange(next);
+        setTimeInput(time);
         setOpen(false);
     };
 
@@ -159,6 +176,11 @@ export function DateTimePicker({
             }
         }
     };
+
+    // Displayed text uses localValue so it updates immediately on interaction
+    const displayText = localValue
+        ? formatDisplay(localValue, dateOnly)
+        : (placeholder ?? (dateOnly ? 'Select date' : 'Select date & time'));
 
     // Calendar grid
     const firstDow = new Date(calYear, calMonth, 1).getDay();
@@ -290,9 +312,7 @@ export function DateTimePicker({
                 )}
             >
                 <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">
-                    {value ? formatDisplay(value, dateOnly) : (placeholder ?? (dateOnly ? 'Select date' : 'Select date & time'))}
-                </span>
+                <span className="flex-1 truncate">{displayText}</span>
             </button>
             {dropdown}
         </>
