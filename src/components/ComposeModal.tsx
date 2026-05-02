@@ -13,6 +13,7 @@ import { useCompose } from '@/contexts/ComposeContext';
 import { useCache } from '@/contexts/CacheContext';
 import { cn } from '@/lib/utils';
 import { TagInput } from './ui/TagInput';
+import { DateTimePicker } from './ui/DateTimePicker';
 import { Editor } from './Editor';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { useSession } from '@/components/SessionProvider';
@@ -95,6 +96,8 @@ export function ComposeModal({
 
     const [showCcBcc, setShowCcBcc] = useState(!!initialCc || !!initialBcc);
     const [sending, setSending] = useState(false);
+    const [schedulePickerOpen, setSchedulePickerOpen] = useState(false);
+    const [scheduleValue, setScheduleValue] = useState('');
     const [draftId, setDraftId] = useState(initialDraftId);
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
@@ -1061,29 +1064,37 @@ export function ComposeModal({
                                 )}
                             </button>
                             <div className="relative h-9 flex items-center pr-1 rounded-r-full hover:bg-blue-800/50 transition-colors">
-                                <label className="cursor-pointer p-2 flex items-center justify-center h-full w-full rounded-r-full" title="Schedule Send">
+                                <button
+                                    type="button"
+                                    onClick={() => setSchedulePickerOpen(o => !o)}
+                                    title="Schedule Send"
+                                    className="cursor-pointer p-2 flex items-center justify-center h-full w-full rounded-r-full"
+                                >
                                     <Clock className="w-4 h-4" />
-                                    <input
-                                        type="datetime-local"
-                                        className="absolute inset-0 opacity-0 cursor-pointer w-full"
-                                        onChange={(e) => {
-                                            if (e.target.value) {
-                                                const date = new Date(e.target.value);
-                                                // Confirm with user or just set it? Let's send immediately with schedule for now or set state?
-                                                // Better: Set state and change button text to "Schedule"
-                                                // For MVP: Just send immediately with this date
-                                                if (confirm(`Schedule email for ${date.toLocaleString()}?`)) {
-                                                    // Hack to reuse handleSend with the date
-                                                    // Actually, we need to update state and trigger send.
-                                                    // Let's create a specific handleSchedule(date) function.
-                                                    handleSchedule(date);
-                                                }
-                                                e.target.value = ''; // Reset
-                                            }
-                                        }}
-                                        min={new Date().toISOString().slice(0, 16)}
-                                    />
-                                </label>
+                                </button>
+                                {schedulePickerOpen && (
+                                    <div className="absolute bottom-full right-0 mb-2 z-[200]">
+                                        <div className="bg-background rounded-lg shadow-xl border border-border overflow-hidden">
+                                            <DateTimePicker
+                                                value={scheduleValue}
+                                                onChange={(v) => {
+                                                    setScheduleValue(v);
+                                                    if (v) {
+                                                        const date = new Date(v);
+                                                        if (!isNaN(date.getTime()) && confirm(`Schedule email for ${date.toLocaleString()}?`)) {
+                                                            handleSchedule(date);
+                                                            setSchedulePickerOpen(false);
+                                                            setScheduleValue('');
+                                                        }
+                                                    }
+                                                }}
+                                                minDate={new Date().toISOString().slice(0, 10)}
+                                                placeholder="Pick date & time"
+                                                className="border-0 rounded-none bg-transparent hover:bg-transparent shadow-none"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         <div className="overflow-hidden flex items-center gap-2 scroll-x w-full">

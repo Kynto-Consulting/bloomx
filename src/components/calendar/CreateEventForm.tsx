@@ -3,9 +3,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { TagInput } from '@/components/ui/TagInput';
+import { DateTimePicker } from '@/components/ui/DateTimePicker';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
 import { toast } from 'sonner';
+import { Video, Loader2 as SpinIcon, X as XIcon } from 'lucide-react';
+
+const pad = (n: number) => String(n).padStart(2, '0');
 
 type EventAttendee = {
     email: string;
@@ -67,6 +71,8 @@ export function CreateEventForm({
     const [isGoogleMeetAvailable, setIsGoogleMeetAvailable] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isInviting, setIsInviting] = useState(false);
+    const [conferenceUrl, setConferenceUrl] = useState<string | null>(null);
+    const [isCreatingMeet, setIsCreatingMeet] = useState(false);
 
     const normalizeTags = useCallback((tags: string[]) => {
         return Array.from(new Set(
@@ -211,6 +217,25 @@ export function CreateEventForm({
             })
             .catch(() => undefined);
     }, []);
+
+    const createGoogleMeet = useCallback(async () => {
+        setIsCreatingMeet(true);
+        try {
+            const res = await fetch('/api/calendar/conferencing/meet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: title || 'Meeting', startsAt: toIsoIfValid(startsAt), endsAt: toIsoIfValid(endsAt) }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.meetUrl) throw new Error(data.error || 'Failed');
+            setConferenceUrl(data.meetUrl);
+            setLocation(data.meetUrl);
+        } catch {
+            toast.error('Could not create Google Meet link');
+        } finally {
+            setIsCreatingMeet(false);
+        }
+    }, [title, startsAt, endsAt, toIsoIfValid]);
 
     const saveEvent = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
@@ -368,13 +393,38 @@ export function CreateEventForm({
             
             <div className="space-y-4 flex-1">
                 <div className="flex items-end gap-2">
-                    <input 
-                        value={location} 
-                        onChange={(e) => setLocation(e.target.value)} 
-                        placeholder="Location" 
+                    <input
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="Location or meeting link"
                         readOnly={isReadOnly}
-                        className="w-full flex-1 border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none" 
+                        className="w-full flex-1 border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none"
                     />
+
+                    {!isReadOnly && isGoogleMeetAvailable && !conferenceUrl && (
+                        <button
+                            type="button"
+                            onClick={createGoogleMeet}
+                            disabled={isCreatingMeet}
+                            title="Add Google Meet"
+                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 text-xs hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                        >
+                            {isCreatingMeet ? <SpinIcon className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
+                            {isCreatingMeet ? 'Creating…' : 'Meet'}
+                        </button>
+                    )}
+                    {!isReadOnly && conferenceUrl && (
+                        <button
+                            type="button"
+                            onClick={() => { setConferenceUrl(null); setLocation(''); }}
+                            title="Remove video meeting"
+                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
+                        >
+                            <Video className="h-3 w-3" />
+                            Meet
+                            <XIcon className="h-3 w-3" />
+                        </button>
+                    )}
 
                     {!isReadOnly && (
                         <div className="shrink-0 pb-1">
@@ -453,23 +503,41 @@ export function CreateEventForm({
                 <div className="flex gap-4">
                     <div className="flex-1 space-y-1">
                         <label className="text-xs font-medium text-slate-500">Starts</label>
-                        <input 
-                            type="datetime-local" 
-                            value={(startsAt || '').slice(0, 16)} 
-                            onChange={(e) => setStartsAt(e.target.value)} 
-                            readOnly={isReadOnly}
-                            className={`w-full text-sm border-b border-slate-200 py-2 px-2 rounded-t transition-colors outline-none ${isReadOnly ? 'bg-transparent border-none' : 'bg-slate-50 focus:bg-white focus:border-blue-600'}`} 
-                        />
+                        {isReadOnly ? (
+                            <p className="text-sm py-2 text-slate-700">
+                                {startsAt ? new Date(startsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </p>
+                        ) : (
+                            <DateTimePicker
+                                value={(startsAt || '').slice(0, 16)}
+                                onChange={(v) => {
+                                    setStartsAt(v);
+                                    // Auto-advance endsAt if it's before or equal to new startsAt
+                                    if (v && endsAt && v >= endsAt.slice(0, 16)) {
+                                        const d = new Date(v);
+                                        d.setHours(d.getHours() + 1);
+                                        setEndsAt(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+                                    }
+                                }}
+                                placeholder="Start date & time"
+                                className="border-slate-200 bg-slate-50 hover:bg-white"
+                            />
+                        )}
                     </div>
                     <div className="flex-1 space-y-1">
                         <label className="text-xs font-medium text-slate-500">Ends</label>
-                        <input 
-                            type="datetime-local" 
-                            value={(endsAt || '').slice(0, 16)} 
-                            onChange={(e) => setEndsAt(e.target.value)} 
-                            readOnly={isReadOnly}
-                            className={`w-full text-sm border-b border-slate-200 py-2 px-2 rounded-t transition-colors outline-none ${isReadOnly ? 'bg-transparent border-none' : 'bg-slate-50 focus:bg-white focus:border-blue-600'}`} 
-                        />
+                        {isReadOnly ? (
+                            <p className="text-sm py-2 text-slate-700">
+                                {endsAt ? new Date(endsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                            </p>
+                        ) : (
+                            <DateTimePicker
+                                value={(endsAt || '').slice(0, 16)}
+                                onChange={setEndsAt}
+                                placeholder="End date & time"
+                                className="border-slate-200 bg-slate-50 hover:bg-white"
+                            />
+                        )}
                     </div>
                 </div>
             </div>

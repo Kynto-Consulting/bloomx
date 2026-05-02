@@ -20,7 +20,10 @@ export type ParsedInvite = {
 };
 
 function unfoldIcs(source: string) {
-    return String(source || '').replace(/\r?\n[ \t]/g, '');
+    return String(source || '')
+        .replace(/\r?\n[ \t]/g, '')          // RFC 5545 line folding
+        .replace(/=\r?\n/g, '')              // quoted-printable soft line breaks
+        .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16))); // quoted-printable encoded chars (e.g. =3D → =)
 }
 
 function extractIcsDateField(source: string, key: string) {

@@ -23,6 +23,34 @@ function foldLine(line: string) {
     return parts.join('\r\n');
 }
 
+/** Returns the UTC offset for `tz` at `date` as ±HHMM (e.g. "-0500"). */
+function tzOffsetStr(date: Date, tz: string): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(date);
+    const get = (t: string) => { const v = parts.find(p => p.type === t)?.value ?? '00'; return v === '24' ? '00' : v; };
+    const localMs = Date.UTC(
+        Number(parts.find(p => p.type === 'year')?.value ?? '2000'),
+        Number(get('month')) - 1, Number(get('day')),
+        Number(get('hour')), Number(get('minute')), Number(get('second')),
+    );
+    const offMin = Math.round((localMs - date.getTime()) / 60000);
+    const sign = offMin >= 0 ? '+' : '-';
+    const abs = Math.abs(offMin);
+    return `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}${String(abs % 60).padStart(2, '0')}`;
+}
+
+/** Formats a Date as YYYYMMDDTHHMMSS in the given timezone (no Z — used with TZID). */
+function formatIcsDateTz(date: Date, tz: string): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    }).formatToParts(date);
+    const get = (t: string) => { const v = parts.find(p => p.type === t)?.value ?? '00'; return v === '24' ? '00' : v; };
+    return `${parts.find(p => p.type === 'year')?.value}${get('month')}${get('day')}T${get('hour')}${get('minute')}${get('second')}`;
+}
+
 function buildBookingIcs({
     uid, title, description, meetUrl, startsAt, endsAt,
     organizerEmail, organizerName, guestEmail, guestName, timezone,
@@ -63,17 +91,35 @@ function buildBookingIcs({
         isZoom ? `X-ZOOM-JOIN-URL:${meetUrl}` : null,
     ] : [];
 
+    // VTIMEZONE block — lets calendar clients display the local time without conversion.
+    // We use the offset at startsAt; for timezones with DST this is a single-rule simplification
+    // but correct for the event itself since startsAt falls within that offset period.
+    const offset = tzOffsetStr(startsAt, timezone);
+    const vtimezone = [
+        'BEGIN:VTIMEZONE',
+        `TZID:${timezone}`,
+        `X-LIC-LOCATION:${timezone}`,
+        'BEGIN:STANDARD',
+        `TZOFFSETFROM:${offset}`,
+        `TZOFFSETTO:${offset}`,
+        `TZNAME:${timezone}`,
+        'DTSTART:19700101T000000',
+        'END:STANDARD',
+        'END:VTIMEZONE',
+    ];
+
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
         'PRODID:-//BloomX//Appointments//EN',
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
+        ...vtimezone,
         'BEGIN:VEVENT',
         `UID:${uid}`,
         `DTSTAMP:${formatIcsDate(new Date())}`,
-        `DTSTART:${formatIcsDate(startsAt)}`,
-        `DTEND:${formatIcsDate(endsAt)}`,
+        `DTSTART;TZID=${timezone}:${formatIcsDateTz(startsAt, timezone)}`,
+        `DTEND;TZID=${timezone}:${formatIcsDateTz(endsAt, timezone)}`,
         `SUMMARY:${escapeIcs(title)}`,
         `DESCRIPTION:${richDescription}`,
         meetUrl ? `LOCATION:${escapeIcs(meetUrl)}` : null,
@@ -98,7 +144,10 @@ function buildBookingIcs({
 
 // ─── Meeting providers ───────────────────────────────────────────────────────
 
-async function createGoogleMeetRoom(refreshToken: string, topic: string, startsAt: Date, endsAt: Date, guestEmail: string) {
+async function createGoogleMeetRoom(
+    refreshToken: string, topic: string, startsAt: Date, endsAt: Date,
+    guestName: string, guestEmail: string,
+) {
     const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -112,6 +161,9 @@ async function createGoogleMeetRoom(refreshToken: string, topic: string, startsA
     if (!tokenRes.ok) throw new Error('Failed to refresh Google token');
     const { access_token } = await tokenRes.json();
 
+    // Guest is intentionally placed in description, NOT in attendees.
+    // Google ignores sendUpdates=none for non-Google accounts and always sends its own
+    // calendar invite — the only way to suppress it is to never list them as attendees.
     const eventRes = await fetch(
         'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none',
         {
@@ -119,6 +171,7 @@ async function createGoogleMeetRoom(refreshToken: string, topic: string, startsA
             headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 summary: topic,
+                description: `Guest: ${guestName} (${guestEmail})`,
                 start: { dateTime: startsAt.toISOString() },
                 end: { dateTime: endsAt.toISOString() },
                 conferenceData: {
@@ -355,6 +408,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
                     `${schedule.name} — ${guestName}`,
                     startsAt,
                     endsAt,
+                    guestName,
                     guestEmail
                 );
             }
