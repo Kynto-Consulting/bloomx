@@ -175,7 +175,12 @@ async function createGoogleMeetRoom(
                 start: { dateTime: startsAt.toISOString() },
                 end: { dateTime: endsAt.toISOString() },
                 conferenceData: {
-                    createRequest: { requestId: randomBytes(8).toString('hex'), conferenceSolutionKey: { type: 'hangoutsMeet' } },
+                    createRequest: { requestId: randomBytes(8).toString('hex'), conferenceSolutionKey: { type: 'hangoutsMeet' },
+                    conferenceProperties: { 
+                        allowAddGuests: true,
+                        allowedPresenters: 'EVERYONE',
+                        accessType: 'OPEN',
+                    } },
                 },
             }),
         }

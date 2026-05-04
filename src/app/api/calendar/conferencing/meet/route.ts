@@ -47,6 +47,11 @@ export async function POST(req: NextRequest) {
                     createRequest: {
                         requestId: randomBytes(8).toString('hex'),
                         conferenceSolutionKey: { type: 'hangoutsMeet' },
+                    conferenceProperties: { 
+                        allowAddGuests: true,
+                        allowedPresenters: 'EVERYONE',
+                        accessType: 'OPEN',
+                    }
                     },
                 },
             }),
