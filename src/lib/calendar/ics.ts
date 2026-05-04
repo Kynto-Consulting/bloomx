@@ -22,8 +22,83 @@ export type ParsedInvite = {
 function unfoldIcs(source: string) {
     return String(source || '')
         .replace(/\r?\n[ \t]/g, '')          // RFC 5545 line folding
-        .replace(/=\r?\n/g, '')              // quoted-printable soft line breaks
-        .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16))); // quoted-printable encoded chars (e.g. =3D → =)
+        .replace(/=\r?\n/g, '');             // quoted-printable soft line breaks
+}
+
+function decodeQuotedPrintable(value: string, charset = 'utf-8') {
+    const bytes: number[] = [];
+
+    for (let index = 0; index < value.length; index += 1) {
+        const char = value[index];
+        if (char === '=' && index + 2 < value.length) {
+            const hex = value.substr(index + 1, 2);
+            if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+                bytes.push(parseInt(hex, 16));
+                index += 2;
+                continue;
+            }
+        }
+
+        const code = value.charCodeAt(index);
+        bytes.push(code & 0xff);
+    }
+
+    try {
+        if (typeof TextDecoder !== 'undefined') {
+            return new TextDecoder(charset, { fatal: false }).decode(new Uint8Array(bytes));
+        }
+    } catch {
+        // ignore and fallback
+    }
+
+    try {
+        return Buffer.from(bytes).toString(normalizeBufferEncoding(charset));
+    } catch {
+        return String.fromCharCode(...bytes);
+    }
+}
+
+function normalizeBufferEncoding(charset: string): BufferEncoding {
+    const normalized = String(charset || '').trim().toLowerCase().replace(/^"|"$/g, '');
+
+    switch (normalized) {
+        case 'utf8':
+        case 'utf-8':
+            return 'utf8';
+        case 'utf16le':
+        case 'utf-16le':
+        case 'ucs2':
+        case 'ucs-2':
+            return 'utf16le';
+        case 'latin1':
+        case 'iso-8859-1':
+        case 'iso8859-1':
+            return 'latin1';
+        case 'ascii':
+            return 'ascii';
+        case 'base64':
+            return 'base64';
+        case 'hex':
+            return 'hex';
+        case 'binary':
+            return 'binary';
+        default:
+            return 'utf8';
+    }
+}
+
+function decodeIcsText(value: string, params: string) {
+    const normalizedParams = String(params || '').toUpperCase();
+    const charsetMatch = normalizedParams.match(/CHARSET=([^;:]+)/i);
+    const encodingMatch = normalizedParams.match(/ENCODING=([^;:]+)/i);
+    const charset = charsetMatch?.[1]?.trim() || 'utf-8';
+    const encoding = encodingMatch?.[1]?.trim().toUpperCase();
+
+    if (encoding === 'QUOTED-PRINTABLE' || /=[0-9A-F]{2}/i.test(value)) {
+        return decodeQuotedPrintable(value, charset);
+    }
+
+    return value;
 }
 
 function extractIcsDateField(source: string, key: string) {
@@ -105,8 +180,14 @@ function toDateInTimeZone(parts: ReturnType<typeof parseIcsLocalDateParts>, time
 
 export function extractIcsValue(source: string, key: string) {
     const unfolded = unfoldIcs(source);
-    const match = unfolded.match(new RegExp(`^${key}[^:]*:(.+)$`, 'im'));
-    return match?.[1]?.trim() || '';
+    const match = unfolded.match(new RegExp(`^${key}([^:]*):(.+)$`, 'im'));
+    if (!match?.[2]) {
+        return '';
+    }
+
+    const params = String(match[1] || '');
+    const value = match[2].trim();
+    return decodeIcsText(value, params);
 }
 
 export function extractEmail(value: string) {
@@ -127,13 +208,13 @@ export function extractEmail(value: string) {
 export function extractDisplayName(value: string) {
     const cnMatch = String(value || '').match(/CN=([^;:]+)/i);
     if (cnMatch?.[1]) {
-        return cnMatch[1].trim().replace(/^"|"$/g, '');
+        return decodeIcsText(cnMatch[1].trim().replace(/^"|"$/g, ''), '');
     }
 
     const normalized = String(value || '').trim();
     const angleIndex = normalized.indexOf('<');
     if (angleIndex > 0) {
-        return normalized.slice(0, angleIndex).trim().replace(/^"|"$/g, '');
+        return decodeIcsText(normalized.slice(0, angleIndex).trim().replace(/^"|"$/g, ''), '');
     }
 
     return extractEmail(normalized);
