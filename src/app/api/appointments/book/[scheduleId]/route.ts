@@ -4,6 +4,7 @@ import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
 import { randomBytes } from 'crypto';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
+import { buildAppointmentConfirmationHtml } from '@/lib/calendar/email-templates';
 
 // ─── ICS builder ────────────────────────────────────────────────────────────
 
@@ -221,46 +222,6 @@ async function createZoomMeeting(refreshToken: string, topic: string, startsAt: 
     if (!meetRes.ok) throw new Error('Failed to create Zoom meeting');
     const data = await meetRes.json();
     return data.join_url || null;
-}
-
-// ─── Confirmation email ──────────────────────────────────────────────────────
-
-function buildConfirmationHtml({
-    guestName, hostName, scheduleName, startsAt, endsAt, meetUrl, cancelUrl, timezone,
-}: {
-    guestName: string; hostName: string; scheduleName: string;
-    startsAt: Date; endsAt: Date; meetUrl: string | null; cancelUrl: string; timezone: string;
-}) {
-    const fmt = (d: Date) => new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone, weekday: 'long', year: 'numeric', month: 'long',
-        day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-    }).format(d);
-
-    const meetSection = meetUrl ? `
-        <p style="margin:16px 0 8px;font-size:14px;color:#374151;">Join the meeting:</p>
-        <a href="${meetUrl}" style="display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:10px 20px;border-radius:8px;font-size:14px;font-weight:600;">${meetUrl.includes('zoom') ? 'Join Zoom' : 'Join Google Meet'}</a>
-    ` : '';
-
-    return `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f9fafb;font-family:system-ui,sans-serif;">
-<div style="max-width:520px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
-  <div style="background:#2563eb;padding:32px 32px 24px;">
-    <p style="margin:0;color:#bfdbfe;font-size:13px;font-weight:500;letter-spacing:.5px;">BOOKING CONFIRMED</p>
-    <h1 style="margin:8px 0 0;color:#fff;font-size:22px;font-weight:700;">${escapeHtml(scheduleName)}</h1>
-  </div>
-  <div style="padding:32px;">
-    <p style="margin:0 0 20px;font-size:15px;color:#111827;">Hi ${escapeHtml(guestName)}, your appointment with <strong>${escapeHtml(hostName)}</strong> is confirmed.</p>
-    <table style="width:100%;border-collapse:collapse;">
-      <tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;width:80px;">When</td>
-          <td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;font-weight:500;">${escapeHtml(fmt(startsAt))}</td></tr>
-      <tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;">Ends</td>
-          <td style="padding:10px 0;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;">${escapeHtml(fmt(endsAt))}</td></tr>
-    </table>
-    ${meetSection}
-    <p style="margin:28px 0 0;font-size:13px;color:#9ca3af;">A calendar invite (.ics) is attached — add it to your calendar to get a reminder.</p>
-    <p style="margin:24px 0 0;font-size:12px;color:#d1d5db;">Need to cancel? <a href="${cancelUrl}" style="color:#ef4444;text-decoration:none;">Cancel this appointment</a></p>
-  </div>
-</div>
-</body></html>`;
 }
 
 function buildHostNotificationHtml({
@@ -515,8 +476,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
             fromName: hostName,
             fromEmail: hostEmail,
             to: guestEmail,
-            subject: `Confirmed: ${schedule.name} with ${hostName}`,
-            html: buildConfirmationHtml({ guestName, hostName, scheduleName: schedule.name, startsAt, endsAt, meetUrl, cancelUrl, timezone: tz }),
+            subject: meetUrl ? `Confirmado: ${schedule.name} · Google Meet` : `Confirmado: ${schedule.name}`,
+            html: buildAppointmentConfirmationHtml({
+                guestName,
+                guestEmail,
+                hostName,
+                hostEmail,
+                scheduleName: schedule.name,
+                startsAt,
+                endsAt,
+                meetUrl,
+                cancelUrl,
+                timezone: tz,
+            }),
             attachmentIcs: icsContent,
             icsFilename,
         }).catch(err => console.error('Guest confirmation email failed:', err));

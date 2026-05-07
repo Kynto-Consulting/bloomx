@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { TagInput } from '@/components/ui/TagInput';
 import { DateTimePicker } from '@/components/ui/DateTimePicker';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
+import { buildCalendarInviteHtml } from '@/lib/calendar/email-templates';
 import { toast } from 'sonner';
 import { Video, Loader2 as SpinIcon, X as XIcon } from 'lucide-react';
 
@@ -73,6 +74,7 @@ export function CreateEventForm({
     const [isInviting, setIsInviting] = useState(false);
     const [conferenceUrl, setConferenceUrl] = useState<string | null>(null);
     const [isCreatingMeet, setIsCreatingMeet] = useState(false);
+    const attendeeChangeSeqRef = useRef(0);
 
     const normalizeTags = useCallback((tags: string[]) => {
         return Array.from(new Set(
@@ -127,10 +129,16 @@ export function CreateEventForm({
         }
     }, [mailGroupAliases, normalizeTags]);
 
-    const handleAttendeesChange = useCallback(async (tags: string[]) => {
+    const handleAttendeesChange = useCallback((tags: string[]) => {
+        const requestId = ++attendeeChangeSeqRef.current;
         setAttendeeTags(tags);
-        const resolvedTags = await runRecipientsMiddleware(tags);
-        setAttendeeTags(resolvedTags);
+
+        void (async () => {
+            const resolvedTags = await runRecipientsMiddleware(tags);
+            if (attendeeChangeSeqRef.current === requestId) {
+                setAttendeeTags(resolvedTags);
+            }
+        })();
     }, [runRecipientsMiddleware]);
 
     const getAttendeeList = useCallback(() => {
@@ -328,6 +336,14 @@ export function CreateEventForm({
 
             const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
             const endsAtLabel = endsAt ? new Date(endsAt).toLocaleString() : 'TBD';
+            const html = buildCalendarInviteHtml({
+                title: title || inviteAttachmentResult.subject || 'New Event',
+                startsAtLabel,
+                endsAtLabel,
+                location: location || null,
+                organizerLabel: isGoogleLinked ? 'Google Calendar' : 'BloomX Calendar',
+                attendeeCount: toInvite.length,
+            });
 
             const text = [
                 `You are invited to: ${title || 'New Event'}`,
@@ -344,6 +360,7 @@ export function CreateEventForm({
                 body: JSON.stringify({
                     to: toInvite.join(','),
                     subject: `Invitation: ${title || inviteAttachmentResult.subject || 'New Event'}`,
+                    html,
                     text,
                     attachments: [inviteAttachmentResult.attachment],
                 }),

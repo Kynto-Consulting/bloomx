@@ -23,12 +23,14 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
     const [suggestions, setSuggestions] = React.useState<TagInputSuggestion[]>([]);
     const [activeSuggestionIndex, setActiveSuggestionIndex] = React.useState(0);
     const inputRef = React.useRef<HTMLInputElement>(null);
+    const lastCommitWasKeyboardRef = React.useRef(false);
 
-    const addTag = React.useCallback((nextValue: string) => {
+    const addTag = React.useCallback((nextValue: string, commitSource: 'keyboard' | 'mouse' | 'blur' = 'keyboard') => {
         const newTag = nextValue.trim().replace(',', '');
         if (newTag && !value.includes(newTag)) {
             onChange([...value, newTag]);
         }
+        lastCommitWasKeyboardRef.current = commitSource !== 'blur';
         setInputValue('');
         setSuggestions([]);
         setActiveSuggestionIndex(0);
@@ -88,13 +90,14 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
 
         if ((e.key === 'Enter' || e.key === 'Tab' || e.key === ',') && inputValue.trim()) {
             e.preventDefault();
+            e.stopPropagation();
             const activeSuggestion = suggestions[activeSuggestionIndex];
             if (activeSuggestion?.email) {
-                addTag(activeSuggestion.email);
+                addTag(activeSuggestion.email, 'keyboard');
                 return;
             }
 
-            addTag(inputValue);
+            addTag(inputValue, 'keyboard');
         } else if (e.key === 'Backspace' && !inputValue && value.length > 0) {
             e.preventDefault();
             const newValue = [...value];
@@ -140,8 +143,13 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
                     onKeyDown={handleKeyDown}
                     onBlur={() => {
                         window.setTimeout(() => {
+                            if (lastCommitWasKeyboardRef.current) {
+                                lastCommitWasKeyboardRef.current = false;
+                                return;
+                            }
+
                             if (inputValue.trim()) {
-                                addTag(inputValue);
+                                addTag(inputValue, 'blur');
                             } else {
                                 setSuggestions([]);
                             }
@@ -157,7 +165,7 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
                                 type="button"
                                 onMouseDown={(e) => {
                                     e.preventDefault();
-                                    addTag(suggestion.email);
+                                    addTag(suggestion.email, 'mouse');
                                 }}
                                 className={cn(
                                     "flex w-full flex-col items-start px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
