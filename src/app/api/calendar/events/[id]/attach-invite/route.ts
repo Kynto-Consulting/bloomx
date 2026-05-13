@@ -75,7 +75,7 @@ function buildIcsFromEvent(options: {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//BloomX//Calendar Invite//EN',
+        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
         'BEGIN:VEVENT',
@@ -138,7 +138,7 @@ export async function POST(
 
         const providedOrganizerEmail = String(body?.organizerEmail || '').trim().toLowerCase();
         const providedOrganizerName = String(body?.organizerName || '').trim();
-        const organizerEmail = providedOrganizerEmail || event.organizerEmail || user.email || 'noreply@bloomx.local';
+        const organizerEmail = providedOrganizerEmail || event.organizerEmail || user.email || `noreply@${(process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '')}.local`;
         const organizerName = providedOrganizerName || event.organizerName || user.name || organizerEmail;
 
         const nextTitle = typeof body?.title === 'string' && body.title.trim()
@@ -157,7 +157,8 @@ export async function POST(
         const nextEndsAt = parsedEndsAt && !Number.isNaN(parsedEndsAt.getTime()) ? parsedEndsAt : event.endsAt;
 
         const requestedInviteUid = String(body?.inviteUid || '').trim();
-        const eventUid = requestedInviteUid || event.inviteUid || event.externalId || `${event.id}@bloomx.local`;
+        const brandLocal = (process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const eventUid = requestedInviteUid || event.inviteUid || event.externalId || `${event.id}@${brandLocal}.local`;
         const replaceAttendees = body?.replaceAttendees !== false;
 
         let latestEvent = event;

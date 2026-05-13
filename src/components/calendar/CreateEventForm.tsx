@@ -348,20 +348,19 @@ export function CreateEventForm({
             }
 
             const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
-            const endsAtLabel = endsAt ? new Date(endsAt).toLocaleString() : 'TBD';
+            const parsedStart = startsAt ? new Date(startsAt) : new Date();
+            const parsedEnd = endsAt ? new Date(endsAt) : new Date(parsedStart.getTime() + 3600000);
             const html = buildCalendarInviteHtml({
                 title: title || inviteAttachmentResult.subject || 'New Event',
-                startsAtLabel,
-                endsAtLabel,
+                startsAt: parsedStart,
+                endsAt: parsedEnd,
                 location: location || null,
-                organizerLabel: isGoogleLinked ? 'Google Calendar' : 'BloomX Calendar',
-                attendeeCount: toInvite.length,
             });
 
             const text = [
                 `You are invited to: ${title || 'New Event'}`,
                 `Starts: ${startsAtLabel}`,
-                `Ends: ${endsAtLabel}`,
+                `Ends: ${parsedEnd.toLocaleString()}`,
                 location ? `Location: ${location}` : '',
                 '',
                 'The calendar invite (.ics) is attached to this email.',

@@ -6,8 +6,10 @@ import { patchAllUserMeetRooms } from '@/lib/google/meet';
 /**
  * POST /api/google/fix-meet-rooms
  *
- * Gets a fresh access token and patches all stored Meet rooms to OPEN (no waiting room).
- * Only works for rooms created via the Meet REST API (not Calendar API createRequest).
+ * Applies BOTH patching methods to open all stored Meet rooms (no waiting room):
+ *   Option 1 — Meet REST API PATCH with accessType:OPEN
+ *   Option 2 — Calendar API PATCH to refresh conference, then retry Meet PATCH
+ * Returns per-room results with error details so the UI can surface failures.
  */
 export async function POST() {
     const user = await getCurrentUser();
@@ -49,6 +51,10 @@ export async function POST() {
         total: results.length,
         patched: results.filter((r) => r.ok).length,
         failed: results.filter((r) => !r.ok).length,
-        rooms: results,
+        rooms: results.map((r) => ({
+            url: r.url,
+            ok: r.ok,
+            ...(r.error ? { error: r.error } : {}),
+        })),
     });
 }

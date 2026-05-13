@@ -113,7 +113,7 @@ function buildBookingIcs({
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//BloomX//Appointments//EN',
+        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
         ...vtimezone,
@@ -393,7 +393,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
     const calendars = await ensureDefaultCalendars(schedule.user.id);
     const targetCalendar = calendars.find(c => c.source === 'local' && !c.isReadOnly) || calendars[0];
     let calendarEventId: string | null = null;
-    const inviteUid = randomBytes(16).toString('hex') + '@bloomx';
+    const brandDomain = (process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const inviteUid = randomBytes(16).toString('hex') + `@${brandDomain}`;
 
     if (targetCalendar) {
         const event = await prisma.calendarEvent.create({

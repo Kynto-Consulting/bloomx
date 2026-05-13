@@ -423,8 +423,16 @@ export default function AppointmentsPage() {
                 toast.info('No se encontraron salas de Meet para actualizar.');
             } else if (data.failed === 0) {
                 toast.success(`${data.patched} sala${data.patched !== 1 ? 's' : ''} abierta${data.patched !== 1 ? 's' : ''} correctamente.`);
+            } else if (data.patched > 0) {
+                toast.warning(`${data.patched} de ${data.total} salas actualizadas. ${data.failed} fallaron — las salas antiguas creadas antes de reconectar requieren recrearse.`);
             } else {
-                toast.warning(`${data.patched} de ${data.total} sala${data.total !== 1 ? 's' : ''} actualizadas. ${data.failed} no pudieron actualizarse (salas antiguas requieren reconexión y nueva sala).`);
+                // All failed — check first error for diagnosis
+                const firstError = data.rooms?.find((r: any) => r.error)?.error || '';
+                const is403 = firstError.includes('403') || firstError.includes('PERMISSION_DENIED');
+                toast.error(is403
+                    ? 'Sin permiso para abrir estas salas. Son antiguas (creadas vía Calendar API). Crea nuevas citas para generar salas abiertas automáticamente.'
+                    : `No se pudo abrir ninguna sala. Error: ${firstError.slice(0, 120)}`
+                );
             }
         } catch {
             toast.error('Error al conectar con el servidor.');

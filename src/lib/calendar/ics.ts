@@ -371,7 +371,7 @@ export function buildReplyIcs(options: {
     return [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//BloomX//Invite Reply//EN',
+        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
         'CALSCALE:GREGORIAN',
         'METHOD:REPLY',
         'BEGIN:VEVENT',
