@@ -437,6 +437,8 @@ export async function POST(req: NextRequest) {
                 userId: user.id, // Link to User
                 from: formattedFrom, // Store in "Name <email>" format
                 to: to,
+                cc: cc || null,
+                bcc: bcc || null,
                 replyTo: requestedReplyTo.includes('@') ? requestedReplyTo : null,
                 cleanTo: to.split(',').map((email: string) => { // Use same logic as before or extract helper
                     const [local, domain] = email.trim().toLowerCase().split('@');

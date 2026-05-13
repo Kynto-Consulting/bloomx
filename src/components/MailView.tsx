@@ -24,6 +24,8 @@ interface EmailDetails {
         id: string;
         from: string;
         to: string;
+        cc?: string | null;
+        bcc?: string | null;
         cleanTo?: string | null;
         replyTo?: string | null;
         subject: string;
@@ -623,6 +625,12 @@ export function MailView() {
                                                         <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
                                                         <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
                                                     </div>
+                                                    {isExpanded && item.email.cc && (
+                                                        <span className="text-xs text-muted-foreground truncate">CC: {item.email.cc}</span>
+                                                    )}
+                                                    {isExpanded && item.email.bcc && (
+                                                        <span className="text-xs text-muted-foreground truncate">BCC: {item.email.bcc}</span>
+                                                    )}
                                                     <span className="text-xs text-muted-foreground sm:hidden">{formatDate(item.email.createdAt)}</span>
                                                     {!isExpanded && (
                                                         <motion.span

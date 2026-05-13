@@ -417,7 +417,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     console.log('--- RAW PAYLOAD DEBUG ---');
     console.log(`Payload Size: ${rawPayload.length} bytes`);
     console.log('-------------------------');
-    const { from, to, subject, attachments, messageId } = data;
+    const { from, to, cc: rawCc, subject, attachments, messageId } = data;
     let headersMap = (data?.headers && typeof data.headers === 'object') ? data.headers : {};
     const webhookEmailId = String(data?.email_id || data?.id || '').trim();
     const resolvedMessageId = String(messageId || data?.message_id || '').trim();
@@ -471,6 +471,13 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     // Use RAW for storage (Dedupe case-sensitive or insensitive? Let's keep it exact as received)
     const uniqueRawRecipients = Array.from(new Set(recipients));
     const toField = uniqueRawRecipients.join(', ');
+
+    // Normalize CC field (same format as to)
+    const rawCcList: any[] = Array.isArray(rawCc) ? rawCc : (rawCc ? [rawCc] : []);
+    const ccField = rawCcList
+        .map((r) => { const p = parseMailbox(r); return p.email || (typeof r === 'string' ? r.trim() : ''); })
+        .filter(Boolean)
+        .join(', ') || null;
 
     // Verify recipients exist in our DB
     const users = await prisma.user.findMany({
@@ -766,6 +773,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 userId: user.id, // Assign to correct user
                 from: formattedFrom,
                 to: toField,
+                cc: ccField,
                 replyTo: replyToEmail,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
