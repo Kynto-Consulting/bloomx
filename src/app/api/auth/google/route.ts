@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
         client_id: GOOGLE_CLIENT_ID,
         redirect_uri: REDIRECT_URI,
         response_type: "code",
-        scope: "openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts.readonly",
+        scope: "openid email profile https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/contacts.readonly https://www.googleapis.com/auth/meetings.space.created",
         access_type: "offline",
         prompt: "consent",
         state,

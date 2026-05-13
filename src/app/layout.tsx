@@ -64,6 +64,8 @@ export async function generateMetadata(): Promise<Metadata> {
 
 import { ExpansionUIProvider } from '@/contexts/ExpansionUIContext';
 import { ThemeProvider } from '@/components/ThemeProvider';
+import { ReAuthProvider } from '@/contexts/ReAuthContext';
+import { ReAuthBanner } from '@/components/ReAuthBanner';
 
 export default function RootLayout({
     children,
@@ -74,23 +76,35 @@ export default function RootLayout({
         <html lang="en" className="light" suppressHydrationWarning>
             <body className={`${inter.variable} font-sans antialiased bg-white text-slate-900`}>
                 <SessionProvider>
-                    <GlobalWindowProvider>
-                        <ComposeProvider>
-                            <CacheProvider>
-                                <OfflineProvider>
-                                    <ExpansionUIProvider>
-                                        <ThemeProvider>
-                                            {children}
-                                        </ThemeProvider>
-                                        <PwaManager />
-                                        <RealTimeListener />
-                                        <ComposeWindows />
-                                        <Toaster />
-                                    </ExpansionUIProvider>
-                                </OfflineProvider>
-                            </CacheProvider>
-                        </ComposeProvider>
-                    </GlobalWindowProvider>
+                    <ReAuthProvider
+                        initialChecks={[
+                            {
+                                provider: 'google',
+                                scopes: ['https://www.googleapis.com/auth/meetings.space.created'],
+                                reason: 'Para crear salas de Google Meet abiertas sin sala de espera, necesita un permiso adicional.',
+                                requestedBy: 'Google Meet',
+                            },
+                        ]}
+                    >
+                        <GlobalWindowProvider>
+                            <ComposeProvider>
+                                <CacheProvider>
+                                    <OfflineProvider>
+                                        <ExpansionUIProvider>
+                                            <ThemeProvider>
+                                                {children}
+                                            </ThemeProvider>
+                                            <PwaManager />
+                                            <RealTimeListener />
+                                            <ComposeWindows />
+                                            <ReAuthBanner />
+                                            <Toaster />
+                                        </ExpansionUIProvider>
+                                    </OfflineProvider>
+                                </CacheProvider>
+                            </ComposeProvider>
+                        </GlobalWindowProvider>
+                    </ReAuthProvider>
                 </SessionProvider>
             </body>
         </html>

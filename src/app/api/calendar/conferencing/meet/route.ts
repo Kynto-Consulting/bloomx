@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { randomBytes } from 'crypto';
+import { patchMeetSpaceOpen } from '@/lib/google/meet';
 
 export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
@@ -47,11 +48,6 @@ export async function POST(req: NextRequest) {
                     createRequest: {
                         requestId: randomBytes(8).toString('hex'),
                         conferenceSolutionKey: { type: 'hangoutsMeet' },
-                    conferenceProperties: { 
-                        allowAddGuests: true,
-                        allowedPresenters: 'EVERYONE',
-                        accessType: 'OPEN',
-                    }
                     },
                 },
             }),
@@ -72,5 +68,9 @@ export async function POST(req: NextRequest) {
     }
 
     if (!meetUrl) return NextResponse.json({ error: 'No Meet URL returned' }, { status: 500 });
+
+    // Patch the space immediately so it's open (no waiting room) for everyone with the link.
+    await patchMeetSpaceOpen(access_token, meetUrl);
+
     return NextResponse.json({ meetUrl });
 }

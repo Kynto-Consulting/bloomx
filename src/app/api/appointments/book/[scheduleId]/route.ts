@@ -5,6 +5,7 @@ import { uploadToStorage } from '@/lib/storage';
 import { randomBytes } from 'crypto';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { buildAppointmentConfirmationHtml } from '@/lib/calendar/email-templates';
+import { patchMeetSpaceOpen } from '@/lib/google/meet';
 
 // ─── ICS builder ────────────────────────────────────────────────────────────
 
@@ -176,19 +177,22 @@ async function createGoogleMeetRoom(
                 start: { dateTime: startsAt.toISOString() },
                 end: { dateTime: endsAt.toISOString() },
                 conferenceData: {
-                    createRequest: { requestId: randomBytes(8).toString('hex'), conferenceSolutionKey: { type: 'hangoutsMeet' },
-                    conferenceProperties: { 
-                        allowAddGuests: true,
-                        allowedPresenters: 'EVERYONE',
-                        accessType: 'OPEN',
-                    } },
+                    createRequest: {
+                        requestId: randomBytes(8).toString('hex'),
+                        conferenceSolutionKey: { type: 'hangoutsMeet' },
+                    },
                 },
             }),
         }
     );
     if (!eventRes.ok) throw new Error('Failed to create Google Meet event');
     const data = await eventRes.json();
-    return data.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri || null;
+    const meetUrl: string | null = data.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri || null;
+
+    // Patch the space immediately so it's open (no waiting room).
+    if (meetUrl) await patchMeetSpaceOpen(access_token, meetUrl);
+
+    return meetUrl;
 }
 
 async function createZoomMeeting(refreshToken: string, topic: string, startsAt: Date, duration: number) {

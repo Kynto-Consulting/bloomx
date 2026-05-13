@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { useReAuth, type ReAuthRequirements } from '@/contexts/ReAuthContext';
 
 interface ModalOptions {
     width?: string;
@@ -17,6 +18,20 @@ interface ExpansionUIContextType {
     closeModal: () => void;
     openDrawer: (content: ReactNode, options?: DrawerOptions) => void;
     closeDrawer: () => void;
+    /**
+     * Request a reauth/re-link for a provider + scopes from within an extension.
+     * Shows a non-blocking popup prompting the user to reconnect.
+     *
+     * @example
+     * const { requestReAuth } = useExpansionUI();
+     * requestReAuth({
+     *   provider: 'google',
+     *   scopes: ['https://www.googleapis.com/auth/some.scope'],
+     *   reason: 'This extension needs X to work correctly.',
+     *   requestedBy: 'My Extension',
+     * });
+     */
+    requestReAuth: (req: ReAuthRequirements) => void;
 }
 
 const ExpansionUIContext = createContext<ExpansionUIContextType | undefined>(undefined);
@@ -26,6 +41,7 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
     const [modalOptions, setModalOptions] = useState<ModalOptions>({});
     const [drawerContent, setDrawerContent] = useState<ReactNode | null>(null);
     const [drawerOptions, setDrawerOptions] = useState<DrawerOptions>({});
+    const { requestReAuth } = useReAuth();
 
     const openModal = useCallback((content: ReactNode, options?: ModalOptions) => {
         setModalContent(content);
@@ -60,7 +76,7 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
     }, [modalContent, drawerContent, closeModal, closeDrawer]);
 
     return (
-        <ExpansionUIContext.Provider value={{ openModal, closeModal, openDrawer, closeDrawer }}>
+        <ExpansionUIContext.Provider value={{ openModal, closeModal, openDrawer, closeDrawer, requestReAuth }}>
             {children}
 
             {/* Modal Overlay */}
