@@ -114,8 +114,9 @@ export async function GET(req: NextRequest) {
             },
             update: {
                 access_token: tokens.access_token,
-                refresh_token: tokens.refresh_token,
+                refresh_token: tokens.refresh_token ?? undefined,
                 id_token: tokens.id_token,
+                scope: tokens.scope,
                 expires_at: Math.floor(Date.now() / 1000 + tokens.expires_in),
             },
         });

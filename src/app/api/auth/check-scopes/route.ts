@@ -27,7 +27,12 @@ export async function GET(req: NextRequest) {
         select: { scope: true },
     });
 
-    const grantedAll = account?.scope ? account.scope.split(/[\s,]+/).filter(Boolean) : [];
+    // No linked account for this provider — not applicable, don't show reauth popup.
+    if (!account) {
+        return NextResponse.json({ granted: requested, missing: [] });
+    }
+
+    const grantedAll = account.scope ? account.scope.split(/[\s,]+/).filter(Boolean) : [];
     const granted = requested.filter(s => grantedAll.includes(s));
     const missing = requested.filter(s => !grantedAll.includes(s));
 
