@@ -54,6 +54,8 @@ model Email {
   messageId   String       @unique
   from        String
   to          String
+  cc          String?
+  bcc         String?
   replyTo     String?
   subject     String?
   snippet     String?
@@ -68,6 +70,7 @@ model Email {
   cleanTo     String?
   scheduledAt DateTime?
   smartReplies Json?
+  attachmentsChecked Boolean @default(false)
   attachments Attachment[]
   events      EmailEvent[]
   labels      Label[]      @relation("EmailToLabel")

@@ -114,6 +114,8 @@ const TABLES: TableSpec[] = [
             { name: 'messageId', definition: 'TEXT NOT NULL' },
             { name: 'from', definition: 'TEXT NOT NULL' },
             { name: 'to', definition: 'TEXT NOT NULL' },
+            { name: 'cc', definition: 'TEXT' },
+            { name: 'bcc', definition: 'TEXT' },
             { name: 'replyTo', definition: 'TEXT' },
             { name: 'subject', definition: 'TEXT' },
             { name: 'snippet', definition: 'TEXT' },
@@ -128,6 +130,7 @@ const TABLES: TableSpec[] = [
             { name: 'cleanTo', definition: 'TEXT' },
             { name: 'scheduledAt', definition: 'TIMESTAMPTZ' },
             { name: 'smartReplies', definition: 'JSONB' },
+            { name: 'attachmentsChecked', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
         ],
         constraints: [
             { name: 'Email_pkey', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_pkey" PRIMARY KEY ("id")' },

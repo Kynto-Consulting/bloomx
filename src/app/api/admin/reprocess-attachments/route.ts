@@ -178,7 +178,9 @@ export async function POST(req: NextRequest) {
     const since: Date | null = body?.since ? new Date(body.since) : null;
     const limit = Math.min(Number(body?.limit ?? 200), 500);
 
-    // Find candidate emails: received emails with a rawKey but no attachment records.
+    // Find candidate emails: received emails with a rawKey, no attachments, not yet checked.
+    // Pass force=true in the body to re-examine already-checked emails.
+    const force = Boolean(body?.force ?? false);
     const emails = await prisma.email.findMany({
         where: {
             ...(emailIds ? { id: { in: emailIds } } : { userId: user.id }),
@@ -186,6 +188,7 @@ export async function POST(req: NextRequest) {
             folder: { in: ['inbox', 'spam'] },
             ...(since ? { createdAt: { gte: since } } : {}),
             attachments: { none: {} },
+            ...(force ? {} : { attachmentsChecked: false }),
         },
         select: { id: true, rawKey: true, subject: true },
         orderBy: { createdAt: 'desc' },
@@ -201,15 +204,26 @@ export async function POST(req: NextRequest) {
     let attachmentsAdded = 0;
     let errors = 0;
 
+    const checkedIds: string[] = [];
+
     for (const email of emails) {
         const result = await processEmail(email as any, dryRun);
         details.push(result);
         if (result.status === 'fixed') {
             fixed++;
             attachmentsAdded += result.attachmentsAdded;
+            if (!dryRun) checkedIds.push(email.id);
         } else if (result.status === 'resend_error' || result.status === 'mime_error') {
             errors++;
+            // transient — don't mark checked so the next run retries
+        } else {
+            // skipped / no_raw_key / no_resend_id / no_attachments_expected / already_ok
+            if (!dryRun) checkedIds.push(email.id);
         }
+    }
+
+    if (checkedIds.length > 0) {
+        await prisma.email.updateMany({ where: { id: { in: checkedIds } }, data: { attachmentsChecked: true } });
     }
 
     return NextResponse.json({

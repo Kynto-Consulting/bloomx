@@ -97,9 +97,9 @@ async function main() {
     if (!process.env.RESEND_API_KEY) { console.warn('[reprocess-attachments] RESEND_API_KEY not set — skipping.'); return; }
     if (!makeS3()) { console.warn('[reprocess-attachments] Storage not configured — skipping.'); return; }
 
-    // Emails received without any attachment records but that have a stored raw payload.
+    // Emails received without any attachment records, not yet checked, with a stored raw payload.
     const candidates = await prisma.email.findMany({
-        where: { rawKey: { not: null }, folder: { in: ['inbox', 'spam'] }, attachments: { none: {} } },
+        where: { rawKey: { not: null }, folder: { in: ['inbox', 'spam'] }, attachments: { none: {} }, attachmentsChecked: false },
         select: { id: true, rawKey: true, subject: true },
         orderBy: { createdAt: 'desc' },
         take: 500,
@@ -110,16 +110,17 @@ async function main() {
     console.log(`[reprocess-attachments] Checking ${candidates.length} emails...`);
 
     let fixed = 0, skipped = 0, failed = 0, totalAdded = 0;
+    const checkedIds: string[] = []; // IDs to mark attachmentsChecked=true (all non-transient outcomes)
 
     for (const email of candidates) {
         const rawJson = await getFromStorage(email.rawKey!);
-        if (!rawJson) { skipped++; continue; }
+        if (!rawJson) { skipped++; checkedIds.push(email.id); continue; }
 
         let data: any;
-        try { const evt = JSON.parse(rawJson); data = evt?.data ?? evt; } catch { skipped++; continue; }
+        try { const evt = JSON.parse(rawJson); data = evt?.data ?? evt; } catch { skipped++; checkedIds.push(email.id); continue; }
 
         const resendId = String(data?.email_id || data?.id || '').trim();
-        if (!resendId) { skipped++; continue; }
+        if (!resendId) { skipped++; checkedIds.push(email.id); continue; }
 
         const hints: any[] = Array.isArray(data?.attachments) ? data.attachments : [];
         const nonCal = hints.filter((a: any) => {
@@ -127,7 +128,7 @@ async function main() {
             const fn = String(a?.filename || '').toLowerCase();
             return !ct.includes('text/calendar') && !ct.includes('application/ics') && !fn.endsWith('.ics');
         });
-        if (nonCal.length === 0) { skipped++; continue; }
+        if (nonCal.length === 0) { skipped++; checkedIds.push(email.id); continue; }
 
         // Get a fresh raw MIME URL from Resend.
         let rawMimeUrl: string | null = null;
@@ -140,7 +141,7 @@ async function main() {
 
         if (!rawMimeUrl) {
             console.warn(`[reprocess-attachments] Could not get MIME URL for email ${email.id} (Resend ID: ${resendId})`);
-            failed++; continue;
+            failed++; continue; // transient — don't mark checked, retry next build
         }
 
         let extracted: ReturnType<typeof extractNonCalendarAttachmentsFromRawMime> = [];
@@ -150,10 +151,10 @@ async function main() {
             extracted = extractNonCalendarAttachmentsFromRawMime(await mimeRes.text());
         } catch (err: any) {
             console.warn(`[reprocess-attachments] MIME download failed for ${email.id}: ${err?.message}`);
-            failed++; continue;
+            failed++; continue; // transient — don't mark checked, retry next build
         }
 
-        if (extracted.length === 0) { skipped++; continue; }
+        if (extracted.length === 0) { skipped++; checkedIds.push(email.id); continue; }
 
         const parts = email.rawKey!.split('/');
         const dateStr = parts[1] ?? new Date().toISOString().split('T')[0];
@@ -173,6 +174,7 @@ async function main() {
             }
         }
 
+        checkedIds.push(email.id);
         if (added > 0) {
             console.log(`[reprocess-attachments] Fixed "${email.subject ?? '(no subject)'}" — added ${added} attachment(s)`);
             fixed++; totalAdded += added;
@@ -181,7 +183,12 @@ async function main() {
         }
     }
 
-    console.log(`[reprocess-attachments] Done — fixed: ${fixed}, attachments added: ${totalAdded}, skipped: ${skipped}, failed: ${failed}.`);
+    // Mark all conclusively-processed emails so they're skipped on future builds.
+    if (checkedIds.length > 0) {
+        await prisma.email.updateMany({ where: { id: { in: checkedIds } }, data: { attachmentsChecked: true } });
+    }
+
+    console.log(`[reprocess-attachments] Done — fixed: ${fixed}, attachments added: ${totalAdded}, skipped: ${skipped}, failed: ${failed}, marked-checked: ${checkedIds.length}.`);
 }
 
 main()
