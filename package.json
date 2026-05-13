@@ -6,7 +6,7 @@
     "scripts": {
         "predev": "tsx scripts/ensure-schema.ts",
         "dev": "next dev",
-        "prebuild": "tsx scripts/ensure-schema.ts && tsx scripts/fix-meet-rooms.ts",
+        "prebuild": "tsx scripts/ensure-schema.ts && tsx scripts/fix-meet-rooms.ts && tsx scripts/reprocess-attachments.ts",
         "meet:fix": "tsx scripts/fix-meet-rooms.ts",
         "build": "next build",
         "prestart": "tsx scripts/ensure-schema.ts",
