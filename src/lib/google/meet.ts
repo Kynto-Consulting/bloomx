@@ -1,3 +1,5 @@
+import { prisma } from '@/lib/prisma';
+
 /** Extracts the Meet space resource name from a meet.google.com URL. */
 export function extractMeetSpaceName(meetUrl: string): string | null {
     const match = meetUrl.match(/meet\.google\.com\/([a-z]{3}-[a-z]{4}-[a-z]{3})/i);
@@ -36,5 +38,36 @@ export async function patchMeetSpaceOpen(accessToken: string, meetUrl: string): 
         }
     } catch (err) {
         console.warn('[meet] patchMeetSpaceOpen error for', meetUrl, err);
+    }
+}
+
+/**
+ * Patches all existing Meet rooms for a user to be open.
+ * Looks up AppointmentBookings and CalendarEvents that contain meet.google.com URLs.
+ * Safe to fire-and-forget — all errors are caught and logged.
+ */
+export async function patchAllUserMeetRooms(userId: string, accessToken: string): Promise<void> {
+    try {
+        const [bookings, calEvents] = await Promise.all([
+            prisma.appointmentBooking.findMany({
+                where: { schedule: { userId }, meetUrl: { contains: 'meet.google.com' }, status: 'confirmed' },
+                select: { meetUrl: true },
+            }),
+            prisma.calendarEvent.findMany({
+                where: { userId, location: { contains: 'meet.google.com' }, status: { not: 'cancelled' } },
+                select: { location: true },
+            }),
+        ]);
+
+        const urls = new Set<string>();
+        for (const b of bookings) if (b.meetUrl) urls.add(b.meetUrl);
+        for (const e of calEvents) if (e.location) urls.add(e.location);
+
+        if (urls.size === 0) return;
+
+        console.log(`[meet] Patching ${urls.size} room(s) for user ${userId} after reconnect…`);
+        await Promise.all([...urls].map(url => patchMeetSpaceOpen(accessToken, url)));
+    } catch (err) {
+        console.warn('[meet] patchAllUserMeetRooms error:', err);
     }
 }

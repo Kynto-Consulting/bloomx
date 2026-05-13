@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, setSessionCookie } from "@/lib/session";
+import { patchAllUserMeetRooms } from "@/lib/google/meet";
 
 function resolveReturnTo(state: string | null) {
     if (!state) {
@@ -127,6 +129,12 @@ export async function GET(req: NextRequest) {
             email: user.email,
             name: user.name,
         });
+
+        // Patch existing Meet rooms in the background after reconnect.
+        // Only fires if the new token has the meetings.space.created scope.
+        if (tokens.scope?.includes('meetings.space.created')) {
+            after(patchAllUserMeetRooms(user.id, tokens.access_token));
+        }
 
         return NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}`);
 
