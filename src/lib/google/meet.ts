@@ -99,18 +99,18 @@ export async function patchAllUserMeetRooms(
         }),
         prisma.calendarEvent.findMany({
             where: { userId, location: { contains: 'meet.google.com' }, status: { not: 'cancelled' } },
-            select: { location: true, calendarEventId: true },
+            select: { location: true, externalId: true },
         }),
     ]);
 
     const urls = new Set<string>();
-    const calEventMap = new Map<string, string | null>(); // meetUrl → calendarEventId
+    const calEventMap = new Map<string, string | null>(); // meetUrl → externalId (Google Calendar event ID)
 
     for (const b of bookings) if (b.meetUrl) urls.add(b.meetUrl);
     for (const e of calEvents) {
         if (e.location) {
             urls.add(e.location);
-            calEventMap.set(e.location, e.calendarEventId);
+            calEventMap.set(e.location, e.externalId);
         }
     }
 
