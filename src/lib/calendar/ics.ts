@@ -87,6 +87,17 @@ function normalizeBufferEncoding(charset: string): BufferEncoding {
     }
 }
 
+/**
+ * When an email client applies QP encoding to an ICS MIME part it encodes every
+ * literal `=` as `=3D`, including the `=` that separates ICS parameter names
+ * from their values (e.g. `TZID=America/Panama` becomes `TZID=3DAmerica/Panama`).
+ * Detect this by looking for `=3D` and decode the whole params string if found.
+ */
+function decodeIcsParams(params: string): string {
+    if (!/=3[Dd]/.test(params)) return params;
+    return decodeQuotedPrintable(params);
+}
+
 function decodeIcsText(value: string, params: string) {
     const normalizedParams = String(params || '').toUpperCase();
     const charsetMatch = normalizedParams.match(/CHARSET=([^;:]+)/i);
@@ -108,7 +119,7 @@ function extractIcsDateField(source: string, key: string) {
         return null;
     }
 
-    const params = String(match[1] || '');
+    const params = decodeIcsParams(String(match[1] || ''));
     const value = match[2].trim();
     const tzMatch = params.match(/TZID=([^;:]+)/i);
 
@@ -185,7 +196,7 @@ export function extractIcsValue(source: string, key: string) {
         return '';
     }
 
-    const params = String(match[1] || '');
+    const params = decodeIcsParams(String(match[1] || ''));
     const value = match[2].trim();
     return decodeIcsText(value, params);
 }
@@ -273,7 +284,7 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
     const attendees = attendeeLines
         .map((line) => {
             const separatorIndex = line.indexOf(':');
-            const metadata = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+            const metadata = decodeIcsParams(separatorIndex >= 0 ? line.slice(0, separatorIndex) : line);
             const value = separatorIndex >= 0 ? line.slice(separatorIndex + 1) : '';
 
             const email = extractEmail(value);
