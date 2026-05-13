@@ -422,6 +422,34 @@ export function MailView() {
         });
     };
 
+    const handleReplyAll = () => {
+        if (!data) return;
+        const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
+        const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
+
+        const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
+        const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
+
+        const replyTarget = targetEmail.replyTo || targetEmail.from;
+        const replyFrom = resolveSenderFromEmail(targetEmail);
+        const currentEmail = (replyFrom || AccountManager.getActiveAccount()?.email || '').toLowerCase();
+
+        // All original To recipients except ourselves and the sender we're replying to
+        const replyTargetEmail = extractRecipientEmails(replyTarget)[0]?.toLowerCase() || '';
+        const ccRecipients = extractRecipientEmails(targetEmail.to)
+            .filter(e => e.toLowerCase() !== currentEmail && e.toLowerCase() !== replyTargetEmail);
+
+        openCompose({
+            id: crypto.randomUUID(),
+            from: replyFrom,
+            to: replyTarget,
+            cc: ccRecipients.length > 0 ? ccRecipients.join(', ') : undefined,
+            subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
+            body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
+            minimized: false
+        });
+    };
+
     const handleForward = () => {
         if (!data) return;
         // With reversed order (newest first), we target index 0.
@@ -484,8 +512,9 @@ export function MailView() {
                     >
                         <Tag className="h-4 w-4" />
                     </button>
-                    <button onClick={handleReply} className="p-2 hover:bg-muted rounded-md"><Reply className="h-4 w-4 text-muted-foreground" /></button>
-                    <button onClick={handleForward} className="p-2 hover:bg-muted rounded-md"><Forward className="h-4 w-4 text-muted-foreground" /></button>
+                    <button onClick={handleReply} className="p-2 hover:bg-muted rounded-md" title="Reply"><Reply className="h-4 w-4 text-muted-foreground" /></button>
+                    <button onClick={handleReplyAll} className="p-2 hover:bg-muted rounded-md" title="Reply All"><ReplyAll className="h-4 w-4 text-muted-foreground" /></button>
+                    <button onClick={handleForward} className="p-2 hover:bg-muted rounded-md" title="Forward"><Forward className="h-4 w-4 text-muted-foreground" /></button>
 
                     {/* JSON Extensions Toolbar */}
                     <ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email} />
@@ -689,6 +718,9 @@ export function MailView() {
                                                     <div className="mt-8 flex gap-2 opacity-100">
                                                         <button onClick={handleReply} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
                                                             <Reply className="h-4 w-4" /> Reply
+                                                        </button>
+                                                        <button onClick={handleReplyAll} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
+                                                            <ReplyAll className="h-4 w-4" /> Reply All
                                                         </button>
                                                         <button onClick={handleForward} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
                                                             <Forward className="h-4 w-4" /> Forward

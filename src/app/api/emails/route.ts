@@ -422,7 +422,7 @@ export async function POST(req: NextRequest) {
         let textKey = null;
 
         if (finalHtml) {
-            htmlKey = `sent / ${sessionUser.email}/${timestamp}-${safeSubject}.html`;
+            htmlKey = `sent/${sessionUser.email}/${timestamp}-${safeSubject}.html`;
             await uploadToStorage(htmlKey, Buffer.from(finalHtml), 'text/html');
         }
 
