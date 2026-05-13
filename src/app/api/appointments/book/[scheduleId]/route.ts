@@ -163,34 +163,19 @@ async function createGoogleMeetRoom(
     if (!tokenRes.ok) throw new Error('Failed to refresh Google token');
     const { access_token } = await tokenRes.json();
 
-    // Guest is intentionally placed in description, NOT in attendees.
-    // Google ignores sendUpdates=none for non-Google accounts and always sends its own
-    // calendar invite — the only way to suppress it is to never list them as attendees.
-    const eventRes = await fetch(
-        'https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1&sendUpdates=none',
-        {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                summary: topic,
-                description: `Guest: ${guestName} (${guestEmail})`,
-                start: { dateTime: startsAt.toISOString() },
-                end: { dateTime: endsAt.toISOString() },
-                conferenceData: {
-                    createRequest: {
-                        requestId: randomBytes(8).toString('hex'),
-                        conferenceSolutionKey: { type: 'hangoutsMeet' },
-                    },
-                },
-            }),
-        }
-    );
-    if (!eventRes.ok) throw new Error('Failed to create Google Meet event');
-    const data = await eventRes.json();
-    const meetUrl: string | null = data.conferenceData?.entryPoints?.find((ep: any) => ep.entryPointType === 'video')?.uri || null;
-
-    // Patch the space immediately so it's open (no waiting room).
-    if (meetUrl) await patchMeetSpaceOpen(access_token, meetUrl);
+    // Create via Meet REST API directly so the space is open (no waiting room) from the start.
+    // Calendar API's createRequest produces a room that is NOT patchable via the Meet API
+    // (meetings.space.created scope only covers rooms created through the Meet API itself).
+    const spaceRes = await fetch('https://meet.googleapis.com/v2/spaces', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            config: { accessType: 'OPEN', entryPointAccess: 'ALL' },
+        }),
+    });
+    if (!spaceRes.ok) throw new Error('Failed to create Meet space');
+    const space = await spaceRes.json();
+    const meetUrl: string | null = space.meetingUri || null;
 
     return meetUrl;
 }

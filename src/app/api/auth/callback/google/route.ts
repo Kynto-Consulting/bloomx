@@ -132,8 +132,9 @@ export async function GET(req: NextRequest) {
 
         // Patch existing Meet rooms in the background after reconnect.
         // Only fires if the new token has the meetings.space.created scope.
+        // Only works for rooms originally created via the Meet REST API.
         if (tokens.scope?.includes('meetings.space.created')) {
-            after(patchAllUserMeetRooms(user.id, tokens.access_token));
+            after(patchAllUserMeetRooms(user.id, tokens.access_token).catch(() => undefined));
         }
 
         return NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}`);

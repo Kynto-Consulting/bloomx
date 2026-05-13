@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Sidebar } from '@/components/Sidebar';
-import { Clock, Copy, ExternalLink, Plus, Pencil, Trash2, Check, Video, X, CalendarDays, ToggleLeft, ToggleRight, ChevronRight, ChevronLeft, PlusCircle, Trash } from 'lucide-react';
+import { Clock, Copy, ExternalLink, Plus, Pencil, Trash2, Check, Video, X, CalendarDays, ToggleLeft, ToggleRight, ChevronRight, ChevronLeft, PlusCircle, Trash, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
@@ -342,6 +342,7 @@ export default function AppointmentsPage() {
     const [editTarget, setEditTarget] = useState<Schedule | null>(null);
     const [saving, setSaving] = useState(false);
     const [copiedId, setCopiedId] = useState<string | null>(null);
+    const [fixingRooms, setFixingRooms] = useState(false);
 
     const loadSchedules = async () => {
         setLoading(true);
@@ -405,6 +406,35 @@ export default function AppointmentsPage() {
         toast.success('Link copied');
     };
 
+    const handleFixMeetRooms = async () => {
+        setFixingRooms(true);
+        try {
+            const res = await fetch('/api/google/fix-meet-rooms', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) {
+                if (data.error === 'missing_scope') {
+                    toast.error('Reconecta tu cuenta de Google para obtener el permiso de Meet.');
+                } else {
+                    toast.error(data.error || 'Error al abrir salas');
+                }
+                return;
+            }
+            if (data.total === 0) {
+                toast.info('No se encontraron salas de Meet para actualizar.');
+            } else if (data.failed === 0) {
+                toast.success(`${data.patched} sala${data.patched !== 1 ? 's' : ''} abierta${data.patched !== 1 ? 's' : ''} correctamente.`);
+            } else {
+                toast.warning(`${data.patched} de ${data.total} sala${data.total !== 1 ? 's' : ''} actualizadas. ${data.failed} no pudieron actualizarse (salas antiguas requieren reconexión y nueva sala).`);
+            }
+        } catch {
+            toast.error('Error al conectar con el servidor.');
+        } finally {
+            setFixingRooms(false);
+        }
+    };
+
+    const hasMeetSchedules = schedules.some(s => s.conferencing === 'meet');
+
     return (
         <div className="flex h-screen overflow-hidden bg-background">
             <div className="hidden md:flex w-64 border-r flex-col shrink-0">
@@ -418,13 +448,28 @@ export default function AppointmentsPage() {
                             <h1 className="text-xl font-bold">Appointment schedules</h1>
                             <p className="text-muted-foreground text-sm mt-0.5">Share your booking link so people can schedule time with you.</p>
                         </div>
-                        <button
-                            onClick={() => { setEditTarget(null); setShowForm(true); }}
-                            className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
-                            style={{ backgroundColor: brandColor }}
-                        >
-                            <Plus className="h-4 w-4" /> New schedule
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {hasMeetSchedules && (
+                                <button
+                                    onClick={handleFixMeetRooms}
+                                    disabled={fixingRooms}
+                                    className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium border hover:bg-muted transition-colors disabled:opacity-50"
+                                    title="Abrir todas las salas de Meet existentes"
+                                >
+                                    {fixingRooms
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        : <Video className="h-3.5 w-3.5" />}
+                                    Abrir salas
+                                </button>
+                            )}
+                            <button
+                                onClick={() => { setEditTarget(null); setShowForm(true); }}
+                                className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
+                                style={{ backgroundColor: brandColor }}
+                            >
+                                <Plus className="h-4 w-4" /> New schedule
+                            </button>
+                        </div>
                     </div>
 
                     {loading ? (
