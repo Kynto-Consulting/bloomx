@@ -208,9 +208,15 @@ export function CreateEventForm({
         if (initialEndsAt) setEndsAt(initialEndsAt);
         if (initialTitle) setTitle(initialTitle);
         if (initialLocation) setLocation(initialLocation);
+    }, [initialStartsAt, initialEndsAt, initialTitle, initialLocation]);
+
+    useEffect(() => {
         if (initialAttendees) setAttendeeTags(initialAttendees);
+    }, [JSON.stringify(initialAttendees)]);
+
+    useEffect(() => {
         if (initialAttendeeDetails) setAttendeeDetails(initialAttendeeDetails);
-    }, [initialStartsAt, initialEndsAt, initialTitle, initialLocation, initialAttendees, initialAttendeeDetails]);
+    }, [JSON.stringify(initialAttendeeDetails)]);
 
     useEffect(() => {
         fetch('/api/settings', { cache: 'no-store' })

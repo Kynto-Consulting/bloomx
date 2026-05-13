@@ -729,6 +729,7 @@ export function ComposeModal({
         },
         isGoogleLinked,
         isGoogleMeetAvailable,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         ...actions,
         toast: (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
             if (type === 'success') toast.success(msg);
