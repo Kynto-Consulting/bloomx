@@ -106,6 +106,72 @@ function decodeQuotedPrintable(input: string) {
         .replace(/=([A-Fa-f0-9]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
 }
 
+/**
+ * Extracts non-calendar attachment parts from a raw MIME email string.
+ * Used when Resend's webhook payload omits attachment content (i.e. att.content is absent).
+ */
+function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
+    filename: string;
+    contentType: string;
+    buffer: Buffer;
+}> {
+    const results: Array<{ filename: string; contentType: string; buffer: Buffer }> = [];
+
+    const boundaryMatch = rawMime.match(/Content-Type:\s*multipart\/[^\r\n]+boundary=(?:"([^"]+)"|(\S+))/i);
+    if (!boundaryMatch) return results;
+
+    const boundary = (boundaryMatch[1] ?? boundaryMatch[2]).trim().replace(/;$/, '');
+    const escapedBoundary = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const parts = rawMime.split(new RegExp(`--${escapedBoundary}(?:--)?`));
+
+    for (const part of parts) {
+        const split = part.match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);
+        if (!split) continue;
+        const [, headersRaw, bodyRaw] = split;
+
+        if (!/Content-Disposition:\s*attachment/i.test(headersRaw)) continue;
+
+        const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
+        const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
+        const ctLower = contentType.toLowerCase();
+        if (ctLower.includes('text/calendar') || ctLower.includes('application/ics')) continue;
+
+        // Filename — prefer Content-Disposition, fall back to Content-Type name param.
+        let filename = '';
+        const cdFn = headersRaw.match(/Content-Disposition:[^\r\n]*\bfilename\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
+        if (cdFn) filename = decodeURIComponent(cdFn[1].trim().replace(/["']/g, ''));
+        if (!filename) {
+            const ctFn = headersRaw.match(/Content-Type:[^\r\n]*\bname\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
+            if (ctFn) filename = decodeURIComponent(ctFn[1].trim().replace(/["']/g, ''));
+        }
+        if (!filename) filename = `attachment-${results.length + 1}.bin`;
+
+        const teMatch = headersRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
+        const te = teMatch ? teMatch[1].trim().toLowerCase() : '7bit';
+
+        let buffer: Buffer;
+        try {
+            if (te === 'base64') {
+                buffer = Buffer.from(bodyRaw.replace(/\s+/g, ''), 'base64');
+            } else if (te === 'quoted-printable') {
+                const decoded = bodyRaw
+                    .replace(/=(\r?\n)/g, '')
+                    .replace(/=([A-Fa-f0-9]{2})/g, (_: string, h: string) => String.fromCharCode(parseInt(h, 16)));
+                buffer = Buffer.from(decoded, 'binary');
+            } else {
+                buffer = Buffer.from(bodyRaw);
+            }
+        } catch {
+            continue;
+        }
+
+        if (buffer.length === 0) continue;
+        results.push({ filename, contentType, buffer });
+    }
+
+    return results;
+}
+
 function extractCalendarIcsFromRawEmail(rawSource: string): string[] {
     const source = String(rawSource || '');
     const foundBlocks: string[] = [];
@@ -561,13 +627,24 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         }
     }
 
-    if (fetchedReceivingData?.raw?.download_url) {
+    // Use the raw MIME URL from the fetched receiving data or directly from the webhook payload.
+    // The webhook payload already contains raw.download_url, so we don't need fetchedReceivingData
+    // to be populated in order to reach the raw email (important when html+text are both present
+    // but attachments still lack content).
+    const rawMimeUrl: string | null =
+        fetchedReceivingData?.raw?.download_url ?? data?.raw?.download_url ?? null;
+
+    if (rawMimeUrl) {
         try {
-            const rawDownloadResponse = await fetch(fetchedReceivingData.raw.download_url);
+            const rawDownloadResponse = await fetch(rawMimeUrl);
             if (rawDownloadResponse.ok) {
                 const rawMime = await rawDownloadResponse.text();
+
+                // ── Calendar ICS extraction (existing logic) ──────────────────────
                 const calendarIcsBlocks = extractCalendarIcsFromRawEmail(rawMime);
-                const attachmentHints = Array.isArray(fetchedReceivingData?.attachments) ? fetchedReceivingData.attachments : [];
+                const attachmentHints = Array.isArray(fetchedReceivingData?.attachments ?? data?.attachments)
+                    ? (fetchedReceivingData?.attachments ?? data?.attachments)
+                    : [];
 
                 calendarIcsBlocks.forEach((icsContent, index) => {
                     registerParsedInvite(parseInviteFromIcs(icsContent));
@@ -595,6 +672,34 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                         key: attKey,
                     });
                 });
+
+                // ── Non-calendar attachments missing from webhook payload ──────────
+                // Resend only sends attachment metadata (no content) for large files.
+                // Extract the actual bytes from the raw MIME for any attachment not
+                // already uploaded via att.content above.
+                const metaOnlyAttachments = (attachments || []).filter((att: any) => {
+                    if (att?.content) return false; // already handled
+                    const ct = String(att?.contentType || att?.content_type || '').toLowerCase();
+                    const fn = String(att?.filename || '').toLowerCase();
+                    return !ct.includes('text/calendar') && !ct.includes('application/ics') && !fn.endsWith('.ics');
+                });
+
+                if (metaOnlyAttachments.length > 0) {
+                    const extracted = extractNonCalendarAttachmentsFromRawMime(rawMime);
+                    for (const ext of extracted) {
+                        if (attachmentRecords.some(r => r.filename.toLowerCase() === ext.filename.toLowerCase())) {
+                            continue; // already uploaded
+                        }
+                        const attKey = `emails/${dateStr}/${uuid}/attachments/${ext.filename}`;
+                        uploads.push(uploadToStorage(attKey, ext.buffer, ext.contentType));
+                        attachmentRecords.push({
+                            filename: ext.filename,
+                            mimeType: ext.contentType,
+                            size: ext.buffer.byteLength,
+                            key: attKey,
+                        });
+                    }
+                }
             }
         } catch (error) {
             console.error('Failed to download raw MIME from Resend:', error);
