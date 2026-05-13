@@ -35,6 +35,13 @@ function getResponseClass(responseStatus?: string | null) {
     return 'bg-slate-50 text-slate-600 border-slate-200';
 }
 
+function formatToLocalString(value?: string): string {
+    if (!value) return '';
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return value;
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 export function CreateEventForm({ 
     eventId,
     calendarId,
@@ -63,8 +70,8 @@ export function CreateEventForm({
     const expansionUI = useOptionalExpansionUI();
     const [title, setTitle] = useState(initialTitle);
     const [location, setLocation] = useState(initialLocation);
-    const [startsAt, setStartsAt] = useState(initialStartsAt || '');
-    const [endsAt, setEndsAt] = useState(initialEndsAt || '');
+    const [startsAt, setStartsAt] = useState(formatToLocalString(initialStartsAt));
+    const [endsAt, setEndsAt] = useState(formatToLocalString(initialEndsAt));
     const [attendeeTags, setAttendeeTags] = useState<string[]>(initialAttendees);
     const [attendeeDetails, setAttendeeDetails] = useState<EventAttendee[]>(initialAttendeeDetails);
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
@@ -204,8 +211,8 @@ export function CreateEventForm({
 
     // Update state if props change when reopened
     useEffect(() => {
-        if (initialStartsAt) setStartsAt(initialStartsAt);
-        if (initialEndsAt) setEndsAt(initialEndsAt);
+        if (initialStartsAt) setStartsAt(formatToLocalString(initialStartsAt));
+        if (initialEndsAt) setEndsAt(formatToLocalString(initialEndsAt));
         if (initialTitle) setTitle(initialTitle);
         if (initialLocation) setLocation(initialLocation);
     }, [initialStartsAt, initialEndsAt, initialTitle, initialLocation]);
