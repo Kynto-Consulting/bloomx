@@ -88,7 +88,7 @@ async function buildInvitePreview(email: any) {
         uid: invite.uid || null,
         title: invite.summary || email.subject || 'Calendar invitation',
         description: invite.description || null,
-        location: invite.location || null,
+        location: invite.meetUrl || invite.location || null,
         startsAt: invite.startsAt || null,
         endsAt: invite.endsAt || null,
         method: invite.method || null,

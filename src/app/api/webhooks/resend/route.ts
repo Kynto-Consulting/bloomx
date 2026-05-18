@@ -366,7 +366,7 @@ async function handleInboundCalendarInvite(options: {
         calendarId: sharedCalendar.id,
         title: options.invite.summary || 'Invitation',
         description: options.invite.description || null,
-        location: options.invite.location || null,
+        location: options.invite.meetUrl || options.invite.location || null,
         startsAt,
         endsAt,
         source: 'shared',

@@ -43,6 +43,7 @@ function getMeetProvider(url: string | null | undefined) {
     if (!url) return null;
     if (url.includes('meet.google.com')) return 'Google Meet';
     if (url.includes('zoom.us')) return 'Zoom';
+    if (url.includes('teams.microsoft.com')) return 'Microsoft Teams';
     return 'Videollamada';
 }
 
@@ -63,6 +64,7 @@ export interface EmailTemplateOptions {
     title: string;
     when?: { start: Date; end: Date; timezone?: string | null } | null;
     location?: string | null;
+    meetUrl?: string | null;
     description?: string | null;
     attendees?: Array<{ email: string; name?: string | null }>;
     organizer?: { email: string; name?: string | null } | null;
@@ -91,8 +93,9 @@ export function buildEmailHtml(opts: EmailTemplateOptions): string {
         ? `${formatDateLabel(opts.when.start, opts.when.timezone)} — ${formatTimeLabel(opts.when.end, opts.when.timezone)}`
         : null;
 
-    const meetProvider = getMeetProvider(opts.location);
-    const isMeetUrl = opts.location?.startsWith('http');
+    const effectiveMeetUrl = opts.meetUrl || (opts.location?.startsWith('http') ? opts.location : null);
+    const meetProvider = getMeetProvider(effectiveMeetUrl ?? opts.location);
+    const isMeetUrl = !!effectiveMeetUrl;
 
     const attendeeRows = opts.attendees && opts.attendees.length > 0
         ? opts.attendees.map(a => {
@@ -109,10 +112,10 @@ export function buildEmailHtml(opts: EmailTemplateOptions): string {
 
     const rows = [
         whenLabel ? row('Cuándo', whenLabel) : '',
-        opts.location
+        opts.location || effectiveMeetUrl
             ? isMeetUrl
-                ? row('Enlace', `<a href="${escapeHtml(opts.location)}" style="color:${escapeHtml(brandColor)};font-weight:600;word-break:break-all;">${escapeHtml(opts.location)}</a>`, true)
-                : row('Lugar', opts.location)
+                ? row('Enlace', `<a href="${escapeHtml(effectiveMeetUrl!)}" style="color:${escapeHtml(brandColor)};font-weight:600;word-break:break-all;">${escapeHtml(meetProvider || effectiveMeetUrl!)}</a>`, true)
+                : row('Lugar', opts.location!)
             : '',
         organizerLabel ? row('Organizador', organizerLabel, true) : '',
         attendeeRows ? row('Invitados', attendeeRows, true) : '',
@@ -121,8 +124,8 @@ export function buildEmailHtml(opts: EmailTemplateOptions): string {
 
     const primaryBtn = opts.primaryAction
         ? `<a href="${escapeHtml(opts.primaryAction.url)}" style="display:inline-block;padding:12px 20px;background:${escapeHtml(brandColor)};color:#fff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;margin-top:20px;">${escapeHtml(opts.primaryAction.label)}</a>`
-        : opts.location && isMeetUrl
-            ? `<a href="${escapeHtml(opts.location)}" style="display:inline-block;padding:12px 20px;background:${escapeHtml(brandColor)};color:#fff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;margin-top:20px;">Unirse a ${escapeHtml(meetProvider || 'la reunión')}</a>`
+        : effectiveMeetUrl
+            ? `<a href="${escapeHtml(effectiveMeetUrl)}" style="display:inline-block;padding:12px 20px;background:${escapeHtml(brandColor)};color:#fff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;margin-top:20px;">Unirse a ${escapeHtml(meetProvider || 'la reunión')}</a>`
             : '';
 
     const secondaryBtns = (opts.secondaryActions || []).map(a =>
