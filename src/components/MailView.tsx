@@ -45,6 +45,7 @@ interface EmailDetails {
         title: string;
         description?: string | null;
         location?: string | null;
+        meetUrl?: string | null;
         startsAt?: string | null;
         endsAt?: string | null;
         method?: string | null;
@@ -59,6 +60,14 @@ interface EmailDetails {
         uid?: string;
     } | null;
     thread?: EmailDetails[]; // Thread support
+}
+
+function getMeetProvider(url?: string | null) {
+    if (!url) return null;
+    if (url.includes('meet.google.com')) return 'Google Meet';
+    if (url.includes('zoom.us')) return 'Zoom';
+    if (url.includes('teams.microsoft.com')) return 'Microsoft Teams';
+    return 'Videollamada';
 }
 
 function formatInviteDate(value?: string | null) {
@@ -345,7 +354,7 @@ export function MailView() {
                     calendarId: target.id,
                     title: invitePreview.title,
                     description: invitePreview.description || null,
-                    location: invitePreview.location || null,
+                    location: invitePreview.meetUrl || invitePreview.location || null,
                     startsAt: invitePreview.startsAt,
                     endsAt: invitePreview.endsAt,
                     inviteUid: invitePreview.uid || null,
@@ -657,7 +666,9 @@ export function MailView() {
                                                 className="overflow-hidden"
                                             >
                                                 <div className="px-4 pb-8 pl-4 sm:pl-14 min-w-0 overflow-x-hidden">
-                                                    {invitePreview && (
+                                                    {invitePreview && (() => {
+                                                        const meetProvider = getMeetProvider(invitePreview.meetUrl);
+                                                        return (
                                                         <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-slate-900">
                                                             <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
                                                                 <div className="space-y-2">
@@ -675,10 +686,21 @@ export function MailView() {
                                                                             </span>
                                                                         </div>
                                                                     )}
-                                                                    {invitePreview.location && (
+                                                                    {(invitePreview.location || invitePreview.meetUrl) && (
                                                                         <div className="flex items-center gap-2 text-slate-700">
-                                                                            <MapPin className="h-4 w-4" />
-                                                                            <span>{invitePreview.location}</span>
+                                                                            <MapPin className="h-4 w-4 shrink-0" />
+                                                                            {invitePreview.meetUrl ? (
+                                                                                <a
+                                                                                    href={invitePreview.meetUrl}
+                                                                                    target="_blank"
+                                                                                    rel="noopener noreferrer"
+                                                                                    className="font-medium text-blue-700 hover:underline"
+                                                                                >
+                                                                                    {meetProvider || invitePreview.location || 'Unirse a la reunión'}
+                                                                                </a>
+                                                                            ) : (
+                                                                                <span>{invitePreview.location}</span>
+                                                                            )}
                                                                         </div>
                                                                     )}
                                                                     <div className="flex flex-wrap gap-2 pt-1">
@@ -706,6 +728,16 @@ export function MailView() {
                                                                         >
                                                                             Decline
                                                                         </button>
+                                                                        {invitePreview.meetUrl && (
+                                                                            <a
+                                                                                href={invitePreview.meetUrl}
+                                                                                target="_blank"
+                                                                                rel="noopener noreferrer"
+                                                                                className="inline-flex items-center rounded-full border border-blue-400 bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                                                                            >
+                                                                                Unirse a {meetProvider || 'la reunión'}
+                                                                            </a>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                                 <button
@@ -719,7 +751,8 @@ export function MailView() {
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                    )}
+                                                        );
+                                                    })()}
 
                                                     <SafeIframe html={cleanHtml} />
 
