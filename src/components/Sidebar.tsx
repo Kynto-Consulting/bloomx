@@ -4,7 +4,7 @@ import { Suspense, useState, useEffect } from 'react';
 import Link from 'next/link';
 
 import { useSearchParams, usePathname } from 'next/navigation';
-import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, ChevronDown, ArrowUp, ArrowDown, MoreHorizontal, CalendarDays, Users } from 'lucide-react';
+import { Inbox, File, Send, ArchiveX, Trash2, Archive, Plus, Tag, Check, X, Clock, Sparkles, LogOut, UserPlus, Settings, ChevronUp, ChevronDown, ArrowUp, ArrowDown, MoreHorizontal, CalendarDays, Users, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import * as Icons from 'lucide-react';
 import { useExpansions } from '@/hooks/useExpansions';
@@ -331,6 +331,7 @@ function SidebarContent({ onClose }: SidebarProps) {
         { name: 'Calendar', icon: CalendarDays, href: '/calendar', active: pathname === '/calendar' },
         { name: 'Contacts', icon: Users, href: '/contacts', active: pathname === '/contacts' },
         { name: 'Appointments', icon: Clock, href: '/appointments', active: pathname === '/appointments' },
+        { name: 'Elixir', icon: Zap, href: '/elixir', active: pathname === '/elixir' },
     ];
 
     const { config: domainConfig } = useDomainConfig();
