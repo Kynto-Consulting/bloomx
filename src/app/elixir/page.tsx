@@ -2,6 +2,8 @@
 
 import { useState, useCallback, useRef, useMemo, useEffect, lazy, Suspense } from 'react';
 const LiquidEditor = lazy(() => import('@/components/elixir/LiquidEditor').then(m => ({ default: m.LiquidEditor })));
+import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { renderTemplate } from '@/lib/liquid';
 import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import {
     Upload, FileSpreadsheet, Mail, Send, Eye, ChevronDown, ChevronUp,
@@ -47,6 +49,8 @@ type SendResult = {
     status: 'sent' | 'error' | 'skipped';
     message?: string;
 };
+
+type FolderEntry = { name: string; handle: FileSystemFileHandle };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Column type detection
@@ -107,229 +111,7 @@ function parseCSV(text: string): { headers: string[]; rows: Row[] } {
     return { headers, rows };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Liquid Template Engine — full Ample Market compatible implementation
-// ─────────────────────────────────────────────────────────────────────────────
 
-function formatLiquidDate(d: Date, fmt: string): string {
-    const mo = ['January','February','March','April','May','June','July','August','September','October','November','December'];
-    const mos = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const dy = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    const dys = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    return fmt
-        .replace(/%Y/g, String(d.getFullYear()))
-        .replace(/%y/g, String(d.getFullYear()).slice(-2))
-        .replace(/%m/g, String(d.getMonth()+1).padStart(2,'0'))
-        .replace(/%d/g, String(d.getDate()).padStart(2,'0'))
-        .replace(/%e/g, String(d.getDate()))
-        .replace(/%B/g, mo[d.getMonth()])
-        .replace(/%b/g, mos[d.getMonth()])
-        .replace(/%A/g, dy[d.getDay()])
-        .replace(/%a/g, dys[d.getDay()])
-        .replace(/%H/g, String(d.getHours()).padStart(2,'0'))
-        .replace(/%I/g, String(d.getHours()%12||12).padStart(2,'0'))
-        .replace(/%M/g, String(d.getMinutes()).padStart(2,'0'))
-        .replace(/%S/g, String(d.getSeconds()).padStart(2,'0'))
-        .replace(/%p/g, d.getHours()<12?'AM':'PM');
-}
-
-/** Apply a single Liquid filter to a string value */
-function applyLiquidFilter(value: string, filter: string): string {
-    const f = filter.trim();
-    if (f === 'upcase') return value.toUpperCase();
-    if (f === 'downcase') return value.toLowerCase();
-    if (f === 'capitalize') return value ? value[0].toUpperCase() + value.slice(1) : '';
-    if (f === 'strip') return value.trim();
-    if (f === 'lstrip') return value.trimStart();
-    if (f === 'rstrip') return value.trimEnd();
-    if (f === 'strip_html') return value.replace(/<[^>]*>/g, '');
-    if (f === 'newline_to_br') return value.replace(/\n/g, '<br>');
-    if (f === 'escape') return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    if (f === 'url_encode') return encodeURIComponent(value);
-    if (f === 'size') return String(value.length);
-    if (f === 'reverse') return value.split('').reverse().join('');
-
-    const truncM = f.match(/^truncate:\s*(\d+)(?:,\s*["']([^"']*)["'])?$/);
-    if (truncM) {
-        const n = parseInt(truncM[1]); const ellipsis = truncM[2] ?? '...';
-        return value.length > n ? value.slice(0, Math.max(0, n - ellipsis.length)) + ellipsis : value;
-    }
-    const truncWordsM = f.match(/^truncatewords:\s*(\d+)(?:,\s*["']([^"']*)["'])?$/);
-    if (truncWordsM) {
-        const words = value.split(/\s+/); const n = parseInt(truncWordsM[1]); const e = truncWordsM[2] ?? '...';
-        return words.length > n ? words.slice(0, n).join(' ') + e : value;
-    }
-    const replaceM = f.match(/^replace:\s*["']([^"']*)["'],\s*["']([^"']*)["']$/);
-    if (replaceM) return value.split(replaceM[1]).join(replaceM[2]);
-    const replaceFirstM = f.match(/^replace_first:\s*["']([^"']*)["'],\s*["']([^"']*)["']$/);
-    if (replaceFirstM) return value.replace(replaceFirstM[1], replaceFirstM[2]);
-    const removeM = f.match(/^remove:\s*["']([^"']*)["']$/);
-    if (removeM) return value.split(removeM[1]).join('');
-    const prependM = f.match(/^prepend:\s*["']([^"']*)["']$/);
-    if (prependM) return prependM[1] + value;
-    const appendM = f.match(/^append:\s*["']([^"']*)["']$/);
-    if (appendM) return value + appendM[1];
-    const defaultM = f.match(/^default:\s*["']([^"']*)["']$/);
-    if (defaultM) return value && value.trim() ? value : defaultM[1];
-    const sliceM = f.match(/^slice:\s*(-?\d+)(?:,\s*(\d+))?$/);
-    if (sliceM) { const s = parseInt(sliceM[1]); const l = sliceM[2] ? parseInt(sliceM[2]) : 1; return value.slice(s, s < 0 ? undefined : s + l); }
-    const dateM = f.match(/^date:\s*["']([^"']*)["']$/);
-    if (dateM) { const d = new Date(value); return isNaN(d.getTime()) ? value : formatLiquidDate(d, dateM[1]); }
-    const splitM = f.match(/^split:\s*["']([^"']*)["']$/);
-    if (splitM) return value.split(splitM[1]).join(' '); // join with space for display
-    const timesM = f.match(/^times:\s*([\d.]+)$/);
-    if (timesM) return String(parseFloat(value) * parseFloat(timesM[1]));
-    const plusM = f.match(/^plus:\s*([\d.]+)$/);
-    if (plusM) return String(parseFloat(value) + parseFloat(plusM[1]));
-    const minusM = f.match(/^minus:\s*([\d.]+)$/);
-    if (minusM) return String(parseFloat(value) - parseFloat(minusM[1]));
-    const dividedM = f.match(/^divided_by:\s*([\d.]+)$/);
-    if (dividedM) return String(parseFloat(value) / parseFloat(dividedM[1]));
-    const modM = f.match(/^modulo:\s*([\d.]+)$/);
-    if (modM) return String(parseFloat(value) % parseFloat(modM[1]));
-    if (f === 'abs') return String(Math.abs(parseFloat(value)));
-    if (f === 'ceil') return String(Math.ceil(parseFloat(value)));
-    if (f === 'floor') return String(Math.floor(parseFloat(value)));
-    if (f === 'round') return String(Math.round(parseFloat(value)));
-    const roundM = f.match(/^round:\s*(\d+)$/);
-    if (roundM) return parseFloat(value).toFixed(parseInt(roundM[1]));
-
-    return value; // unknown filter — passthrough
-}
-
-/** Apply a chain of filters: "upcase | truncate: 10 | append: '!'" */
-function applyFilterChain(value: string, filterChain: string): string {
-    // Split respecting quoted commas: split on | that are not inside quotes
-    const filters: string[] = [];
-    let cur = ''; let inQ = false; let qChar = '';
-    for (let i = 0; i < filterChain.length; i++) {
-        const c = filterChain[i];
-        if ((c === '"' || c === "'") && !inQ) { inQ = true; qChar = c; cur += c; }
-        else if (c === qChar && inQ) { inQ = false; cur += c; }
-        else if (c === '|' && !inQ) { filters.push(cur.trim()); cur = ''; }
-        else { cur += c; }
-    }
-    if (cur.trim()) filters.push(cur.trim());
-    return filters.filter(Boolean).reduce((v, f) => applyLiquidFilter(v, f), value);
-}
-
-/** Evaluate a single Liquid condition atom (no and/or) */
-function evalAtom(expr: string, row: Row, assigns: Row): boolean {
-    const e = expr.trim();
-    // blank / present
-    if (e.endsWith(' == blank') || e.endsWith('== empty')) return !(row[e.split(/\s/)[0]] || '').trim();
-    if (e.endsWith(' != blank') || e.endsWith('!= empty')) return !!(row[e.split(/\s/)[0]] || '').trim();
-
-    const containsM = e.match(/^(.+?)\s+contains\s+"([^"]*)"$/);
-    if (containsM) return (row[containsM[1].trim()] ?? assigns[containsM[1].trim()] ?? '').toLowerCase().includes(containsM[2].toLowerCase());
-    const containsMs = e.match(/^(.+?)\s+contains\s+'([^']*)'$/);
-    if (containsMs) return (row[containsMs[1].trim()] ?? assigns[containsMs[1].trim()] ?? '').toLowerCase().includes(containsMs[2].toLowerCase());
-
-    const eqDQ = e.match(/^(.+?)\s*==\s*"([^"]*)"$/);
-    if (eqDQ) return (row[eqDQ[1].trim()] ?? assigns[eqDQ[1].trim()] ?? '') === eqDQ[2];
-    const eqSQ = e.match(/^(.+?)\s*==\s*'([^']*)'$/);
-    if (eqSQ) return (row[eqSQ[1].trim()] ?? assigns[eqSQ[1].trim()] ?? '') === eqSQ[2];
-
-    const neqDQ = e.match(/^(.+?)\s*!=\s*"([^"]*)"$/);
-    if (neqDQ) return (row[neqDQ[1].trim()] ?? assigns[neqDQ[1].trim()] ?? '') !== neqDQ[2];
-    const neqSQ = e.match(/^(.+?)\s*!=\s*'([^']*)'$/);
-    if (neqSQ) return (row[neqSQ[1].trim()] ?? assigns[neqSQ[1].trim()] ?? '') !== neqSQ[2];
-
-    const gtM = e.match(/^(.+?)\s*>\s*([\d.]+)$/);
-    if (gtM) return parseFloat(row[gtM[1].trim()] ?? assigns[gtM[1].trim()] ?? '0') > parseFloat(gtM[2]);
-    const ltM = e.match(/^(.+?)\s*<\s*([\d.]+)$/);
-    if (ltM) return parseFloat(row[ltM[1].trim()] ?? assigns[ltM[1].trim()] ?? '0') < parseFloat(ltM[2]);
-    const gteM = e.match(/^(.+?)\s*>=\s*([\d.]+)$/);
-    if (gteM) return parseFloat(row[gteM[1].trim()] ?? assigns[gteM[1].trim()] ?? '0') >= parseFloat(gteM[2]);
-    const lteM = e.match(/^(.+?)\s*<=\s*([\d.]+)$/);
-    if (lteM) return parseFloat(row[lteM[1].trim()] ?? assigns[lteM[1].trim()] ?? '0') <= parseFloat(lteM[2]);
-
-    // plain variable
-    const varVal = row[e] ?? assigns[e] ?? '';
-    return !!(varVal && varVal.trim() && varVal !== 'false' && varVal !== 'nil');
-}
-
-/** Evaluate Liquid condition supporting `and` / `or` */
-function evalCondition(expr: string, row: Row, assigns: Row): boolean {
-    // `and` has higher precedence than `or` in Liquid
-    if (/ or /.test(expr)) return expr.split(/ or /).some(part => evalCondition(part.trim(), row, assigns));
-    if (/ and /.test(expr)) return expr.split(/ and /).every(part => evalAtom(part.trim(), row, assigns));
-    return evalAtom(expr, row, assigns);
-}
-
-/** Resolve a Liquid variable expression (with filter chain) */
-function resolveExpr(expr: string, row: Row, assigns: Row): string {
-    const pipeIdx = expr.search(/\|(?![^"']*["'][^"']*$)/); // first unquoted pipe
-    if (pipeIdx === -1) {
-        const varName = expr.trim();
-        return row[varName] ?? assigns[varName] ?? '';
-    }
-    const varName = expr.slice(0, pipeIdx).trim();
-    const chain = expr.slice(pipeIdx + 1);
-    const base = row[varName] ?? assigns[varName] ?? '';
-    return applyFilterChain(base, chain);
-}
-
-/** Process all Liquid block tags in a template given row data */
-function processLiquidBlocks(template: string, row: Row, assigns: Row): string {
-    let result = template;
-
-    // Remove comments
-    result = result.replace(/\{%-?\s*comment\s*-?%\}[\s\S]*?\{%-?\s*endcomment\s*-?%\}/g, '');
-
-    // {% assign var = expr %}
-    result = result.replace(/\{%-?\s*assign\s+(\w+)\s*=\s*([\s\S]+?)\s*-?%\}/g, (_, varName, expr) => {
-        const strM = expr.trim().match(/^["']([^"']*)["']$/);
-        if (strM) { assigns[varName] = strM[1]; }
-        else { assigns[varName] = resolveExpr(expr.trim(), row, assigns); }
-        return '';
-    });
-
-    // {% capture var %}...{% endcapture %}
-    result = result.replace(/\{%-?\s*capture\s+(\w+)\s*-?%\}([\s\S]*?)\{%-?\s*endcapture\s*-?%\}/g, (_, varName, body) => {
-        assigns[varName] = body.trim();
-        return '';
-    });
-
-    // {% unless %}...{% endunless %}
-    result = result.replace(/\{%-?\s*unless\s+([\s\S]+?)\s*-?%\}([\s\S]*?)\{%-?\s*endunless\s*-?%\}/g, (_, cond, body) => {
-        const [unlessPart, ...rest] = body.split(/\{%-?\s*else\s*-?%\}/);
-        const elsePart = rest.join('{% else %}');
-        return evalCondition(cond, row, assigns) ? (elsePart ?? '') : unlessPart;
-    });
-
-    // {% if %}...{% elsif %}...{% else %}...{% endif %}
-    result = result.replace(/\{%-?\s*if\s+([\s\S]+?)\s*-?%\}([\s\S]*?)\{%-?\s*endif\s*-?%\}/g, (_, cond, body) => {
-        const [ifPart, ...elseRest] = body.split(/\{%-?\s*else\s*-?%\}/);
-        const elsePart = elseRest.join('{% else %}');
-        const ifSegs = ifPart.split(/\{%-?\s*elsif\s+([\s\S]+?)\s*-?%\}/);
-        if (evalCondition(cond, row, assigns)) return ifSegs[0];
-        for (let i = 1; i < ifSegs.length; i += 2) {
-            if (evalCondition(ifSegs[i], row, assigns)) return ifSegs[i + 1] ?? '';
-        }
-        return elsePart ?? '';
-    });
-
-    return result;
-}
-
-/** Full Liquid render: blocks → assigns → variable expressions */
-function renderTemplate(template: string, row: Row): string {
-    const assigns: Row = {};
-
-    // 1. Process all block tags
-    let result = processLiquidBlocks(template, row, assigns);
-
-    // 2. {{- whitespace control -}}
-    result = result.replace(/\{\{-\s*([\s\S]+?)\s*-\}\}/g, (_, expr) => resolveExpr(expr, row, assigns).trim());
-    result = result.replace(/\{\{-\s*([\s\S]+?)\s*\}\}/g, (_, expr) => resolveExpr(expr, row, assigns));
-    result = result.replace(/\{\{\s*([\s\S]+?)\s*-\}\}/g, (_, expr) => resolveExpr(expr, row, assigns));
-
-    // 3. {{ expr | filters }}
-    result = result.replace(/\{\{([^{}%]+)\}\}/g, (_, expr) => resolveExpr(expr, row, assigns));
-
-    return result;
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Filter logic
@@ -437,9 +219,24 @@ const DEFAULT_TEMPLATE = `<div style="font-family: Arial, sans-serif; max-width:
 // Main Page
 // ─────────────────────────────────────────────────────────────────────────────
 
+// System variables injected into every Liquid template
+const SYSTEM_VAR_KEYS = [
+    { key: 'brand_name',   label: 'Nombre marca',    desc: 'config.displayName' },
+    { key: 'brand_color',  label: 'Color primario',   desc: 'config.theme.primaryColor' },
+    { key: 'brand_logo',   label: 'Logo URL',         desc: 'config.logo' },
+    { key: 'current_date', label: 'Fecha hoy',        desc: '15 de enero de 2025' },
+    { key: 'current_day',  label: 'Día semana',       desc: 'miércoles' },
+    { key: 'current_month',label: 'Mes actual',       desc: 'enero' },
+    { key: 'current_year', label: 'Año actual',       desc: '2025' },
+];
+
 export default function ElixirPage() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [activeTab, setActiveTab] = useState<'data' | 'template' | 'send'>('data');
+
+    // Domain config for brand system vars + theme
+    const { config: domainConfig } = useDomainConfig();
+    const brandColor = domainConfig.theme?.primaryColor;
 
     // Data state
     const [headers, setHeaders] = useState<string[]>([]);
@@ -450,6 +247,8 @@ export default function ElixirPage() {
     const [isDragging, setIsDragging] = useState(false);
     const [fileName, setFileName] = useState<string>('');
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [folderFiles, setFolderFiles] = useState<FolderEntry[]>([]);
+    const [folderName, setFolderName] = useState<string>('');
 
     // Sender config
     const [senderConfig, setSenderConfig] = useState<SenderConfig>({
@@ -559,6 +358,44 @@ export default function ElixirPage() {
         }
     }, []);
 
+    // ── File System Access API ─────────────────────────────────────────────
+    const hasFSA = typeof window !== 'undefined' && 'showOpenFilePicker' in window;
+
+    const openFilePicker = useCallback(async () => {
+        if (!hasFSA) { fileInputRef.current?.click(); return; }
+        try {
+            const [fh] = await (window as any).showOpenFilePicker({
+                types: [{ description: 'CSV o Excel', accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] } }],
+                multiple: false,
+            });
+            await loadFile(await fh.getFile());
+        } catch (e: any) { if (e?.name !== 'AbortError') toast.error('Error al abrir archivo'); }
+    }, [hasFSA, loadFile]);
+
+    const openFolderPicker = useCallback(async () => {
+        if (!('showDirectoryPicker' in window)) {
+            toast.error('Acceso a carpetas requiere Chrome o Edge'); return;
+        }
+        try {
+            const dir = await (window as any).showDirectoryPicker({ mode: 'read' });
+            const entries: FolderEntry[] = [];
+            for await (const [name, handle] of dir.entries()) {
+                if (handle.kind === 'file' && /\.(csv|xlsx|xls)$/i.test(name))
+                    entries.push({ name, handle });
+            }
+            entries.sort((a, b) => a.name.localeCompare(b.name));
+            setFolderFiles(entries);
+            setFolderName(dir.name);
+            if (entries.length === 0) toast.info('Sin archivos CSV/Excel en la carpeta');
+            else toast.success(`${entries.length} archivos en "${dir.name}"`);
+        } catch (e: any) { if (e?.name !== 'AbortError') toast.error('Error al acceder a la carpeta'); }
+    }, []);
+
+    const loadFolderFile = useCallback(async (entry: FolderEntry) => {
+        try { await loadFile(await entry.handle.getFile()); }
+        catch { toast.error(`Error al abrir ${entry.name}`); }
+    }, [loadFile]);
+
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) loadFile(file);
@@ -616,6 +453,7 @@ export default function ElixirPage() {
                     subject,
                     recipientColumn,
                     senderConfig,
+                    systemVars,
                 }),
             });
             const data = await res.json();
@@ -628,7 +466,21 @@ export default function ElixirPage() {
         finally { setSending(false); }
     };
 
-    const previewRow = filteredRows[previewRowIndex] || {};
+    // System vars — built from domain config + current date
+    const systemVars = useMemo(() => {
+        const now = new Date();
+        return {
+            brand_name:    domainConfig.displayName || domainConfig.name || '',
+            brand_color:   domainConfig.theme?.primaryColor || '',
+            brand_logo:    domainConfig.logo || '',
+            current_date:  now.toLocaleDateString('es-PE', { year: 'numeric', month: 'long', day: 'numeric' }),
+            current_day:   now.toLocaleDateString('es-PE', { weekday: 'long' }),
+            current_month: now.toLocaleDateString('es-PE', { month: 'long' }),
+            current_year:  String(now.getFullYear()),
+        };
+    }, [domainConfig]);
+
+    const previewRow = useMemo(() => ({ ...systemVars, ...(filteredRows[previewRowIndex] || {}) }), [systemVars, filteredRows, previewRowIndex]);
     const previewSubject = renderTemplate(subject, previewRow);
     const previewHtml = renderTemplate(templateHtml, previewRow);
 
@@ -659,8 +511,9 @@ export default function ElixirPage() {
                         <Menu className="h-5 w-5" />
                     </button>
                     <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-lg bg-violet-500/10 flex items-center justify-center">
-                            <Zap className="h-4 w-4 text-violet-500" />
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"
+                            style={brandColor ? { backgroundColor: `${brandColor}1a` } : undefined}>
+                            <Zap className="h-4 w-4 text-primary" />
                         </div>
                         <div>
                             <h1 className="text-sm font-semibold">Elixir</h1>
@@ -678,7 +531,7 @@ export default function ElixirPage() {
                             disabled={sending || validRecipients.length === 0}
                             className={cn(
                                 "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all",
-                                "bg-violet-600 text-white hover:bg-violet-700 active:scale-95",
+                                "bg-primary text-primary-foreground hover:bg-primary/90 active:scale-95",
                                 "disabled:opacity-50 disabled:cursor-not-allowed"
                             )}
                         >
@@ -701,12 +554,12 @@ export default function ElixirPage() {
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                             className={cn(
                                 "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
-                                activeTab === tab.id ? "border-violet-500 text-violet-600" : "border-transparent text-muted-foreground hover:text-foreground"
+                                activeTab === tab.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                             )}>
                             <tab.icon className="h-4 w-4" />
                             {tab.label}
                             {tab.id === 'send' && results.length > 0 && (
-                                <span className="ml-1 text-xs bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full">{results.length}</span>
+                                <span className="ml-1 text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{results.length}</span>
                             )}
                         </button>
                     ))}
@@ -719,11 +572,15 @@ export default function ElixirPage() {
                             filters={filters} columnTypes={columnTypes}
                             recipientColumn={recipientColumn} fileName={fileName}
                             isDragging={isDragging} fileInputRef={fileInputRef}
+                            folderFiles={folderFiles} folderName={folderName}
+                            hasFSA={hasFSA}
                             onDrop={handleDrop}
                             onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
                             onDragLeave={() => setIsDragging(false)}
-                            onFileClick={() => fileInputRef.current?.click()}
+                            onFileClick={openFilePicker}
                             onFileChange={handleFileChange}
+                            onOpenFolder={openFolderPicker}
+                            onLoadFolderFile={loadFolderFile}
                             onAddFilter={addFilter}
                             onUpdateFilter={updateFilter}
                             onRemoveFilter={removeFilter}
@@ -737,6 +594,7 @@ export default function ElixirPage() {
                             previewRowIndex={previewRowIndex}
                             previewSubject={previewSubject} previewHtml={previewHtml}
                             senderConfig={senderConfig}
+                            systemVarKeys={SYSTEM_VAR_KEYS}
                             importTemplateRef={importTemplateRef}
                             onSenderConfigChange={setSenderConfig}
                             onSubjectChange={setSubject}
@@ -763,8 +621,10 @@ export default function ElixirPage() {
 
 function DataTab({
     headers, allRows, filteredRows, filters, columnTypes, recipientColumn, fileName,
-    isDragging, fileInputRef, onDrop, onDragOver, onDragLeave,
-    onFileClick, onFileChange, onAddFilter, onUpdateFilter, onRemoveFilter, onSetRecipientColumn,
+    isDragging, fileInputRef, folderFiles, folderName, hasFSA,
+    onDrop, onDragOver, onDragLeave,
+    onFileClick, onFileChange, onOpenFolder, onLoadFolderFile,
+    onAddFilter, onUpdateFilter, onRemoveFilter, onSetRecipientColumn,
 }: {
     headers: string[];
     allRows: Row[];
@@ -775,11 +635,16 @@ function DataTab({
     fileName: string;
     isDragging: boolean;
     fileInputRef: React.RefObject<HTMLInputElement | null>;
+    folderFiles: FolderEntry[];
+    folderName: string;
+    hasFSA: boolean;
     onDrop: (e: React.DragEvent) => void;
     onDragOver: (e: React.DragEvent) => void;
     onDragLeave: () => void;
     onFileClick: () => void;
     onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onOpenFolder: () => void;
+    onLoadFolderFile: (entry: FolderEntry) => void;
     onAddFilter: () => void;
     onUpdateFilter: (i: number, u: Partial<FilterValue>) => void;
     onRemoveFilter: (i: number) => void;
@@ -795,27 +660,64 @@ function DataTab({
                 {/* Upload */}
                 <div className="p-4 border-b border-border">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Archivo</p>
+
+                    {/* Drag-drop zone */}
                     <div
                         onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave} onClick={onFileClick}
                         className={cn(
-                            "border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition-all",
-                            isDragging ? "border-violet-400 bg-violet-50" : "border-border hover:border-violet-300 hover:bg-muted/30"
+                            "border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all",
+                            isDragging ? "border-primary/50 bg-primary/5" : "border-border hover:border-primary/30 hover:bg-muted/30"
                         )}
                     >
-                        <FileSpreadsheet className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+                        <FileSpreadsheet className="h-7 w-7 mx-auto mb-2 text-muted-foreground" />
                         {fileName
                             ? <p className="text-sm font-medium truncate">{fileName}</p>
                             : <>
-                                <p className="text-sm font-medium">Subir archivo</p>
-                                <p className="text-xs text-muted-foreground mt-1">CSV o Excel (.xlsx)</p>
+                                <p className="text-sm font-medium">Abrir archivo</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">CSV · XLSX — o arrastra aquí</p>
                             </>
                         }
                     </div>
                     <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onFileChange} />
+
+                    {/* Folder picker button */}
+                    <button
+                        onClick={onOpenFolder}
+                        className="mt-2 w-full flex items-center justify-center gap-2 text-xs px-3 py-2 rounded-lg border border-dashed border-border hover:border-primary/40 hover:bg-muted/30 transition-all text-muted-foreground hover:text-foreground"
+                    >
+                        <FolderOpen className="h-3.5 w-3.5" />
+                        {folderName ? `📁 ${folderName}` : 'Abrir carpeta…'}
+                        {!hasFSA && <span className="text-[10px] opacity-60">(requiere Chrome/Edge)</span>}
+                    </button>
+
                     {allRows.length > 0 && (
                         <p className="text-xs text-muted-foreground mt-2 text-center">{allRows.length} filas · {headers.length} columnas</p>
                     )}
                 </div>
+
+                {/* Folder file list */}
+                {folderFiles.length > 0 && (
+                    <div className="border-b border-border">
+                        <p className="px-4 pt-3 pb-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                            Archivos en carpeta ({folderFiles.length})
+                        </p>
+                        <div className="max-h-40 overflow-y-auto">
+                            {folderFiles.map(entry => (
+                                <button
+                                    key={entry.name}
+                                    onClick={() => onLoadFolderFile(entry)}
+                                    className={cn(
+                                        "flex items-center gap-2 w-full text-left px-4 py-2 text-xs hover:bg-muted/50 transition-colors",
+                                        fileName === entry.name && "bg-primary/8 text-primary font-medium"
+                                    )}
+                                >
+                                    <FileSpreadsheet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                                    <span className="truncate">{entry.name}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
 
                 {/* Recipient column */}
                 {headers.length > 0 && (
@@ -823,7 +725,7 @@ function DataTab({
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Columna de email</p>
                         <select
                             value={recipientColumn} onChange={e => onSetRecipientColumn(e.target.value)}
-                            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-violet-400"
+                            className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
                         >
                             {headers.map(h => <option key={h} value={h}>{h}</option>)}
                         </select>
@@ -835,7 +737,7 @@ function DataTab({
                     <div className="p-4 flex-1">
                         <div className="flex items-center justify-between mb-3">
                             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Filtros</p>
-                            <button onClick={onAddFilter} className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 font-medium">
+                            <button onClick={onAddFilter} className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium">
                                 <Plus className="h-3.5 w-3.5" />Agregar
                             </button>
                         </div>
@@ -887,7 +789,7 @@ function DataTab({
                                     {headers.map(h => (
                                         <th key={h} className={cn(
                                             "px-3 py-2 text-left font-semibold border-b border-border whitespace-nowrap",
-                                            h === recipientColumn ? "text-violet-600" : "text-muted-foreground"
+                                            h === recipientColumn ? "text-primary" : "text-muted-foreground"
                                         )}>
                                             <span className="flex items-center gap-1">
                                                 {h === recipientColumn
@@ -980,7 +882,7 @@ function FilterRow({
                 <select
                     value={filter.column}
                     onChange={e => onUpdate({ column: e.target.value })}
-                    className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    className="flex-1 text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                 </select>
@@ -991,7 +893,7 @@ function FilterRow({
             <select
                 value={filter.op}
                 onChange={e => onUpdate({ op: e.target.value as FilterOp })}
-                className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400"
+                className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
             >
                 {ops.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
@@ -1001,7 +903,7 @@ function FilterRow({
                     value={filter.value}
                     onChange={e => onUpdate({ value: e.target.value })}
                     placeholder={filter.op === 'between' || filter.op === 'date_between' ? 'Desde...' : 'Valor...'}
-                    className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
             )}
             {needsSecondValue && (
@@ -1010,7 +912,7 @@ function FilterRow({
                     value={filter.value2 || ''}
                     onChange={e => onUpdate({ value2: e.target.value })}
                     placeholder="Hasta..."
-                    className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400"
+                    className="w-full text-xs border border-border rounded px-2 py-1 bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
             )}
         </div>
@@ -1023,7 +925,7 @@ function FilterRow({
 
 function TemplateTab({
     headers, filteredRows, subject, templateHtml, previewRowIndex,
-    previewSubject, previewHtml, senderConfig, importTemplateRef,
+    previewSubject, previewHtml, senderConfig, systemVarKeys, importTemplateRef,
     onSenderConfigChange, onSubjectChange, onTemplateChange, onPreviewRowChange,
     onExportLiquid, onExportBundle, onImportClick, onImportFile,
 }: {
@@ -1035,6 +937,7 @@ function TemplateTab({
     previewSubject: string;
     previewHtml: string;
     senderConfig: SenderConfig;
+    systemVarKeys: typeof SYSTEM_VAR_KEYS;
     importTemplateRef: React.RefObject<HTMLInputElement | null>;
     onSenderConfigChange: (c: SenderConfig) => void;
     onSubjectChange: (v: string) => void;
@@ -1115,25 +1018,25 @@ function TemplateTab({
                             <label className="text-[10px] text-muted-foreground block mb-1">Nombre remitente</label>
                             <input value={sc.fromName} onChange={e => set('fromName')(e.target.value)}
                                 placeholder="{{nombre}} (tu empresa)"
-                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
                         </div>
                         <div>
                             <label className="text-[10px] text-muted-foreground block mb-1">Email remitente</label>
                             <input value={sc.fromEmail} onChange={e => set('fromEmail')(e.target.value)}
                                 placeholder="tu@empresa.com"
-                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
                         </div>
                         <div>
                             <label className="text-[10px] text-muted-foreground block mb-1">CC (copia)</label>
                             <input value={sc.cc} onChange={e => set('cc')(e.target.value)}
                                 placeholder="cc@empresa.com · admite {{columna}}"
-                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
                         </div>
                         <div>
                             <label className="text-[10px] text-muted-foreground block mb-1">BCC (copia oculta)</label>
                             <input value={sc.bcc} onChange={e => set('bcc')(e.target.value)}
                                 placeholder="bcc@empresa.com · admite {{columna}}"
-                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-violet-400" />
+                                className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-ring" />
                         </div>
                     </div>
                 </div>
@@ -1142,24 +1045,37 @@ function TemplateTab({
                 <div className="px-4 py-3 border-b border-border shrink-0">
                     <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Asunto</label>
                     <input type="text" value={subject} onChange={e => onSubjectChange(e.target.value)}
-                        className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-violet-400 font-medium"
+                        className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring font-medium"
                         placeholder="Hola {{nombre | default: 'ahí'}} — admite Liquid" />
                 </div>
 
                 {/* Variables */}
-                {headers.length > 0 && (
-                    <div className="px-4 py-2 border-b border-border shrink-0 bg-muted/20">
-                        <p className="text-xs text-muted-foreground mb-1.5 font-medium">Variables disponibles (click para insertar):</p>
+                <div className="px-4 py-2 border-b border-border shrink-0 bg-muted/20 space-y-2">
+                    {headers.length > 0 && (
+                        <div>
+                            <p className="text-[10px] text-muted-foreground mb-1 font-semibold uppercase tracking-wider">Columnas del archivo</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {headers.map(h => (
+                                    <button key={h} onClick={() => insertVar(h)}
+                                        className="text-xs bg-primary/8 text-primary border border-primary/25 px-2 py-0.5 rounded-full hover:bg-primary/15 transition-colors font-mono">
+                                        {`{{${h}}}`}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    <div>
+                        <p className="text-[10px] text-muted-foreground mb-1 font-semibold uppercase tracking-wider">Variables del sistema</p>
                         <div className="flex flex-wrap gap-1.5">
-                            {headers.map(h => (
-                                <button key={h} onClick={() => insertVar(h)}
-                                    className="text-xs bg-violet-50 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full hover:bg-violet-100 transition-colors font-mono">
-                                    {`{{${h}}}`}
+                            {systemVarKeys.map(v => (
+                                <button key={v.key} onClick={() => insertVar(v.key)} title={v.label}
+                                    className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full hover:bg-amber-100 transition-colors font-mono">
+                                    {`{{${v.key}}}`}
                                 </button>
                             ))}
                         </div>
                     </div>
-                )}
+                </div>
 
                 {/* Syntax reference */}
                 <details className="border-b border-border shrink-0 bg-amber-50/60 group">
@@ -1171,36 +1087,40 @@ function TemplateTab({
                         <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1 uppercase tracking-wider">Variables</span>
                         <span>{`{{campo}}`} → valor directo</span>
                         <span>{`{{campo | default: "texto"}}`} → fallback</span>
+                        <span>{`{{ now | date: "%B %d, %Y" }}`} → fecha actual</span>
+                        <span>{`{{brand_name}} {{today}}`} → sistema</span>
 
                         <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de texto</span>
-                        <span>{`| upcase / downcase`}</span>
-                        <span>{`| capitalize`}</span>
-                        <span>{`| strip / lstrip / rstrip`}</span>
-                        <span>{`| strip_html`}</span>
-                        <span>{`| truncate: 50`}</span>
-                        <span>{`| truncate: 50, "…"`}</span>
-                        <span>{`| truncatewords: 10`}</span>
+                        <span>{`| upcase / downcase / capitalize`}</span>
+                        <span>{`| strip / lstrip / rstrip / strip_html`}</span>
+                        <span>{`| truncate: 50 / truncatewords: 10`}</span>
                         <span>{`| replace: "old", "new"`}</span>
-                        <span>{`| remove: "texto"`}</span>
-                        <span>{`| prepend: "Hola "`}</span>
-                        <span>{`| append: "!"`}</span>
-                        <span>{`| escape / url_encode`}</span>
-                        <span>{`| newline_to_br`}</span>
-                        <span>{`| size`}</span>
+                        <span>{`| remove: "x" / remove_first: "x"`}</span>
+                        <span>{`| prepend: "Hola " / append: "!"`}</span>
+                        <span>{`| escape / url_encode / url_decode`}</span>
+                        <span>{`| base64_encode / base64_decode`}</span>
+                        <span>{`| size / first / last / reverse`}</span>
+                        <span>{`| slice: 0, 5`}</span>
+
+                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de array</span>
+                        <span>{`| split: ","` } → crea array</span>
+                        <span>{`| join: " / "`} → une array</span>
+                        <span>{`| sort / sort_natural / uniq`}</span>
+                        <span>{`| compact / flatten`}</span>
+                        <span>{`| first / last / size / reverse`}</span>
+                        <span>{`| sum / min / max`}</span>
 
                         <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros numéricos</span>
                         <span>{`| plus: 10 / minus: 5`}</span>
                         <span>{`| times: 2 / divided_by: 3`}</span>
-                        <span>{`| round / ceil / floor`}</span>
-                        <span>{`| round: 2`}</span>
-                        <span>{`| abs / modulo: 7`}</span>
-                        <span>{`| default: "0"`}</span>
+                        <span>{`| round: 2 / ceil / floor / abs`}</span>
+                        <span>{`| modulo: 7 / at_least: 0 / at_most: 100`}</span>
 
                         <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de fecha</span>
                         <span>{`| date: "%B %d, %Y"`}</span>
                         <span>{`| date: "%d/%m/%Y"`}</span>
-                        <span>{`%Y %m %d %H %M %S %B %b`}</span>
-                        <span>{`%A (día) %p (AM/PM)`}</span>
+                        <span>{`%Y %m %d %H %M %S %B %b %A %p`}</span>
+                        <span>{`{{ now | date: "..." }}` } → hoy</span>
 
                         <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Cadena de filtros</span>
                         <span className="col-span-2">{`{{campo | upcase | truncate: 20 | append: "..."}}`}</span>
@@ -1212,10 +1132,24 @@ function TemplateTab({
                         <span>{`{% if a contains "X" %} … {% endif %}`}</span>
                         <span>{`{% if a > 100 and b != "Y" %} … {% endif %}`}</span>
                         <span>{`{% if a or b %} … {% elsif c %} … {% endif %}`}</span>
+                        <span>{`{% case x %}{% when "a" %}…{% when "b" %}…{% else %}…{% endcase %}`}</span>
+                        <span>{`{% when "a" or "b" %}` } → múltiples valores</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Asignación</span>
+                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Bucles for</span>
+                        <span>{`{% assign items = campo | split: "," %}`}</span>
+                        <span>{`{% for x in items %}{{x}}{% endfor %}`}</span>
+                        <span>{`{% for i in (1..5) %}{{i}}{% endfor %}`}</span>
+                        <span>{`for … limit:3 offset:1 reversed`}</span>
+                        <span>{`forloop.index / index0 / first / last`}</span>
+                        <span>{`forloop.length / rindex / rindex0`}</span>
+                        <span>{`{% break %} / {% continue %}`}</span>
+                        <span>{`{% for x in arr %}…{% else %}vacío{% endfor %}`}</span>
+
+                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Asignación y captura</span>
                         <span>{`{% assign x = campo | upcase %}`}</span>
                         <span>{`{% capture x %}texto {{campo}}{% endcapture %}`}</span>
+                        <span>{`{% increment ctr %} / {% decrement ctr %}`}</span>
+                        <span>{`{% cycle "odd", "even" %}`}</span>
                     </div>
                 </details>
 
@@ -1322,7 +1256,7 @@ function TemplateTab({
                                     <div className="divide-y divide-border/50">
                                         {headers.map(h => (
                                             <div key={h} className="flex px-4 py-2 gap-3">
-                                                <span className="text-xs font-mono text-violet-600 shrink-0 w-32 truncate">{h}</span>
+                                                <span className="text-xs font-mono text-primary shrink-0 w-32 truncate">{h}</span>
                                                 <span className="text-xs text-foreground truncate">{filteredRows[previewRowIndex]?.[h] || '—'}</span>
                                             </div>
                                         ))}
@@ -1353,7 +1287,7 @@ function SendTab({ results, sending, validRecipients }: {
         return (
             <div className="flex flex-col items-center justify-center h-full gap-4">
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}>
-                    <Zap className="h-10 w-10 text-violet-500" />
+                    <Zap className="h-10 w-10 text-primary" />
                 </motion.div>
                 <p className="text-sm font-medium">Enviando campaña...</p>
                 <p className="text-xs text-muted-foreground">{validRecipients.length} destinatarios</p>

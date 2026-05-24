@@ -21,7 +21,7 @@ function DesktopLayout() {
                     <Sidebar />
                 </Panel>
 
-                <Separator className="w-px bg-gray-200 hover:bg-blue-500 transition-colors cursor-col-resize active:bg-blue-600" />
+                <Separator className="w-px bg-border hover:bg-primary transition-colors cursor-col-resize active:bg-primary" />
 
                 {/* Panel Lista de Correos */}
                 <Panel defaultSize={32} minSize={30}>
@@ -30,7 +30,7 @@ function DesktopLayout() {
 
                 {selectedId && (
                     <>
-                        <Separator className="w-px bg-gray-200 hover:bg-blue-500 transition-colors cursor-col-resize active:bg-blue-600" />
+                        <Separator className="w-px bg-border hover:bg-primary transition-colors cursor-col-resize active:bg-primary" />
 
                         {/* Panel Vista de Mensaje */}
                         <Panel defaultSize={48} >
