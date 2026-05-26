@@ -71,6 +71,7 @@ model Email {
   scheduledAt DateTime?
   smartReplies Json?
   attachmentsChecked Boolean @default(false)
+  rawMimeUrl  String?      // Resend raw MIME download URL for async attachment processing
   attachments Attachment[]
   events      EmailEvent[]
   labels      Label[]      @relation("EmailToLabel")
@@ -88,6 +89,7 @@ model Attachment {
   mimeType  String
   size      Int
   key       String
+  status    String   @default("ready")  // "pending" | "ready" | "failed"
   createdAt DateTime @default(now())
   draftId   String?
   draft     Draft?   @relation(fields: [draftId], references: [id], onDelete: Cascade)

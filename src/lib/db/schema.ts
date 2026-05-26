@@ -131,6 +131,7 @@ const TABLES: TableSpec[] = [
             { name: 'scheduledAt', definition: 'TIMESTAMPTZ' },
             { name: 'smartReplies', definition: 'JSONB' },
             { name: 'attachmentsChecked', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'rawMimeUrl', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Email_pkey', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_pkey" PRIMARY KEY ("id")' },
@@ -195,6 +196,7 @@ const TABLES: TableSpec[] = [
             { name: 'mimeType', definition: 'TEXT NOT NULL' },
             { name: 'size', definition: 'INTEGER NOT NULL' },
             { name: 'key', definition: 'TEXT NOT NULL' },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'ready'" },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'draftId', definition: 'TEXT' },
         ],

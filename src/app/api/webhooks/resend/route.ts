@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { after } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { uploadToStorage } from '@/lib/storage';
 import { Webhook } from 'svix';
@@ -7,6 +8,7 @@ import { sendNewMessagePushNotification } from '@/lib/notifications/web-push';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { ParsedInvite, parseInviteFromIcs } from '@/lib/calendar/ics';
 import { classifySpamFromHeaders } from '@/lib/spam-headers';
+import { decodeRFC2047, extractFilenameFromHeaders, extensionFromMimeType, sanitizeFilename } from '@/lib/mime-decode';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -106,71 +108,9 @@ function decodeQuotedPrintable(input: string) {
         .replace(/=([A-Fa-f0-9]{2})/g, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
 }
 
-/**
- * Extracts non-calendar attachment parts from a raw MIME email string.
- * Used when Resend's webhook payload omits attachment content (i.e. att.content is absent).
- */
-function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
-    filename: string;
-    contentType: string;
-    buffer: Buffer;
-}> {
-    const results: Array<{ filename: string; contentType: string; buffer: Buffer }> = [];
-
-    const boundaryMatch = rawMime.match(/Content-Type:\s*multipart\/[^\r\n]+boundary=(?:"([^"]+)"|(\S+))/i);
-    if (!boundaryMatch) return results;
-
-    const boundary = (boundaryMatch[1] ?? boundaryMatch[2]).trim().replace(/;$/, '');
-    const escapedBoundary = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = rawMime.split(new RegExp(`--${escapedBoundary}(?:--)?`));
-
-    for (const part of parts) {
-        const split = part.match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);
-        if (!split) continue;
-        const [, headersRaw, bodyRaw] = split;
-
-        if (!/Content-Disposition:\s*attachment/i.test(headersRaw)) continue;
-
-        const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
-        const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
-        const ctLower = contentType.toLowerCase();
-        if (ctLower.includes('text/calendar') || ctLower.includes('application/ics')) continue;
-
-        // Filename — prefer Content-Disposition, fall back to Content-Type name param.
-        let filename = '';
-        const cdFn = headersRaw.match(/Content-Disposition:[^\r\n]*\bfilename\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
-        if (cdFn) filename = decodeURIComponent(cdFn[1].trim().replace(/["']/g, ''));
-        if (!filename) {
-            const ctFn = headersRaw.match(/Content-Type:[^\r\n]*\bname\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
-            if (ctFn) filename = decodeURIComponent(ctFn[1].trim().replace(/["']/g, ''));
-        }
-        if (!filename) filename = `attachment-${results.length + 1}.bin`;
-
-        const teMatch = headersRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
-        const te = teMatch ? teMatch[1].trim().toLowerCase() : '7bit';
-
-        let buffer: Buffer;
-        try {
-            if (te === 'base64') {
-                buffer = Buffer.from(bodyRaw.replace(/\s+/g, ''), 'base64');
-            } else if (te === 'quoted-printable') {
-                const decoded = bodyRaw
-                    .replace(/=(\r?\n)/g, '')
-                    .replace(/=([A-Fa-f0-9]{2})/g, (_: string, h: string) => String.fromCharCode(parseInt(h, 16)));
-                buffer = Buffer.from(decoded, 'binary');
-            } else {
-                buffer = Buffer.from(bodyRaw);
-            }
-        } catch {
-            continue;
-        }
-
-        if (buffer.length === 0) continue;
-        results.push({ filename, contentType, buffer });
-    }
-
-    return results;
-}
+// NOTE: extractNonCalendarAttachmentsFromRawMime and extractCalendarIcsFromRawEmail
+// have been moved to /api/emails/[id]/process-attachments which runs asynchronously
+// after the webhook returns, avoiding Vercel execution time limits.
 
 function extractCalendarIcsFromRawEmail(rawSource: string): string[] {
     const source = String(rawSource || '');
@@ -580,138 +520,96 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         }
     }
 
-    // 3. Upload Attachments
-    const attachmentRecords: Array<{
+    // 3. Build attachment metadata records (no content downloaded yet — done async)
+    // We use the attachment hints from the webhook payload to create 'pending' records.
+    // The actual file content is downloaded by /api/emails/[id]/process-attachments.
+    const attachmentMetaRecords: Array<{
         filename: string;
         mimeType: string;
         size: number;
         key: string;
+        status: string;
     }> = [];
     const parsedInvites: ParsedInvite[] = [];
     const parsedInviteKeys = new Set<string>();
 
     const registerParsedInvite = (invite: ParsedInvite | null | undefined) => {
-        if (!invite) {
-            return;
-        }
-
+        if (!invite) return;
         const key = `${invite.uid || ''}|${invite.method || ''}|${invite.organizerEmail || ''}`;
-        if (parsedInviteKeys.has(key)) {
-            return;
-        }
-
+        if (parsedInviteKeys.has(key)) return;
         parsedInviteKeys.add(key);
         parsedInvites.push(invite);
     };
 
+    // Process attachments that came with inline content in the webhook payload (small files)
     if (attachments && Array.isArray(attachments)) {
         for (const att of attachments) {
             if (att.content) {
-                const fallbackFilename: string = `attachment-${attachmentRecords.length + 1}.bin`;
-                const filename: string = String(att.filename || fallbackFilename);
-                const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
-
+                // Small file — content is inlined, upload immediately
                 const buffer = Buffer.from(att.content.data || att.content);
-                const contentType = att.contentType || att.content_type || 'application/octet-stream';
+                const contentType: string = att.contentType || att.content_type || 'application/octet-stream';
 
+                // Decode filename properly (RFC 2047 encoded-words)
+                let filename: string = att.filename
+                    ? sanitizeFilename(decodeRFC2047(String(att.filename)))
+                    : '';
+                if (!filename) {
+                    const ext = extensionFromMimeType(contentType);
+                    filename = `attachment-${attachmentMetaRecords.length + 1}${ext || '.bin'}`;
+                } else if (!filename.includes('.')) {
+                    const ext = extensionFromMimeType(contentType);
+                    if (ext) filename = `${filename}${ext}`;
+                }
+
+                const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
                 uploads.push(uploadToStorage(attKey, buffer, contentType));
 
-                attachmentRecords.push({
+                attachmentMetaRecords.push({
                     filename,
                     mimeType: contentType,
                     size: att.size || buffer.length,
-                    key: attKey
+                    key: attKey,
+                    status: 'ready',
                 });
 
-                const isCalendarAttachment = String(contentType || '').toLowerCase().includes('text/calendar')
-                    || String(contentType || '').toLowerCase().includes('application/ics')
-                    || String(att.filename || '').toLowerCase().endsWith('.ics');
+                const isCalendarAttachment =
+                    contentType.toLowerCase().includes('text/calendar') ||
+                    contentType.toLowerCase().includes('application/ics') ||
+                    filename.toLowerCase().endsWith('.ics');
 
                 if (isCalendarAttachment) {
                     registerParsedInvite(parseInviteFromIcs(buffer.toString('utf8')));
                 }
+            } else {
+                // Large file — no inline content, register as 'pending' for async download
+                const contentType: string = att.contentType || att.content_type || 'application/octet-stream';
+                let filename: string = att.filename
+                    ? sanitizeFilename(decodeRFC2047(String(att.filename)))
+                    : '';
+                if (!filename) {
+                    const ext = extensionFromMimeType(contentType);
+                    filename = `attachment-${attachmentMetaRecords.length + 1}${ext || '.bin'}`;
+                } else if (!filename.includes('.')) {
+                    const ext = extensionFromMimeType(contentType);
+                    if (ext) filename = `${filename}${ext}`;
+                }
+
+                attachmentMetaRecords.push({
+                    filename,
+                    mimeType: contentType,
+                    size: att.size || 0,
+                    key: 'PENDING',
+                    status: 'pending',
+                });
             }
         }
     }
 
-    // Use the raw MIME URL from the fetched receiving data or directly from the webhook payload.
-    // The webhook payload already contains raw.download_url, so we don't need fetchedReceivingData
-    // to be populated in order to reach the raw email (important when html+text are both present
-    // but attachments still lack content).
+
+    // The rawMimeUrl is stored on the email so that the async process-attachments
+    // route can download it without needing the webhook payload again.
     const rawMimeUrl: string | null =
         fetchedReceivingData?.raw?.download_url ?? data?.raw?.download_url ?? null;
-
-    if (rawMimeUrl) {
-        try {
-            const rawDownloadResponse = await fetch(rawMimeUrl);
-            if (rawDownloadResponse.ok) {
-                const rawMime = await rawDownloadResponse.text();
-
-                // ── Calendar ICS extraction (existing logic) ──────────────────────
-                const calendarIcsBlocks = extractCalendarIcsFromRawEmail(rawMime);
-                const attachmentHints = Array.isArray(fetchedReceivingData?.attachments ?? data?.attachments)
-                    ? (fetchedReceivingData?.attachments ?? data?.attachments)
-                    : [];
-
-                calendarIcsBlocks.forEach((icsContent, index) => {
-                    registerParsedInvite(parseInviteFromIcs(icsContent));
-
-                    const alreadyHasCalendarAttachment = attachmentRecords.some((record: any) => {
-                        const mimeType = String(record?.mimeType || '').toLowerCase();
-                        const filename = String(record?.filename || '').toLowerCase();
-                        return mimeType.includes('text/calendar') || mimeType.includes('application/ics') || filename.endsWith('.ics');
-                    });
-
-                    if (alreadyHasCalendarAttachment) {
-                        return;
-                    }
-
-                    const hintedFilename = String(attachmentHints[index]?.filename || '').trim();
-                    const filename = hintedFilename || `invite-${index + 1}.ics`;
-                    const contentBuffer = Buffer.from(icsContent, 'utf8');
-                    const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
-
-                    uploads.push(uploadToStorage(attKey, contentBuffer, 'text/calendar;charset=utf-8'));
-                    attachmentRecords.push({
-                        filename,
-                        mimeType: 'text/calendar;charset=utf-8',
-                        size: contentBuffer.byteLength,
-                        key: attKey,
-                    });
-                });
-
-                // ── Non-calendar attachments missing from webhook payload ──────────
-                // Resend only sends attachment metadata (no content) for large files.
-                // Extract the actual bytes from the raw MIME for any attachment not
-                // already uploaded via att.content above.
-                const metaOnlyAttachments = (attachments || []).filter((att: any) => {
-                    if (att?.content) return false; // already handled
-                    const ct = String(att?.contentType || att?.content_type || '').toLowerCase();
-                    const fn = String(att?.filename || '').toLowerCase();
-                    return !ct.includes('text/calendar') && !ct.includes('application/ics') && !fn.endsWith('.ics');
-                });
-
-                if (metaOnlyAttachments.length > 0) {
-                    const extracted = extractNonCalendarAttachmentsFromRawMime(rawMime);
-                    for (const ext of extracted) {
-                        if (attachmentRecords.some(r => r.filename.toLowerCase() === ext.filename.toLowerCase())) {
-                            continue; // already uploaded
-                        }
-                        const attKey = `emails/${dateStr}/${uuid}/attachments/${ext.filename}`;
-                        uploads.push(uploadToStorage(attKey, ext.buffer, ext.contentType));
-                        attachmentRecords.push({
-                            filename: ext.filename,
-                            mimeType: ext.contentType,
-                            size: ext.buffer.byteLength,
-                            key: attKey,
-                        });
-                    }
-                }
-            }
-        } catch (error) {
-            console.error('Failed to download raw MIME from Resend:', error);
-        }
-    }
 
     await Promise.all(uploads);
 
@@ -770,37 +668,49 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
         const createdEmail = await prisma.email.create({
             data: {
-                userId: user.id, // Assign to correct user
+                userId: user.id,
                 from: formattedFrom,
                 to: toField,
                 cc: ccField,
                 replyTo: replyToEmail,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
-                messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid), // Ensure unique messageId per record if multipule users? 
-                // Wait, messageId in schema is unique? Yes.
-                // If we store same email for multiple users, they need distinct messageId in DB?
-                // The Schema says `messageId String @unique`.
-                // So yes, we must append user.id or random suffix if multiple users receive it.
-                // Actually, `messageId` from email headers is global.
-                // If we enforce uniqueness, we can't save the same messageId twice.
-                // Solution: We should probably scope messageId by userId in schema, OR append suffixes.
-                // Appending suffix is safer for now without schema migration.
+                messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid),
                 snippet: text ? text.substring(0, 200) : '',
                 htmlKey: (html || (!html && !text)) ? htmlKey : null,
                 textKey: text ? textKey : null,
                 rawKey: rawKey,
+                rawMimeUrl: rawMimeUrl,
                 folder: deliveryFolder,
                 attachments: {
-                    create: attachmentRecords.map(a => ({ ...a, emailId: undefined })) // Create new attachment records for each email? 
-                    // Attachment schema links to Email via emailId.
-                    // Yes, we need to clone attachment records for each email entry.
+                    create: attachmentMetaRecords.map(a => ({ ...a, emailId: undefined })),
                 },
                 labels: {
                     connect: uniqueLabelIds
                 }
             }
         });
+
+        // 🚀 Launch async attachment processing AFTER the webhook response is sent.
+        // Using Next.js after() so this runs after the response without blocking Resend's timeout.
+        // The process-attachments route will: download raw MIME, extract all attachments
+        // with proper RFC-2047 filename decoding, upload to storage, and update DB records.
+        if (rawMimeUrl || attachmentMetaRecords.some(a => a.status === 'pending')) {
+            const emailIdForAsync = createdEmail.id;
+            const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
+            const internalSecret = process.env.INTERNAL_SECRET || '';
+            after(
+                fetch(`${appUrl}/api/emails/${emailIdForAsync}/process-attachments`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-internal-secret': internalSecret,
+                    },
+                }).catch(err =>
+                    console.error(`[webhook] Failed to trigger process-attachments for ${emailIdForAsync}:`, err),
+                ),
+            );
+        }
 
         if (parsedInvites.length > 0) {
             for (const invite of parsedInvites) {
