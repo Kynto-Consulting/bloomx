@@ -473,14 +473,12 @@ const MIME_TO_EXT: Record<string, string> = {
     'x-world/x-vrml': '.vrml',
 
     // ── GIS / Geo ─────────────────────────────────────────────────────────────
-    'application/geo+json': '.geojson',
     'application/vnd.google-earth.kml+xml': '.kml',
     'application/vnd.google-earth.kmz': '.kmz',
     'application/gpx+xml': '.gpx',
     'application/vnd.mapbox-vector-tile': '.mvt',
     'application/x-shapefile': '.shp',
     'application/x-esri-shapefile': '.shp',
-    'image/tiff': '.tiff',
 
     // ── Programming / Build ───────────────────────────────────────────────────
     'application/wasm': '.wasm',
@@ -521,8 +519,6 @@ const MIME_TO_EXT: Record<string, string> = {
     'application/pgp-keys': '.asc',
 
     // ── Ebook / Publishing ────────────────────────────────────────────────────
-    'application/epub+zip': '.epub',
-    'application/x-mobipocket-ebook': '.mobi',
     'application/x-fictionbook+xml': '.fb2',
     'application/vnd.amazon.ebook': '.azw',
     'application/x-cbr': '.cbr',
@@ -538,7 +534,6 @@ const MIME_TO_EXT: Record<string, string> = {
     'application/x-java-jnlp-file': '.jnlp',
     'application/x-makeself': '.run',
     'application/x-pilot': '.prc',
-    'application/x-stuffit': '.sit',
     'application/x-tcl': '.tcl',
     'application/x-perl': '.pl',
     'application/x-cgi': '.cgi',

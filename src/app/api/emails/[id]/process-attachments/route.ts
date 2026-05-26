@@ -8,6 +8,7 @@ import {
 } from '@/lib/mime-decode';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
+import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -358,30 +359,24 @@ export async function POST(
         });
 
         if (emailRecord) {
-            const { handleInboundCalendarInviteForUser } = await import(
-                '@/app/api/webhooks/resend/calendar-invite-handler'
-            ).catch(() => ({ handleInboundCalendarInviteForUser: null }));
+            const user = await prisma.user.findUnique({
+                where: { id: emailRecord.userId },
+                select: { id: true, email: true },
+            });
 
-            if (handleInboundCalendarInviteForUser) {
-                const user = await prisma.user.findUnique({
-                    where: { id: emailRecord.userId },
-                    select: { id: true, email: true },
-                });
-
-                if (user) {
-                    for (const invite of parsedInvites) {
-                        if (!invite) continue;
-                        await handleInboundCalendarInviteForUser({
-                            userId: user.id,
-                            userEmail: user.email,
-                            emailId,
-                            senderEmail: emailRecord.from,
-                            senderName: null,
-                            invite,
-                        }).catch(err =>
-                            console.error('[process-attachments] Calendar invite error:', err),
-                        );
-                    }
+            if (user) {
+                for (const invite of parsedInvites) {
+                    if (!invite) continue;
+                    await handleInboundCalendarInvite({
+                        userId: user.id,
+                        userEmail: user.email,
+                        emailId,
+                        senderEmail: emailRecord.from,
+                        senderName: null,
+                        invite,
+                    }).catch(err =>
+                        console.error('[process-attachments] Calendar invite error:', err),
+                    );
                 }
             }
         }
