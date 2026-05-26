@@ -476,8 +476,10 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         return isCalendarAttachment && !att?.content;
     });
 
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
     let fetchedReceivingData: any = null;
-    if (webhookEmailId && (!html || !text || hasCalendarAttachmentWithoutContent)) {
+    if (webhookEmailId && (!html || !text || hasCalendarAttachmentWithoutContent || hasAttachments)) {
         if (!html || !text) {
             console.log('[resend] Email body missing in webhook payload. Attempting Resend API fallback...');
         }

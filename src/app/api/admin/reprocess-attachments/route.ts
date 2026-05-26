@@ -3,6 +3,12 @@ import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { getFromStorage, uploadToStorage } from '@/lib/storage';
 
+import {
+    extractFilenameFromHeaders,
+    extensionFromMimeType,
+    sanitizeFilename,
+} from '@/lib/mime-decode';
+
 // ─── MIME helpers (mirrors the webhook route logic) ──────────────────────────
 
 function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
@@ -24,21 +30,34 @@ function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
         if (!split) continue;
         const [, headersRaw, bodyRaw] = split;
 
-        if (!/Content-Disposition:\s*attachment/i.test(headersRaw)) continue;
+        // Match both attachment and inline files
+        const isAttachment = /Content-Disposition:\s*attachment/i.test(headersRaw);
+        const isInlineWithName =
+            /Content-Disposition:\s*inline/i.test(headersRaw) &&
+            (/Content-Type:[^\r\n]*;\s*name\s*=/i.test(headersRaw) ||
+                /Content-Disposition:[^\r\n]*;\s*filename\s*=/i.test(headersRaw));
+
+        if (!isAttachment && !isInlineWithName) continue;
 
         const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
         const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
         const ctLower = contentType.toLowerCase();
         if (ctLower.includes('text/calendar') || ctLower.includes('application/ics')) continue;
 
-        let filename = '';
-        const cdFn = headersRaw.match(/Content-Disposition:[^\r\n]*\bfilename\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
-        if (cdFn) filename = decodeURIComponent(cdFn[1].trim().replace(/["']/g, ''));
+        // Filename — use the robust decoder
+        let filename = extractFilenameFromHeaders(headersRaw);
+
+        // If still empty, try to infer from Content-Type
         if (!filename) {
-            const ctFn = headersRaw.match(/Content-Type:[^\r\n]*\bname\*?=(?:UTF-8'')?["']?([^"'\r\n;]+)/i);
-            if (ctFn) filename = decodeURIComponent(ctFn[1].trim().replace(/["']/g, ''));
+            const ext = extensionFromMimeType(contentType);
+            filename = `attachment-${results.length + 1}${ext || '.bin'}`;
+        } else {
+            if (!filename.includes('.')) {
+                const ext = extensionFromMimeType(contentType);
+                if (ext) filename = `${filename}${ext}`;
+            }
+            filename = sanitizeFilename(filename);
         }
-        if (!filename) filename = `attachment-${results.length + 1}.bin`;
 
         const teMatch = headersRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
         const te = teMatch ? teMatch[1].trim().toLowerCase() : '7bit';
