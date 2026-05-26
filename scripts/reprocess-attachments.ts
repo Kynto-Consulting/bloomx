@@ -78,7 +78,8 @@ function extractNonCalendarAttachmentsFromRawMime(rawMime: string) {
 
         const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
         const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
-        if (/text/calendar|application/ics/i.test(contentType)) continue;
+        const ctLower = contentType.toLowerCase();
+        if (ctLower.includes('text/calendar') || ctLower.includes('application/ics')) continue;
 
         // Filename — use the robust decoder
         let filename = extractFilenameFromHeaders(headersRaw);
