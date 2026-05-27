@@ -9,7 +9,7 @@ import {
     Upload, FileSpreadsheet, Mail, Send, Eye, ChevronDown, ChevronUp,
     X, Plus, Zap, Filter, CheckCircle, AlertCircle, Menu,
     RotateCcw, Variable, Table2, Hash, Calendar, Type,
-    Download, FolderOpen
+    Download, FolderOpen, Maximize2, Minimize2, PanelTopClose
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -949,9 +949,32 @@ function TemplateTab({
     onImportFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }) {
     const [showExportMenu, setShowExportMenu] = useState(false);
+    const [configCollapsed, setConfigCollapsed] = useState(false);
+    const [configHeight, setConfigHeight] = useState(340);
+    const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
+    const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+
     const insertVar = (varName: string) => onTemplateChange(templateHtml + `{{${varName}}}`);
     const sc = senderConfig;
     const set = (k: keyof SenderConfig) => (v: string) => onSenderConfigChange({ ...sc, [k]: v });
+
+    const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
+        dragRef.current = { startY: e.clientY, startHeight: configHeight };
+        e.currentTarget.setPointerCapture(e.pointerId);
+    };
+    const handleDragMove = (e: React.PointerEvent<HTMLDivElement>) => {
+        if (!dragRef.current) return;
+        const newH = Math.max(80, Math.min(640, dragRef.current.startHeight + e.clientY - dragRef.current.startY));
+        setConfigHeight(newH);
+    };
+    const handleDragEnd = () => { dragRef.current = null; };
+
+    useEffect(() => {
+        if (!isEditorFullscreen) return;
+        const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsEditorFullscreen(false); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [isEditorFullscreen]);
 
     return (
         <div className="flex h-full min-h-0">
@@ -1007,11 +1030,26 @@ function TemplateTab({
                             )}
                         </AnimatePresence>
                     </div>
-                    <span className="ml-auto text-[11px] text-muted-foreground">Acepta .liquid · .html · .json</span>
+                    <span className="text-[11px] text-muted-foreground">Acepta .liquid · .html · .json</span>
+                    <button
+                        type="button"
+                        onClick={() => setConfigCollapsed(v => !v)}
+                        title={configCollapsed ? 'Mostrar configuración' : 'Ocultar configuración'}
+                        className="ml-auto flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground"
+                    >
+                        <PanelTopClose className="h-3.5 w-3.5" />
+                        {configCollapsed ? 'Config' : 'Ocultar'}
+                    </button>
                 </div>
 
+                {/* Collapsible config area */}
+                <div
+                    className="overflow-y-auto shrink-0 transition-all"
+                    style={{ height: configCollapsed ? 0 : configHeight, minHeight: 0 }}
+                >
+
                 {/* Sender config */}
-                <div className="px-4 py-3 border-b border-border shrink-0 bg-muted/10 space-y-2">
+                <div className="px-4 py-3 border-b border-border bg-muted/10 space-y-2">
                     <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Configuración de envío</p>
                     <div className="grid grid-cols-2 gap-2">
                         <div>
@@ -1153,21 +1191,48 @@ function TemplateTab({
                     </div>
                 </details>
 
+                </div>{/* end collapsible config area */}
+
+                {/* Drag resize handle */}
+                {!configCollapsed && (
+                    <div
+                        className="h-1.5 bg-border hover:bg-primary/40 cursor-ns-resize shrink-0 transition-colors select-none"
+                        onPointerDown={handleDragStart}
+                        onPointerMove={handleDragMove}
+                        onPointerUp={handleDragEnd}
+                    />
+                )}
+
                 {/* Liquid Code Editor (CodeMirror 6) */}
-                <div className="flex-1 min-h-0 border-t border-border overflow-hidden">
-                    <Suspense fallback={
-                        <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                            Cargando editor...
-                        </div>
-                    }>
+                {isEditorFullscreen ? (
+                    <div className="fixed inset-0 z-50 bg-background flex flex-col">
                         <LiquidEditor
                             value={templateHtml}
                             onChange={onTemplateChange}
                             variables={headers}
-                            className="h-full"
+                            className="flex-1 min-h-0"
+                            isFullscreen={true}
+                            onToggleFullscreen={() => setIsEditorFullscreen(false)}
                         />
-                    </Suspense>
-                </div>
+                    </div>
+                ) : (
+                    <div className="flex-1 min-h-0 overflow-hidden">
+                        <Suspense fallback={
+                            <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+                                Cargando editor...
+                            </div>
+                        }>
+                            <LiquidEditor
+                                value={templateHtml}
+                                onChange={onTemplateChange}
+                                variables={headers}
+                                className="h-full"
+                                isFullscreen={false}
+                                onToggleFullscreen={() => setIsEditorFullscreen(true)}
+                            />
+                        </Suspense>
+                    </div>
+                )}
             </div>
 
             {/* Preview side */}

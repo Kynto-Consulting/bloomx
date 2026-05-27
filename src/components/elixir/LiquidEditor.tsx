@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
+import { Search as SearchIcon, Maximize2, Minimize2 } from 'lucide-react';
+import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
 
 // ─── CodeMirror 6 imports ───────────────────────────────────────────────────
 import {
@@ -476,6 +478,12 @@ const liquidTheme = EditorView.theme({
     '.cm-completionIcon-variable::after': { content: '"⬡"', color: 'var(--color-primary)' },
     '.cm-completionIcon-function::after': { content: '"ƒ"', color: '#0891b2' },
     '.cm-completionIcon-keyword::after': { content: '"%"', color: '#d97706' },
+    // Search panel
+    '.cm-panels': { backgroundColor: 'hsl(var(--muted))', borderTop: '1px solid hsl(var(--border))' },
+    '.cm-search': { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', padding: '6px 8px', fontSize: '12px' },
+    '.cm-search input': { borderRadius: '6px', border: '1px solid hsl(var(--border))', padding: '2px 6px', fontSize: '12px', backgroundColor: 'hsl(var(--background))' },
+    '.cm-search button': { borderRadius: '6px', border: '1px solid hsl(var(--border))', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', backgroundColor: 'hsl(var(--background))' },
+    '.cm-search label': { fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' },
     // Tooltip / info panel
     '.cm-tooltip': {
         border: '1px solid hsl(var(--border))',
@@ -494,15 +502,18 @@ export interface LiquidEditorProps {
     onChange: (value: string) => void;
     variables: string[];
     className?: string;
+    isFullscreen?: boolean;
+    onToggleFullscreen?: () => void;
 }
 
-export function LiquidEditor({ value, onChange, variables, className }: LiquidEditorProps) {
+export function LiquidEditor({ value, onChange, variables, className, isFullscreen, onToggleFullscreen }: LiquidEditorProps) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const lastValueRef = useRef<string>(value);
     const getVariables = useCallback(() => variables, [variables]);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
+    const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -537,6 +548,9 @@ export function LiquidEditor({ value, onChange, variables, className }: LiquidEd
                 maxRenderedOptions: 20,
             }),
 
+            // Search
+            search({ top: false }),
+
             // Keymaps
             keymap.of([
                 ...closeBracketsKeymap,
@@ -544,6 +558,7 @@ export function LiquidEditor({ value, onChange, variables, className }: LiquidEd
                 ...historyKeymap,
                 ...foldKeymap,
                 ...completionKeymap,
+                ...searchKeymap,
                 indentWithTab,
             ]),
 
@@ -556,6 +571,11 @@ export function LiquidEditor({ value, onChange, variables, className }: LiquidEd
                     const newValue = update.state.doc.toString();
                     lastValueRef.current = newValue;
                     onChangeRef.current(newValue);
+                }
+                if (update.docChanged || update.selectionSet) {
+                    const pos = update.state.selection.main.head;
+                    const line = update.state.doc.lineAt(pos);
+                    setCursorPos({ line: line.number, col: pos - line.from + 1 });
                 }
             }),
 
@@ -591,10 +611,40 @@ export function LiquidEditor({ value, onChange, variables, className }: LiquidEd
     // Already handled via useCallback ref pattern above.
 
     return (
-        <div
-            ref={containerRef}
-            className={className}
-            style={{ height: '100%', minHeight: 0 }}
-        />
+        <div className={`flex flex-col ${className ?? ''}`} style={{ height: '100%', minHeight: 0 }}>
+            {/* Editor toolbar */}
+            <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-muted/30 shrink-0">
+                <span className="text-[10px] text-muted-foreground font-mono select-none">
+                    Ln {cursorPos.line}, Col {cursorPos.col}
+                </span>
+                <div className="ml-auto flex items-center gap-0.5">
+                    <button
+                        type="button"
+                        onClick={() => viewRef.current && openSearchPanel(viewRef.current)}
+                        title="Buscar / reemplazar (Ctrl+F)"
+                        className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                        <SearchIcon className="h-3.5 w-3.5" />
+                    </button>
+                    {onToggleFullscreen && (
+                        <button
+                            type="button"
+                            onClick={onToggleFullscreen}
+                            title={isFullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+                            className="p-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                            {isFullscreen
+                                ? <Minimize2 className="h-3.5 w-3.5" />
+                                : <Maximize2 className="h-3.5 w-3.5" />}
+                        </button>
+                    )}
+                </div>
+            </div>
+            <div
+                ref={containerRef}
+                className="flex-1 min-h-0"
+                style={{ minHeight: 0 }}
+            />
+        </div>
     );
 }
