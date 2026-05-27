@@ -82,6 +82,11 @@ export function CreateEventForm({
     const [conferenceUrl, setConferenceUrl] = useState<string | null>(null);
     const [isCreatingMeet, setIsCreatingMeet] = useState(false);
     const attendeeChangeSeqRef = useRef(0);
+    const [attendeeAvailability, setAttendeeAvailability] = useState<Array<{
+        email: string;
+        name: string | null;
+        events: Array<{ title: string; startsAt: string; endsAt: string }>;
+    }>>([]);
 
     const normalizeTags = useCallback((tags: string[]) => {
         return Array.from(new Set(
@@ -237,6 +242,51 @@ export function CreateEventForm({
                 setIsGoogleMeetAvailable(Boolean(data?.isGoogleMeetAvailable));
             })
             .catch(() => undefined);
+    }, []);
+
+    useEffect(() => {
+        const emails = normalizeTags(attendeeTags).filter(t => t.includes('@'));
+        if (emails.length === 0 || !startsAt || !endsAt) {
+            setAttendeeAvailability([]);
+            return;
+        }
+        const startIso = toIsoIfValid(startsAt);
+        const endIso = toIsoIfValid(endsAt);
+        if (!startIso || !endIso) return;
+
+        const controller = new AbortController();
+        const params = new URLSearchParams({ emails: emails.join(','), start: startIso, end: endIso });
+        fetch(`/api/calendar/domain-availability?${params}`, { signal: controller.signal })
+            .then(r => r.ok ? r.json() : [])
+            .then(data => {
+                if (Array.isArray(data)) {
+                    setAttendeeAvailability(data.filter((a: any) => Array.isArray(a.events) && a.events.length > 0));
+                }
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [attendeeTags, startsAt, endsAt]);
+
+    // Broadcast ghost events to calendar grid whenever availability changes
+    useEffect(() => {
+        const ghostEvents = attendeeAvailability.flatMap(a =>
+            a.events.map(e => ({
+                title: e.title,
+                startsAt: e.startsAt,
+                endsAt: e.endsAt,
+                attendeeEmail: a.email,
+                attendeeName: a.name,
+            }))
+        );
+        window.dispatchEvent(new CustomEvent('bloomx:attendee-ghost-events', { detail: { events: ghostEvents } }));
+    }, [attendeeAvailability]);
+
+    // Clear ghost events when this form unmounts
+    useEffect(() => {
+        return () => {
+            window.dispatchEvent(new CustomEvent('bloomx:attendee-ghost-events', { detail: { events: [] } }));
+        };
     }, []);
 
     const createGoogleMeet = useCallback(async () => {
@@ -526,6 +576,23 @@ export function CreateEventForm({
                                     </div>
                                 ))}
                         </div>
+                    </div>
+                )}
+
+                {attendeeAvailability.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-1.5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Conflictos de horario</p>
+                        {attendeeAvailability.map(a => (
+                            <div key={a.email} className="flex items-start gap-2 text-sm">
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                                <div className="min-w-0">
+                                    <span className="font-medium text-slate-700">{a.name || a.email}</span>
+                                    <span className="text-slate-500 ml-1">
+                                        — {a.events.map(e => `${String(e.title || 'Evento')} (${new Date(e.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${new Date(e.endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
+                                    </span>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 )}
 

@@ -43,6 +43,13 @@ export default function CalendarPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [startsAt, setStartsAt] = useState('');
     const [endsAt, setEndsAt] = useState('');
+    const [ghostEvents, setGhostEvents] = useState<Array<{
+        title: string;
+        startsAt: string;
+        endsAt: string;
+        attendeeEmail: string;
+        attendeeName: string | null;
+    }>>([]);
     const { openWindow, closeWindow } = useGlobalWindow();
 
     const currentDate = new Date();
@@ -234,11 +241,18 @@ export default function CalendarPage() {
             }).catch(() => undefined);
         };
 
+        const handleGhostEvents = (e: Event) => {
+            const detail = (e as CustomEvent).detail;
+            if (Array.isArray(detail?.events)) setGhostEvents(detail.events);
+        };
+
         window.addEventListener('bloomx:calendar-sync-complete', handleSyncComplete);
         window.addEventListener('bloomx:notifications-enabled', handleNotificationsEnabled);
+        window.addEventListener('bloomx:attendee-ghost-events', handleGhostEvents);
         return () => {
             window.removeEventListener('bloomx:calendar-sync-complete', handleSyncComplete);
             window.removeEventListener('bloomx:notifications-enabled', handleNotificationsEnabled);
+            window.removeEventListener('bloomx:attendee-ghost-events', handleGhostEvents);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentMonth, currentYear]);
@@ -288,7 +302,15 @@ export default function CalendarPage() {
     }, [events, holidays]);
 
     const visibleEvents = useMemo(() => {
-        return allEvents.filter((event) => selectedCalendarIds.includes(event.calendar.id));
+        const filtered = allEvents.filter((event) => selectedCalendarIds.includes(event.calendar.id));
+        // User events come first in allEvents ([...events, ...holidays]), so they win dedup
+        const seen = new Map<string, boolean>();
+        return filtered.filter((event) => {
+            const key = `${String(event.title || '').toLowerCase().trim()}|${event.startsAt}`;
+            if (seen.has(key)) return false;
+            seen.set(key, true);
+            return true;
+        });
     }, [allEvents, selectedCalendarIds]);
 
     const nextMonth = () => { if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear(currentYear + 1); } else { setCurrentMonth(currentMonth + 1); } };
@@ -318,10 +340,18 @@ export default function CalendarPage() {
         for (let i = 1; i <= daysInMonth; i++) {
             const isToday = i === currentDate.getDate() && currentMonth === currentDate.getMonth() && currentYear === currentDate.getFullYear();
             
-            const dayEvents = visibleEvents.filter(e => {
-                const eventDate = new Date(e.startsAt);
-                return eventDate.getDate() === i && eventDate.getMonth() === currentMonth && eventDate.getFullYear() === currentYear;
-            });
+            const dayEvents = visibleEvents
+                .filter(e => {
+                    const eventDate = new Date(e.startsAt);
+                    return eventDate.getDate() === i && eventDate.getMonth() === currentMonth && eventDate.getFullYear() === currentYear;
+                })
+                .sort((a, b) => {
+                    const aHol = a.calendar.id.startsWith('holidays') || (a.calendar as any).source === 'holidays';
+                    const bHol = b.calendar.id.startsWith('holidays') || (b.calendar as any).source === 'holidays';
+                    if (aHol && !bHol) return 1;
+                    if (!aHol && bHol) return -1;
+                    return 0;
+                });
             
             // Check if user is currently creating an event on this day
             let hasGhost = false;
@@ -332,9 +362,14 @@ export default function CalendarPage() {
                 }
             }
 
+            const dayGhostEvents = ghostEvents.filter(ge => {
+                const d = new Date(ge.startsAt);
+                return d.getDate() === i && d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+            });
+
             days.push(
-                <div 
-                    key={`day-${i}`} 
+                <div
+                    key={`day-${i}`}
                     onDoubleClick={() => {
                         const d = new Date(currentYear, currentMonth, i, 9, 0); // Default to 9:00 AM
                         const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
@@ -349,14 +384,23 @@ export default function CalendarPage() {
                     </div>
                     <div className="flex flex-col gap-1 px-1 overflow-hidden">
                         {dayEvents.map(ev => (
-                            <div 
-                                key={ev.id} 
+                            <div
+                                key={ev.id}
                                 onClick={(e) => handleOpenEvent(ev, e)}
-                                className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`} 
+                                className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`}
                                 style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: ev.calendar.color } : {}}
                             >
                                 {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} `}
                                 {ev.title}
+                            </div>
+                        ))}
+                        {dayGhostEvents.map((ge, idx) => (
+                            <div
+                                key={`ghost-${idx}`}
+                                title={`${ge.attendeeName || ge.attendeeEmail} — ocupado`}
+                                className="text-[11px] truncate px-1.5 py-0.5 rounded border border-dashed border-slate-400 bg-slate-100 text-slate-500 opacity-60 font-medium pointer-events-none select-none"
+                            >
+                                {new Date(ge.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {ge.attendeeName || ge.attendeeEmail.split('@')[0]}
                             </div>
                         ))}
                         {hasGhost && (
