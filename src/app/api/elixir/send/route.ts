@@ -38,9 +38,31 @@ export async function POST(req: NextRequest) {
 
     const user = await prisma.user.findUnique({
         where: { id: sessionUser.id },
-        select: { id: true, email: true, name: true },
+        select: {
+            id: true,
+            email: true,
+            name: true,
+            accounts: { select: { providerAccountId: true } },
+        },
     });
     if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+    // Build set of emails this user is authorized to send from
+    const allowedEmails = new Set<string>([
+        user.email.toLowerCase(),
+        ...user.accounts
+            .map(a => String(a.providerAccountId || '').trim().toLowerCase())
+            .filter(e => e.includes('@')),
+    ]);
+
+    // Validate fromEmail if explicitly provided
+    if (senderConfig.fromEmail?.trim()) {
+        const raw = senderConfig.fromEmail.trim().toLowerCase();
+        const extracted = raw.match(/<([^>]+)>/)?.[1]?.toLowerCase() ?? raw;
+        if (!allowedEmails.has(extracted)) {
+            return NextResponse.json({ error: 'Unauthorized sender account' }, { status: 401 });
+        }
+    }
 
     const results: { email: string; row: Row; status: 'sent' | 'error' | 'skipped'; message?: string }[] = [];
 
