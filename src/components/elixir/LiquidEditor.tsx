@@ -439,8 +439,8 @@ const liquidTheme = EditorView.theme({
     '.cm-activeLineGutter': { backgroundColor: 'hsl(var(--muted) / 0.7)' },
     '.cm-activeLine': { backgroundColor: 'hsl(var(--muted) / 0.3)' },
     '.cm-cursor': { borderLeftColor: 'hsl(var(--foreground))' },
-    '.cm-selectionBackground': { backgroundColor: 'hsl(var(--primary) / 0.2) !important' },
-    '&.cm-focused .cm-selectionBackground': { backgroundColor: 'hsl(var(--primary) / 0.25) !important' },
+    '.cm-selectionBackground': { backgroundColor: 'rgba(37, 99, 235, 0.28) !important' },
+    '&.cm-focused .cm-selectionBackground': { backgroundColor: 'rgba(37, 99, 235, 0.38) !important' },
     // Liquid highlight classes
     '.liq-expr': { color: 'var(--color-primary)', fontWeight: '600' },
     '.liq-tag': { color: '#d97706', fontWeight: '600' },
