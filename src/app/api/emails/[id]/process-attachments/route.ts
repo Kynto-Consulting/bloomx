@@ -1,11 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { uploadToStorage } from '@/lib/storage';
-import {
-    extractFilenameFromHeaders,
-    extensionFromMimeType,
-    sanitizeFilename,
-} from '@/lib/mime-decode';
+import { uploadToStorage, getFromStorage } from '@/lib/storage';
+import { extractAttachmentsFromRawMime } from '@/lib/mime-attachments';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
@@ -70,94 +66,33 @@ async function uploadWithRetry(key: string, buffer: Buffer, contentType: string)
     return false;
 }
 
-// ── MIME Extraction ───────────────────────────────────────────────────────────
-
-interface ExtractedPart {
-    filename: string;
-    contentType: string;
-    buffer: Buffer;
-    isCalendar: boolean;
-}
-
 /**
- * Extract all attachment parts (calendar and non-calendar) from a raw MIME string.
- * Uses robust RFC 2047 / RFC 5987 filename decoding.
+ * Resolve a fresh raw-MIME download URL from Resend using the stored webhook payload's
+ * email_id. Resend's download URLs expire after a few hours, so the URL saved on the
+ * email row can go stale; this re-derives a working one on demand.
  */
-function extractAttachmentsFromRawMime(rawMime: string): ExtractedPart[] {
-    const results: ExtractedPart[] = [];
-
-    // Find the top-level boundary
-    const boundaryMatch = rawMime.match(
-        /Content-Type:\s*multipart\/[^\r\n]+boundary=(?:"([^"]+)"|(\S+))/i,
-    );
-    if (!boundaryMatch) return results;
-
-    const boundary = (boundaryMatch[1] ?? boundaryMatch[2]).trim().replace(/;$/, '');
-    const escaped = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = rawMime.split(new RegExp(`--${escaped}(?:--)?`));
-
-    for (const part of parts) {
-        // Split headers from body on first blank line
-        const split = part.match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);
-        if (!split) continue;
-        const [, headersRaw, bodyRaw] = split;
-
-        // Only process attachments (and inline parts that look like files)
-        const isAttachment = /Content-Disposition:\s*attachment/i.test(headersRaw);
-        const isInlineWithName =
-            /Content-Disposition:\s*inline/i.test(headersRaw) &&
-            (/Content-Type:[^\r\n]*;\s*name\s*=/i.test(headersRaw) ||
-                /Content-Disposition:[^\r\n]*;\s*filename\s*=/i.test(headersRaw));
-
-        if (!isAttachment && !isInlineWithName) continue;
-
-        // Content-Type
-        const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
-        const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
-        const ctLower = contentType.toLowerCase();
-        const isCalendar =
-            ctLower.includes('text/calendar') || ctLower.includes('application/ics');
-
-        // Filename — use the robust decoder
-        let filename = extractFilenameFromHeaders(headersRaw);
-
-        // If still empty, try to infer from Content-Type
-        if (!filename) {
-            const ext = extensionFromMimeType(contentType);
-            filename = `attachment-${results.length + 1}${ext}`;
-        } else {
-            // Ensure the filename has an extension consistent with its MIME type
-            if (!isCalendar && !filename.includes('.')) {
-                const ext = extensionFromMimeType(contentType);
-                if (ext) filename = `${filename}${ext}`;
-            }
-            filename = sanitizeFilename(filename);
-        }
-
-        // Transfer-encoding
-        const teMatch = headersRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
-        const te = (teMatch ? teMatch[1].trim() : '7bit').toLowerCase();
-
-        let buffer: Buffer;
-        try {
-            if (te === 'base64') {
-                buffer = Buffer.from(bodyRaw.replace(/\s+/g, ''), 'base64');
-            } else if (te === 'quoted-printable') {
-                buffer = Buffer.from(decodeQuotedPrintable(bodyRaw), 'binary');
-            } else {
-                buffer = Buffer.from(bodyRaw);
-            }
-        } catch {
-            continue;
-        }
-
-        if (buffer.length === 0) continue;
-
-        results.push({ filename, contentType, buffer, isCalendar });
+async function resolveFreshRawMimeUrl(rawKey: string | null): Promise<string | null> {
+    if (!rawKey || !process.env.RESEND_API_KEY) return null;
+    try {
+        const rawJson = await getFromStorage(rawKey);
+        if (!rawJson) return null;
+        const evt = JSON.parse(rawJson);
+        const data = evt?.data ?? evt;
+        const resendId = String(data?.email_id || data?.id || '').trim();
+        if (!resendId) return null;
+        const res = await fetch(`https://api.resend.com/emails/receiving/${resendId}`, {
+            headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+        });
+        if (!res.ok) return null;
+        return (await res.json())?.raw?.download_url ?? null;
+    } catch {
+        return null;
     }
-
-    return results;
 }
+
+// ── MIME Extraction ───────────────────────────────────────────────────────────
+// Attachment extraction lives in @/lib/mime-attachments (fold-aware, nested-multipart,
+// inline-without-disposition, and single-part aware). Imported above.
 
 /**
  * Extract calendar ICS blocks from raw MIME (handles both MIME parts and inline blocks).
@@ -228,10 +163,18 @@ export async function POST(
         return NextResponse.json({ skipped: true, reason: 'already processed' });
     }
 
-    const rawMimeUrl = email.rawMimeUrl;
+    const hasPending = email.attachments.some(
+        a => a.status === 'pending' || a.key === 'PENDING' || a.size === 0,
+    );
+
+    // Prefer the URL saved on the email; if absent, derive a fresh one from Resend.
+    let rawMimeUrl = email.rawMimeUrl || (await resolveFreshRawMimeUrl(email.rawKey));
     if (!rawMimeUrl) {
-        // No MIME to download — just mark done
-        await prisma.email.update({ where: { id: emailId }, data: { attachmentsChecked: true } });
+        // Nothing to download. If placeholders are still waiting, leave them unchecked so
+        // the reprocess backfill can retry later; otherwise mark this email done.
+        if (!hasPending) {
+            await prisma.email.update({ where: { id: emailId }, data: { attachmentsChecked: true } });
+        }
         return NextResponse.json({ skipped: true, reason: 'no rawMimeUrl' });
     }
 
@@ -240,14 +183,25 @@ export async function POST(
     const dateStr = parts[1] ?? new Date().toISOString().split('T')[0];
     const uuid = parts[2] ?? crypto.randomUUID();
 
-    // Download raw MIME with retries
+    // Download raw MIME with retries; the saved URL may have expired between webhook and
+    // this run, so re-derive a fresh one from Resend and retry once before giving up.
     let rawMime: string;
     try {
         const mimeRes = await fetchWithRetry(rawMimeUrl);
         rawMime = await mimeRes.text();
     } catch (err) {
-        console.error(`[process-attachments] Failed to download raw MIME for email ${emailId}:`, err);
-        return NextResponse.json({ error: 'Failed to fetch raw MIME' }, { status: 502 });
+        const fresh = await resolveFreshRawMimeUrl(email.rawKey);
+        if (!fresh || fresh === rawMimeUrl) {
+            console.error(`[process-attachments] Failed to download raw MIME for email ${emailId}:`, err);
+            return NextResponse.json({ error: 'Failed to fetch raw MIME' }, { status: 502 });
+        }
+        try {
+            const mimeRes = await fetchWithRetry(fresh);
+            rawMime = await mimeRes.text();
+        } catch (err2) {
+            console.error(`[process-attachments] Retry with fresh URL failed for email ${emailId}:`, err2);
+            return NextResponse.json({ error: 'Failed to fetch raw MIME' }, { status: 502 });
+        }
     }
 
     // Extract all attachment parts
@@ -316,23 +270,28 @@ export async function POST(
     }
 
     // ── Update pending attachment records or create new ones ──────────────────
-    const pendingAttachments = email.attachments.filter(a => a.status === 'pending');
+    const pendingAttachments = email.attachments.filter(
+        a => a.status === 'pending' || a.key === 'PENDING' || a.size === 0,
+    );
 
     for (const att of pendingAttachments) {
-        // Try to find a matching extracted part by filename hint
-        const match = newAttachments.find(
-            na => na.filename.toLowerCase() === att.filename.toLowerCase(),
-        );
+        // Match an extracted part: exact filename → same mime-type → any leftover.
+        // (The webhook's filename hint can differ from the decoded MIME filename, so we
+        // must not fail a placeholder when content WAS extracted — just under another name.)
+        const match =
+            newAttachments.find(na => na.filename.toLowerCase() === att.filename.toLowerCase()) ||
+            newAttachments.find(na => na.mimeType.toLowerCase() === att.mimeType.toLowerCase()) ||
+            newAttachments[0];
+
         if (match) {
             await prisma.attachment.update({
                 where: { id: att.id },
-                data: { key: match.key, status: 'ready', size: match.size },
+                data: { key: match.key, status: 'ready', size: match.size, mimeType: match.mimeType, filename: match.filename },
             });
-            // Remove from newAttachments so we don't double-create
             const idx = newAttachments.indexOf(match);
             if (idx !== -1) newAttachments.splice(idx, 1);
         } else {
-            // Mark as failed — couldn't extract the content
+            // No extracted content matched this placeholder — mark failed so the UI hides it.
             await prisma.attachment.update({
                 where: { id: att.id },
                 data: { status: 'failed' },

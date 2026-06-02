@@ -152,14 +152,13 @@ export async function GET(
             return e.snippet || "";
         };
 
-        // Helper to sign attachments
+        // Helper to sign attachments. Skip placeholders/failures (key === 'PENDING' or a
+        // non-ready status) so the UI never renders a broken download link.
         const signAttachments = async (list: any[]) => {
-            return Promise.all(list.map(async (att) => {
-                if (att.key) {
-                    const url = await import('@/lib/storage').then(m => m.getSignedDownloadUrl(att.key, att.filename));
-                    return { ...att, url };
-                }
-                return att;
+            const usable = list.filter(att => att.key && att.key !== 'PENDING' && att.status !== 'pending' && att.status !== 'failed');
+            return Promise.all(usable.map(async (att) => {
+                const url = await import('@/lib/storage').then(m => m.getSignedDownloadUrl(att.key, att.filename));
+                return { ...att, url };
             }));
         };
 

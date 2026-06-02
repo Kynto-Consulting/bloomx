@@ -2,87 +2,17 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { getFromStorage, uploadToStorage } from '@/lib/storage';
+import { extractAttachmentsFromRawMime } from '@/lib/mime-attachments';
 
-import {
-    extractFilenameFromHeaders,
-    extensionFromMimeType,
-    sanitizeFilename,
-} from '@/lib/mime-decode';
-
-// ─── MIME helpers (mirrors the webhook route logic) ──────────────────────────
-
+// Non-calendar attachment extraction, backed by the shared, robust MIME parser.
 function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
     filename: string;
     contentType: string;
     buffer: Buffer;
 }> {
-    const results: Array<{ filename: string; contentType: string; buffer: Buffer }> = [];
-
-    const boundaryMatch = rawMime.match(/Content-Type:\s*multipart\/[^\r\n]+boundary=(?:"([^"]+)"|(\S+))/i);
-    if (!boundaryMatch) return results;
-
-    const boundary = (boundaryMatch[1] ?? boundaryMatch[2]).trim().replace(/;$/, '');
-    const escapedBoundary = boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const parts = rawMime.split(new RegExp(`--${escapedBoundary}(?:--)?`));
-
-    for (const part of parts) {
-        const split = part.match(/^([\s\S]*?)\r?\n\r?\n([\s\S]*)$/);
-        if (!split) continue;
-        const [, headersRaw, bodyRaw] = split;
-
-        // Match both attachment and inline files
-        const isAttachment = /Content-Disposition:\s*attachment/i.test(headersRaw);
-        const isInlineWithName =
-            /Content-Disposition:\s*inline/i.test(headersRaw) &&
-            (/Content-Type:[^\r\n]*;\s*name\s*=/i.test(headersRaw) ||
-                /Content-Disposition:[^\r\n]*;\s*filename\s*=/i.test(headersRaw));
-
-        if (!isAttachment && !isInlineWithName) continue;
-
-        const ctMatch = headersRaw.match(/Content-Type:\s*([^\r\n;]+)/i);
-        const contentType = ctMatch ? ctMatch[1].trim() : 'application/octet-stream';
-        const ctLower = contentType.toLowerCase();
-        if (ctLower.includes('text/calendar') || ctLower.includes('application/ics')) continue;
-
-        // Filename — use the robust decoder
-        let filename = extractFilenameFromHeaders(headersRaw);
-
-        // If still empty, try to infer from Content-Type
-        if (!filename) {
-            const ext = extensionFromMimeType(contentType);
-            filename = `attachment-${results.length + 1}${ext || '.bin'}`;
-        } else {
-            if (!filename.includes('.')) {
-                const ext = extensionFromMimeType(contentType);
-                if (ext) filename = `${filename}${ext}`;
-            }
-            filename = sanitizeFilename(filename);
-        }
-
-        const teMatch = headersRaw.match(/Content-Transfer-Encoding:\s*([^\r\n]+)/i);
-        const te = teMatch ? teMatch[1].trim().toLowerCase() : '7bit';
-
-        let buffer: Buffer;
-        try {
-            if (te === 'base64') {
-                buffer = Buffer.from(bodyRaw.replace(/\s+/g, ''), 'base64');
-            } else if (te === 'quoted-printable') {
-                const decoded = bodyRaw
-                    .replace(/=(\r?\n)/g, '')
-                    .replace(/=([A-Fa-f0-9]{2})/g, (_: string, h: string) => String.fromCharCode(parseInt(h, 16)));
-                buffer = Buffer.from(decoded, 'binary');
-            } else {
-                buffer = Buffer.from(bodyRaw);
-            }
-        } catch {
-            continue;
-        }
-
-        if (buffer.length === 0) continue;
-        results.push({ filename, contentType, buffer });
-    }
-
-    return results;
+    return extractAttachmentsFromRawMime(rawMime)
+        .filter(a => !a.isCalendar)
+        .map(({ filename, contentType, buffer }) => ({ filename, contentType, buffer }));
 }
 
 // ─── Per-email processor ─────────────────────────────────────────────────────
@@ -162,24 +92,51 @@ async function processEmail(
     const dateStr = pathParts[1] ?? new Date().toISOString().split('T')[0];
     const uuid = pathParts[2] ?? crypto.randomUUID();
 
-    // 5. Upload and create DB records (skip if dryRun).
+    // Existing rows that still need content: PENDING placeholders or already-ready rows
+    // (ready rows are matched so we don't duplicate them).
+    const existing = await prisma.attachment.findMany({ where: { emailId: email.id } });
+    const pendingRows = existing.filter(a => a.key === 'PENDING' || a.status === 'pending' || a.status === 'failed' || a.size === 0);
+    const matchedIds = new Set<string>();
+
+    // 5. Upload, then update matching PENDING rows or create new ones (skip writes in dryRun).
     let added = 0;
     for (const ext of extracted) {
+        // Skip if an already-ready row with this filename exists.
+        if (existing.some(a => a.status === 'ready' && a.key !== 'PENDING' && a.filename.toLowerCase() === ext.filename.toLowerCase())) {
+            continue;
+        }
         const attKey = `emails/${dateStr}/${uuid}/attachments/${ext.filename}`;
+
+        // Prefer to fill a PENDING row: exact filename, else same mime-type, else any leftover.
+        const match =
+            pendingRows.find(a => !matchedIds.has(a.id) && a.filename.toLowerCase() === ext.filename.toLowerCase()) ||
+            pendingRows.find(a => !matchedIds.has(a.id) && a.mimeType.toLowerCase() === ext.contentType.toLowerCase()) ||
+            pendingRows.find(a => !matchedIds.has(a.id));
 
         if (!dryRun) {
             await uploadToStorage(attKey, ext.buffer, ext.contentType);
-            await prisma.attachment.create({
-                data: {
-                    emailId: email.id,
-                    filename: ext.filename,
-                    mimeType: ext.contentType,
-                    size: ext.buffer.byteLength,
-                    key: attKey,
-                },
-            });
+            if (match) {
+                await prisma.attachment.update({
+                    where: { id: match.id },
+                    data: { key: attKey, status: 'ready', size: ext.buffer.byteLength, mimeType: ext.contentType, filename: ext.filename },
+                });
+            } else {
+                await prisma.attachment.create({
+                    data: { emailId: email.id, filename: ext.filename, mimeType: ext.contentType, size: ext.buffer.byteLength, key: attKey, status: 'ready' },
+                });
+            }
         }
+        if (match) matchedIds.add(match.id);
         added++;
+    }
+
+    // Any PENDING rows we couldn't fill (no matching MIME part) → mark failed so the UI
+    // stops rendering a broken `PENDING` download link.
+    if (!dryRun) {
+        const unfilled = pendingRows.filter(a => !matchedIds.has(a.id));
+        if (unfilled.length > 0) {
+            await prisma.attachment.updateMany({ where: { id: { in: unfilled.map(a => a.id) } }, data: { status: 'failed' } });
+        }
     }
 
     return { ...base, status: 'fixed', attachmentsAdded: added };
@@ -197,8 +154,9 @@ export async function POST(req: NextRequest) {
     const since: Date | null = body?.since ? new Date(body.since) : null;
     const limit = Math.min(Number(body?.limit ?? 200), 500);
 
-    // Find candidate emails: received emails with a rawKey, no attachments, not yet checked.
-    // Pass force=true in the body to re-examine already-checked emails.
+    // Find candidate emails: received emails with a rawKey that either have NO attachment
+    // rows yet, OR have at least one stuck `PENDING` placeholder (large-file async path
+    // that never resolved). Pass force=true to also re-examine already-checked emails.
     const force = Boolean(body?.force ?? false);
     const emails = await prisma.email.findMany({
         where: {
@@ -206,8 +164,10 @@ export async function POST(req: NextRequest) {
             rawKey: { not: null },
             folder: { in: ['inbox', 'spam'] },
             ...(since ? { createdAt: { gte: since } } : {}),
-            attachments: { none: {} },
-            ...(force ? {} : { attachmentsChecked: false }),
+            OR: [
+                { attachments: { none: {} }, ...(force ? {} : { attachmentsChecked: false }) },
+                { attachments: { some: { key: 'PENDING' } } },
+            ],
         },
         select: { id: true, rawKey: true, subject: true },
         orderBy: { createdAt: 'desc' },
