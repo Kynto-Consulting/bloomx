@@ -534,6 +534,53 @@ function formatIcsDate(value: string | Date | undefined) {
     return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
+export function buildCancelIcs(options: {
+    uid: string;
+    title?: string | null;
+    description?: string | null;
+    location?: string | null;
+    startsAt?: string | Date | null;
+    endsAt?: string | Date | null;
+    organizerEmail?: string | null;
+    organizerName?: string | null;
+    attendees?: Array<{ email: string; name?: string | null; isOrganizer?: boolean }>;
+    sequence?: number;
+}) {
+    const toIcs = (value?: string | Date | null) =>
+        value ? formatIcsDate(value instanceof Date ? value.toISOString() : String(value)) : '';
+
+    const lines = [
+        'BEGIN:VCALENDAR',
+        'VERSION:2.0',
+        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        'CALSCALE:GREGORIAN',
+        'METHOD:CANCEL',
+        'BEGIN:VEVENT',
+        `UID:${escapeIcsText(options.uid)}`,
+        `DTSTAMP:${formatIcsDate(new Date())}`,
+        options.startsAt ? `DTSTART:${toIcs(options.startsAt)}` : '',
+        options.endsAt ? `DTEND:${toIcs(options.endsAt)}` : '',
+        options.title ? `SUMMARY:${escapeIcsText(options.title)}` : '',
+        options.description ? `DESCRIPTION:${escapeIcsText(options.description)}` : '',
+        options.location ? `LOCATION:${escapeIcsText(options.location)}` : '',
+        options.organizerEmail
+            ? `ORGANIZER;CN=${escapeIcsText(options.organizerName || options.organizerEmail)}:mailto:${options.organizerEmail}`
+            : '',
+        `SEQUENCE:${Number.isFinite(options.sequence) ? options.sequence : 0}`,
+        'STATUS:CANCELLED',
+    ];
+
+    (options.attendees || []).forEach((attendee) => {
+        if (!attendee.email || attendee.isOrganizer) return;
+        lines.push(
+            `ATTENDEE;CN=${escapeIcsText(attendee.name || attendee.email)};ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION:mailto:${attendee.email}`
+        );
+    });
+
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+    return lines.filter(Boolean).join('\r\n');
+}
+
 export function buildReplyIcs(options: {
     invite: ParsedInvite;
     attendeeEmail: string;

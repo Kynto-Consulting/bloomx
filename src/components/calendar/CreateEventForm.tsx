@@ -523,10 +523,16 @@ export function CreateEventForm({
         if (!eventId || !confirm('Are you sure you want to delete this event?')) return;
         setIsSaving(true);
         try {
-            await fetch(`/api/calendar/events/${eventId}`, { method: 'DELETE' });
+            const res = await fetch(`/api/calendar/events/${eventId}`, { method: 'DELETE' });
+            const result = await res.json().catch(() => null);
+            if (res.ok && result?.cancelledNotified > 0) {
+                const suffix = result.cancelledNotified === 1 ? '' : 's';
+                toast.success(`Event deleted · cancellation sent to ${result.cancelledNotified} guest${suffix}`);
+            }
             onSaved();
         } catch (error) {
             console.error(error);
+            toast.error('Failed to delete event');
         } finally {
             setIsSaving(false);
         }

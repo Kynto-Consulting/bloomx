@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { resend } from '@/lib/resend';
+import { uploadToStorage } from '@/lib/storage';
+import { buildCancelIcs } from '@/lib/calendar/ics';
+import { buildEmailHtml } from '@/lib/calendar/email-templates';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const user = await getCurrentUser();
@@ -80,10 +84,10 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     }
 
     const { id } = await params;
-    
+
     const event = await prisma.calendarEvent.findFirst({
         where: { id, userId: user.id },
-        include: { calendar: true }
+        include: { calendar: true, attendees: true }
     });
 
     if (!event) {
@@ -94,9 +98,112 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
         return NextResponse.json({ error: 'Cannot delete read-only events' }, { status: 400 });
     }
 
+    // Notify guests that the event was cancelled (METHOD:CANCEL .ics). Best-effort:
+    // a send failure must not block the delete.
+    let cancelledNotified = 0;
+    try {
+        const organizerEmail = (event.organizerEmail || user.email || '').trim();
+        const organizerName = (event.organizerName || user.name || organizerEmail).trim();
+
+        const recipients = Array.from(new Set(
+            event.attendees
+                .filter((a) => !a.isOrganizer && a.email && a.email.toLowerCase() !== organizerEmail.toLowerCase())
+                .map((a) => a.email.toLowerCase())
+        ));
+
+        if (organizerEmail && recipients.length > 0) {
+            const brandLocal = (process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '');
+            const eventUid = event.inviteUid || event.externalId || `${event.id}@${brandLocal}.local`;
+            const sequenceBase = new Date(event.updatedAt || new Date()).getTime();
+            const sequence = (Number.isFinite(sequenceBase) ? Math.floor(sequenceBase / 1000) : 0) + 1;
+
+            const icsContent = buildCancelIcs({
+                uid: eventUid,
+                title: event.title,
+                description: event.description,
+                location: event.location,
+                startsAt: event.startsAt,
+                endsAt: event.endsAt,
+                organizerEmail,
+                organizerName,
+                attendees: event.attendees,
+                sequence,
+            });
+
+            const html = buildEmailHtml({
+                type: 'cancellation',
+                title: event.title,
+                when: { start: event.startsAt, end: event.endsAt },
+                location: event.location,
+                organizer: { email: organizerEmail, name: organizerName },
+                hint: 'Este evento fue cancelado. Tu calendario se actualizará con el archivo .ics adjunto.',
+            });
+
+            const text = [
+                `Evento cancelado: ${event.title}`,
+                `Cuándo: ${new Date(event.startsAt).toLocaleString()}`,
+                event.location ? `Lugar: ${event.location}` : '',
+                '',
+                'El archivo .ics adjunto actualiza tu calendario.',
+            ].filter(Boolean).join('\n');
+
+            const icsBuffer = Buffer.from(icsContent, 'utf8');
+            const formattedFrom = `${organizerName} <${organizerEmail}>`;
+
+            const { error } = await resend.emails.send({
+                from: formattedFrom,
+                to: recipients,
+                subject: `Cancelado: ${event.title}`,
+                html,
+                text,
+                attachments: [{ filename: 'cancel.ics', content: icsBuffer }],
+            });
+
+            if (error) {
+                console.error('[DELETE event] cancellation send failed:', error);
+            } else {
+                cancelledNotified = recipients.length;
+
+                // Persist to Sent so it shows in the mailbox.
+                try {
+                    const timestamp = Date.now();
+                    const icsKey = `attachments/${organizerEmail}/${timestamp}-cancel.ics`;
+                    await uploadToStorage(icsKey, icsBuffer, 'text/calendar;charset=utf-8');
+
+                    await prisma.email.create({
+                        data: {
+                            userId: user.id,
+                            from: formattedFrom,
+                            to: recipients.join(', '),
+                            cleanTo: recipients.join(', '),
+                            subject: `Cancelado: ${event.title}`,
+                            messageId: crypto.randomUUID(),
+                            snippet: text.substring(0, 200),
+                            folder: 'sent',
+                            status: 'sent',
+                            read: true,
+                            attachments: {
+                                create: [{
+                                    filename: 'cancel.ics',
+                                    mimeType: 'text/calendar;charset=utf-8',
+                                    size: icsBuffer.byteLength,
+                                    key: icsKey,
+                                }],
+                            },
+                        },
+                    });
+                } catch (persistError) {
+                    console.error('[DELETE event] failed to persist cancellation to Sent:', persistError);
+                }
+            }
+        }
+    } catch (notifyError) {
+        console.error('[DELETE event] cancellation notification error:', notifyError);
+    }
+
     await prisma.calendarEvent.delete({
         where: { id }
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, cancelledNotified });
 }
