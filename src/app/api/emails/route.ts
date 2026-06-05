@@ -410,8 +410,9 @@ export async function POST(req: NextRequest) {
         const { data, error } = await resend.emails.send(payload);
 
         if (error) {
-            console.error(error, to);
-            return NextResponse.json({ error }, { status: 400 });
+            console.error('[POST /api/emails] Resend send failed:', error, 'to:', to);
+            const message = (error as any)?.message || (error as any)?.name || 'Failed to send email';
+            return NextResponse.json({ error: message }, { status: 400 });
         }
 
         // Upload HTML/Text to Storage for persistence
