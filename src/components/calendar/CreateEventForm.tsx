@@ -17,6 +17,7 @@ type EventAttendee = {
     name?: string | null;
     responseStatus?: string | null;
     isOrganizer?: boolean;
+    invitedAt?: string | null;
 };
 
 function getResponseLabel(responseStatus?: string | null) {
@@ -82,6 +83,14 @@ export function CreateEventForm({
     const [conferenceUrl, setConferenceUrl] = useState<string | null>(null);
     const [isCreatingMeet, setIsCreatingMeet] = useState(false);
     const attendeeChangeSeqRef = useRef(0);
+    // Stable idempotency key for NEW events: a double-click / retried POST reuses
+    // the same UID, so the server's inviteUid upsert path updates instead of
+    // creating a duplicate row. Existing events already have a server UID.
+    const inviteUidRef = useRef<string>('');
+    if (!eventId && !inviteUidRef.current) {
+        const brandLocal = (process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '');
+        inviteUidRef.current = `${crypto.randomUUID()}@${brandLocal}.local`;
+    }
     const [attendeeAvailability, setAttendeeAvailability] = useState<Array<{
         email: string;
         name: string | null;
@@ -182,8 +191,9 @@ export function CreateEventForm({
             endsAtLocal: endsAt,
             timeZone,
             attendees: getAttendeeList(),
+            inviteUid: eventId ? undefined : inviteUidRef.current,
         };
-    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid]);
+    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid, eventId]);
 
     const markAttendeesAsPending = useCallback((emails: string[]) => {
         const normalizedEmails = normalizeTags(emails);
@@ -196,10 +206,12 @@ export function CreateEventForm({
                     .map((attendee) => [attendee.email.toLowerCase(), attendee])
             );
 
+            const nowIso = new Date().toISOString();
             const updatedAttendees = normalizedEmails.map((email) => {
                 const existing = existingByEmail.get(email.toLowerCase());
                 if (existing) {
-                    return existing;
+                    // They were just (re)invited — record it so we don't re-mail.
+                    return { ...existing, invitedAt: nowIso } satisfies EventAttendee;
                 }
 
                 return {
@@ -207,6 +219,7 @@ export function CreateEventForm({
                     name: null,
                     responseStatus: 'needsAction',
                     isOrganizer: false,
+                    invitedAt: nowIso,
                 } satisfies EventAttendee;
             });
 
@@ -308,9 +321,72 @@ export function CreateEventForm({
         }
     }, [title, startsAt, endsAt, toIsoIfValid]);
 
+    // Shared send path: generate the .ics for the event and email it to the
+    // given recipients. Used by both Save (auto-send) and the Invitar button.
+    // replaceAttendees:false so sending to a subset never wipes attendees that
+    // were already invited on the event.
+    const sendInvitations = useCallback(async (targetEventId: string, recipients: string[]) => {
+        const cleanRecipients = normalizeTags(recipients).filter((email) => email.includes('@'));
+        if (!targetEventId || cleanRecipients.length === 0) {
+            return false;
+        }
+
+        const inviteAttachmentResponse = await fetch(`/api/calendar/events/${targetEventId}/attach-invite`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to: cleanRecipients, replaceAttendees: false }),
+        });
+        const inviteAttachmentResult = await inviteAttachmentResponse.json().catch(() => null);
+
+        if (!inviteAttachmentResponse.ok || !inviteAttachmentResult?.attachment) {
+            throw new Error(inviteAttachmentResult?.error || 'Failed to generate invite attachment');
+        }
+
+        const subjectTitle = title || inviteAttachmentResult.subject || 'New Event';
+        const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
+        const parsedStart = startsAt ? new Date(startsAt) : new Date();
+        const parsedEnd = endsAt ? new Date(endsAt) : new Date(parsedStart.getTime() + 3600000);
+        const html = buildCalendarInviteHtml({
+            title: subjectTitle,
+            startsAt: parsedStart,
+            endsAt: parsedEnd,
+            location: location || null,
+        });
+
+        const text = [
+            `You are invited to: ${subjectTitle}`,
+            `Starts: ${startsAtLabel}`,
+            `Ends: ${parsedEnd.toLocaleString()}`,
+            location ? `Location: ${location}` : '',
+            '',
+            'The calendar invite (.ics) is attached to this email.',
+        ].filter(Boolean).join('\n');
+
+        const sendInvitesResponse = await fetch('/api/emails', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: cleanRecipients.join(','),
+                subject: `Invitation: ${subjectTitle}`,
+                html,
+                text,
+                attachments: [inviteAttachmentResult.attachment],
+            }),
+        });
+        const sendInvitesResult = await sendInvitesResponse.json().catch(() => null);
+
+        if (!sendInvitesResponse.ok || !sendInvitesResult?.success) {
+            throw new Error(sendInvitesResult?.error || 'Failed to send invitation emails');
+        }
+
+        markAttendeesAsPending(cleanRecipients);
+        window.dispatchEvent(new CustomEvent('bloomx:calendar-sync-complete'));
+        return true;
+    }, [title, location, startsAt, endsAt, normalizeTags, markAttendeesAsPending]);
+
     const saveEvent = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
-        
+
         setIsSaving(true);
         try {
             let targetCalendarId = calendarId;
@@ -321,8 +397,9 @@ export function CreateEventForm({
                 const localCalendar = Array.isArray(calData)
                     ? calData.find((c: any) => c.source === 'local' && !c.isReadOnly)
                     : null;
-                
+
                 if (!localCalendar) {
+                    toast.error('No writable calendar found to save this event');
                     setIsSaving(false);
                     return;
                 }
@@ -333,11 +410,51 @@ export function CreateEventForm({
             const method = eventId ? 'PUT' : 'POST';
             const payload = buildEventPayload(targetCalendarId);
 
-            await fetch(url, {
+            const response = await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+
+            if (!response.ok) {
+                const saveError = await response.json().catch(() => null);
+                throw new Error(saveError?.error || 'Failed to save event');
+            }
+
+            const savedEvent = await response.json().catch(() => null);
+            const savedEventId = eventId || savedEvent?.id;
+
+            // Decide who gets an invite from this save. On create, everyone added.
+            // On edit, only the newly added attendees (avoid re-spamming everyone
+            // on every edit) — the Invitar button still re-sends to all on demand.
+            const attendeeList = getAttendeeList();
+            let recipients: string[];
+            if (!eventId) {
+                recipients = attendeeList;
+            } else {
+                const oldEmails = new Set(
+                    attendeeDetails
+                        .filter((a) => a.invitedAt || a.isOrganizer)
+                        .map((a) => a.email.toLowerCase())
+                );
+                recipients = attendeeList.filter((email) => !oldEmails.has(email.toLowerCase()));
+            }
+
+            let invitedCount = 0;
+            if (savedEventId && recipients.length > 0) {
+                try {
+                    const sent = await sendInvitations(savedEventId, recipients);
+                    if (sent) invitedCount = recipients.length;
+                } catch (inviteError: any) {
+                    console.error(inviteError);
+                    toast.error(inviteError?.message || 'Event saved, but invitations could not be sent');
+                }
+            }
+
+            if (invitedCount > 0) {
+                const suffix = invitedCount === 1 ? '' : 's';
+                toast.success(`Invitation sent to ${invitedCount} attendee${suffix}`);
+            }
 
             if (!eventId) {
                 setTitle('');
@@ -345,8 +462,9 @@ export function CreateEventForm({
                 setAttendeeTags([]);
             }
             onSaved();
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
+            toast.error(error?.message || 'Failed to save event');
         } finally {
             setIsSaving(false);
         }
@@ -364,14 +482,15 @@ export function CreateEventForm({
             return;
         }
 
-        const oldEmails = new Set(attendeeDetails.map(a => a.email.toLowerCase()));
+        const oldEmails = new Set(
+            attendeeDetails
+                .filter(a => a.invitedAt || a.isOrganizer)
+                .map(a => a.email.toLowerCase())
+        );
         const newlyAdded = attendeeList.filter(email => !oldEmails.has(email.toLowerCase()));
-        
-        let toInvite = newlyAdded;
-        if (toInvite.length === 0) {
-            // If no new people, re-send to everyone
-            toInvite = attendeeList;
-        }
+
+        // New people get the invite; if everyone is already known, re-send to all.
+        const toInvite = newlyAdded.length > 0 ? newlyAdded : attendeeList;
 
         setIsInviting(true);
         try {
@@ -386,58 +505,12 @@ export function CreateEventForm({
                 throw new Error(updateResult?.error || 'Failed to save event before inviting attendees');
             }
 
-            const inviteAttachmentResponse = await fetch(`/api/calendar/events/${eventId}/attach-invite`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ to: toInvite }),
-            });
-            const inviteAttachmentResult = await inviteAttachmentResponse.json().catch(() => null);
+            const sent = await sendInvitations(eventId, toInvite);
 
-            if (!inviteAttachmentResponse.ok || !inviteAttachmentResult?.attachment) {
-                throw new Error(inviteAttachmentResult?.error || 'Failed to generate invite attachment');
+            if (sent) {
+                const suffix = toInvite.length === 1 ? '' : 's';
+                toast.success(`Invitation sent to ${toInvite.length} attendee${suffix}`);
             }
-
-            const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
-            const parsedStart = startsAt ? new Date(startsAt) : new Date();
-            const parsedEnd = endsAt ? new Date(endsAt) : new Date(parsedStart.getTime() + 3600000);
-            const html = buildCalendarInviteHtml({
-                title: title || inviteAttachmentResult.subject || 'New Event',
-                startsAt: parsedStart,
-                endsAt: parsedEnd,
-                location: location || null,
-            });
-
-            const text = [
-                `You are invited to: ${title || 'New Event'}`,
-                `Starts: ${startsAtLabel}`,
-                `Ends: ${parsedEnd.toLocaleString()}`,
-                location ? `Location: ${location}` : '',
-                '',
-                'The calendar invite (.ics) is attached to this email.',
-            ].filter(Boolean).join('\n');
-
-            const sendInvitesResponse = await fetch('/api/emails', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    to: toInvite.join(','),
-                    subject: `Invitation: ${title || inviteAttachmentResult.subject || 'New Event'}`,
-                    html,
-                    text,
-                    attachments: [inviteAttachmentResult.attachment],
-                }),
-            });
-            const sendInvitesResult = await sendInvitesResponse.json().catch(() => null);
-
-            if (!sendInvitesResponse.ok || !sendInvitesResult?.success) {
-                throw new Error(sendInvitesResult?.error || 'Failed to send invitation emails');
-            }
-
-            markAttendeesAsPending(toInvite);
-            window.dispatchEvent(new CustomEvent('bloomx:calendar-sync-complete'));
-
-            const suffix = toInvite.length === 1 ? '' : 's';
-            toast.success(`Invitation sent to ${toInvite.length} attendee${suffix}`);
         } catch (error: any) {
             console.error(error);
             toast.error(error?.message || 'Failed to send invitations');

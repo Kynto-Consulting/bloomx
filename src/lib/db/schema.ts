@@ -476,6 +476,7 @@ const TABLES: TableSpec[] = [
             "name" TEXT,
             "responseStatus" TEXT,
             "isOrganizer" BOOLEAN NOT NULL DEFAULT FALSE,
+            "invitedAt" TIMESTAMPTZ,
             "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`,
@@ -486,6 +487,7 @@ const TABLES: TableSpec[] = [
             { name: 'name', definition: 'TEXT' },
             { name: 'responseStatus', definition: 'TEXT' },
             { name: 'isOrganizer', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'invitedAt', definition: 'TIMESTAMPTZ' },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
         ],

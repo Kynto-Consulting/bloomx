@@ -249,6 +249,17 @@ export async function POST(
                         skipDuplicates: true,
                     });
                 }
+
+                // Stamp invite state server-side so re-sends / reopens can dedupe
+                // by who has actually been mailed, not by client-held guesses.
+                await prisma.calendarAttendee.updateMany({
+                    where: {
+                        eventId: latestEvent.id,
+                        isOrganizer: false,
+                        email: { in: attendeeRecipients },
+                    },
+                    data: { invitedAt: new Date() },
+                });
             }
 
             latestEvent = await prisma.calendarEvent.findFirstOrThrow({

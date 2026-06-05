@@ -245,6 +245,7 @@ model CalendarAttendee {
   name           String?
   responseStatus String?
   isOrganizer    Boolean       @default(false)
+  invitedAt      DateTime?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
