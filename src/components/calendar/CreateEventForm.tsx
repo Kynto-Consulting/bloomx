@@ -422,35 +422,10 @@ export function CreateEventForm({
             }
 
             const savedEvent = await response.json().catch(() => null);
-            const savedEventId = eventId || savedEvent?.id;
 
-            // Decide who gets an invite from this save. On create, everyone added.
-            // On edit, only the newly added attendees (avoid re-spamming everyone
-            // on every edit) — the Invitar button still re-sends to all on demand.
-            const attendeeList = getAttendeeList();
-            let recipients: string[];
-            if (!eventId) {
-                recipients = attendeeList;
-            } else {
-                const oldEmails = new Set(
-                    attendeeDetails
-                        .filter((a) => a.invitedAt || a.isOrganizer)
-                        .map((a) => a.email.toLowerCase())
-                );
-                recipients = attendeeList.filter((email) => !oldEmails.has(email.toLowerCase()));
-            }
-
-            let invitedCount = 0;
-            if (savedEventId && recipients.length > 0) {
-                try {
-                    const sent = await sendInvitations(savedEventId, recipients);
-                    if (sent) invitedCount = recipients.length;
-                } catch (inviteError: any) {
-                    console.error(inviteError);
-                    toast.error(inviteError?.message || 'Event saved, but invitations could not be sent');
-                }
-            }
-
+            // Invites are sent server-side by the POST/PUT routes (works even with
+            // a stale client bundle). Just surface the count the server reports.
+            const invitedCount = Number(savedEvent?.invitedCount) || 0;
             if (invitedCount > 0) {
                 const suffix = invitedCount === 1 ? '' : 's';
                 toast.success(`Invitation sent to ${invitedCount} attendee${suffix}`);
@@ -494,17 +469,9 @@ export function CreateEventForm({
 
         setIsInviting(true);
         try {
-            const updateResponse = await fetch(`/api/calendar/events/${eventId}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(buildEventPayload(calendarId)),
-            });
-
-            if (!updateResponse.ok) {
-                const updateResult = await updateResponse.json().catch(() => null);
-                throw new Error(updateResult?.error || 'Failed to save event before inviting attendees');
-            }
-
+            // attach-invite (inside sendInvitations) creates any missing attendees
+            // with replaceAttendees:false, so an explicit PUT here is unnecessary
+            // and would double-send via the route's own auto-invite.
             const sent = await sendInvitations(eventId, toInvite);
 
             if (sent) {

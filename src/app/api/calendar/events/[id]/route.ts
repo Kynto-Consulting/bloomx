@@ -5,6 +5,7 @@ import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
 import { buildCancelIcs } from '@/lib/calendar/ics';
 import { buildEmailHtml } from '@/lib/calendar/email-templates';
+import { sendEventInvites } from '@/lib/calendar/notify';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const user = await getCurrentUser();
@@ -74,7 +75,19 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         }
     });
 
-    return NextResponse.json(updated);
+    // Server-side auto-invite for newly-added guests on edit. Best-effort.
+    let invitedCount = 0;
+    if (attendeesToAdd.length > 0 && !updated.calendar.isReadOnly) {
+        invitedCount = await sendEventInvites({
+            userId: user.id,
+            userEmail: user.email,
+            userName: user.name,
+            event: updated,
+            recipients: attendeesToAdd,
+        });
+    }
+
+    return NextResponse.json({ ...updated, invitedCount });
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

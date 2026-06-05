@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
+import { sendEventInvites } from '@/lib/calendar/notify';
 
 export async function GET(req: NextRequest) {
     const user = await getCurrentUser();
@@ -163,6 +164,26 @@ export async function POST(req: NextRequest) {
             attendees: true,
         }
     });
+
+    // Server-side auto-invite: mail everyone added on create, regardless of the
+    // client bundle. Best-effort, stamps invitedAt so it won't double-send.
+    if (attendeeEmails.length > 0) {
+        const notified = await sendEventInvites({
+            userId: user.id,
+            userEmail: user.email,
+            userName: user.name,
+            event,
+            recipients: attendeeEmails,
+        });
+
+        if (notified > 0) {
+            const refreshed = await prisma.calendarEvent.findFirst({
+                where: { id: event.id },
+                include: { calendar: true, attendees: true },
+            });
+            return NextResponse.json({ ...(refreshed || event), invitedCount: notified }, { status: 201 });
+        }
+    }
 
     return NextResponse.json(event, { status: 201 });
 }
