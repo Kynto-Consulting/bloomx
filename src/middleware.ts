@@ -16,6 +16,7 @@ export async function middleware(req: NextRequest) {
         pathname === '/manifest.webmanifest' ||
         pathname === '/sw.js' ||
         pathname === '/icon.svg' ||
+        pathname.startsWith('/tumiai.svg') ||
         pathname === '/icon-maskable.svg' ||
         pathname.startsWith('/api/register') || // Allow register API
         pathname.startsWith('/api/auth') || // Allow all auth routes
