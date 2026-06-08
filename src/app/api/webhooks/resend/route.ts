@@ -456,7 +456,19 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         // Using Next.js after() so this runs after the response without blocking Resend's timeout.
         // The process-attachments route will: download raw MIME, extract all attachments
         // with proper RFC-2047 filename decoding, upload to storage, and update DB records.
-        if (rawMimeUrl || attachmentMetaRecords.some(a => a.status === 'pending')) {
+        // Trigger async processing when: a raw-MIME URL is available, a placeholder is
+        // pending, OR any attachment is a calendar invite or landed empty (Resend never
+        // inlines .ics content, so these always need a raw-MIME backfill).
+        const needsAsyncProcessing =
+            rawMimeUrl ||
+            attachmentMetaRecords.some(
+                a =>
+                    a.status === 'pending' ||
+                    a.size === 0 ||
+                    a.mimeType.toLowerCase().includes('calendar') ||
+                    a.filename.toLowerCase().endsWith('.ics'),
+            );
+        if (needsAsyncProcessing) {
             const emailIdForAsync = createdEmail.id;
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
             const internalSecret = process.env.INTERNAL_SECRET || '';
