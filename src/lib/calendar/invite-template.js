@@ -53,13 +53,13 @@ const TYPE_LABELS = {
 // ─── Row builder ─────────────────────────────────────────────────────────────
 
 function inviteRow(label, value, isHtml) {
-    // Classes (ext-row / ext-muted / ext-value) are the dark-mode hooks; the
-    // inline colors are the light-mode defaults / fallback for clients that
-    // strip <style>.
+    // Inline styles only — no CSS classes / <style> rules. Some webmail viewers
+    // inject the email body into their own DOM and any <style> we ship leaks out
+    // as global CSS, so everything must be self-contained inline.
     return `
-      <tr class="ext-row">
-        <td class="ext-muted" style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;width:110px;vertical-align:top;">${escapeHtml(label)}</td>
-        <td class="ext-value" style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;font-weight:500;">${isHtml ? value : escapeHtml(value)}</td>
+      <tr>
+        <td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;width:110px;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;font-weight:500;">${isHtml ? value : escapeHtml(value)}</td>
       </tr>`;
 }
 
@@ -134,59 +134,30 @@ function renderInviteEmailHtml(opts) {
     ).join('');
 
     const hintBlock = opts.hint
-        ? `<div class="ext-surface ext-hint" style="margin-top:20px;padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:13px;line-height:1.6;">${escapeHtml(opts.hint)}</div>`
+        ? `<div style="margin-top:20px;padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:13px;line-height:1.6;">${escapeHtml(opts.hint)}</div>`
         : '';
 
     const year = new Date().getFullYear();
 
-    // Dark/light handling:
-    //  • <meta color-scheme> opts into native rendering so clients don't force
-    //    a clumsy auto-invert on the card.
-    //  • The @media (prefers-color-scheme: dark) block re-pins the surfaces for
-    //    clients that DO recolor (Apple Mail / iOS Mail), keeping contrast.
-    //  • [data-ogsc]/[data-ogsb] rules cover Outlook.com's dark mode.
-    // Every element also keeps an explicit inline light-mode color so any client
-    // that ignores all of the above still renders the intended look.
+    // INLINE STYLES ONLY — no <style> block, no CSS classes, no media queries.
+    // Webmail viewers that inject the email body into their own DOM (BloomX does
+    // this) would otherwise leak our <style> rules as global page CSS; a
+    // prefers-color-scheme:dark rule then flips text to light while the page
+    // background stays light → invisible white-on-white text. Every element
+    // carries an explicit dark-on-light inline color so it renders the same,
+    // readable, in light and dark clients. `color-scheme: light` tells native
+    // mail clients not to auto-invert.
     return `<!DOCTYPE html>
-<html lang="es" style="color-scheme:light dark;supported-color-schemes:light dark;">
+<html lang="es">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light dark">
-    <meta name="supported-color-schemes" content="light dark">
-    <style>
-      :root { color-scheme: light dark; supported-color-schemes: light dark; }
-      body { margin:0; padding:0; }
-      a { text-decoration:none; }
-      .ext-page { background:#f1f5f9; }
-      .ext-card { background:#ffffff; }
-      .ext-surface { background:#f8fafc; }
-      .ext-title { color:#111827; }
-      .ext-value { color:#111827; }
-      .ext-muted { color:#6b7280; }
-      .ext-hint { color:#475569; }
-      @media (prefers-color-scheme: dark) {
-        .ext-page { background:#0b1220 !important; }
-        .ext-card { background:#111827 !important; }
-        .ext-surface { background:#0f172a !important; }
-        .ext-title, .ext-value { color:#f1f5f9 !important; }
-        .ext-muted { color:#94a3b8 !important; }
-        .ext-hint { color:#cbd5e1 !important; }
-        .ext-row td { border-top-color:#334155 !important; }
-        .ext-footer { border-top-color:#334155 !important; }
-      }
-      /* Outlook.com dark mode */
-      [data-ogsc] .ext-title, [data-ogsc] .ext-value { color:#f1f5f9 !important; }
-      [data-ogsc] .ext-muted { color:#94a3b8 !important; }
-      [data-ogsc] .ext-hint { color:#cbd5e1 !important; }
-      [data-ogsb] .ext-card { background:#111827 !important; }
-      [data-ogsb] .ext-surface { background:#0f172a !important; }
-      [data-ogsb] .ext-page { background:#0b1220 !important; }
-    </style>
+    <meta name="color-scheme" content="light">
+    <meta name="supported-color-schemes" content="light">
   </head>
-  <body class="ext-page" style="margin:0;padding:32px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;color:#111827;">
+  <body style="margin:0;padding:32px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;color:#111827;">
     <div style="max-width:560px;margin:0 auto;">
-      <div class="ext-card" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,.10);">
+      <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,.10);">
         <!-- Header (solid background-color fallback for Outlook, gradient on top) -->
         <div style="padding:28px 32px;background-color:${escapeHtml(brandColor)};background:linear-gradient(135deg,${escapeHtml(brandColor)} 0%,${escapeHtml(darkColor)} 100%);color:#ffffff;">
           <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.85;color:#ffffff;">${escapeHtml(brandName)}</div>
@@ -195,15 +166,15 @@ function renderInviteEmailHtml(opts) {
           ${whenLabel ? `<p style="margin:8px 0 0;font-size:14px;opacity:.9;color:#ffffff;">${escapeHtml(whenLabel)}</p>` : ''}
         </div>
         <!-- Body -->
-        <div style="padding:28px 32px;">
-          ${rows ? `<table class="ext-table" style="width:100%;border-collapse:collapse;">${rows}</table>` : ''}
+        <div style="padding:28px 32px;background:#ffffff;">
+          ${rows ? `<table style="width:100%;border-collapse:collapse;">${rows}</table>` : ''}
           ${primaryBtn}
           ${secondaryBtns ? `<div style="margin-top:${primaryBtn ? '12px' : '20px'}">${secondaryBtns}</div>` : ''}
           ${hintBlock}
         </div>
         <!-- Footer -->
-        <div class="ext-surface ext-footer" style="padding:14px 32px;border-top:1px solid #e5e7eb;background:#f8fafc;">
-          <p class="ext-muted" style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">${escapeHtml(brandName)} · ${year}</p>
+        <div style="padding:14px 32px;border-top:1px solid #e5e7eb;background:#f8fafc;">
+          <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">${escapeHtml(brandName)} · ${year}</p>
         </div>
       </div>
     </div>
