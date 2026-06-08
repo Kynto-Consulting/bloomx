@@ -174,6 +174,7 @@ export async function POST(req: NextRequest) {
             userName: user.name,
             event,
             recipients: attendeeEmails,
+            timezone: typeof body?.timeZone === 'string' ? body.timeZone : null,
         });
 
         if (notified > 0) {

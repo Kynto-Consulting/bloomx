@@ -11,6 +11,25 @@ import { renderInviteEmailHtml } from './invite-template.js';
 const BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom';
 const BRAND_COLOR = process.env.NEXT_PUBLIC_BRAND_COLOR || '#2563EB';
 
+// Fallback timezone for human-readable date labels when a caller doesn't supply
+// one. WITHOUT this, Intl falls back to the runtime tz — which is UTC on the
+// server — so a 11:00 Lima event renders as "4:00 p. m." in invite emails.
+// Override per-deployment via DEFAULT_TIMEZONE; defaults to Peru.
+export const DEFAULT_TIMEZONE =
+    process.env.DEFAULT_TIMEZONE || process.env.NEXT_PUBLIC_DEFAULT_TIMEZONE || 'America/Lima';
+
+/** Validate an IANA tz string; fall back to DEFAULT_TIMEZONE if missing/invalid. */
+export function resolveTimeZone(tz?: string | null): string {
+    const candidate = String(tz || '').trim();
+    if (!candidate) return DEFAULT_TIMEZONE;
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: candidate });
+        return candidate;
+    } catch {
+        return DEFAULT_TIMEZONE;
+    }
+}
+
 function formatDateLabel(date: Date, timezone?: string | null) {
     return new Intl.DateTimeFormat('es-PE', {
         timeZone: timezone || undefined,
@@ -87,7 +106,7 @@ export function buildCalendarInviteHtml(options: {
     return buildEmailHtml({
         type: 'invitation',
         title: options.title,
-        when: { start: options.startsAt, end: options.endsAt, timezone: options.timezone },
+        when: { start: options.startsAt, end: options.endsAt, timezone: resolveTimeZone(options.timezone) },
         location: options.location,
         description: options.description,
         organizer: options.organizer,
@@ -133,7 +152,7 @@ export function buildMeetingAnnouncementHtml(options: {
         type: 'meeting',
         title: options.topic,
         when: options.startsAt && options.endsAt
-            ? { start: options.startsAt, end: options.endsAt, timezone: options.timezone }
+            ? { start: options.startsAt, end: options.endsAt, timezone: resolveTimeZone(options.timezone) }
             : null,
         location: options.meetUrl,
         organizer: options.organizer,

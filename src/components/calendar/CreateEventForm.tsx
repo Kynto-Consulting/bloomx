@@ -350,6 +350,7 @@ export function CreateEventForm({
             title: subjectTitle,
             startsAt: parsedStart,
             endsAt: parsedEnd,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             location: location || null,
         });
 

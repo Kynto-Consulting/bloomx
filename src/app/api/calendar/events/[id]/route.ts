@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
 import { buildCancelIcs } from '@/lib/calendar/ics';
-import { buildEmailHtml } from '@/lib/calendar/email-templates';
+import { buildEmailHtml, resolveTimeZone } from '@/lib/calendar/email-templates';
 import { sendEventInvites } from '@/lib/calendar/notify';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -84,6 +84,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             userName: user.name,
             event: updated,
             recipients: attendeesToAdd,
+            timezone: typeof body?.timeZone === 'string' ? body.timeZone : null,
         });
     }
 
@@ -143,10 +144,11 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
                 sequence,
             });
 
+            const cancelTz = resolveTimeZone(null); // DELETE carries no tz payload → default
             const html = buildEmailHtml({
                 type: 'cancellation',
                 title: event.title,
-                when: { start: event.startsAt, end: event.endsAt },
+                when: { start: event.startsAt, end: event.endsAt, timezone: cancelTz },
                 location: event.location,
                 organizer: { email: organizerEmail, name: organizerName },
                 hint: 'Este evento fue cancelado. Tu calendario se actualizará con el archivo .ics adjunto.',
@@ -154,7 +156,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
 
             const text = [
                 `Evento cancelado: ${event.title}`,
-                `Cuándo: ${new Date(event.startsAt).toLocaleString()}`,
+                `Cuándo: ${new Date(event.startsAt).toLocaleString('es-PE', { timeZone: cancelTz })}`,
                 event.location ? `Lugar: ${event.location}` : '',
                 '',
                 'El archivo .ics adjunto actualiza tu calendario.',

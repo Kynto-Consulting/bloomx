@@ -1,7 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
-import { buildCalendarInviteHtml } from '@/lib/calendar/email-templates';
+import { buildCalendarInviteHtml, resolveTimeZone } from '@/lib/calendar/email-templates';
 
 type EventForInvite = {
     id: string;
@@ -75,8 +75,10 @@ export async function sendEventInvites(options: {
     userName?: string | null;
     event: EventForInvite;
     recipients: string[];
+    timezone?: string | null;
 }): Promise<number> {
     try {
+        const tz = resolveTimeZone(options.timezone);
         const organizerEmail = (options.event.organizerEmail || options.userEmail || '').trim();
         if (!organizerEmail) return 0;
         const organizerName = (options.event.organizerName || options.userName || organizerEmail).trim();
@@ -101,6 +103,7 @@ export async function sendEventInvites(options: {
             title: options.event.title || 'New Event',
             startsAt: options.event.startsAt,
             endsAt: options.event.endsAt,
+            timezone: tz,
             location: options.event.location || null,
             description: options.event.description || null,
             organizer: { email: organizerEmail, name: organizerName },
@@ -108,8 +111,8 @@ export async function sendEventInvites(options: {
 
         const text = [
             `You are invited to: ${options.event.title || 'New Event'}`,
-            `Starts: ${new Date(options.event.startsAt).toLocaleString()}`,
-            `Ends: ${new Date(options.event.endsAt).toLocaleString()}`,
+            `Starts: ${new Date(options.event.startsAt).toLocaleString('es-PE', { timeZone: tz })}`,
+            `Ends: ${new Date(options.event.endsAt).toLocaleString('es-PE', { timeZone: tz })}`,
             options.event.location ? `Location: ${options.event.location}` : '',
             '',
             'The calendar invite (.ics) is attached to this email.',
