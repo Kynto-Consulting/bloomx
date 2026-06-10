@@ -43,6 +43,7 @@ export default function CalendarPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [startsAt, setStartsAt] = useState('');
     const [endsAt, setEndsAt] = useState('');
+    const [moreList, setMoreList] = useState<{ title: string; events: CalendarEventRecord[] } | null>(null);
     const [ghostEvents, setGhostEvents] = useState<Array<{
         title: string;
         startsAt: string;
@@ -320,6 +321,125 @@ export default function CalendarPage() {
     const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
     const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
 
+    // ── Time-grid layout (Day / Week views) ─────────────────────────────────
+    const HOUR_PX = 48;            // pixels per hour row
+    const MAX_LANES = 3;           // max side-by-side overlapping events before "+N"
+
+    const isHoliday = (ev: CalendarEventRecord) => ev.calendar.id.startsWith('holidays') || (ev.calendar as any).source === 'holidays';
+
+    const sameDay = (a: Date, b: Date) =>
+        a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+    const eventsOnDate = (date: Date) =>
+        visibleEvents.filter((ev) => {
+            const d = new Date(ev.startsAt);
+            return !isHoliday(ev) && sameDay(d, date);
+        });
+
+    type Positioned = { ev: CalendarEventRecord; top: number; height: number; lane: number; lanes: number };
+
+    const layoutDay = (evts: CalendarEventRecord[]): Positioned[] => {
+        const items = [...evts].sort((a, b) =>
+            new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime() ||
+            new Date(a.endsAt).getTime() - new Date(b.endsAt).getTime()
+        );
+        const res: Positioned[] = [];
+        let cluster: CalendarEventRecord[] = [];
+        let clusterEnd = 0;
+
+        const flush = () => {
+            if (!cluster.length) return;
+            const cols: number[] = [];               // last end-time per column
+            const laneOf = new Map<string, number>();
+            cluster.forEach((ev) => {
+                const s = new Date(ev.startsAt).getTime();
+                let placed = cols.findIndex((end) => end <= s);
+                if (placed === -1) { placed = cols.length; cols.push(0); }
+                cols[placed] = new Date(ev.endsAt).getTime();
+                laneOf.set(ev.id, placed);
+            });
+            const lanes = cols.length;
+            cluster.forEach((ev) => {
+                const s = new Date(ev.startsAt);
+                const e = new Date(ev.endsAt);
+                const startMin = s.getHours() * 60 + s.getMinutes();
+                let endMin = sameDay(s, e) ? e.getHours() * 60 + e.getMinutes() : 24 * 60;
+                endMin = Math.max(endMin, startMin + 20);   // min visible height
+                res.push({ ev, top: (startMin / 60) * HOUR_PX, height: ((endMin - startMin) / 60) * HOUR_PX, lane: laneOf.get(ev.id)!, lanes });
+            });
+            cluster = [];
+            clusterEnd = 0;
+        };
+
+        items.forEach((ev) => {
+            const s = new Date(ev.startsAt).getTime();
+            if (cluster.length && s >= clusterEnd) flush();
+            cluster.push(ev);
+            clusterEnd = Math.max(clusterEnd, new Date(ev.endsAt).getTime());
+        });
+        flush();
+        return res;
+    };
+
+    const renderDayColumn = (date: Date) => {
+        const positioned = layoutDay(eventsOnDate(date));
+        const visible = positioned.filter((p) => p.lane < MAX_LANES);
+        const hidden = positioned.filter((p) => p.lane >= MAX_LANES);
+
+        // group hidden events into a single "+N" chip per overlapping hour bucket
+        const hiddenByBucket = new Map<number, CalendarEventRecord[]>();
+        hidden.forEach((p) => {
+            const bucket = Math.floor(p.top / HOUR_PX);
+            const arr = hiddenByBucket.get(bucket) || [];
+            arr.push(p.ev);
+            hiddenByBucket.set(bucket, arr);
+        });
+
+        return (
+            <>
+                {visible.map((p) => {
+                    const lanes = Math.min(p.lanes, MAX_LANES);
+                    const widthPct = 100 / lanes;
+                    const hol = isHoliday(p.ev);
+                    return (
+                        <div
+                            key={p.ev.id}
+                            onClick={(e) => handleOpenEvent(p.ev, e)}
+                            title={p.ev.title}
+                            className={`absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium shadow-sm cursor-pointer hover:brightness-95 ${hol ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`}
+                            style={{
+                                top: p.top,
+                                height: Math.max(p.height - 2, 16),
+                                left: `calc(${p.lane * widthPct}% + 2px)`,
+                                width: `calc(${widthPct}% - 4px)`,
+                                backgroundColor: hol ? undefined : p.ev.calendar.color,
+                                zIndex: 5,
+                            }}
+                        >
+                            <div className="truncate leading-tight">
+                                {new Date(p.ev.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {p.ev.title}
+                            </div>
+                        </div>
+                    );
+                })}
+                {Array.from(hiddenByBucket.entries()).map(([bucket, evs]) => (
+                    <button
+                        key={`more-${bucket}`}
+                        type="button"
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            setMoreList({ title: date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), events: eventsOnDate(date) });
+                        }}
+                        className="absolute right-1 z-10 rounded bg-slate-700/90 px-1.5 py-0.5 text-[10px] font-semibold text-white shadow hover:bg-slate-800"
+                        style={{ top: bucket * HOUR_PX + 2 }}
+                    >
+                        +{evs.length}
+                    </button>
+                ))}
+            </>
+        );
+    };
+
     const renderMonthGrid = () => {
         const daysInMonth = getDaysInMonth(currentYear, currentMonth);
         const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
@@ -383,7 +503,7 @@ export default function CalendarPage() {
                         </span>
                     </div>
                     <div className="flex flex-col gap-1 px-1 overflow-hidden">
-                        {dayEvents.map(ev => (
+                        {dayEvents.slice(0, 3).map(ev => (
                             <div
                                 key={ev.id}
                                 onClick={(e) => handleOpenEvent(ev, e)}
@@ -394,6 +514,19 @@ export default function CalendarPage() {
                                 {ev.title}
                             </div>
                         ))}
+                        {dayEvents.length > 3 && (
+                            <button
+                                type="button"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    const d = new Date(currentYear, currentMonth, i);
+                                    setMoreList({ title: d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), events: dayEvents });
+                                }}
+                                className="text-[11px] text-left px-1.5 py-0.5 rounded font-semibold text-slate-600 hover:bg-slate-200/70"
+                            >
+                                +{dayEvents.length - 3} more
+                            </button>
+                        )}
                         {dayGhostEvents.map((ge, idx) => (
                             <div
                                 key={`ghost-${idx}`}
@@ -587,36 +720,47 @@ export default function CalendarPage() {
                             </div>
                         ) : viewMode === 'Day' ? (
                             <div className="flex-1 overflow-y-auto w-full">
-                                <div className="grid grid-cols-[60px_1fr] border-b border-slate-200 sticky top-0 z-10 bg-white">
+                                <div className="grid grid-cols-[60px_1fr] border-b border-slate-200 sticky top-0 z-20 bg-white">
                                     <div className="border-r border-slate-200 bg-slate-50" />
                                     <div className="font-semibold text-center py-2 text-slate-700 bg-slate-50 flex flex-col items-center">
                                         <span className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][currentDate.getDay()]}</span>
                                         <span className="text-lg mt-0.5 w-8 h-8 flex items-center justify-center rounded-full bg-blue-600 text-white">{currentDate.getDate()}</span>
                                     </div>
                                 </div>
-                                <div className="relative">
-                                    {Array.from({length: 24}).map((_, i) => (
-                                        <div key={i} className="grid grid-cols-[60px_1fr] border-b border-slate-100 min-h-[60px]">
-                                            <div className="text-xs text-slate-500 text-right pr-2 py-1 select-none border-r border-slate-200">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`}</div>
-                                            <div 
-                                                className="relative group hover:bg-blue-50/30 cursor-pointer"
+                                <div className="grid grid-cols-[60px_1fr]">
+                                    {/* hour labels */}
+                                    <div className="select-none">
+                                        {Array.from({ length: 24 }).map((_, i) => (
+                                            <div key={i} className="text-xs text-slate-500 text-right pr-2 border-r border-b border-slate-100" style={{ height: HOUR_PX }}>
+                                                <span className="relative -top-2">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {/* day column with events */}
+                                    <div className="relative" style={{ height: 24 * HOUR_PX }}>
+                                        {Array.from({ length: 24 }).map((_, i) => (
+                                            <div
+                                                key={i}
+                                                className="border-b border-slate-100 hover:bg-blue-50/30 cursor-pointer"
+                                                style={{ height: HOUR_PX }}
                                                 onDoubleClick={() => {
                                                     const d = new Date(currentYear, currentMonth, currentDate.getDate(), i, 0);
                                                     const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
                                                     handleOpenCreate(d.toISOString().slice(0, 16), dEnd.toISOString().slice(0, 16));
                                                 }}
-                                            ></div>
-                                        </div>
-                                    ))}
+                                            />
+                                        ))}
+                                        {renderDayColumn(new Date(currentYear, currentMonth, currentDate.getDate()))}
+                                    </div>
                                 </div>
                             </div>
                         ) : viewMode === 'Week' ? (
                             <div className="flex-1 overflow-y-auto w-full">
-                                <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-slate-200 sticky top-0 z-10 bg-white">
+                                <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-slate-200 sticky top-0 z-20 bg-white">
                                     <div className="border-r border-slate-200 bg-slate-50" />
                                     {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, index) => {
                                         const dateOfD = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + index);
-                                        const isToday = dateOfD.getDate() === currentDate.getDate() && dateOfD.getMonth() === currentDate.getMonth() && dateOfD.getFullYear() === currentDate.getFullYear();
+                                        const isToday = sameDay(dateOfD, currentDate);
                                         return (
                                             <div key={d} className="font-semibold text-center py-2 text-slate-700 border-l border-slate-100 text-sm bg-slate-50 flex flex-col items-center">
                                                 <span className="text-[11px] text-slate-500 font-medium uppercase tracking-wider">{d}</span>
@@ -625,25 +769,36 @@ export default function CalendarPage() {
                                         );
                                     })}
                                 </div>
-                                <div className="relative">
-                                    {Array.from({length: 24}).map((_, i) => (
-                                        <div key={i} className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-slate-100 min-h-[60px]">
-                                            <div className="text-xs text-slate-500 text-right pr-2 py-1 select-none border-r border-slate-200">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i-12} PM`}</div>
-                                            {Array.from({length: 7}).map((_, j) => {
-                                                const d = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + j, i, 0);
-                                                return (
-                                                    <div 
-                                                        key={j} 
-                                                        className="border-l border-slate-100 relative group hover:bg-blue-50/30 cursor-pointer"
+                                <div className="grid grid-cols-[60px_repeat(7,1fr)]">
+                                    {/* hour labels */}
+                                    <div className="select-none">
+                                        {Array.from({ length: 24 }).map((_, i) => (
+                                            <div key={i} className="text-xs text-slate-500 text-right pr-2 border-r border-b border-slate-100" style={{ height: HOUR_PX }}>
+                                                <span className="relative -top-2">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    {/* 7 day columns */}
+                                    {Array.from({ length: 7 }).map((_, j) => {
+                                        const colDate = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + j);
+                                        return (
+                                            <div key={j} className="relative border-l border-slate-100" style={{ height: 24 * HOUR_PX }}>
+                                                {Array.from({ length: 24 }).map((_, i) => (
+                                                    <div
+                                                        key={i}
+                                                        className="border-b border-slate-100 hover:bg-blue-50/30 cursor-pointer"
+                                                        style={{ height: HOUR_PX }}
                                                         onDoubleClick={() => {
+                                                            const d = new Date(colDate.getFullYear(), colDate.getMonth(), colDate.getDate(), i, 0);
                                                             const dEnd = new Date(d.getTime() + 60 * 60 * 1000);
                                                             handleOpenCreate(d.toISOString().slice(0, 16), dEnd.toISOString().slice(0, 16));
                                                         }}
-                                                    ></div>
-                                                );
-                                            })}
-                                        </div>
-                                    ))}
+                                                    />
+                                                ))}
+                                                {renderDayColumn(colDate)}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
                         ) : (
@@ -698,6 +853,43 @@ export default function CalendarPage() {
                     </AnimatePresence>
                 </div>
             </div>
+
+            <AnimatePresence>
+                {moreList && (
+                    <>
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setMoreList(null)}
+                            className="fixed inset-0 z-[80] bg-black/30"
+                        />
+                        <motion.div
+                            initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}
+                            className="fixed left-1/2 top-1/2 z-[90] w-[320px] max-h-[70vh] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+                        >
+                            <div className="mb-3 flex items-center justify-between">
+                                <span className="text-sm font-semibold capitalize text-slate-700">{moreList.title}</span>
+                                <button onClick={() => setMoreList(null)} className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">✕</button>
+                            </div>
+                            <div className="space-y-1.5">
+                                {moreList.events
+                                    .slice()
+                                    .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime())
+                                    .map((ev) => (
+                                        <div
+                                            key={ev.id}
+                                            onClick={(e) => { setMoreList(null); handleOpenEvent(ev, e); }}
+                                            className={`cursor-pointer truncate rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'bg-teal-50 text-teal-900 border border-teal-100' : 'text-white'}`}
+                                            style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: ev.calendar.color } : {}}
+                                        >
+                                            {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} `}
+                                            {ev.title}
+                                        </div>
+                                    ))}
+                            </div>
+                        </motion.div>
+                    </>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
