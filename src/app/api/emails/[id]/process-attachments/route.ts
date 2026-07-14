@@ -6,6 +6,12 @@ import { parseInviteFromIcs } from '@/lib/calendar/ics';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
 
+// Large inbound attachments mean downloading the full raw MIME (all parts,
+// base64) and re-uploading to our own storage. Give the function room so big
+// files don't hit the default serverless timeout. Vercel clamps to the plan max.
+export const runtime = 'nodejs';
+export const maxDuration = 300;
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 3;
