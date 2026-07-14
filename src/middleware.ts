@@ -25,6 +25,7 @@ export async function middleware(req: NextRequest) {
 
         pathname.startsWith('/api/webhooks') || // Allow cron routes
         pathname.startsWith('/api/molt') || // Allow cron routes
+        (pathname.startsWith('/api/emails/') && pathname.endsWith('/process-attachments')) || // internal async job (guarded by INTERNAL_SECRET)
         pathname.startsWith('/api/assets') || // Allow asset downloads
         pathname.startsWith('/SKILL') || // Allow cron routes
         pathname.startsWith('/_next') ||
