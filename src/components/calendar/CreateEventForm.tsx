@@ -354,13 +354,14 @@ export function CreateEventForm({
             location: location || null,
         });
 
+        // Same language/facts as the HTML part — a text/HTML mismatch is a spam signal.
         const text = [
-            `You are invited to: ${subjectTitle}`,
-            `Starts: ${startsAtLabel}`,
-            `Ends: ${parsedEnd.toLocaleString()}`,
-            location ? `Location: ${location}` : '',
+            `Te invitaron a: ${subjectTitle}`,
             '',
-            'The calendar invite (.ics) is attached to this email.',
+            `Cuándo: ${startsAtLabel} — ${parsedEnd.toLocaleString()}`,
+            location ? `Enlace/Lugar: ${location}` : '',
+            '',
+            'El archivo .ics está adjunto para agregar esta invitación a tu calendario.',
         ].filter(Boolean).join('\n');
 
         const sendInvitesResponse = await fetch('/api/emails', {
@@ -368,7 +369,7 @@ export function CreateEventForm({
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 to: cleanRecipients.join(','),
-                subject: `Invitation: ${subjectTitle}`,
+                subject: `Invitación: ${subjectTitle}`,
                 html,
                 text,
                 attachments: [inviteAttachmentResult.attachment],

@@ -109,13 +109,18 @@ export async function sendEventInvites(options: {
             organizer: { email: organizerEmail, name: organizerName },
         });
 
+        // Keep the plain-text part in the same language and with the same facts as
+        // the HTML part. A text/HTML mismatch (English text + Spanish HTML) is a
+        // spam-filter signal, and some clients only ever show this version.
         const text = [
-            `You are invited to: ${options.event.title || 'New Event'}`,
-            `Starts: ${new Date(options.event.startsAt).toLocaleString('es-PE', { timeZone: tz })}`,
-            `Ends: ${new Date(options.event.endsAt).toLocaleString('es-PE', { timeZone: tz })}`,
-            options.event.location ? `Location: ${options.event.location}` : '',
+            `${organizerName} te invitó a: ${options.event.title || 'Nuevo evento'}`,
             '',
-            'The calendar invite (.ics) is attached to this email.',
+            `Cuándo: ${new Date(options.event.startsAt).toLocaleString('es-PE', { timeZone: tz })} — ${new Date(options.event.endsAt).toLocaleString('es-PE', { timeZone: tz })}`,
+            options.event.location ? `Enlace/Lugar: ${options.event.location}` : '',
+            `Organizador: ${organizerName} (${organizerEmail})`,
+            options.event.description ? `Notas: ${options.event.description}` : '',
+            '',
+            'El archivo .ics está adjunto para agregar esta invitación a tu calendario.',
         ].filter(Boolean).join('\n');
 
         const filename = `${(options.event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`;
@@ -123,7 +128,7 @@ export async function sendEventInvites(options: {
         const { error } = await resend.emails.send({
             from: formattedFrom,
             to: recipients,
-            subject: `Invitation: ${options.event.title || 'New Event'}`,
+            subject: `Invitación: ${options.event.title || 'Nuevo evento'}`,
             html,
             text,
             attachments: [{ filename, content: icsBuffer }],
@@ -151,7 +156,7 @@ export async function sendEventInvites(options: {
                     from: formattedFrom,
                     to: recipients.join(', '),
                     cleanTo: recipients.join(', '),
-                    subject: `Invitation: ${options.event.title || 'New Event'}`,
+                    subject: `Invitación: ${options.event.title || 'Nuevo evento'}`,
                     messageId: crypto.randomUUID(),
                     snippet: text.substring(0, 200),
                     folder: 'sent',

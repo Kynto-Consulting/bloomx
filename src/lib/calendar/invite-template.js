@@ -52,14 +52,18 @@ const TYPE_LABELS = {
 
 // ─── Row builder ─────────────────────────────────────────────────────────────
 
+// Mid-gray reads acceptably against both a white and a dark background, so it is
+// the ONE color we hard-code. Everything else inherits the client's own palette.
+const RULE = '#808080';
+
 function inviteRow(label, value, isHtml) {
     // Inline styles only — no CSS classes / <style> rules. Some webmail viewers
     // inject the email body into their own DOM and any <style> we ship leaks out
     // as global CSS, so everything must be self-contained inline.
     return `
       <tr>
-        <td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:13px;color:#6b7280;width:110px;vertical-align:top;">${escapeHtml(label)}</td>
-        <td style="padding:12px 0;border-top:1px solid #e5e7eb;font-size:14px;color:#111827;font-weight:500;">${isHtml ? value : escapeHtml(value)}</td>
+        <td width="110" style="padding:8px 12px 8px 0;border-top:1px solid ${RULE};font-size:13px;vertical-align:top;">${escapeHtml(label)}</td>
+        <td style="padding:8px 0;border-top:1px solid ${RULE};font-size:14px;">${isHtml ? value : escapeHtml(value)}</td>
       </tr>`;
 }
 
@@ -87,8 +91,6 @@ function inviteRow(label, value, isHtml) {
 function renderInviteEmailHtml(opts) {
     opts = opts || {};
     const brandName = opts.brandName || 'Bloom';
-    const brandColor = opts.brandColor || '#2563EB';
-    const darkColor = darkenHex(brandColor, 0.3);
     const typeLabel = TYPE_LABELS[opts.type] || opts.type || 'Invitación';
     const whenLabel = opts.whenLabel || null;
 
@@ -101,21 +103,21 @@ function renderInviteEmailHtml(opts) {
     const attendeeRows = attendees.length > 0
         ? attendees.map((a) => {
             const display = a.name && a.name !== a.email
-                ? `${escapeHtml(a.name)} <span style="color:#6b7280;font-weight:400;">(${escapeHtml(a.email)})</span>`
+                ? `${escapeHtml(a.name)} (${escapeHtml(a.email)})`
                 : escapeHtml(a.email);
-            return `<div style="padding:2px 0;">${display}</div>`;
+            return `<div style="padding:1px 0;">${display}</div>`;
         }).join('')
         : null;
 
     const organizerLabel = opts.organizer
-        ? `${escapeHtml(opts.organizer.name || opts.organizer.email)} <span style="color:#6b7280;font-weight:400;">(${escapeHtml(opts.organizer.email)})</span>`
+        ? `${escapeHtml(opts.organizer.name || opts.organizer.email)} (${escapeHtml(opts.organizer.email)})`
         : null;
 
     const rows = [
         whenLabel ? inviteRow('Cuándo', whenLabel) : '',
         (opts.location || effectiveMeetUrl)
             ? (isMeetUrl
-                ? inviteRow('Enlace', `<a href="${escapeHtml(effectiveMeetUrl)}" style="color:${escapeHtml(brandColor)};font-weight:600;word-break:break-all;">${escapeHtml(meetProvider || effectiveMeetUrl)}</a>`, true)
+                ? inviteRow('Enlace', `<a href="${escapeHtml(effectiveMeetUrl)}" style="word-break:break-all;">${escapeHtml(meetProvider || effectiveMeetUrl)}</a>`, true)
                 : inviteRow('Lugar', opts.location))
             : '',
         organizerLabel ? inviteRow('Organizador', organizerLabel, true) : '',
@@ -123,61 +125,73 @@ function renderInviteEmailHtml(opts) {
         opts.description ? inviteRow('Notas', opts.description) : '',
     ].join('');
 
+    // Buttons are bordered links, not colored blocks: a solid brand background with
+    // hard-coded white text turns unreadable if a dark-mode client repaints the
+    // background but keeps our text color (or vice versa). A border + inherited
+    // text color survives both schemes.
+    const btn = (url, label) =>
+        `<a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 18px;border:1px solid ${RULE};text-decoration:none;font-size:14px;font-weight:bold;">${escapeHtml(label)}</a>`;
+
     const primaryBtn = opts.primaryAction
-        ? `<a href="${escapeHtml(opts.primaryAction.url)}" style="display:inline-block;padding:12px 20px;background:${escapeHtml(brandColor)};color:#ffffff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;margin-top:20px;">${escapeHtml(opts.primaryAction.label)}</a>`
-        : (effectiveMeetUrl
-            ? `<a href="${escapeHtml(effectiveMeetUrl)}" style="display:inline-block;padding:12px 20px;background:${escapeHtml(brandColor)};color:#ffffff;border-radius:10px;font-size:14px;font-weight:700;text-decoration:none;margin-top:20px;">Unirse a ${escapeHtml(meetProvider || 'la reunión')}</a>`
-            : '');
+        ? btn(opts.primaryAction.url, opts.primaryAction.label)
+        : (effectiveMeetUrl ? btn(effectiveMeetUrl, `Unirse a ${meetProvider || 'la reunión'}`) : '');
 
-    const secondaryBtns = (Array.isArray(opts.secondaryActions) ? opts.secondaryActions : []).map((a) =>
-        `<a href="${escapeHtml(a.url)}" style="display:inline-block;padding:11px 16px;border:1px solid #d1d5db;color:${escapeHtml(brandColor)};text-decoration:none;border-radius:10px;font-size:14px;font-weight:600;background:#ffffff;margin:4px 8px 4px 0;">${escapeHtml(a.label)}</a>`
-    ).join('');
-
-    const hintBlock = opts.hint
-        ? `<div style="margin-top:20px;padding:14px 16px;border-radius:12px;background:#f8fafc;border:1px solid #e2e8f0;color:#475569;font-size:13px;line-height:1.6;">${escapeHtml(opts.hint)}</div>`
-        : '';
+    const secondaryBtns = (Array.isArray(opts.secondaryActions) ? opts.secondaryActions : [])
+        .map((a) => `<span style="padding-right:12px;">${btn(a.url, a.label)}</span>`)
+        .join('');
 
     const year = new Date().getFullYear();
 
-    // INLINE STYLES ONLY — no <style> block, no CSS classes, no media queries.
-    // Webmail viewers that inject the email body into their own DOM (BloomX does
-    // this) would otherwise leak our <style> rules as global page CSS; a
-    // prefers-color-scheme:dark rule then flips text to light while the page
-    // background stays light → invisible white-on-white text. Every element
-    // carries an explicit dark-on-light inline color so it renders the same,
-    // readable, in light and dark clients. `color-scheme: light` tells native
-    // mail clients not to auto-invert.
+    // DESIGN RULES (do not "improve" this back into a marketing template):
+    //
+    // 1. NO background-color and NO text color anywhere. The client paints its own
+    //    background and default text color, so the mail is readable in light AND
+    //    dark mode for free. Hard-coding #ffffff/#111827 is exactly what breaks:
+    //    a dark-mode client that repaints the background but keeps our dark text
+    //    (or inverts our text but not our background) yields unreadable mail.
+    //    The only hard-coded color is RULE (mid-gray), which reads on both.
+    // 2. Tables for layout — divs with padding/max-width are unreliable in Outlook.
+    // 3. Web-safe font stack only. `-apple-system`/`Segoe UI` resolve to a
+    //    different face on every OS, so the mail rendered differently per machine.
+    // 4. No gradient / box-shadow / border-radius / rgba / opacity: Outlook drops
+    //    them, and the heavy CSS-in-HTML blob is itself a spam signal.
+    // 5. Inline styles ONLY — no <style>, no classes, no media queries. Webmail
+    //    viewers that inject the body into their own DOM (BloomX does) leak our
+    //    <style> rules as global page CSS.
+    // 6. color-scheme light dark => tells native clients we render correctly in
+    //    both, so they don't force-invert us.
     return `<!DOCTYPE html>
 <html lang="es">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <meta name="supported-color-schemes" content="light">
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
+    <title>${escapeHtml(typeLabel)}: ${escapeHtml(opts.title)}</title>
   </head>
-  <body style="margin:0;padding:32px 16px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,Helvetica,sans-serif;color:#111827;">
-    <div style="max-width:560px;margin:0 auto;">
-      <div style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,.10);">
-        <!-- Header (solid background-color fallback for Outlook, gradient on top) -->
-        <div style="padding:28px 32px;background-color:${escapeHtml(brandColor)};background:linear-gradient(135deg,${escapeHtml(brandColor)} 0%,${escapeHtml(darkColor)} 100%);color:#ffffff;">
-          <div style="font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;opacity:.85;color:#ffffff;">${escapeHtml(brandName)}</div>
-          <div style="display:inline-block;margin-top:10px;padding:3px 10px;border-radius:99px;background:rgba(255,255,255,.2);font-size:12px;font-weight:600;color:#ffffff;">${escapeHtml(typeLabel)}</div>
-          <h1 style="margin:10px 0 0;font-size:22px;line-height:1.3;font-weight:700;color:#ffffff;">${escapeHtml(opts.title)}</h1>
-          ${whenLabel ? `<p style="margin:8px 0 0;font-size:14px;opacity:.9;color:#ffffff;">${escapeHtml(whenLabel)}</p>` : ''}
-        </div>
-        <!-- Body -->
-        <div style="padding:28px 32px;background:#ffffff;">
-          ${rows ? `<table style="width:100%;border-collapse:collapse;">${rows}</table>` : ''}
-          ${primaryBtn}
-          ${secondaryBtns ? `<div style="margin-top:${primaryBtn ? '12px' : '20px'}">${secondaryBtns}</div>` : ''}
-          ${hintBlock}
-        </div>
-        <!-- Footer -->
-        <div style="padding:14px 32px;border-top:1px solid #e5e7eb;background:#f8fafc;">
-          <p style="margin:0;font-size:12px;color:#94a3b8;text-align:center;">${escapeHtml(brandName)} · ${year}</p>
-        </div>
-      </div>
-    </div>
+  <body style="margin:0;padding:16px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.5;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+      <tr>
+        <td align="center">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560" style="width:100%;max-width:560px;text-align:left;">
+            <tr>
+              <td style="padding:0 0 6px;font-size:12px;">${escapeHtml(brandName)} &middot; ${escapeHtml(typeLabel)}</td>
+            </tr>
+            <tr>
+              <td style="padding:0 0 6px;font-size:20px;font-weight:bold;">${escapeHtml(opts.title)}</td>
+            </tr>
+            ${whenLabel ? `<tr><td style="padding:0 0 12px;font-size:14px;">${escapeHtml(whenLabel)}</td></tr>` : ''}
+            ${rows ? `<tr><td><table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">${rows}</table></td></tr>` : ''}
+            ${primaryBtn ? `<tr><td style="padding:18px 0 0;">${primaryBtn}</td></tr>` : ''}
+            ${secondaryBtns ? `<tr><td style="padding:${primaryBtn ? '10px' : '18px'} 0 0;">${secondaryBtns}</td></tr>` : ''}
+            ${opts.hint ? `<tr><td style="padding:18px 0 0;font-size:13px;">${escapeHtml(opts.hint)}</td></tr>` : ''}
+            <tr>
+              <td style="padding:16px 0 0;border-top:1px solid ${RULE};font-size:12px;">${escapeHtml(brandName)} &middot; ${year}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </body>
 </html>`;
 }
