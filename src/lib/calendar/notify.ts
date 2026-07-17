@@ -145,20 +145,36 @@ export async function sendEventInvites(options: {
             data: { invitedAt: new Date() },
         });
 
-        // Persist to Sent (best-effort).
+        // Persist to Sent (best-effort). The body MUST be uploaded to storage and
+        // referenced via htmlKey/textKey — the mail viewer reads those. Storing only
+        // a snippet is what made our own Sent copy render as plain text while the
+        // recipient (Gmail) saw the real HTML.
         try {
             const timestamp = Date.now();
+            const subject = `Invitación: ${options.event.title || 'Nuevo evento'}`;
+            const safeSubject = subject.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+
             const key = `attachments/${organizerEmail}/${timestamp}-${filename}`;
-            await uploadToStorage(key, icsBuffer, 'text/calendar;charset=utf-8');
+            const htmlKey = `sent/${organizerEmail}/${timestamp}-${safeSubject}.html`;
+            const textKey = `sent/${organizerEmail}/${timestamp}-${safeSubject}.txt`;
+
+            await Promise.all([
+                uploadToStorage(key, icsBuffer, 'text/calendar;charset=utf-8'),
+                uploadToStorage(htmlKey, Buffer.from(html, 'utf8'), 'text/html'),
+                uploadToStorage(textKey, Buffer.from(text, 'utf8'), 'text/plain'),
+            ]);
+
             await prisma.email.create({
                 data: {
                     userId: options.userId,
                     from: formattedFrom,
                     to: recipients.join(', '),
                     cleanTo: recipients.join(', '),
-                    subject: `Invitación: ${options.event.title || 'Nuevo evento'}`,
+                    subject,
                     messageId: crypto.randomUUID(),
                     snippet: text.substring(0, 200),
+                    htmlKey,
+                    textKey,
                     folder: 'sent',
                     status: 'sent',
                     read: true,

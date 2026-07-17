@@ -182,12 +182,23 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
                 // Persist to Sent so it shows in the mailbox.
                 try {
                     const timestamp = Date.now();
+                    const safeSubject = `Cancelado: ${event.title}`.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
                     const icsKey = `attachments/${organizerEmail}/${timestamp}-cancel.ics`;
-                    await uploadToStorage(icsKey, icsBuffer, 'text/calendar;charset=utf-8');
+                    // Upload the body too — the viewer renders from htmlKey/textKey.
+                    const htmlKey = `sent/${organizerEmail}/${timestamp}-${safeSubject}.html`;
+                    const textKey = `sent/${organizerEmail}/${timestamp}-${safeSubject}.txt`;
+
+                    await Promise.all([
+                        uploadToStorage(icsKey, icsBuffer, 'text/calendar;charset=utf-8'),
+                        uploadToStorage(htmlKey, Buffer.from(html, 'utf8'), 'text/html'),
+                        uploadToStorage(textKey, Buffer.from(text, 'utf8'), 'text/plain'),
+                    ]);
 
                     await prisma.email.create({
                         data: {
                             userId: user.id,
+                            htmlKey,
+                            textKey,
                             from: formattedFrom,
                             to: recipients.join(', '),
                             cleanTo: recipients.join(', '),
