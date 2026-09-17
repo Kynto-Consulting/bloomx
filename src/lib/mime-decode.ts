@@ -279,6 +279,8 @@ const MIME_TO_EXT: Record<string, string> = {
     'text/tab-separated-values': '.tsv',
     'text/calendar': '.ics',
     'application/ics': '.ics',
+    'message/rfc822': '.eml',
+    'message/delivery-status': '.txt',
     'text/vcard': '.vcf',
     'text/x-vcard': '.vcf',
     'text/xml': '.xml',

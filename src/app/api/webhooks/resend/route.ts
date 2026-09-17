@@ -384,6 +384,29 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // 4. Store in Postgres (Per User)
     for (const user of users) {
+        // Scoped messageId per user ensures:
+        // 1) Multi-recipient emails delivered across separate Resend webhooks don't collide.
+        // 2) Retrying the webhook for a user who already received the email is idempotent.
+        const userMessageId = resolvedMessageId
+            ? (resolvedMessageId.endsWith(`-${user.id}`) ? resolvedMessageId : `${resolvedMessageId}-${user.id}`)
+            : `${uuid}-${user.id}`;
+
+        // Idempotency check: if this user already received this email, skip creation
+        const existingEmail = await prisma.email.findFirst({
+            where: {
+                userId: user.id,
+                OR: [
+                    { messageId: userMessageId },
+                    ...(resolvedMessageId ? [{ messageId: resolvedMessageId }] : []),
+                ],
+            },
+        });
+
+        if (existingEmail) {
+            console.log(`[webhook] Email already processed for user ${user.email} (messageId: ${userMessageId}). Skipping.`);
+            continue;
+        }
+
         // Identify Labels for THIS user
         const matchingLabels: { id: string }[] = [];
 
@@ -436,7 +459,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 replyTo: replyToEmail,
                 cleanTo: Array.from(new Set(normalizedRecipients)).join(', '),
                 subject: subject || '(No Subject)',
-                messageId: users.length > 1 ? `${resolvedMessageId || uuid}-${user.id}` : (resolvedMessageId || uuid),
+                messageId: userMessageId,
                 snippet: text ? text.substring(0, 200) : '',
                 htmlKey: (html || (!html && !text)) ? htmlKey : null,
                 textKey: text ? textKey : null,
@@ -472,7 +495,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             const emailIdForAsync = createdEmail.id;
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
             const internalSecret = process.env.INTERNAL_SECRET || '';
-            after(
+            const triggerProcessAttachments = () => {
                 fetch(`${appUrl}/api/emails/${emailIdForAsync}/process-attachments`, {
                     method: 'POST',
                     headers: {
@@ -481,8 +504,15 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                     },
                 }).catch(err =>
                     console.error(`[webhook] Failed to trigger process-attachments for ${emailIdForAsync}:`, err),
-                ),
-            );
+                );
+            };
+
+            try {
+                after(triggerProcessAttachments);
+            } catch {
+                // If after() is unavailable (e.g. background script or outside request context), run async
+                triggerProcessAttachments();
+            }
         }
 
         if (parsedInvites.length > 0) {
@@ -503,7 +533,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 title: senderName || senderEmail,
                 body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
                 url: '/?folder=inbox',
-                tag: `email-${resolvedMessageId || uuid}-${user.id}`,
+                tag: `email-${userMessageId}`,
             });
         }
     }
