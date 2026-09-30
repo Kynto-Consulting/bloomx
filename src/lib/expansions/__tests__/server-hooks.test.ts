@@ -6,6 +6,7 @@ import {
     runEmailPreSendHooks,
     runEmailReceivedHooks,
 } from '../server-hooks';
+import { canonicalString, generateEd25519KeyPair, parseEd25519PublicKey, sha256Hex, verifyCanonical } from '@/lib/bloomx-signature';
 
 const json = (body: any, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body }) as any;
 
@@ -15,6 +16,8 @@ beforeEach(() => {
     delete process.env.EXTENSION_HOOKS_FAIL_CLOSED;
     delete process.env.EXTENSION_HOOKS_SECRET;
     delete process.env.INTERNAL_SECRET;
+    delete process.env.BLOOMX_DOMAIN_PRIVATE_KEY;
+    delete process.env.NEXT_PUBLIC_APP_URL;
     vi.spyOn(console, 'error').mockImplementation(() => { });
 });
 afterEach(() => {
@@ -56,27 +59,44 @@ describe('buildPreSendContext', () => {
 });
 
 describe('callBackendHooks', () => {
-    it('envia JWT, dominio y evento al backend', async () => {
+    it('SIN clave de dominio: protocolo antiguo por cabeceras (legado), sin JWT ni firma', async () => {
         const fetchImpl = vi.fn(async () => json({ success: true, stop: false }));
-        await callBackendHooks('EMAIL_PRE_SEND', { subject: 's' }, { fetchImpl: fetchImpl as any, backendUrl: 'https://be.example.com/', token: 'jwt123', host: 'mail.acme.com:3000', userId: 'u1' });
+        await callBackendHooks('EMAIL_PRE_SEND', { subject: 's' }, { fetchImpl: fetchImpl as any, backendUrl: 'https://be.example.com/', token: 'jwt123', host: 'mail.acme.com:3000', userId: 'u1', email: 'a@acme.com' });
         const [url, init] = fetchImpl.mock.calls[0] as any;
         expect(url).toBe('https://be.example.com/api/extension/hooks');
-        expect(init.headers.Authorization).toBe('Bearer jwt123');
+        expect(init.headers.Authorization).toBeUndefined();
+        expect(JSON.stringify(init.headers)).not.toContain('jwt123');
         expect(init.headers['X-BloomX-Domain']).toBe('mail.acme.com');
+        expect(init.headers['X-User-ID']).toBe('u1');
+        expect(init.headers['X-User-Email']).toBe('a@acme.com');
+        expect(init.headers['X-BloomX-Signature']).toBeUndefined();
         expect(JSON.parse(init.body)).toEqual({ event: 'EMAIL_PRE_SEND', context: { subject: 's' } });
     });
 
-    it('modo interno usa x-internal-secret y no manda JWT', async () => {
-        process.env.EXTENSION_HOOKS_SECRET = 'sh';
+    it('CON BLOOMX_DOMAIN_PRIVATE_KEY firma (Ed25519) metodo+ruta+cuerpo+dominio+usuario', async () => {
+        const kp = generateEd25519KeyPair();
+        process.env.BLOOMX_DOMAIN_PRIVATE_KEY = kp.privatePem;
         const fetchImpl = vi.fn(async () => json({ results: [] }));
-        await callBackendHooks('EMAIL_RECEIVED', {}, { fetchImpl: fetchImpl as any, backendUrl: 'https://be', internal: true, host: 'acme.com' });
-        const init = (fetchImpl.mock.calls[0] as any)[1];
-        expect(init.headers['x-internal-secret']).toBe('sh');
+        await callBackendHooks('EMAIL_RECEIVED', { emailId: 'e1' }, { fetchImpl: fetchImpl as any, backendUrl: 'https://be/', internal: true, host: 'acme.com', userId: 'u9' });
+        const [url, init] = fetchImpl.mock.calls[0] as any;
         expect(init.headers.Authorization).toBeUndefined();
+        expect(init.headers['x-internal-secret']).toBeUndefined();
+        const canonical = canonicalString({
+            method: 'POST',
+            pathAndQuery: new URL(url).pathname,
+            bodySha256Hex: sha256Hex(init.body),
+            domain: 'acme.com',
+            timestamp: init.headers['X-BloomX-Timestamp'],
+            nonce: init.headers['X-BloomX-Nonce'],
+            userId: 'u9',
+            userEmail: '',
+            callback: init.headers['X-BloomX-Callback'] || '',
+        });
+        expect(verifyCanonical(parseEd25519PublicKey(kp.publicKey)!, canonical, init.headers['X-BloomX-Signature'])).toBe(true);
     });
 
-    it('modo interno sin secreto configurado falla cerrado', async () => {
-        await expect(callBackendHooks('EMAIL_RECEIVED', {}, { fetchImpl: vi.fn() as any, internal: true })).rejects.toThrow(/secret/);
+    it('modo interno (EMAIL_RECEIVED/CRON) sin clave de dominio no se degrada a legado: lanza', async () => {
+        await expect(callBackendHooks('EMAIL_RECEIVED', {}, { fetchImpl: vi.fn() as any, internal: true, host: 'acme.com' })).rejects.toThrow(/signing key/);
     });
 
     it('respuesta no-2xx lanza', async () => {
@@ -134,8 +154,14 @@ describe('runEmailPreSendHooks: el DLP realmente bloquea o avisa al enviar', () 
 });
 
 describe('runEmailReceivedHooks', () => {
+    it('sin clave de dominio se omite en silencio (el backend solo lo admite firmado) y no llama a la red', async () => {
+        const fetchImpl = vi.fn();
+        expect(await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1', domain: 'acme.com' }, { fetchImpl: fetchImpl as any, backendUrl: 'https://be' })).toBeNull();
+        expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
     it('devuelve cuantos hooks corrieron y nunca lanza', async () => {
-        process.env.EXTENSION_HOOKS_SECRET = 'sh';
+        process.env.BLOOMX_DOMAIN_PRIVATE_KEY = generateEd25519KeyPair().privatePem;
         const ok = await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1', domain: 'acme.com' }, { fetchImpl: (async () => json({ results: [{}, {}] })) as any, backendUrl: 'https://be' });
         expect(ok).toEqual({ executed: 2 });
 

@@ -58,6 +58,16 @@ Bloomx is configured entirely via Environment Variables. See `.env.example` for 
 - `S3_SECRET_KEY` || `B2_SECRET_KEY`
 - `S3_BUCKET` || `B2_BUCKET`
 
+### Shared backend (`bloomx-backend`) authentication — no shared secrets
+The backend is **shared** by many Bloomx frontends, so nothing global is shared with it.
+
+**Do NOT configure:** `INTERNAL_SECRET`, `EXTENSION_HOOKS_SECRET`, `FRONTEND_INTERNAL_URL`, nor share `NEXTAUTH_SECRET` with the backend. The frontend's internal server-to-server key (Resend webhook -> `process-attachments`, cron chaining) is **derived from this instance's own `NEXTAUTH_SECRET`** with HKDF-SHA256 (info `bloomx-internal-v1`, `src/lib/internal-auth.ts`); `INTERNAL_SECRET` is accepted only if you still define it. The session JWT is no longer forwarded to the backend.
+
+**Optional variables:**
+- `BLOOMX_DOMAIN_PRIVATE_KEY`: this instance's Ed25519 private key (PEM PKCS8 or base64). When set, requests to the backend (`extension/execute`, hooks, handler listing) are signed (`X-BloomX-Signature/Timestamp/Nonce`). When unset, the legacy header protocol is used and the backend treats the domain in *legacy mode* (no domain credentials, no `services.mail`, no `EMAIL_RECEIVED`/`CRON` hooks; response header `X-BloomX-Auth: legacy`).
+  Generate it with `node scripts/gen-domain-keypair.mjs`, then register the **public** key in the backend (`signingPublicKey` in `POST /api/auth/verify-domain`, or `POST /api/manager/domain-key` with the domain manager's session). Once registered, the backend *requires* signatures for the domain.
+- `BLOOMX_BACKEND_PUBLIC_KEY`: the backend's Ed25519 public key, used to verify its signed calls to `/api/internal/mail` (Organizer / `services.mail`). If unset it is discovered (cached) at `NEXT_PUBLIC_BACKEND_URL/.well-known/bloomx-backend-key.json`. If the backend has no key, that bridge is simply unavailable (the Organizer falls back to heuristics).
+
 ### AI Capabilities
 - `AI_PROVIDER`: `openai`, `gemini`, `anthropic`, `cohere`
 - `AI_KEY`: Your API Key.

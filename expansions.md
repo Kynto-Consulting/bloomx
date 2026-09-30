@@ -34,7 +34,7 @@ Ya no existen en el código ni en esta lista: `core-slack`, `core-templates`, `c
 
 ## Seguridad (resumen)
 
-- **Ejecución autenticada**: `/api/extension/execute` y `/api/extension/hooks` exigen el JWT de sesión (`NEXTAUTH_SECRET` compartido) o el secreto de servicio; fallan cerrado sin configuración en producción.
+- **Ejecución autenticada por dominio, sin secretos compartidos**: el backend es compartido por N frontends. Un dominio con clave pública registrada (`Domain.signingPublicKey`) debe firmar cada llamada con Ed25519 (`X-BloomX-Signature/Timestamp/Nonce`, ventana ±120 s, anti-replay por nonce); un dominio sin clave entra en **modo legado** (cabeceras `x-bloomx-domain`/`x-user-id`, sin credenciales de dominio, sin `services.mail`, sin `EMAIL_RECEIVED`/`CRON`, con rate limit y cabecera `X-BloomX-Auth: legacy`). Ya no se usan `NEXTAUTH_SECRET`/`INTERNAL_SECRET`/`EXTENSION_HOOKS_SECRET` entre frontend y backend.
 - **Sandbox** `node:vm` sin objetos del host; `process.env` solo con las variables `ENV_READ:*` permitidas (lista de reservadas en `manifest-schema.ts`); `fetch` con protección SSRF. Sigue sin ser una frontera fuerte: para código de terceros usar `isolated-vm`/contenedor.
 - **Manifests validados** con schema en carga (frontend), publicación (`admin/extensions`) y lectura de repositorio.
 - **Renderer**: evaluador de expresiones sin `eval`, URLs saneadas, contexto saneado hacia el backend, `auth`/`user`/`env` fijados solo por el servidor.
@@ -65,9 +65,12 @@ Cookie de sesión del manager (propietario del dominio). Requiere `DATA_ENCRYPTI
 
 | Variable | Dónde | Uso |
 |---|---|---|
-| `NEXTAUTH_SECRET` | ambos (mismo valor) | JWT de sesión que el backend verifica. |
+| `NEXTAUTH_SECRET` | frontend (propio de cada instancia) | Sesión y clave interna derivada (HKDF). **No se comparte con el backend.** |
+| `BLOOMX_DOMAIN_PRIVATE_KEY` | frontend (opcional) | Clave Ed25519 con la que la instancia firma sus llamadas al backend (`scripts/gen-domain-keypair.mjs`); sin ella, modo legado. |
+| `BLOOMX_BACKEND_PUBLIC_KEY` | frontend (opcional) | Clave pública del backend para verificar `services.mail`; si falta se descubre en `/.well-known/bloomx-backend-key.json`. |
+| `BACKEND_SIGNING_PRIVATE_KEY` | backend (opcional) | Clave Ed25519 propia del backend para el puente hacia el frontend. |
 | `DATA_ENCRYPTION_KEY` | backend | Cifrado de credenciales por dominio. |
-| `EXTENSION_HOOKS_SECRET` / `INTERNAL_SECRET` | ambos (mismo valor) | Llamadas de servicio a `/api/extension/hooks` (EMAIL_RECEIVED, CRON). |
+| `BACKEND_CRON_SECRET` | backend (opcional, operador) | Cron global de hooks de todos los dominios (`Authorization: Bearer`). Sin definir, el cron va firmado por cada dominio. |
 | `EXTENSION_GLOBAL_ENV_FALLBACK` | backend | Variables sensibles que un dominio puede tomar del entorno global. |
 | `EXTENSION_HOOKS_FAIL_CLOSED` / `EXTENSION_HOOKS_DISABLED` | frontend | Política si el backend no evalúa los hooks de `EMAIL_PRE_SEND`. |
 

@@ -19,6 +19,7 @@ import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { normalizeContentId } from '@/lib/email-utils';
 import { validateAttachment } from '@/lib/file-type';
 import { runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
+import { internalSecretToSend } from '@/lib/internal-auth';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
 
 export async function POST(req: NextRequest) {
@@ -572,7 +573,8 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         if (needsAsyncProcessing) {
             const emailIdForAsync = createdEmail.id;
             const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-            const internalSecret = process.env.INTERNAL_SECRET || '';
+            // Clave interna derivada de NEXTAUTH_SECRET (lib/internal-auth.ts); INTERNAL_SECRET solo si esta definido.
+            const internalSecret = internalSecretToSend();
             const triggerProcessAttachments = () => {
                 fetch(`${appUrl}/api/emails/${emailIdForAsync}/process-attachments`, {
                     method: 'POST',

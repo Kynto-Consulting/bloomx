@@ -7,6 +7,7 @@ import { createResendSender } from '@/lib/elixir-send';
 import { buildAbsoluteUnsubscribeUrl, buildUnsubscribeHeaders, getSuppressedRecipients } from '@/lib/unsubscribe';
 import { runCampaignTick, type TickResult, type WorkerDeps, type WorkerLimits, type WorkerUser } from '@/lib/elixir-worker';
 import { pgCampaignStore } from '@/lib/elixir-campaign-store';
+import { deriveInternalKey } from '@/lib/internal-auth';
 
 export async function loadWorkerUser(userId: string): Promise<WorkerUser | null> {
     const u = await prisma.user.findUnique({
@@ -40,11 +41,12 @@ export async function tickCampaign(campaignId: string, limits: Partial<WorkerLim
 
 /**
  * Encadena otra invocacion del worker (fire-and-forget) para no depender de la frecuencia del cron.
- * Autenticada con CRON_SECRET; `hop` acota la cadena. Sin CRON_SECRET o URL publica no hace nada
+ * Autenticada con CRON_SECRET o la clave interna derivada; `hop` acota la cadena. Sin URL publica no hace nada
  * (el cron programado seguira el trabajo).
  */
 export async function chainNextTick(campaignId: string, hop: number): Promise<boolean> {
-    const secret = process.env.CRON_SECRET;
+    // Encadenamiento propio: CRON_SECRET si existe; si no, la clave interna derivada de NEXTAUTH_SECRET (lib/internal-auth.ts).
+    const secret = process.env.CRON_SECRET || deriveInternalKey();
     const base = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '');
     if (!secret || !/^https?:\/\//.test(base) || hop >= MAX_CHAIN_HOPS) return false;
     try {

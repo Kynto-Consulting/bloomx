@@ -15,7 +15,7 @@ bloomx-extensions/<ext>/manifest.json + server.js
         ▲                                            │ ExtensionLoader → JsonRenderer│
         │                                            └───────┬──────────────────────┘
  bloomx-backend                                              │ CALL_BACKEND / hooks
-  /api/extension/execute  (RPC)  ◄───── /api/expansions ─────┘  (proxy con JWT de sesión)
+  /api/extension/execute  (RPC)  ◄───── /api/expansions ─────┘  (proxy firmado Ed25519 / legado)
   /api/extension/hooks    (intercepts) ◄─ /api/emails (EMAIL_PRE_SEND)
   /api/extension/settings (credenciales por dominio)
 ```
@@ -122,11 +122,11 @@ Evaluador propio sin `eval` (`lib/expansions/expressions.ts`). Soporta: rutas (`
 
 | Evento | Quién lo llama | Efecto |
 |---|---|---|
-| `EMAIL_PRE_SEND` | `POST /api/emails` (frontend) con el JWT del usuario, justo antes de enviar | Handler devuelve `{ stop: true, message }` → **el correo no se envía** (HTTP 422, `code: "EXTENSION_BLOCKED"`). `{ modify: { subject?, html?, text? } }` reemplaza asunto/cuerpo (nunca destinatarios). `{ warning }` se devuelve en `warnings`. `MONITOR` se ejecuta pero no bloquea ni modifica. `onError: "block"` bloquea si el handler falla (DLP lo usa). |
-| `EMAIL_RECEIVED` | Ingest de correo entrante con `x-internal-secret` (`runEmailReceivedHooks` en `lib/expansions/server-hooks.ts`) | Sin bloqueo. **Pendiente:** llamar a `runEmailReceivedHooks({emailId,userId,domain})` desde `webhooks/resend` (ruta editada por otro equipo). |
-| `CRON` | Planificador del operador: `POST /api/extension/hooks {event:"CRON", schedule:"hourly"|"daily"}` con `x-internal-secret` (o `runCronHooks`) | Ejecuta los intercepts `point:"CRON"` con ese `schedule` en todos los dominios. Ninguna extensión actual lo usa. |
+| `EMAIL_PRE_SEND` | `POST /api/emails` (frontend, firmado o en modo legado), justo antes de enviar | Handler devuelve `{ stop: true, message }` → **el correo no se envía** (HTTP 422, `code: "EXTENSION_BLOCKED"`). `{ modify: { subject?, html?, text? } }` reemplaza asunto/cuerpo (nunca destinatarios). `{ warning }` se devuelve en `warnings`. `MONITOR` se ejecuta pero no bloquea ni modifica. `onError: "block"` bloquea si el handler falla (DLP lo usa). |
+| `EMAIL_RECEIVED` | Ingest de correo entrante, solo con dominio **firmado** (`runEmailReceivedHooks` en `lib/expansions/server-hooks.ts`) | Sin bloqueo. **Pendiente:** llamar a `runEmailReceivedHooks({emailId,userId,domain})` desde `webhooks/resend` (ruta editada por otro equipo). |
+| `CRON` | `runCronHooks` (dominio firmado) o el operador del backend con `BACKEND_CRON_SECRET` | Ejecuta los intercepts `point:"CRON"` con ese `schedule` en el dominio firmado (o en todos, si lo lanza el operador). Ninguna extensión actual lo usa. |
 
-Variables: backend `EXTENSION_HOOKS_SECRET` (o `INTERNAL_SECRET`, mismo valor en el frontend). Frontend: `EXTENSION_HOOKS_FAIL_CLOSED=true` para **no enviar** si el backend no puede evaluar los hooks (por defecto se envía y se registra el fallo), `EXTENSION_HOOKS_DISABLED=true` para desactivar.
+Autenticación: firma Ed25519 con `BLOOMX_DOMAIN_PRIVATE_KEY` (sin secretos compartidos; ver README). Frontend: `EXTENSION_HOOKS_FAIL_CLOSED=true` para **no enviar** si el backend no puede evaluar los hooks (por defecto se envía y se registra el fallo), `EXTENSION_HOOKS_DISABLED=true` para desactivar.
 
 Ejemplo (DLP): el hook ve `ctx.subject`, `ctx.emailContent` (HTML + texto), `ctx.attachments[].filename`, `ctx.to/cc/bcc/from`.
 

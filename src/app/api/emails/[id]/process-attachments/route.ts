@@ -20,8 +20,7 @@ export const maxDuration = 300;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 3;
-import { safeEqual } from '@/lib/security';
-const INTERNAL_SECRET = process.env.INTERNAL_SECRET;
+import { verifyInternalRequest } from '@/lib/internal-auth';
 // Limites anti-agotamiento de memoria/almacenamiento (raw MIME base64 ~ 1.37x el adjunto).
 const MAX_RAW_MIME_BYTES = 80 * 1024 * 1024;
 const MAX_ATTACHMENT_BYTES = 45 * 1024 * 1024;
@@ -162,16 +161,10 @@ export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> },
 ) {
-    // Auth: internal secret
-    // Falla cerrado en produccion si INTERNAL_SECRET no esta configurado (la ruta es publica en middleware)
-    if (!INTERNAL_SECRET && process.env.NODE_ENV === 'production') {
+    // Auth interna (la ruta es publica en middleware): clave derivada de NEXTAUTH_SECRET con HKDF (lib/internal-auth.ts);
+    // INTERNAL_SECRET se acepta solo si esta definido. No hace falta configurar INTERNAL_SECRET.
+    if (!verifyInternalRequest(req.headers).ok) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-    if (INTERNAL_SECRET) {
-        const provided = req.headers.get('x-internal-secret') || '';
-        if (!safeEqual(provided, INTERNAL_SECRET)) {
-            return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-        }
     }
 
     const { id: emailId } = await params;

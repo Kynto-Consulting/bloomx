@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { rateLimitAsync, safeEqual } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
+import { verifyBackendRequest } from '@/lib/backend-auth';
 import { internalMailRequest } from '@/lib/organizer/schemas';
 import { applyBatch, defaultDeps, getEmail, listRecent, undoRun } from '@/lib/organizer/mail-service';
 
 /**
  * Puente servidor-a-servidor para `services.mail.*` del sandbox de extensiones (bloomx-backend).
  *
- * Auth: secreto compartido `x-internal-secret` (EXTENSION_HOOKS_SECRET o INTERNAL_SECRET, el mismo valor que en el
- * backend). Sin secreto configurado se rechaza siempre (fail-closed). El `userId` del cuerpo es el que el backend
- * derivo de una identidad verificada (JWT del usuario o webhook interno): la extension nunca lo controla.
+ * Auth SIN secretos compartidos: firma Ed25519 DEL BACKEND (X-BloomX-Signature/Timestamp/Nonce sobre metodo+ruta+sha256(cuerpo)
+ * +dominio+usuario), verificada con la clave PUBLICA del backend (BLOOMX_BACKEND_PUBLIC_KEY o descubrimiento con cache desde
+ * NEXT_PUBLIC_BACKEND_URL/.well-known/bloomx-backend-key.json). La audiencia (X-BloomX-Domain) debe ser esta instancia y el
+ * nonce no puede repetirse. Sin clave publica del backend la ruta responde 503 solo para este puente (Organizer usa su
+ * heuristica). El `userId` del cuerpo es el que el backend derivo de una identidad que ESTE dominio firmo al llamarle:
+ * la extension nunca lo controla y debe coincidir con el X-User-Id firmado.
  * Ver src/lib/organizer/mail-service.ts para las garantias de propiedad y minimo privilegio.
  */
 export const runtime = 'nodejs';
@@ -19,23 +23,25 @@ const MAX_BODY_BYTES = 256 * 1024;
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
 export async function POST(req: NextRequest) {
-    const expected = process.env.EXTENSION_HOOKS_SECRET || process.env.INTERNAL_SECRET;
-    if (!expected) return NextResponse.json({ error: 'Service not configured' }, { status: 503, headers: NO_STORE });
-    const provided = req.headers.get('x-internal-secret') || '';
-    if (!provided || !safeEqual(provided, expected)) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
-    }
-
     const declared = Number(req.headers.get('content-length') || 0);
     if (declared > MAX_BODY_BYTES) return NextResponse.json({ error: 'Payload too large' }, { status: 413, headers: NO_STORE });
     const raw = await req.text();
     if (raw.length > MAX_BODY_BYTES) return NextResponse.json({ error: 'Payload too large' }, { status: 413, headers: NO_STORE });
+
+    const verified = await verifyBackendRequest(req, raw);
+    if (!verified.ok) {
+        return verified.reason === 'unavailable'
+            ? NextResponse.json({ error: 'Backend key unavailable' }, { status: 503, headers: { ...NO_STORE, 'Retry-After': '30' } })
+            : NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
+    }
 
     let json: unknown = null;
     try { json = JSON.parse(raw); } catch { json = null; }
     const parsed = internalMailRequest.safeParse(json);
     if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400, headers: NO_STORE });
     const { userId } = parsed.data;
+    // El usuario del cuerpo debe ser el firmado en la cabecera (evita reutilizar una firma con otro userId).
+    if (verified.userId !== userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
 
     const rl = await rateLimitAsync(`internal-mail:${userId}`, 300, 60_000);
     if (!rl.ok) {

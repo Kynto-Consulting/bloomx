@@ -240,5 +240,5 @@ Gmail y Yahoo exigen a remitentes de volumen (más de 5000 correos al día) SPF,
 - Los envíos masivos de Elixir incluyen `List-Unsubscribe` y `List-Unsubscribe-Post: List-Unsubscribe=One-Click` y omiten a quienes ya se dieron de baja.
 - Requisitos: `NEXT_PUBLIC_APP_URL` con `https://` público y un secreto (`UNSUBSCRIBE_SECRET`, o `NEXTAUTH_SECRET` como respaldo). Sin estos, la cabecera no se añade.
 - Endpoint público de baja: `https://tu-dominio-publico/api/webhooks/unsubscribe`.
-- Variables de operación relacionadas: `MAX_SENDS_PER_HOUR` (por defecto 200, envíos normales), `MAX_BULK_ROWS` (por defecto 500 filas por solicitud), `WEBHOOK_SECRET`, `INTERNAL_SECRET`.
+- Variables de operación relacionadas: `MAX_SENDS_PER_HOUR` (por defecto 200, envíos normales), `MAX_BULK_ROWS` (por defecto 500 filas por solicitud), `WEBHOOK_SECRET` (`INTERNAL_SECRET` ya no es necesario: se deriva de `NEXTAUTH_SECRET`).
 - Calienta el dominio: sube el volumen de forma gradual durante 2 a 4 semanas.

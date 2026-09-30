@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { safeEqual } from '@/lib/security';
+import { deriveInternalKey } from '@/lib/internal-auth';
 import { campaigns, ElixirTablesMissingError } from '@/lib/elixir-campaign-store';
 import { chainNextTick, tickCampaign } from '@/lib/elixir-worker-runtime';
 import type { TickResult } from '@/lib/elixir-worker';
 
 /**
  * Worker de campanas de Elixir. Autenticado SOLO con `Authorization: Bearer CRON_SECRET`
- * (Vercel Cron, un pinger externo o el propio encadenamiento). Sin CRON_SECRET configurado: 401.
+ * (Vercel Cron, un pinger externo) o con la clave interna derivada de NEXTAUTH_SECRET (el propio encadenamiento, sin configurar
+ * nada). Cualquier otra cosa: 401.
  *
  *  GET|POST /api/cron/elixir                 -> procesa hasta 5 campanas `running` con filas listas.
  *  GET|POST /api/cron/elixir?campaign=<id>   -> procesa esa campana.
@@ -23,9 +25,11 @@ const MAX_CAMPAIGNS_PER_RUN = 5;
 
 function authorized(req: NextRequest): boolean {
     const header = req.headers.get('authorization') || '';
-    const secret = process.env.CRON_SECRET;
-    if (!secret || !header.startsWith('Bearer ')) return false;
-    return safeEqual(header.slice(7).trim(), secret);
+    if (!header.startsWith('Bearer ')) return false;
+    const provided = header.slice(7).trim();
+    // CRON_SECRET (planificador externo / Vercel Cron) o la clave interna derivada de NEXTAUTH_SECRET (encadenamiento propio).
+    const accepted = [process.env.CRON_SECRET, deriveInternalKey()].filter((s): s is string => Boolean(s));
+    return accepted.some((secret) => safeEqual(provided, secret));
 }
 
 async function handle(req: NextRequest) {

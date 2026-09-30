@@ -2,8 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { getGoogleAccessToken } from '@/lib/google/account';
-import { cookies } from 'next/headers';
-import { readSessionCookie } from '@/lib/session-cookie';
+import { buildBackendHeaders } from '@/lib/backend-auth';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://backend.bloomx.arubik.dev';
 
@@ -28,21 +27,17 @@ export async function GET(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const cookieStore = await cookies();
-    const token = readSessionCookie(cookieStore).token ?? undefined;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     const { searchParams } = new URL(req.url);
     const trigger = searchParams.get('trigger');
 
     try {
-        const res = await fetch(`${BACKEND_URL}/api/extensions?trigger=${trigger || ''}`, {
-            headers: {
-                'Authorization': `Bearer ${token || ''}`,
-                'X-User-ID': user.id,
-                'X-User-Email': user.email || '',
-                'X-BloomX-Domain': host.split(':')[0]
-            }
+        // Identidad hacia el backend compartido: firmada (Ed25519) si hay BLOOMX_DOMAIN_PRIVATE_KEY; si no, protocolo
+        // legado por cabeceras. Ya no se reenvia el JWT de sesion.
+        const backendUrl = `${BACKEND_URL}/api/extensions?trigger=${trigger || ''}`;
+        const res = await fetch(backendUrl, {
+            headers: buildBackendHeaders({ method: 'GET', url: backendUrl, body: '', domain: host, userId: user.id, email: user.email || '' }),
         });
 
         if (!res.ok) {
@@ -61,8 +56,6 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const cookieStore = await cookies();
-    const token = readSessionCookie(cookieStore).token ?? undefined;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     try {
@@ -82,17 +75,16 @@ export async function POST(req: NextRequest) {
             context: enrichedContext,
         };
 
-        // Forward to backend execution endpoint
-        const res = await fetch(`${BACKEND_URL}/api/extension/execute`, {
+        // Forward to backend execution endpoint (firmado con la clave de esta instancia, o legado sin clave)
+        const executeUrl = `${BACKEND_URL}/api/extension/execute`;
+        const rawBody = JSON.stringify(payload);
+        const res = await fetch(executeUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token || ''}`,
-                'X-User-ID': user.id,
-                'X-User-Email': user.email || '',
-                'X-BloomX-Domain': host.split(':')[0]
+                ...buildBackendHeaders({ method: 'POST', url: executeUrl, body: rawBody, domain: host, userId: user.id, email: user.email || '' }),
             },
-            body: JSON.stringify(payload)
+            body: rawBody
         });
 
         const data = await res.json();

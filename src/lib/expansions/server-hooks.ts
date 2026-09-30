@@ -1,18 +1,24 @@
 /**
  * Ejecutor (lado frontend-servidor) de los hooks de extensiones: habla con `POST {BACKEND}/api/extension/hooks`.
  *
- *  - EMAIL_PRE_SEND: se llama desde POST /api/emails justo antes de enviar. Con la sesion del usuario (JWT).
+ * Autenticacion hacia el backend COMPARTIDO sin secretos: firma Ed25519 con BLOOMX_DOMAIN_PRIVATE_KEY si esta definida
+ * (ver lib/backend-auth.ts); si no, protocolo antiguo por cabeceras (modo LEGADO del backend). Ya no se reenvia el JWT de
+ * sesion ni existe x-internal-secret hacia el backend.
+ *
+ *  - EMAIL_PRE_SEND: se llama desde POST /api/emails justo antes de enviar (funciona en modo legado y firmado).
  *      El resultado { stop, message, warnings, modify } se aplica en la ruta: stop => 422 y NO se envia.
- *  - EMAIL_RECEIVED: para el ingest de correo entrante (webhook de Resend). Usa el secreto de servicio
- *      (EXTENSION_HOOKS_SECRET o INTERNAL_SECRET, el mismo valor en el backend). Sin bloqueo; nunca lanza.
- *  - CRON: lo llama un planificador (Vercel Cron / GitHub Actions) directamente contra el backend con
- *      x-internal-secret; este modulo ofrece `runCronHooks` por comodidad.
+ *  - EMAIL_RECEIVED: para el ingest de correo entrante (webhook de Resend). Requiere dominio FIRMADO (el backend rechaza
+ *      este evento en modo legado): sin BLOOMX_DOMAIN_PRIVATE_KEY se omite. Sin bloqueo; nunca lanza.
+ *  - CRON: `runCronHooks` ejecuta los intercepts CRON de ESTE dominio (firmado). El cron global de todos los dominios es
+ *      del operador del backend (BACKEND_CRON_SECRET en el backend).
  *
  * Politica de fallo de EMAIL_PRE_SEND cuando el backend no responde (red, 5xx, sin configurar):
  *   por defecto se ENVIA igual (un backend caido no debe impedir escribir correos) y se deja un aviso en el log;
  *   con EXTENSION_HOOKS_FAIL_CLOSED=true NO se envia (recomendado si DLP es obligatorio).
  *   EXTENSION_HOOKS_DISABLED=true desactiva por completo la llamada.
  */
+
+import { buildBackendHeaders, loadDomainPrivateKey } from '@/lib/backend-auth';
 
 export type HookEvent = 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON';
 
@@ -41,13 +47,13 @@ export interface PreSendResult {
 export interface HookTransport {
     fetchImpl?: typeof fetch;
     backendUrl?: string;
-    /** JWT de sesion del usuario (Authorization: Bearer) */
+    /** @deprecated Ignorado: el JWT de sesion ya no se reenvia al backend. */
     token?: string | null;
     /** Dominio del tenant (X-BloomX-Domain) */
     host?: string | null;
     userId?: string | null;
     email?: string | null;
-    /** Usa el secreto de servicio en lugar del JWT (EMAIL_RECEIVED) */
+    /** Llamada de servicio (EMAIL_RECEIVED/CRON): exige clave de dominio (firma); nunca se degrada a legado. */
     internal?: boolean;
     timeoutMs?: number;
 }
@@ -105,25 +111,29 @@ export async function callBackendHooks(event: HookEvent, context: Record<string,
     const fetchImpl = transport.fetchImpl || fetch;
     const backendUrl = (transport.backendUrl || process.env.NEXT_PUBLIC_BACKEND_URL || DEFAULT_BACKEND).replace(/\/+$/, '');
 
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (transport.internal) {
-        const secret = process.env.EXTENSION_HOOKS_SECRET || process.env.INTERNAL_SECRET;
-        if (!secret) throw new Error('hooks secret not configured');
-        headers['x-internal-secret'] = secret;
-    } else {
-        headers.Authorization = `Bearer ${transport.token || ''}`;
-        if (transport.userId) headers['X-User-ID'] = transport.userId;
-        if (transport.email) headers['X-User-Email'] = transport.email;
-    }
-    if (transport.host) headers['X-BloomX-Domain'] = transport.host.split(':')[0];
+    if (transport.internal && !loadDomainPrivateKey()) throw new Error('domain signing key not configured');
+
+    const url = `${backendUrl}/api/extension/hooks`;
+    const rawBody = JSON.stringify({ event, context });
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...buildBackendHeaders({
+            method: 'POST',
+            url,
+            body: rawBody,
+            domain: transport.host || '',
+            userId: transport.userId,
+            email: transport.email,
+        }),
+    };
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), transport.timeoutMs ?? 10_000);
     try {
-        const response = await fetchImpl(`${backendUrl}/api/extension/hooks`, {
+        const response = await fetchImpl(url, {
             method: 'POST',
             headers,
-            body: JSON.stringify({ event, context }),
+            body: rawBody,
             signal: controller.signal,
         });
         if (!response.ok) throw new Error(`hooks backend responded ${response.status}`);
@@ -162,8 +172,16 @@ export async function runEmailReceivedHooks(
     transport: HookTransport = {},
 ): Promise<{ executed: number } | null> {
     if (envFlag('EXTENSION_HOOKS_DISABLED')) return null;
+    // El backend solo admite EMAIL_RECEIVED de un dominio firmado: sin clave se omite en silencio (modo legado).
+    if (!loadDomainPrivateKey()) return null;
     try {
-        const json = await callBackendHooks('EMAIL_RECEIVED', context, { ...transport, internal: true, host: transport.host || context.domain || null });
+        // El dueño del buzon viaja como X-User-ID FIRMADO (el backend lo usa como trustedUserId).
+        const json = await callBackendHooks('EMAIL_RECEIVED', context, {
+            ...transport,
+            internal: true,
+            host: transport.host || context.domain || process.env.TOP_DOMAIN || null,
+            userId: transport.userId || context.userId,
+        });
         return { executed: Array.isArray(json?.results) ? json.results.length : 0 };
     } catch (error: any) {
         console.error('[EXTENSION_HOOKS] EMAIL_RECEIVED fallo:', String(error?.message || 'error').slice(0, 120));
@@ -171,18 +189,11 @@ export async function runEmailReceivedHooks(
     }
 }
 
-/** CRON (schedule hourly|daily). Pensado para el planificador del operador. */
+/** CRON (schedule hourly|daily) de ESTE dominio: requiere BLOOMX_DOMAIN_PRIVATE_KEY (firmado). */
 export async function runCronHooks(schedule: 'hourly' | 'daily', transport: HookTransport = {}): Promise<any> {
-    const backendUrl = (transport.backendUrl || process.env.NEXT_PUBLIC_BACKEND_URL || DEFAULT_BACKEND).replace(/\/+$/, '');
-    const secret = process.env.EXTENSION_HOOKS_SECRET || process.env.INTERNAL_SECRET;
-    if (!secret) throw new Error('hooks secret not configured');
-    const response = await (transport.fetchImpl || fetch)(`${backendUrl}/api/extension/hooks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-secret': secret },
-        body: JSON.stringify({ event: 'CRON', schedule }),
-    });
-    if (!response.ok) throw new Error(`hooks backend responded ${response.status}`);
-    return response.json();
+    const host = transport.host || process.env.TOP_DOMAIN || null;
+    if (!host) throw new Error('domain not configured');
+    return callBackendHooks('CRON', { schedule } as Record<string, unknown>, { ...transport, internal: true, host });
 }
 
 /** Adaptador para rutas de Next: obtiene JWT (cookie) y dominio de la peticion. */
@@ -191,8 +202,6 @@ export async function runEmailPreSendHooksForRequest(
     user: { id: string; email?: string | null },
     message: PreSendMessage,
 ): Promise<PreSendResult> {
-    const [{ cookies }, { readSessionCookie }] = await Promise.all([import('next/headers'), import('@/lib/session-cookie')]);
-    const token = readSessionCookie(await cookies()).token;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
-    return runEmailPreSendHooks(message, { token, host, userId: user.id, email: user.email });
+    return runEmailPreSendHooks(message, { host, userId: user.id, email: user.email });
 }
