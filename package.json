@@ -15,7 +15,8 @@
         "db:ensure": "tsx scripts/ensure-schema.ts",
         "check:themes": "tsx scripts/check-theme-contrast.ts",
         "postinstall": "prisma generate",
-        "test": "vitest run"
+        "test": "vitest run",
+        "test:db:setup": "node scripts/setup-test-db.mjs"
     },
     "keywords": [],
     "author": "",

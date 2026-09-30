@@ -2,3 +2,6 @@
 .next/*
 .env
 node_modules/*
+# SQLite de pruebas (generado)
+prisma/test.db*
+prisma/schema.test.prisma
