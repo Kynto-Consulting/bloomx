@@ -206,7 +206,27 @@ export function PwaManager() {
             return;
         }
 
+        // Si ya habia un SW controlando la pagina y llega uno nuevo, recargar una vez para no quedarse con la version vieja.
+        const hadController = Boolean(navigator.serviceWorker.controller);
+        let reloaded = false;
+        const handleControllerChange = () => {
+            if (!hadController || reloaded) return;
+            reloaded = true;
+            window.location.reload();
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
+
+        let registrationRef: ServiceWorkerRegistration | null = null;
+        const checkForUpdate = () => {
+            registrationRef?.update().catch(() => undefined);
+        };
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') checkForUpdate();
+        };
+
         navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).then((registration) => {
+            registrationRef = registration;
+            registration.update().catch(() => undefined);
             registration.active?.postMessage({
                 type: 'SET_BRANDING',
                 payload: {
@@ -217,6 +237,12 @@ export function PwaManager() {
         }).catch((error) => {
             console.error('[pwa] Service worker registration failed:', error);
         });
+
+        document.addEventListener('visibilitychange', handleVisibility);
+        return () => {
+            navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
+            document.removeEventListener('visibilitychange', handleVisibility);
+        };
     }, [brandLogo, brandName]);
 
     useEffect(() => {

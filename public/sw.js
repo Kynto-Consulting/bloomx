@@ -9,7 +9,7 @@
  *
  * Al cambiar la estrategia, subir CACHE_VERSION: activate borra los caches anteriores.
  */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const SHELL_CACHE = `bloomx-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `bloomx-static-${CACHE_VERSION}`;
 const OFFLINE_URL = '/offline.html';
