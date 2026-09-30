@@ -21,7 +21,8 @@ import {
 export const EVENT_APPLIED = 'organizer.applied';
 export const EVENT_PROPOSED = 'organizer.proposed';
 export const EVENT_UNDONE = 'organizer.undone';
-const ORGANIZER_EVENTS = [EVENT_APPLIED, EVENT_PROPOSED, EVENT_UNDONE];
+export const EVENT_DISMISSED = 'organizer.dismissed';
+const ORGANIZER_EVENTS = [EVENT_APPLIED, EVENT_PROPOSED, EVENT_UNDONE, EVENT_DISMISSED];
 
 /** Subconjunto de Prisma que se usa (permite un doble en pruebas). */
 export interface MailDb {
@@ -285,4 +286,110 @@ export async function undoRun(deps: MailDeps, userId: string, args: { runId?: st
         undone++;
     }
     return { runId, undone };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Propuestas de baja confianza (UI del usuario): listar, aceptar (aplica la etiqueta) o rechazar (dismissed).
+// Las llama el propio usuario autenticado (rutas /api/organizer/proposals), con la misma garantia de propiedad.
+// ---------------------------------------------------------------------------------------------------------------
+export interface Proposal {
+    emailId: string;
+    from: string;
+    subject: string;
+    category: OrganizerCategory;
+    /** Nombre INTERNO de la etiqueta (estable, en ingles); null si la categoria no etiqueta (spam). */
+    labelName: string | null;
+    confidence: number;
+    method: string;
+    createdAt: string;
+}
+
+const isCategory = (v: unknown): v is OrganizerCategory => typeof v === 'string' && Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, v);
+
+/** Propuestas vigentes: `organizer.proposed` con categoria real (sin `reason`), correo aun en inbox, sin etiquetas y sin decision posterior. */
+async function loadOpenProposals(deps: MailDeps, userId: string, emailIds?: string[]) {
+    const events = await deps.db.emailEvent.findMany({
+        where: { type: EVENT_PROPOSED, email: { userId }, ...(emailIds ? { emailId: { in: emailIds } } : {}) },
+        select: { id: true, emailId: true, data: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+        take: 500,
+    });
+    const usable = events
+        .filter((e: any) => e.emailId && !e.data?.reason && isCategory(e.data?.category))
+        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    const ids = Array.from(new Set<string>(usable.map((e: any) => String(e.emailId))));
+    if (ids.length === 0) return { proposals: [] as Array<{ event: any; row: any }> };
+
+    const [rows, decided] = await Promise.all([
+        deps.db.email.findMany({ where: { userId, id: { in: ids } }, select: SUMMARY_SELECT }),
+        deps.db.emailEvent.findMany({ where: { emailId: { in: ids }, type: { in: [EVENT_APPLIED, EVENT_DISMISSED] } }, select: { emailId: true } }),
+    ]);
+    const byId = new Map<string, any>(rows.map((r: any) => [String(r.id), r]));
+    const done = new Set<string>(decided.map((e: any) => String(e.emailId)));
+    const seen = new Set<string>();
+    const proposals: Array<{ event: any; row: any }> = [];
+    for (const event of usable) {
+        const id = String(event.emailId);
+        if (seen.has(id)) continue; // la mas reciente por correo
+        seen.add(id);
+        const row = byId.get(id);
+        if (!row || done.has(id) || row.folder !== 'inbox' || (Array.isArray(row.labels) && row.labels.length > 0)) continue;
+        proposals.push({ event, row });
+    }
+    return { proposals };
+}
+
+export async function listProposals(deps: MailDeps, userId: string, args: { limit?: number } = {}): Promise<{ proposals: Proposal[] }> {
+    const limit = Math.min(100, Math.max(1, args.limit ?? 50));
+    const { proposals } = await loadOpenProposals(deps, userId);
+    return {
+        proposals: proposals.slice(0, limit).map(({ event, row }) => ({
+            emailId: String(row.id),
+            from: clip(row.from, 200),
+            subject: clip(row.subject, 200),
+            category: event.data.category as OrganizerCategory,
+            labelName: CATEGORY_LABELS[event.data.category as OrganizerCategory]?.name ?? null,
+            confidence: Number(event.data.confidence) || 0,
+            method: clip(event.data.method, 20),
+            createdAt: event.createdAt instanceof Date ? event.createdAt.toISOString() : String(event.createdAt || ''),
+        })),
+    };
+}
+
+export type ProposalOutcome =
+    | { ok: true; label?: string; runId?: string }
+    | { ok: false; reason: 'not_found' | 'no_label_for_category' };
+
+/** Acepta una propuesta: etiqueta el correo (propio) con la etiqueta de la categoria y lo registra como `organizer.applied` (deshacible). */
+export async function acceptProposal(deps: MailDeps, userId: string, args: { emailId: string }): Promise<ProposalOutcome> {
+    const { proposals } = await loadOpenProposals(deps, userId, [args.emailId]);
+    const found = proposals.find((p) => String(p.row.id) === args.emailId);
+    if (!found) return { ok: false, reason: 'not_found' };
+    const category = found.event.data.category as OrganizerCategory;
+    const label = await resolveLabel(deps, userId, category, new Map());
+    if (!label) return { ok: false, reason: 'no_label_for_category' };
+
+    const runId = deps.newRunId();
+    await deps.db.email.update({ where: { id: args.emailId }, data: { labels: { connect: [{ id: label.id }] } } });
+    await deps.db.emailEvent.create({
+        data: {
+            emailId: args.emailId, type: EVENT_APPLIED,
+            data: {
+                runId, category, confidence: found.event.data.confidence, method: found.event.data.method,
+                source: 'manual', accepted: true, proposalId: String(found.event.id), labelIds: [label.id], labelNames: [label.name],
+            },
+        },
+    });
+    return { ok: true, label: label.name, runId };
+}
+
+/** Rechaza una propuesta: queda como `organizer.dismissed` (no vuelve a proponerse ni a analizarse). */
+export async function dismissProposal(deps: MailDeps, userId: string, args: { emailId: string }): Promise<ProposalOutcome> {
+    const { proposals } = await loadOpenProposals(deps, userId, [args.emailId]);
+    const found = proposals.find((p) => String(p.row.id) === args.emailId);
+    if (!found) return { ok: false, reason: 'not_found' };
+    await deps.db.emailEvent.create({
+        data: { emailId: args.emailId, type: EVENT_DISMISSED, data: { category: found.event.data.category, proposalId: String(found.event.id), source: 'manual' } },
+    });
+    return { ok: true };
 }
