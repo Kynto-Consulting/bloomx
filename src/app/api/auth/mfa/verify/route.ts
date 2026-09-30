@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Invalid or expired challenge" }, { status: 401, headers: NO_STORE });
     }
 
-    const limited = mfaAttemptLimit(req, actor.userId, "verify");
+    const limited = await mfaAttemptLimit(req, actor.userId, "verify");
     if (limited) return limited;
 
     try {

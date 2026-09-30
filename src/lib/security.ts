@@ -56,6 +56,120 @@ export function rateLimitReset(key: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Rate limiting distribuido (Upstash Redis REST) con fallback a memoria.
+//
+// Ventana fija atomica: POST {URL}/multi-exec con [INCR k] [PEXPIRE k ms NX] [PTTL k] (una transaccion MULTI/EXEC).
+// PEXPIRE ... NX solo fija el TTL si la clave aun no lo tiene: la ventana no se "estira" con cada intento y una clave
+// sin TTL (fallo entre comandos) se autorrepara. Las claves se guardan como sha256 (sin emails/IP en claro).
+//
+// Configuracion (todo por entorno, leido en cada llamada):
+//   UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN   sin ellas => solo memoria (por instancia)
+//   RATE_LIMIT_ON_ERROR = "memory" (defecto) | "open"    que hacer si Redis falla: contar en memoria o dejar pasar
+//   RATE_LIMIT_REDIS_TIMEOUT_MS (defecto 800)            timeout por peticion a Redis
+// Circuit breaker: 3 fallos seguidos abren el circuito 30 s (no se llama a Redis; se aplica RATE_LIMIT_ON_ERROR).
+// Nunca se devuelve ok:false por un fallo de Redis: una caida del almacen no bloquea a todos los usuarios.
+// ---------------------------------------------------------------------------
+export type RateLimitResult = { ok: boolean; retryAfter: number; backend: "redis" | "memory" | "open" };
+
+const BREAKER_THRESHOLD = 3;
+const BREAKER_OPEN_MS = 30_000;
+const breaker = { failures: 0, openUntil: 0 };
+
+/** Solo para pruebas. */
+export function __resetRateLimitState() {
+    buckets.clear();
+    breaker.failures = 0;
+    breaker.openUntil = 0;
+}
+
+function redisConfig(): { url: string; token: string } | null {
+    const url = (process.env.UPSTASH_REDIS_REST_URL || "").trim().replace(/\/+$/, "");
+    const token = (process.env.UPSTASH_REDIS_REST_TOKEN || "").trim();
+    if (!url || !token || !/^https?:\/\//i.test(url)) return null;
+    return { url, token };
+}
+
+function redisKey(key: string) {
+    return "bloomx:rl:" + createHash("sha256").update(key).digest("hex").slice(0, 40);
+}
+
+async function redisCall(cfg: { url: string; token: string }, path: string, commands: unknown[][]): Promise<any[]> {
+    const timeoutMs = Math.min(Math.max(Number(process.env.RATE_LIMIT_REDIS_TIMEOUT_MS) || 800, 100), 5000);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(cfg.url + path, {
+            method: "POST",
+            headers: { Authorization: "Bearer " + cfg.token, "Content-Type": "application/json" },
+            body: JSON.stringify(commands),
+            signal: ctrl.signal,
+            cache: "no-store",
+        });
+        if (!res.ok) throw new Error("redis http " + res.status);
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("redis bad response");
+        for (const item of data) if (item && item.error) throw new Error("redis command error");
+        return data.map((item: any) => item?.result);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function onRedisError(): void {
+    breaker.failures += 1;
+    if (breaker.failures >= BREAKER_THRESHOLD) {
+        breaker.openUntil = Date.now() + BREAKER_OPEN_MS;
+        breaker.failures = 0;
+        console.error("[RATE_LIMIT] Redis no disponible: circuito abierto " + BREAKER_OPEN_MS / 1000 + " s");
+    }
+}
+
+function degraded(key: string, limit: number, windowMs: number): RateLimitResult {
+    if ((process.env.RATE_LIMIT_ON_ERROR || "memory").toLowerCase() === "open") {
+        return { ok: true, retryAfter: 0, backend: "open" };
+    }
+    return { ...rateLimit(key, limit, windowMs), backend: "memory" };
+}
+
+export async function rateLimitAsync(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+    const cfg = redisConfig();
+    if (!cfg) return { ...rateLimit(key, limit, windowMs), backend: "memory" };
+    if (Date.now() < breaker.openUntil) return degraded(key, limit, windowMs);
+
+    try {
+        const k = redisKey(key);
+        const [count, , pttl] = await redisCall(cfg, "/multi-exec", [
+            ["INCR", k],
+            ["PEXPIRE", k, String(Math.ceil(windowMs)), "NX"],
+            ["PTTL", k],
+        ]);
+        const n = Number(count);
+        if (!Number.isFinite(n)) throw new Error("redis bad count");
+        breaker.failures = 0;
+        if (n > limit) {
+            const ttl = Number(pttl) > 0 ? Number(pttl) : windowMs;
+            return { ok: false, retryAfter: Math.max(1, Math.ceil(ttl / 1000)), backend: "redis" };
+        }
+        return { ok: true, retryAfter: 0, backend: "redis" };
+    } catch {
+        onRedisError();
+        return degraded(key, limit, windowMs);
+    }
+}
+
+/** Reinicia el contador (p.ej. tras un login correcto). Best-effort: un fallo de Redis no propaga error. */
+export async function rateLimitResetAsync(key: string): Promise<void> {
+    buckets.delete(key);
+    const cfg = redisConfig();
+    if (!cfg || Date.now() < breaker.openUntil) return;
+    try {
+        await redisCall(cfg, "/pipeline", [["DEL", redisKey(key)]]);
+    } catch {
+        onRedisError();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Auditoria con datos redactados (nunca registrar contrasenas/tokens/emails completos)
 // ---------------------------------------------------------------------------
 // La implementacion (redaccion + persistencia en "AuditEvent" con fallback a stdout) vive en ./audit.

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     if (mfaRequiredFor(actor.email)) {
         return NextResponse.json({ error: "MFA is required for this account" }, { status: 403, headers: NO_STORE });
     }
-    const limited = mfaAttemptLimit(req, actor.userId, "disable");
+    const limited = await mfaAttemptLimit(req, actor.userId, "disable");
     if (limited) return limited;
 
     const user = await prisma.user.findUnique({ where: { id: actor.userId }, select: { password: true } });

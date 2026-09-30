@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { COOKIE_NAME, isSessionPayload, renewSessionIfNeeded, verifyJWT } from "@/lib/jwt";
 import { SESSION_COOKIE_OPTIONS } from "@/lib/session";
 import { checkSessionNotRevoked } from "@/lib/session-revocation";
-import { getClientIp, rateLimit } from "@/lib/security";
+import { getClientIp, rateLimitAsync } from "@/lib/security";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -15,7 +15,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
  */
 export async function POST(req: NextRequest) {
     const ip = getClientIp(req);
-    const rl = rateLimit(`refresh:${ip}`, 120, 60_000);
+    const rl = await rateLimitAsync(`refresh:${ip}`, 120, 60_000);
     if (!rl.ok) {
         return NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { ...NO_STORE, "Retry-After": String(rl.retryAfter) } });
     }

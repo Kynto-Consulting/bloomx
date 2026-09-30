@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const actor = await resolveMfaActor({});
     if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
-    const limited = mfaAttemptLimit(req, actor.userId, "recovery");
+    const limited = await mfaAttemptLimit(req, actor.userId, "recovery");
     if (limited) return limited;
 
     // Solo TOTP (un codigo de recuperacion no puede regenerar codigos de recuperacion)

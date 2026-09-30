@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
 // Paneles de MFA TOTP reutilizables: verificacion en el login, enrolamiento (login obligatorio para admin y pagina de seguridad).
-// No usa dependencias de QR: se muestra la clave para escribirla y un enlace otpauth:// (abre la app en el movil).
+// El QR del otpauth:// se genera en el navegador con el paquete `qrcode` (sin servicios externos: la clave nunca sale del cliente).
+// Se mantienen la clave manual y el enlace otpauth:// como alternativa accesible.
 
 const inputCls =
     'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
@@ -120,6 +121,7 @@ export function MfaEnrollForm({
 }) {
     const [secret, setSecret] = useState('');
     const [uri, setUri] = useState('');
+    const [qr, setQr] = useState('');
     const [code, setCode] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -140,6 +142,17 @@ export function MfaEnrollForm({
         }).catch(() => { if (alive) { setError('Could not start MFA setup. Try again.'); setLoading(false); } });
         return () => { alive = false; };
     }, [mfaToken]);
+
+    // QR como data URL (PNG). Import dinamico: el codigo del QR solo se descarga al enrolar, no en el login normal.
+    useEffect(() => {
+        if (!uri) return;
+        let alive = true;
+        import('qrcode')
+            .then((m) => (m.default ?? m).toDataURL(uri, { errorCorrectionLevel: 'M', margin: 2, width: 208, color: { dark: '#000000', light: '#ffffff' } }))
+            .then((url: string) => { if (alive) setQr(url); })
+            .catch(() => { if (alive) setQr(''); }); // sin QR quedan la clave y el enlace
+        return () => { alive = false; };
+    }, [uri]);
 
     const confirm = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -190,7 +203,21 @@ export function MfaEnrollForm({
             </div>
             {secret && (
                 <div className="grid gap-2 rounded-md border border-input p-3">
-                    <span className="text-xs text-muted-foreground">Setup key</span>
+                    {qr && (
+                        // Fondo blanco fijo con zona de silencio: un QR sobre tema oscuro no se escanea.
+                        <div className="mx-auto rounded-md bg-white p-1 shadow-sm" data-testid="mfa-qr">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                                src={qr}
+                                width={208}
+                                height={208}
+                                alt="QR code for your authenticator app. If you cannot scan it, use the setup key below."
+                            />
+                        </div>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                        {qr ? 'Scan the QR code, or enter this setup key manually' : 'Setup key'}
+                    </span>
                     <code className="text-sm font-mono break-all select-all">{groupSecret(secret)}</code>
                     <a href={uri} className="text-xs underline underline-offset-2 text-primary">
                         Open in authenticator app (on this device)

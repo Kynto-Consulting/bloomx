@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { COOKIE_NAME } from "@/lib/jwt";
 import { SESSION_COOKIE_OPTIONS, verifySessionToken } from "@/lib/session";
-import { auditLog, getClientIp, rateLimit } from "@/lib/security";
+import { auditLog, getClientIp, rateLimitAsync } from "@/lib/security";
 
 export async function POST(req: NextRequest) {
     try {
         const ip = getClientIp(req);
-        const rl = rateLimit(`setcookie:${ip}`, 60, 60_000);
+        const rl = await rateLimitAsync(`setcookie:${ip}`, 60, 60_000);
         if (!rl.ok) {
             return NextResponse.json({ error: "Too many requests" }, { status: 429, headers: { "Retry-After": String(rl.retryAfter) } });
         }

@@ -4,7 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { auditLog, getDummyBcryptHash, rateLimit } from "@/lib/security";
+import { auditLog, getDummyBcryptHash, rateLimitAsync } from "@/lib/security";
 import { getSessionTtlSeconds } from "@/lib/jwt";
 import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
 
@@ -36,7 +36,7 @@ export const authOptions: NextAuthOptions = {
                 }
 
                 const ip = String((req as any)?.headers?.["x-forwarded-for"] || "unknown").split(",")[0].trim();
-                const rl = rateLimit(`nextauth:${ip}:${String(credentials.email).toLowerCase()}`, 10, 15 * 60_000);
+                const rl = await rateLimitAsync(`nextauth:${ip}:${String(credentials.email).toLowerCase()}`, 10, 15 * 60_000);
                 if (!rl.ok) {
                     auditLog("auth.nextauth.rate_limited", { ip });
                     return null;

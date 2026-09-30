@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const actor = await resolveMfaActor(body);
     if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
 
-    const limited = mfaAttemptLimit(req, actor.userId, "confirm");
+    const limited = await mfaAttemptLimit(req, actor.userId, "confirm");
     if (limited) return limited;
 
     try {

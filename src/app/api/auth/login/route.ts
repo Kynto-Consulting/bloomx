@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import { setSessionCookie } from "@/lib/session";
 import { signPendingJWT } from "@/lib/jwt";
 import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
-import { auditLog, getClientIp, getDummyBcryptHash, rateLimit, rateLimitReset } from "@/lib/security";
+import { auditLog, getClientIp, getDummyBcryptHash, rateLimitAsync, rateLimitResetAsync } from "@/lib/security";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
     const ip = getClientIp(req);
     try {
         // Rate limit por IP (CIS 5.x/6.x, NIST AC-7, ISO 27002 8.5)
-        const ipRl = rateLimit(`login:ip:${ip}`, 20, 15 * 60_000);
+        const ipRl = await rateLimitAsync(`login:ip:${ip}`, 20, 15 * 60_000);
         if (!ipRl.ok) {
             auditLog("auth.login.rate_limited", { ip, scope: "ip" });
             return NextResponse.json(
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
 
         // Lockout progresivo por cuenta: 10 fallos / 15 min
         const acctKey = `login:acct:${email.trim().toLowerCase()}`;
-        const acctRl = rateLimit(acctKey, 10, 15 * 60_000);
+        const acctRl = await rateLimitAsync(acctKey, 10, 15 * 60_000);
         if (!acctRl.ok) {
             auditLog("auth.login.locked", { email, ip });
             return NextResponse.json(
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Invalid credentials" }, { status: 401, headers: NO_STORE });
         }
 
-        rateLimitReset(acctKey);
+        await rateLimitResetAsync(acctKey);
 
         // Segundo factor (NIST 800-63B AAL2, CIS 6.3-6.5). No se emite cookie hasta verificarlo.
         // Obligatorio para administradores (ADMIN_EMAILS); opcional para el resto si lo activaron.
