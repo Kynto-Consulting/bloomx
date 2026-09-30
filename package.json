@@ -18,6 +18,7 @@
         "check:themes": "tsx scripts/check-theme-contrast.ts",
         "postinstall": "prisma generate",
         "test": "vitest run",
+        "test:pg": "vitest run --config vitest.pg.config.mts",
         "test:db:setup": "node scripts/setup-test-db.mjs"
     },
     "keywords": [],

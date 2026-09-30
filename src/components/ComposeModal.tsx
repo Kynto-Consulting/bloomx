@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef, useId } from 'react';
+import { useState, useEffect, useRef, useId, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { X, Minimize2, Trash2, Maximize2, Loader2, Send, Paperclip, Clock, Mic } from 'lucide-react';
+import { X, Minimize2, Trash2, Maximize2, Loader2, Send, Paperclip, Clock, Mic, Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { useCompose } from '@/contexts/ComposeContext';
 // Local expansions removed.
@@ -17,6 +17,9 @@ import { TagInput } from './ui/TagInput';
 import { DateTimePicker } from './ui/DateTimePicker';
 import { Editor } from './Editor';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
+import { SlashActionRunner, type SlashRun } from '@/components/expansions/SlashActionRunner';
+import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { collectOverlays, collectSlashCommands, type SlashCommand } from '@/lib/slash-commands';
 import { useSession } from '@/components/SessionProvider';
 // import { ClientExpansions } from '@/lib/expansions/client/renderer'; // Legacy
 import { ClientExpansionContext } from '@/lib/expansions/client/types'; // Legacy
@@ -28,6 +31,7 @@ import { splitAddressList } from '@/lib/email-utils';
 import { parseRecipientList } from '@/lib/mail-validation';
 import { DraftSaver, toDraftAttachments, type DraftPayload, type SaveStatus } from '@/lib/draft-autosave';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
+import { buildSealedEmailBody, createSealedLink, validateSealOptions } from '@/lib/sealed/client';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -93,6 +97,20 @@ export function ComposeModal({
 
     // Slash Commands Registry (Computed)
     const [activeSlashComponent, setActiveSlashComponent] = useState<{ Component: React.ComponentType<any>, id: string, args?: string } | null>(null);
+    const { extensions: installedExtensions } = useDomainConfig();
+    const [slashRun, setSlashRun] = useState<SlashRun | null>(null);
+    const slashNonce = useRef(0);
+    const runSlashCommand = useCallback((command: SlashCommand, args: string) => {
+        const extension = installedExtensions.find((ext: any) => (ext?.template?.id || ext?.id) === command.extensionId);
+        slashNonce.current += 1;
+        setSlashRun({
+            nonce: slashNonce.current,
+            extensionId: command.extensionId || '',
+            action: command.action,
+            overlays: collectOverlays(extension),
+            args,
+        });
+    }, [installedExtensions]);
 
 
 
@@ -102,6 +120,11 @@ export function ComposeModal({
 
     const [showCcBcc, setShowCcBcc] = useState(!!initialCc || !!initialBcc);
     const [sending, setSending] = useState(false);
+    // Envio sellado: el cuerpo se cifra en el navegador (AES-256-GCM) y el correo lleva solo el enlace (clave en el #fragmento).
+    const [sealed, setSealed] = useState(false);
+    const [sealPanelOpen, setSealPanelOpen] = useState(false);
+    const [sealPassword, setSealPassword] = useState('');
+    const [sealMaxViews, setSealMaxViews] = useState<number | null>(null);
     const [schedulePickerOpen, setSchedulePickerOpen] = useState(false);
     const [scheduleValue, setScheduleValue] = useState('');
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -458,6 +481,29 @@ export function ComposeModal({
         return true;
     };
 
+    /** Envio sellado: validaciones previas (sin adjuntos; contrasena/vistas validas) antes de tocar la red. */
+    const validateSealed = (): boolean => {
+        if (!sealed) return true;
+        if (attachments.length > 0) {
+            toast.error('El envio sellado no admite adjuntos: quitalos o desactiva "Enviar sellado".');
+            return false;
+        }
+        const invalid = validateSealOptions({ password: sealPassword || undefined, maxViews: sealMaxViews });
+        if (invalid) {
+            toast.error(invalid);
+            setSealPanelOpen(true);
+            return false;
+        }
+        return true;
+    };
+
+    /** Lo que realmente viaja en el correo: el cuerpo normal, o solo el enlace si el envio es sellado (cifrado aqui, en el navegador). */
+    const prepareOutgoing = async (html: string, text: string, subjectLine: string): Promise<{ html: string; text: string }> => {
+        if (!sealed) return { html, text };
+        const link = await createSealedLink({ subject: subjectLine, html }, { password: sealPassword || undefined, maxViews: sealMaxViews });
+        return buildSealedEmailBody(link);
+    };
+
     const handleSchedule = async (date: Date) => {
         if (sending) return;
         if (toTags.length === 0) {
@@ -465,6 +511,7 @@ export function ComposeModal({
             return;
         }
         if (!validateRecipients()) return;
+        if (!validateSealed()) return;
 
         const plainTextBody = extractPlainTextFromHtml(body);
         if (!plainTextBody && attachments.length === 0) {
@@ -474,7 +521,8 @@ export function ComposeModal({
 
         setSending(true);
         try {
-            const attachmentsForSend = await syncCalendarEventsFromAttachments(toTags, ccTags, attachments);
+            const attachmentsForSend = sealed ? [] : await syncCalendarEventsFromAttachments(toTags, ccTags, attachments);
+            const outgoing = await prepareOutgoing(body, plainTextBody, subject);
             const res = await fetch('/api/emails', {
                 method: 'POST',
                 headers: {
@@ -487,8 +535,8 @@ export function ComposeModal({
                     cc: ccTags.length > 0 ? ccTags.join(', ') : undefined,
                     bcc: bccTags.length > 0 ? bccTags.join(', ') : undefined,
                     subject,
-                    text: plainTextBody,
-                    html: body,
+                    text: outgoing.text,
+                    html: outgoing.html,
                     attachments: attachmentsForSend,
                     scheduledAt: date.toISOString()
                 }),
@@ -525,6 +573,7 @@ export function ComposeModal({
             return;
         }
         if (!validateRecipients()) return;
+        if (!validateSealed()) return;
 
         const plainTextBody = extractPlainTextFromHtml(finalBody);
         if (!plainTextBody && attachments.length === 0) {
@@ -534,7 +583,8 @@ export function ComposeModal({
 
         setSending(true);
         try {
-            const attachmentsForSend = await syncCalendarEventsFromAttachments(finalTo, finalCc, attachments);
+            const attachmentsForSend = sealed ? [] : await syncCalendarEventsFromAttachments(finalTo, finalCc, attachments);
+            const outgoing = await prepareOutgoing(finalBody, plainTextBody, finalSubject);
             const res = await fetch('/api/emails', {
                 method: 'POST',
                 headers: {
@@ -547,8 +597,8 @@ export function ComposeModal({
                     cc: finalCc.length > 0 ? finalCc.join(', ') : undefined,
                     bcc: finalBcc.length > 0 ? finalBcc.join(', ') : undefined,
                     subject: finalSubject,
-                    text: plainTextBody,
-                    html: finalBody,
+                    text: outgoing.text,
+                    html: outgoing.html,
                     attachments: attachmentsForSend
                 }),
             });
@@ -877,8 +927,16 @@ export function ComposeModal({
 
     const rightOffset = 24 + index * 40;
 
-    const slashCommandsList: any[] = [];
-    // Local expansions removed.
+    // Comandos "/" declarados por las extensiones instaladas (manifest.slashCommands). Editor los muestra en un menu;
+    // al elegir uno, SlashActionRunner ejecuta su accion con el motor de extensiones.
+    const slashCommandsList: SlashCommand[] = useMemo(
+        () => collectSlashCommands(installedExtensions).map((command) => ({
+            ...command,
+            execute: (args: string) => runSlashCommand(command, args),
+        })),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [installedExtensions],
+    );
 
     // ...
 
@@ -1016,6 +1074,9 @@ export function ComposeModal({
                 mountPoint="COMPOSER_INIT"
                 context={contextProps}
             />
+
+            {/* Ejecuta la accion del slash command elegido en el editor */}
+            <SlashActionRunner run={slashRun} context={contextProps} />
 
             {/* Active Slash Command Overlay */}
             {activeSlashComponent && (
@@ -1170,6 +1231,56 @@ export function ComposeModal({
                     />
                 </div>
 
+                {/* Envio sellado: opciones (cifrado en el navegador; el correo lleva solo el enlace) */}
+                {sealPanelOpen && (
+                    <div id={`${uid}-seal`} role="group" aria-label="Opciones de envio sellado" className="bg-card px-3 pb-2">
+                        <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2 text-sm">
+                            <label className="flex items-center gap-2 font-medium">
+                                <input
+                                    type="checkbox"
+                                    checked={sealed}
+                                    onChange={(e) => setSealed(e.target.checked)}
+                                    className="h-4 w-4"
+                                />
+                                Enviar sellado (cifrado de extremo a extremo)
+                            </label>
+                            <p className="text-xs text-muted-foreground">
+                                El mensaje se cifra en este navegador; el correo lleva solo un enlace y la clave va en la parte del enlace que nunca llega al servidor.
+                                Quien tenga el correo puede abrirlo: usa una contraseña y compártela por otro canal para más seguridad. No admite adjuntos y el asunto viaja en claro.
+                            </p>
+                            {sealed && (
+                                <div className="grid gap-2 sm:grid-cols-2">
+                                    <div className="space-y-1">
+                                        <label htmlFor={`${uid}-seal-pw`} className="text-xs font-medium">Contraseña (opcional, mínimo 8)</label>
+                                        <input
+                                            id={`${uid}-seal-pw`}
+                                            type="password"
+                                            autoComplete="new-password"
+                                            value={sealPassword}
+                                            onChange={(e) => setSealPassword(e.target.value)}
+                                            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label htmlFor={`${uid}-seal-views`} className="text-xs font-medium">Límite de vistas</label>
+                                        <select
+                                            id={`${uid}-seal-views`}
+                                            value={sealMaxViews ?? ''}
+                                            onChange={(e) => setSealMaxViews(e.target.value ? Number(e.target.value) : null)}
+                                            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        >
+                                            <option value="">Sin límite (hasta que caduque)</option>
+                                            <option value="1">1 vista</option>
+                                            <option value="3">3 vistas</option>
+                                            <option value="10">10 vistas</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
+
                 {/* Footer / Send Button */}
                 <div className="flex items-center justify-between p-3 bg-muted/50 relative">
                     <div className="flex items-center gap-2">
@@ -1191,7 +1302,7 @@ export function ComposeModal({
                                         Sending
                                     </>
                                 ) : (
-                                    "Send"
+                                    sealed ? "Send sealed" : "Send"
                                 )}
                             </button>
                             <div className="relative h-9 flex items-center pr-1 rounded-r-full hover:bg-primary-foreground/10 transition-colors">
@@ -1298,6 +1409,30 @@ export function ComposeModal({
                                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-destructive"></span>
                                     </span>
                                 )}
+                            </button>
+
+                            {/* Enviar sellado */}
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!sealed) {
+                                        setSealed(true);
+                                        setSealPanelOpen(true);
+                                    } else {
+                                        setSealPanelOpen((open) => !open);
+                                    }
+                                }}
+                                className={cn(
+                                    "p-2 rounded-full transition-colors relative",
+                                    sealed ? "text-primary bg-primary/10" : "text-muted-foreground hover:bg-secondary"
+                                )}
+                                title="Enviar sellado (cifrado de extremo a extremo)"
+                                aria-label={sealed ? 'Envio sellado activado: opciones' : 'Enviar sellado'}
+                                aria-pressed={sealed}
+                                aria-expanded={sealPanelOpen}
+                                aria-controls={`${uid}-seal`}
+                            >
+                                <Lock className="w-5 h-5" />
                             </button>
 
                             {/* Expansions (Toolbar) */}

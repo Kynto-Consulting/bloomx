@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyPendingJWT } from "./jwt";
 import { getCurrentUser, getSessionCookie } from "./session";
 import { prisma } from "./prisma";
-import { auditLog, getClientIp, rateLimit } from "./security";
+import { auditLog, getClientIp, rateLimitAsync } from "./security";
 
 // Utilidades HTTP compartidas por /api/auth/mfa/*.
 
@@ -36,10 +36,9 @@ export async function resolveMfaActor(body: any): Promise<MfaActor | null> {
 }
 
 /** Rate limit por usuario e IP para intentos de codigo (NIST AC-7 / 800-63B 5.2.2). Devuelve una respuesta 429 o null. */
-export function mfaAttemptLimit(req: NextRequest, userId: string, scope: string): NextResponse | null {
+export async function mfaAttemptLimit(req: NextRequest, userId: string, scope: string): Promise<NextResponse | null> {
     const ip = getClientIp(req);
-    const perUser = rateLimit(`mfa:${scope}:user:${userId}`, 6, 5 * 60_000);
-    const perIp = rateLimit(`mfa:${scope}:ip:${ip}`, 40, 15 * 60_000);
+    const [perUser, perIp] = await Promise.all([rateLimitAsync(`mfa:${scope}:user:${userId}`, 6, 5 * 60_000), rateLimitAsync(`mfa:${scope}:ip:${ip}`, 40, 15 * 60_000)]);
     if (!perUser.ok || !perIp.ok) {
         auditLog("auth.mfa.rate_limited", { userId, ip, scope });
         return NextResponse.json(

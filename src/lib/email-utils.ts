@@ -174,19 +174,49 @@ function safeDecode(value: string): string {
 }
 
 /**
- * Busca el adjunto al que apunta un `cid:`. El esquema NO guarda el Content-ID (solo filename),
- * asi que se resuelve por nombre: cid == filename, parte local del cid (antes de "@") == filename,
- * o parte local == filename sin extension. Solo adjuntos con `key` y tipo imagen (o sin tipo).
- * Devuelve null si no hay coincidencia unica razonable.
+ * Normaliza un Content-ID de cabecera MIME (`<abc@dominio>`) o de `cid:` para guardarlo/compararlo:
+ * sin angulos ni espacios, sin caracteres de control y con un maximo razonable. null si queda vacio.
+ * (No se pasa a minusculas aqui: se conserva tal cual; la comparacion es insensible a mayusculas.)
  */
-export function findAttachmentForCid<T extends { filename?: string | null; mimeType?: string | null; key?: string | null }>(
+export function normalizeContentId(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const cleaned = safeDecode(raw).replace(/[<>]/g, '').trim();
+    // eslint-disable-next-line no-control-regex
+    if (!cleaned || cleaned.length > 255 || /[\u0000-\u001f\u007f\s]/.test(cleaned)) return null;
+    return cleaned;
+}
+
+const isUsableKey = (key?: string | null) => Boolean(key) && key !== 'PENDING' && key !== 'BLOCKED';
+const isImageLike = (mime?: string | null) => {
+    const m = String(mime || '').toLowerCase();
+    return !m || m.startsWith('image/') || m === 'application/octet-stream';
+};
+
+/**
+ * Busca el adjunto al que apunta un `cid:`.
+ *  1) Por Content-ID guardado (`contentId`, exacto e insensible a mayusculas). Es lo fiable: el filename
+ *     casi nunca coincide con el cid. Solo si hay una unica coincidencia.
+ *  2) Respaldo por nombre (correos antiguos sin contentId): cid == filename, parte local del cid (antes
+ *     de "@") == filename, o parte local == filename sin extension. Solo tipo imagen (o sin tipo).
+ * Solo adjuntos con `key` valida. Devuelve null si no hay coincidencia unica razonable.
+ */
+export function findAttachmentForCid<T extends { filename?: string | null; mimeType?: string | null; key?: string | null; contentId?: string | null }>(
     cid: string,
     attachments: T[] | null | undefined,
 ): T | null {
-    const wanted = safeDecode(String(cid || '')).trim().toLowerCase();
+    const wanted = safeDecode(String(cid || '')).replace(/[<>]/g, '').trim().toLowerCase();
     if (!wanted) return null;
+
+    const byContentId = (attachments || []).filter((a) => {
+        if (!a || !isUsableKey(a.key) || !isImageLike(a.mimeType)) return false;
+        const stored = normalizeContentId(a.contentId);
+        return stored !== null && stored.toLowerCase() === wanted;
+    });
+    if (byContentId.length === 1) return byContentId[0];
+    // 0 coincidencias (o duplicadas, invalido en MIME): se sigue con el respaldo por nombre.
+
     const local = wanted.split('@')[0];
-    const usable = (attachments || []).filter((a) => a && a.key && a.filename && (!a.mimeType || String(a.mimeType).toLowerCase().startsWith('image/')));
+    const usable = (attachments || []).filter((a) => a && isUsableKey(a.key) && a.filename && (!a.mimeType || String(a.mimeType).toLowerCase().startsWith('image/')));
 
     const strip = (name: string) => name.replace(/\.[a-z0-9]{1,5}$/i, '');
     const rules: Array<(name: string) => boolean> = [

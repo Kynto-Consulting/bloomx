@@ -97,6 +97,8 @@ model Attachment {
   status    String   @default("ready")  // "pending" | "ready" | "failed"
   createdAt DateTime @default(now())
   draftId   String?
+  // Content-ID (sin angulos) de imagenes inline: resuelve `cid:` antes que el filename. Aditivo (ADD COLUMN IF NOT EXISTS "contentId" TEXT).
+  contentId String?
   draft     Draft?   @relation(fields: [draftId], references: [id], onDelete: Cascade)
   email     Email?   @relation(fields: [emailId], references: [id], onDelete: Cascade)
 

@@ -61,6 +61,9 @@ async function defaultSink(rec: AuditRecord): Promise<void> {
     `;
 }
 
+/** Solo para tests de integracion: el sumidero real (INSERT ... ::jsonb) para inyectarlo con __setAuditSink. */
+export const __defaultAuditSink: Sink = defaultSink;
+
 async function persist(rec: AuditRecord) {
     if (process.env.AUDIT_DB === 'off') return;
     // Las pruebas nunca deben escribir en la BD del .env: solo persisten con un sumidero inyectado (__setAuditSink)

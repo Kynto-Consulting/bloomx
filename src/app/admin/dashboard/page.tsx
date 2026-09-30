@@ -18,10 +18,13 @@ import {
     X,
     AlertTriangle,
     CheckCircle2,
+    KeyRound,
 } from 'lucide-react';
+import { declaredCredentialKeys } from '@/lib/extension-credentials';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { ThemePreview } from '@/components/admin/ThemePreview';
 import { Modal } from '@/components/ui/Modal';
+import { ExtensionCredentialsModal } from '@/components/admin/ExtensionCredentialsModal';
 import { useI18n } from '@/components/I18nProvider';
 import { agendaTextOn } from '@/lib/agenda-color';
 import { analyzeBrand, type BrandIssue } from '@/lib/brand-check';
@@ -176,6 +179,7 @@ export default function AdminDashboard() {
     const [extensionActionId, setExtensionActionId] = useState<string | null>(null);
     const [selectedExtension, setSelectedExtension] = useState<Extension | null>(null);
     const [uninstallTarget, setUninstallTarget] = useState<{ id?: string; extensionId?: string; name?: string } | null>(null);
+    const [credentialsTarget, setCredentialsTarget] = useState<{ id: string; name: string } | null>(null);
 
     const installedExtensionsById = useMemo(() => {
         const map = new Map<string, any>();
@@ -576,7 +580,7 @@ export default function AdminDashboard() {
                                             </div>
                                             <h3 className="font-semibold text-foreground mb-1">{ext.name}</h3>
                                             <p className="text-sm text-muted-foreground mb-4">{ext.description || t('admin.extensions.noDescription')}</p>
-                                            <div className="flex gap-2">
+                                            <div className="flex flex-wrap gap-2">
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedExtension(buildExtensionDetails(ext as Extension))}
@@ -584,6 +588,17 @@ export default function AdminDashboard() {
                                                 >
                                                     {t('admin.extensions.details')}
                                                 </button>
+                                                {declaredCredentialKeys(ext.template).length > 0 && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setCredentialsTarget({ id: ext.extensionId || ext.id, name: ext.name })}
+                                                        aria-label={t('admin.extensions.credentials.buttonLabel', { name: ext.name })}
+                                                        className="inline-flex items-center gap-1.5 py-2 px-4 border border-border text-muted-foreground rounded-lg text-sm font-medium hover:bg-accent hover:text-accent-foreground"
+                                                    >
+                                                        <KeyRound className="w-4 h-4" aria-hidden="true" />
+                                                        {t('admin.extensions.credentials.button')}
+                                                    </button>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => setUninstallTarget(ext)}
@@ -1023,6 +1038,14 @@ export default function AdminDashboard() {
                 )}
             </Modal>
 
+            {/* Credenciales por dominio (ENV_READ del manifest; valores enmascarados, nunca se devuelven) */}
+            <ExtensionCredentialsModal
+                open={!!credentialsTarget}
+                onClose={() => setCredentialsTarget(null)}
+                domainId={domainConfig?.id}
+                extension={credentialsTarget}
+            />
+
             {/* Confirmar desinstalacion (reemplaza window.confirm) */}
             <Modal
                 open={!!uninstallTarget}
@@ -1034,6 +1057,7 @@ export default function AdminDashboard() {
                         <h3 id={titleId} className="text-base font-semibold text-foreground">
                             {t('admin.extensions.uninstallConfirm', { name: uninstallTarget.name || t('admin.extensions.thisExtension') })}
                         </h3>
+                        <p className="mt-2 text-sm text-muted-foreground">{t('admin.extensions.uninstallWipes')}</p>
                         <div className="mt-6 flex justify-end gap-2">
                             <button
                                 type="button"

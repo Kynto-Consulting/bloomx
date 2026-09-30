@@ -17,6 +17,7 @@ import {
     stripControlChars,
 } from '@/lib/mail-validation';
 import { sanitizeFilename } from '@/lib/mime-decode';
+import { attachSendKeyEmail, claimSendKey, markSendKeySent, releaseSendKey } from '@/lib/send-idempotency';
 
 const MAX_SENDS_PER_HOUR = Number.parseInt(process.env.MAX_SENDS_PER_HOUR || '200', 10) || 200;
 const MAX_ATTACHMENTS = 25;
@@ -269,6 +270,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Reserva de Idempotency-Key (ver lib/send-idempotency.ts): se libera si el envio no llega a producirse.
+    let idemClaimId: string | null = null;
+    let idemClaimSent = false;
     try {
         const body = await req.json();
         const { to: rawTo, subject: rawSubject, html, text, from, cc: rawCc, bcc: rawBcc, attachments, scheduledAt, replyTo, reply_to } = body;
@@ -582,20 +586,42 @@ export async function POST(req: NextRequest) {
         const idemKey = /^[A-Za-z0-9_:.-]{8,128}$/.test(rawIdemKey) ? rawIdemKey : null;
         const idemType = idemKey ? `send_idem:${user.id}:${idemKey}` : null;
         if (idemType) {
-            const prior = await prisma.emailEvent.findFirst({ where: { type: idemType }, select: { resendEmailId: true } });
-            if (prior) {
-                return NextResponse.json({ success: true, id: prior.resendEmailId ?? undefined, duplicate: true });
+            const claim = await claimSendKey(idemType);
+            if (claim.kind === 'duplicate') {
+                if (claim.inProgress) {
+                    // Otra peticion con la misma clave esta enviando ahora mismo: no duplicar; el cliente reintenta (425 = reintentable).
+                    return NextResponse.json(
+                        { error: 'A request with this Idempotency-Key is still in progress', code: 'IDEMPOTENCY_IN_PROGRESS' },
+                        { status: 425, headers: { 'Retry-After': '2' } },
+                    );
+                }
+                return NextResponse.json({ success: true, id: claim.resendEmailId ?? undefined, duplicate: true });
             }
+            idemClaimId = claim.id;
         }
 
         // Send via Resend
-        const { data, error } = await resend.emails.send(payload);
+        let sendResult;
+        try {
+            sendResult = await resend.emails.send(payload);
+        } catch (sendErr) {
+            if (idemClaimId) await releaseSendKey(idemClaimId).catch(() => undefined);
+            throw sendErr;
+        }
+        const { data, error } = sendResult;
 
         if (error) {
+            if (idemClaimId) await releaseSendKey(idemClaimId).catch(() => undefined);
             // No registrar destinatarios (PII) en logs.
             console.error('[POST /api/emails] Resend send failed:', (error as any)?.name, (error as any)?.message);
             const message = (error as any)?.message || (error as any)?.name || 'Failed to send email';
             return NextResponse.json({ error: message }, { status: 400 });
+        }
+        // El correo ya salio: registrar el id de Resend de inmediato para que ningun reintento reenvie.
+        if (idemClaimId) {
+            await markSendKeySent(idemClaimId, data?.id ?? null)
+                .catch((e) => console.error('[POST /api/emails] idempotency mark failed:', (e as Error)?.message));
+            idemClaimSent = true;
         }
 
         // Upload HTML/Text to Storage for persistence
@@ -653,9 +679,8 @@ export async function POST(req: NextRequest) {
             }
         });
 
-        if (idemType) {
-            await prisma.emailEvent
-                .create({ data: { emailId: email.id, resendEmailId: data?.id ?? null, type: idemType } })
+        if (idemClaimId) {
+            await attachSendKeyEmail(idemClaimId, email.id)
                 .catch((e) => console.error('[POST /api/emails] idempotency record failed:', (e as Error)?.message));
         }
 
@@ -680,6 +705,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ success: true, id: data?.id, warnings: preSend.warnings.length > 0 ? preSend.warnings : undefined });
 
     } catch (error) {
+        if (idemClaimId && !idemClaimSent) await releaseSendKey(idemClaimId).catch(() => undefined);
         console.log(error);
         return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
     }

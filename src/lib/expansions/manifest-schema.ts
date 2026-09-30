@@ -61,6 +61,7 @@ export const KNOWN_ACTIONS = [
 const KNOWN_PERMISSIONS = [
     "READ_EMAIL", "READ_USER", "READ_USER_NAME", "AI_GENERATE", "HTTP_REQUEST", "OAUTH_READ", "OAUTH_WRITE",
     "API_ROUTE_CREATE", "PAGE_ROUTE_CREATE", "DB_READ", "DB_WRITE", "local:secure-storage",
+    "MAIL_LABEL",
 ];
 
 /**

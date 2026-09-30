@@ -15,6 +15,8 @@ import { parseAuthenticationResults } from '@/lib/email-auth';
 import { computeInboundEffects } from '@/lib/rules/inbound';
 import { markRuleRun } from '@/lib/rules/store';
 import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
+import { normalizeContentId } from '@/lib/email-utils';
 import { validateAttachment } from '@/lib/file-type';
 import { runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
@@ -357,6 +359,9 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     };
 
     const usedAttachmentKeys = new Set<string>();
+    // Content-ID de adjuntos inline (imagenes `cid:`), por clave de storage. Se guardan aparte (SQL best-effort,
+    // ver lib/attachment-content-id.ts) para no depender de que la columna Attachment.contentId ya exista.
+    const attachmentContentIds: Array<{ key: string; contentId: string }> = [];
     // Process attachments that came with inline content in the webhook payload (small files)
     if (attachments && Array.isArray(attachments)) {
         // Limite de cantidad de adjuntos por correo (anti zip-bomb de metadatos / agotamiento de almacenamiento).
@@ -407,6 +412,8 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                     key: attKey,
                     status: 'ready',
                 });
+                const inlineContentId = normalizeContentId(att.content_id ?? att.contentId ?? att.cid);
+                if (inlineContentId) attachmentContentIds.push({ key: attKey, contentId: inlineContentId });
 
                 const isCalendarAttachment =
                     contentType.toLowerCase().includes('text/calendar') ||
@@ -532,6 +539,10 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             throw createError;
         }
         void markRuleRun(createdEmail.id, user.id);
+
+        // Content-ID de imagenes inline (best-effort: si la columna aun no existe, no rompe la ingesta).
+        // Los adjuntos pendientes los rellena process-attachments leyendo la cabecera del MIME.
+        await saveAttachmentContentIds(attachmentContentIds.map((c) => ({ emailId: createdEmail.id, ...c })));
 
         // Hook de extensiones EMAIL_RECEIVED: nunca bloquea ni hace fallar la ingesta.
         const receivedHookContext = { emailId: createdEmail.id, userId: user.id, domain: user.email.split('@')[1] || null };

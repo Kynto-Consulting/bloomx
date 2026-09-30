@@ -299,13 +299,23 @@ export function classifyBulkResponse(status: number): 'ok' | 'revert' {
 // Respuesta rapida desde la lista
 // ---------------------------------------------------------------------------
 
+function escapeHtmlText(value: string): string {
+    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 export function buildQuickReply(
     email: { from: string; replyTo?: string | null; subject?: string | null; createdAt: string },
     contentHtml: string,
-    formattedDate: string
+    formattedDate: string,
+    /** Texto de la cabecera de la cita en el idioma activo (recibe fecha y remitente ya formateados). */
+    quoteHeader?: (date: string, from: string) => string
 ) {
     const subject = email.subject || '';
-    const header = `<div dir="ltr" class="gmail_attr">On ${formattedDate}, ${email.from} wrote:<br></div>`;
+    // El remitente ("Ana <ana@x.com>") se escapa: sin esto el "<...>" se interpretaba como una etiqueta.
+    const headerText = escapeHtmlText(quoteHeader
+        ? quoteHeader(formattedDate, email.from)
+        : `On ${formattedDate}, ${email.from} wrote:`);
+    const header = `<div dir="ltr" class="gmail_attr">${headerText}<br></div>`;
     const quote = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${contentHtml || ''}</blockquote>`;
     return {
         to: email.replyTo || email.from,

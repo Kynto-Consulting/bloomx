@@ -8,6 +8,7 @@ import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
 import { validateAttachment } from '@/lib/file-type';
 import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
 import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { auditLog } from '@/lib/security';
 
 // Large inbound attachments mean downloading the full raw MIME (all parts,
@@ -240,7 +241,9 @@ export async function POST(
     // Also extract calendar ICS blocks that may not appear as explicit parts
     const calendarBlocks = extractCalendarIcsFromRawMime(rawMime);
 
-    const newAttachments: { filename: string; mimeType: string; size: number; key: string }[] = [];
+    const newAttachments: { filename: string; mimeType: string; size: number; key: string; contentId?: string }[] = [];
+    // Content-ID por clave de storage: se guarda con SQL best-effort al final (tolera que la columna aun no exista).
+    const contentIdWrites: { emailId: string; key: string; contentId?: string }[] = [];
     const blockedAttachments: { filename: string; mimeType: string; size: number; reason: string }[] = [];
     const parsedInvites: ReturnType<typeof parseInviteFromIcs>[] = [];
     // Claves ya usadas (BD + esta ejecucion): dos adjuntos con el mismo nombre ya no se sobrescriben
@@ -256,10 +259,14 @@ export async function POST(
         }
 
         // Skip if already present in DB by filename
-        const alreadyExists = email.attachments.some(
+        const existing = email.attachments.find(
             a => a.filename.toLowerCase() === ext.filename.toLowerCase() && a.status === 'ready',
         );
-        if (alreadyExists) continue;
+        if (existing) {
+            // Ya estaba (p. ej. inline del webhook): solo se completa su Content-ID si el MIME lo trae.
+            if (ext.contentId) contentIdWrites.push({ emailId, key: existing.key, contentId: ext.contentId });
+            continue;
+        }
 
         // 1) Tipo real por magic-bytes (ejecutables/HTML disfrazados) y 2) antivirus opcional (AV_SCAN_URL)
         const verdict = validateAttachment({
@@ -291,6 +298,7 @@ export async function POST(
                 mimeType: verdict.storeMime,
                 size: ext.buffer.byteLength,
                 key: attKey,
+                ...(ext.contentId ? { contentId: ext.contentId } : {}),
             });
         } else {
             console.error(`[process-attachments] Permanently failed to upload ${ext.filename} for email ${emailId}`);
@@ -343,6 +351,7 @@ export async function POST(
                 where: { id: att.id },
                 data: { key: match.key, status: 'ready', size: match.size, mimeType: match.mimeType, filename: match.filename },
             });
+            if (match.contentId) contentIdWrites.push({ emailId, key: match.key, contentId: match.contentId });
             const idx = newAttachments.indexOf(match);
             if (idx !== -1) newAttachments.splice(idx, 1);
         } else {
@@ -372,13 +381,24 @@ export async function POST(
     // Create records for newly discovered attachments
     if (newAttachments.length > 0) {
         await prisma.attachment.createMany({
+            // Campos explicitos: `contentId` NO va aqui (un cliente Prisma viejo rechazaria el argumento);
+            // se guarda aparte con SQL best-effort.
             data: newAttachments.map(a => ({
                 emailId,
-                ...a,
+                filename: a.filename,
+                mimeType: a.mimeType,
+                size: a.size,
+                key: a.key,
                 status: 'ready',
             })),
         });
+        for (const a of newAttachments) {
+            if (a.contentId) contentIdWrites.push({ emailId, key: a.key, contentId: a.contentId });
+        }
     }
+
+    // Content-ID de imagenes inline. Nunca hace fallar el procesamiento (columna ausente -> se omite).
+    await saveAttachmentContentIds(contentIdWrites);
 
     // ── Handle calendar invites ───────────────────────────────────────────────
     if (parsedInvites.length > 0) {

@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { env } from '@/lib/env';
-import { auditLog, BCRYPT_COST, getClientIp, isProduction, rateLimit, safeEqual, validateNewPassword } from '@/lib/security';
+import { auditLog, BCRYPT_COST, getClientIp, isProduction, rateLimitAsync, safeEqual, validateNewPassword } from '@/lib/security';
 
 export async function POST(req: NextRequest) {
     const ip = getClientIp(req);
     try {
-        const rl = rateLimit(`register:ip:${ip}`, 5, 60 * 60_000);
+        const rl = await rateLimitAsync(`register:ip:${ip}`, 5, 60 * 60_000);
         if (!rl.ok) {
             return NextResponse.json(
                 { error: 'Too many attempts. Try again later.' },
