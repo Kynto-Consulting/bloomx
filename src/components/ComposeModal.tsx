@@ -32,6 +32,8 @@ import { parseRecipientList } from '@/lib/mail-validation';
 import { DraftSaver, toDraftAttachments, type DraftPayload, type SaveStatus } from '@/lib/draft-autosave';
 import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { buildSealedEmailBody, createSealedLink, validateSealOptions } from '@/lib/sealed/client';
+import { sealedMessages } from '@/lib/sealed/messages';
+import { useI18n } from '@/components/I18nProvider';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -125,6 +127,11 @@ export function ComposeModal({
     const [sealPanelOpen, setSealPanelOpen] = useState(false);
     const [sealPassword, setSealPassword] = useState('');
     const [sealMaxViews, setSealMaxViews] = useState<number | null>(null);
+    const { locale: uiLocale } = useI18n();
+    const sm = sealedMessages(uiLocale);
+    // 'Copiar enlace': crea el mensaje sellado y copia el enlace SIN enviar correo (se comparte por otro canal).
+    const [sealCopying, setSealCopying] = useState(false);
+    const [sealCopiedLink, setSealCopiedLink] = useState<{ url: string; copied: boolean } | null>(null);
     const [schedulePickerOpen, setSchedulePickerOpen] = useState(false);
     const [scheduleValue, setScheduleValue] = useState('');
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
@@ -485,7 +492,7 @@ export function ComposeModal({
     const validateSealed = (): boolean => {
         if (!sealed) return true;
         if (attachments.length > 0) {
-            toast.error('El envio sellado no admite adjuntos: quitalos o desactiva "Enviar sellado".');
+            toast.error(sm.noAttachments);
             return false;
         }
         const invalid = validateSealOptions({ password: sealPassword || undefined, maxViews: sealMaxViews });
@@ -494,7 +501,34 @@ export function ComposeModal({
             setSealPanelOpen(true);
             return false;
         }
+        // Sin contrasena la clave viaja solo en el enlace del correo: el servidor de correo / DLP puede leerla. Se pide confirmar.
+        if (!sealPassword && typeof window !== 'undefined' && !window.confirm(sm.passwordMissingConfirm)) {
+            setSealPanelOpen(true);
+            return false;
+        }
         return true;
+    };
+
+    /** 'Copiar enlace': cifra en el navegador, sube el sobre y copia el enlace. No envia ningun correo. */
+    const handleCopySealedLink = async () => {
+        if (sealCopying) return;
+        const invalid = validateSealOptions({ password: sealPassword || undefined, maxViews: sealMaxViews });
+        if (invalid) { toast.error(invalid); return; }
+        if (!extractPlainTextFromHtml(body)) { toast.error(sm.copyEmpty); return; }
+        if (!sealPassword && typeof window !== 'undefined' && !window.confirm(sm.passwordMissingConfirm)) return;
+        setSealCopying(true);
+        setSealCopiedLink(null);
+        try {
+            const link = await createSealedLink({ subject, html: body }, { password: sealPassword || undefined, maxViews: sealMaxViews });
+            let copied = false;
+            try { await navigator.clipboard.writeText(link.url); copied = true; } catch { copied = false; }
+            setSealCopiedLink({ url: link.url, copied });
+            if (copied) toast.success(sm.copied);
+        } catch (e: any) {
+            toast.error(String(e?.message || 'Error'));
+        } finally {
+            setSealCopying(false);
+        }
     };
 
     /** Lo que realmente viaja en el correo: el cuerpo normal, o solo el enlace si el envio es sellado (cifrado aqui, en el navegador). */
@@ -1233,7 +1267,7 @@ export function ComposeModal({
 
                 {/* Envio sellado: opciones (cifrado en el navegador; el correo lleva solo el enlace) */}
                 {sealPanelOpen && (
-                    <div id={`${uid}-seal`} role="group" aria-label="Opciones de envio sellado" className="bg-card px-3 pb-2">
+                    <div id={`${uid}-seal`} role="group" aria-label={sm.composerLegend} className="bg-card px-3 pb-2">
                         <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-2 text-sm">
                             <label className="flex items-center gap-2 font-medium">
                                 <input
@@ -1242,40 +1276,68 @@ export function ComposeModal({
                                     onChange={(e) => setSealed(e.target.checked)}
                                     className="h-4 w-4"
                                 />
-                                Enviar sellado (cifrado de extremo a extremo)
+                                {sm.sealToggle}
                             </label>
-                            <p className="text-xs text-muted-foreground">
-                                El mensaje se cifra en este navegador; el correo lleva solo un enlace y la clave va en la parte del enlace que nunca llega al servidor.
-                                Quien tenga el correo puede abrirlo: usa una contraseña y compártela por otro canal para más seguridad. No admite adjuntos y el asunto viaja en claro.
-                            </p>
+                            <p className="text-xs text-muted-foreground">{sm.sealIntro}</p>
                             {sealed && (
                                 <div className="grid gap-2 sm:grid-cols-2">
                                     <div className="space-y-1">
-                                        <label htmlFor={`${uid}-seal-pw`} className="text-xs font-medium">Contraseña (opcional, mínimo 8)</label>
+                                        <label htmlFor={`${uid}-seal-pw`} className="text-xs font-medium">{sm.passwordField}</label>
                                         <input
                                             id={`${uid}-seal-pw`}
                                             type="password"
                                             autoComplete="new-password"
                                             value={sealPassword}
+                                            aria-describedby={`${uid}-seal-pw-risk`}
                                             onChange={(e) => setSealPassword(e.target.value)}
                                             className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         />
                                     </div>
                                     <div className="space-y-1">
-                                        <label htmlFor={`${uid}-seal-views`} className="text-xs font-medium">Límite de vistas</label>
+                                        <label htmlFor={`${uid}-seal-views`} className="text-xs font-medium">{sm.viewsField}</label>
                                         <select
                                             id={`${uid}-seal-views`}
                                             value={sealMaxViews ?? ''}
                                             onChange={(e) => setSealMaxViews(e.target.value ? Number(e.target.value) : null)}
                                             className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         >
-                                            <option value="">Sin límite (hasta que caduque)</option>
-                                            <option value="1">1 vista</option>
-                                            <option value="3">3 vistas</option>
-                                            <option value="10">10 vistas</option>
+                                            <option value="">{sm.viewsUnlimited}</option>
+                                            <option value="1">{sm.views1}</option>
+                                            <option value="3">{sm.views3}</option>
+                                            <option value="10">{sm.views10}</option>
                                         </select>
                                     </div>
                                 </div>
+                            )}
+                            {sealed && (
+                                <>
+                                    <p id={`${uid}-seal-pw-risk`} role={sealPassword ? undefined : 'note'} className={cn('text-xs rounded-md px-2 py-1.5', sealPassword ? 'text-muted-foreground' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
+                                        {sealPassword ? sm.passwordRisk : `${sm.passwordHint} ${sm.passwordRisk}`}
+                                    </p>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleCopySealedLink()}
+                                            disabled={sealCopying}
+                                            aria-busy={sealCopying || undefined}
+                                            aria-describedby={`${uid}-seal-copy-help`}
+                                            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-1.5 text-xs font-semibold hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        >
+                                            {sealCopying && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                                            {sealCopying ? sm.copying : sm.copyLink}
+                                        </button>
+                                        <span id={`${uid}-seal-copy-help`} className="text-xs text-muted-foreground">{sm.copyLinkHelp}</span>
+                                    </div>
+                                    <div aria-live="polite">
+                                        {sealCopiedLink && !sealCopiedLink.copied && (
+                                            <label className="block text-xs">
+                                                {sm.copyFailed}
+                                                <input readOnly value={sealCopiedLink.url} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-xs" />
+                                            </label>
+                                        )}
+                                        {sealCopiedLink?.copied && <p className="text-xs text-emerald-700 dark:text-emerald-400">{sm.copied}</p>}
+                                    </div>
+                                </>
                             )}
                         </div>
                     </div>

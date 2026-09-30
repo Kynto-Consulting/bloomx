@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { recordUnsubscribe, verifyUnsubscribeToken } from '@/lib/unsubscribe';
 import { escapeHtmlText } from '@/lib/mail-validation';
-import { getClientIp, rateLimit } from '@/lib/security';
+import { getClientIp, rateLimitAsync } from '@/lib/security';
 
 /**
  * Endpoint publico de baja (RFC 8058).
@@ -123,7 +123,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
     const lang = pickLang(req);
     const t = T[lang];
-    const limit = rateLimit(`unsub:${getClientIp(req)}`, 30, 60_000);
+    const limit = await rateLimitAsync(`unsub:${getClientIp(req)}`, 30, 60_000);
     if (!limit.ok) {
         return new NextResponse(t.tooMany, { status: 429, headers: { 'Retry-After': String(limit.retryAfter), 'Content-Type': 'text/plain; charset=utf-8' } });
     }

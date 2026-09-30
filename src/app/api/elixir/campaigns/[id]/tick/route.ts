@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { rateLimit } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
 import { campaigns } from '@/lib/elixir-campaign-store';
 import { chainNextTick, tickCampaign } from '@/lib/elixir-worker-runtime';
 
@@ -17,7 +17,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     if (!user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { id } = await params;
 
-    const rl = rateLimit(`elixir-tick:${id}`, 1, 10_000);
+    const rl = await rateLimitAsync(`elixir-tick:${id}`, 1, 10_000);
     if (!rl.ok) return NextResponse.json({ error: 'Espere unos segundos', code: 'rate_limited' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
 
     const c = await campaigns.get(user.id, id);

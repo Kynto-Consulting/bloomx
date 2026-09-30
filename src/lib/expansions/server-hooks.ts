@@ -191,8 +191,8 @@ export async function runEmailPreSendHooksForRequest(
     user: { id: string; email?: string | null },
     message: PreSendMessage,
 ): Promise<PreSendResult> {
-    const [{ cookies }, { COOKIE_NAME }] = await Promise.all([import('next/headers'), import('@/lib/jwt')]);
-    const token = (await cookies()).get(COOKIE_NAME)?.value || null;
+    const [{ cookies }, { readSessionCookie }] = await Promise.all([import('next/headers'), import('@/lib/session-cookie')]);
+    const token = readSessionCookie(await cookies()).token;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
     return runEmailPreSendHooks(message, { token, host, userId: user.id, email: user.email });
 }

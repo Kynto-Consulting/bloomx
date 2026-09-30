@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma';
 import { compileTemplate, isValidTimezone, LiquidError, systemDateVars, type CompiledTemplate } from '@/lib/liquid';
 import { extractAddress, formatFromHeader, isValidEmailAddress, parseRecipientList, sanitizeSubject } from '@/lib/mail-validation';
 import { buildAbsoluteUnsubscribeUrl, buildUnsubscribeHeaders, getSuppressedRecipients } from '@/lib/unsubscribe';
-import { rateLimit } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
 import {
     appendUnsubscribeFooter, createResendSender, htmlToText, idempotencyKey, sendWithRetry, templateHasUnsubscribe,
     type ResendPayload,
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
     if (!sessionUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Peticiones (lotes) por hora; el limite real de correos es la cuota por fila de arriba.
-    const rl = rateLimit(`elixir:${sessionUser.id}`, 1200, 60 * 60 * 1000);
+    const rl = await rateLimitAsync(`elixir:${sessionUser.id}`, 1200, 60 * 60 * 1000);
     if (!rl.ok) {
         return NextResponse.json({ error: 'Too many bulk sends. Try again later.' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
     }

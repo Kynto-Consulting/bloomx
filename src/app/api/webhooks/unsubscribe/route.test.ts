@@ -8,7 +8,7 @@ async function load(opts: { valid?: boolean; recipient?: string; recordFails?: b
         recordUnsubscribe: record,
         verifyUnsubscribeToken: (t: string) => (opts.valid === false || t !== 'good' ? null : { sender: 'u1', recipient: opts.recipient ?? 'ana@x.com' }),
     }));
-    vi.doMock('@/lib/security', () => ({ getClientIp: () => '1.1.1.1', rateLimit: () => ({ ok: true, retryAfter: 0 }) }));
+    vi.doMock('@/lib/security', () => ({ getClientIp: () => '1.1.1.1', rateLimitAsync: async () => ({ ok: true, retryAfter: 0, backend: 'memory' }) }));
     const mod = await import('./route');
     const { NextRequest } = await import('next/server');
     const req = (method: string, qs = 't=good', headers: Record<string, string> = {}) =>

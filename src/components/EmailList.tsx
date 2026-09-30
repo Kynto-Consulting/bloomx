@@ -7,6 +7,7 @@ import { Archive, Trash2, Star, Tag, MailOpen, RefreshCw } from 'lucide-react'; 
 import { cn } from '@/lib/utils';
 import { Loader2, Search, Menu, Plus, User, SlidersHorizontal, ChevronDown, Check } from 'lucide-react';
 import { useI18n } from '@/components/I18nProvider';
+import { labelDisplayName } from '@/lib/organizer/labels';
 import { formatMailDate, pluralKey } from '@/lib/i18n/format';
 import { VirtualMailRows, type VirtualMailRowsHandle } from '@/components/VirtualMailRows';
 import { listItemAria, shouldVirtualize } from '@/lib/virtual-list';
@@ -453,7 +454,7 @@ export function EmailList() {
             setEmails((prev) => restoreEmails(prev, snapshot.filter((e) => failed.includes(e.id))));
             toast.error(latest.current.t('emailList.toast.labelPartial', { failed: failed.length, total: toggleIds.length }));
         } else {
-            toast.success(latest.current.t(mode === 'add' ? 'emailList.toast.labelApplied' : 'emailList.toast.labelRemoved', { name: label.name }));
+            toast.success(latest.current.t(mode === 'add' ? 'emailList.toast.labelApplied' : 'emailList.toast.labelRemoved', { name: labelDisplayName(label.name, latest.current.t) }));
         }
         setLabelPickerOpen(false);
         void latest.current.invalidate(EMAIL_LISTS_AND_COUNTS_PATTERN);
@@ -1617,7 +1618,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                                         className="h-1.5 w-1.5 rounded-full"
                                         style={{ backgroundColor: label.color || undefined }}
                                     />
-                                    {label.name}
+                                    {labelDisplayName(label.name, t)}
                                 </li>
                             ))}
                         </ul>
@@ -1718,7 +1719,7 @@ function LabelBulkButton({
                                         className="h-2.5 w-2.5 shrink-0 rounded-full"
                                         style={{ backgroundColor: label.color || undefined }}
                                     />
-                                    <span className="flex-1 truncate">{label.name}</span>
+                                    <span className="flex-1 truncate">{labelDisplayName(label.name, t)}</span>
                                     {state === 'all' && <Check className="h-3.5 w-3.5 text-primary" />}
                                     {state === 'some' && <span className="text-xs text-muted-foreground">–</span>}
                                 </button>

@@ -346,6 +346,35 @@ const TABLES: TableSpec[] = [
         ],
     },
     {
+        // Estado de vistas/caducidad de los mensajes sellados (ver lib/sealed/store.ts). El contador se incrementa con un
+        // UPDATE atomico condicionado (views < maxViews AND expiresAt > now()), valido entre instancias serverless.
+        name: 'SecureMessageMeta',
+        createStatement: `CREATE TABLE IF NOT EXISTS "SecureMessageMeta" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "maxViews" INTEGER,
+            "views" INTEGER NOT NULL DEFAULT 0,
+            "expiresAt" TIMESTAMPTZ NOT NULL,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'maxViews', definition: 'INTEGER' },
+            { name: 'views', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'SecureMessageMeta_pkey', statement: 'ALTER TABLE "SecureMessageMeta" ADD CONSTRAINT "SecureMessageMeta_pkey" PRIMARY KEY ("id")' },
+            { name: 'SecureMessageMeta_userId_fkey', statement: 'ALTER TABLE "SecureMessageMeta" ADD CONSTRAINT "SecureMessageMeta_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "SecureMessageMeta_userId_idx" ON "SecureMessageMeta" ("userId")',
+            'CREATE INDEX IF NOT EXISTS "SecureMessageMeta_expiresAt_idx" ON "SecureMessageMeta" ("expiresAt")',
+        ],
+    },
+    {
         name: 'MoltSession',
         createStatement: `CREATE TABLE IF NOT EXISTS "MoltSession" (
             "id" TEXT NOT NULL,

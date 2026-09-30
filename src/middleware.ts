@@ -1,7 +1,8 @@
 
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import { verifyJWT, isSessionPayload, renewSessionIfNeeded, COOKIE_NAME } from "@/lib/jwt";
+import { verifyJWT, isSessionPayload, renewSessionIfNeeded } from "@/lib/jwt";
+import { readSessionCookie, writeSessionCookie } from "@/lib/session-cookie";
 
 // Rutas de /api/auth que SI cambian estado con la cookie de sesion y por tanto necesitan la defensa CSRF por Origin.
 // El resto de /api/auth (NextAuth, callbacks OAuth de terceros) queda exento.
@@ -56,7 +57,7 @@ export async function middleware(req: NextRequest) {
     // /api/admin/*: el middleware no valida el rol (cada ruta usa requireAdmin de @/lib/admin-auth), pero como defensa en
     // profundidad exige al menos una cookie de sesion (usuario o manager) salvo el login. NIST AC-3 / CIS 6.8.
     if (pathname.startsWith('/api/admin') && pathname !== '/api/admin/login') {
-        const hasCred = req.cookies.get(COOKIE_NAME)?.value || req.cookies.get('auth_session')?.value ||
+        const hasCred = readSessionCookie(req.cookies).token || req.cookies.get('auth_session')?.value ||
             req.headers.get('authorization')?.startsWith('Bearer ');
         if (!hasCred) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -103,7 +104,7 @@ export async function middleware(req: NextRequest) {
 
     try {
         // 2. Token Verification using custom JWT logic
-        const token = req.cookies.get(COOKIE_NAME)?.value;
+        const { token, source } = readSessionCookie(req.cookies);
 
         // console.log("[MIDDLEWARE] Checking token for:", pathname);
 
@@ -125,13 +126,12 @@ export async function middleware(req: NextRequest) {
         try {
             const renewed = await renewSessionIfNeeded(payload);
             if (renewed) {
-                res.cookies.set(COOKIE_NAME, renewed.token, {
-                    httpOnly: true,
-                    secure: process.env.NODE_ENV === 'production',
-                    sameSite: 'lax',
-                    path: '/',
-                    maxAge: renewed.ttl,
-                });
+                // Nombre actual (`__Host-` en produccion) + expira la cookie antigua si existia
+                writeSessionCookie(res.cookies, renewed.token, renewed.ttl);
+            } else if (source === 'legacy' && typeof payload.exp === 'number') {
+                // Migracion: la sesion llego por la cookie antigua; se re-emite con el nombre nuevo y el tiempo restante
+                const left = Math.floor(payload.exp - Date.now() / 1000);
+                if (left > 60) writeSessionCookie(res.cookies, token!, left);
             }
         } catch {
             // La renovacion es best-effort: nunca debe tumbar la peticion

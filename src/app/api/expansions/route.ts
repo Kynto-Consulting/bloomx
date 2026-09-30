@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { getGoogleAccessToken } from '@/lib/google/account';
 import { cookies } from 'next/headers';
-import { COOKIE_NAME } from '@/lib/jwt';
+import { readSessionCookie } from '@/lib/session-cookie';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://backend.bloomx.arubik.dev';
 
@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
+    const token = readSessionCookie(cookieStore).token ?? undefined;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     const { searchParams } = new URL(req.url);
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const cookieStore = await cookies();
-    const token = cookieStore.get(COOKIE_NAME)?.value;
+    const token = readSessionCookie(cookieStore).token ?? undefined;
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
 
     try {

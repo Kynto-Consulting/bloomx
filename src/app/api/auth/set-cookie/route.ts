@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { COOKIE_NAME } from "@/lib/jwt";
+import { writeSessionCookie } from "@/lib/session-cookie";
 import { SESSION_COOKIE_OPTIONS, verifySessionToken } from "@/lib/session";
 import { auditLog, getClientIp, rateLimitAsync } from "@/lib/security";
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
         }
 
         const remaining = typeof payload.exp === "number" ? Math.max(60, payload.exp - Math.floor(Date.now() / 1000)) : SESSION_COOKIE_OPTIONS.maxAge;
-        (await cookies()).set(COOKIE_NAME, token, { ...SESSION_COOKIE_OPTIONS, maxAge: Math.min(remaining, SESSION_COOKIE_OPTIONS.maxAge) });
+        writeSessionCookie(await cookies(), token, Math.min(remaining, SESSION_COOKIE_OPTIONS.maxAge));
 
         auditLog("session.switch", { userId: String(payload.sub), ip });
         return NextResponse.json({ success: true });

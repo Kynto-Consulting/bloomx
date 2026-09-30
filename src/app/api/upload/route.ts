@@ -7,7 +7,7 @@ import { hasDangerousExtension } from '@/lib/mail-validation';
 import { validateAttachment } from '@/lib/file-type';
 import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
 import { buildSignedAssetUrl } from '@/lib/asset-url';
-import { auditLog, getClientIp, rateLimit } from '@/lib/security';
+import { auditLog, getClientIp, rateLimitAsync } from '@/lib/security';
 
 export async function POST(req: NextRequest) {
     try {
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
-        const rl = rateLimit(`upload:${user.id}`, 120, 10 * 60_000);
+        const rl = await rateLimitAsync(`upload:${user.id}`, 120, 10 * 60_000);
         if (!rl.ok) {
             return NextResponse.json({ error: 'Too many uploads' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
         }

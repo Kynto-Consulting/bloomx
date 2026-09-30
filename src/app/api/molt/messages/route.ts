@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { verifyMoltToken } from '@/lib/molt-auth';
 import { resend } from '@/lib/resend';
 import { MAX_RECIPIENTS, formatFromHeader, parseRecipientList, sanitizeSubject } from '@/lib/mail-validation';
-import { rateLimit } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
     // 1. Authenticate
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
         if (toList.valid.length + ccList.valid.length + bccList.valid.length > MAX_RECIPIENTS) {
             return NextResponse.json({ error: `Too many recipients (max ${MAX_RECIPIENTS})` }, { status: 400 });
         }
-        const rl = rateLimit(`molt-send:${user.id}`, 60, 60 * 60 * 1000);
+        const rl = await rateLimitAsync(`molt-send:${user.id}`, 60, 60 * 60 * 1000);
         if (!rl.ok) {
             return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
         }

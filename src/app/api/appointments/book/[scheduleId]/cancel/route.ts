@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { verifyCancelToken } from '@/lib/appointments/cancel-token';
 import { escapeHtmlText, formatFromHeader } from '@/lib/mail-validation';
-import { getClientIp, rateLimit, safeEqual } from '@/lib/security';
+import { getClientIp, rateLimitAsync, safeEqual } from '@/lib/security';
 
 /**
  * Cancelacion de una cita desde el enlace del correo de confirmacion:
@@ -61,7 +61,7 @@ function summary(booking: NonNullable<Awaited<ReturnType<typeof findBooking>>>) 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ scheduleId: string }> }) {
     const { scheduleId } = await params;
 
-    const limit = rateLimit(`cancel-get-ip:${getClientIp(req)}`, 60, 60 * 60 * 1000);
+    const limit = await rateLimitAsync(`cancel-get-ip:${getClientIp(req)}`, 60, 60 * 60 * 1000);
     if (!limit.ok) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } });
     }
@@ -74,7 +74,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ sche
 export async function POST(req: NextRequest, { params }: { params: Promise<{ scheduleId: string }> }) {
     const { scheduleId } = await params;
 
-    const limit = rateLimit(`cancel-post-ip:${getClientIp(req)}`, 20, 60 * 60 * 1000);
+    const limit = await rateLimitAsync(`cancel-post-ip:${getClientIp(req)}`, 20, 60 * 60 * 1000);
     if (!limit.ok) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } });
     }

@@ -19,6 +19,7 @@ import { toast } from 'sonner';
 import { SettingsModal } from './SettingsModal';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { useI18n } from '@/components/I18nProvider';
+import { labelDisplayName } from '@/lib/organizer/labels';
 import {
     LABELS_CACHE_KEY,
     COUNTS_CACHE_KEY,
@@ -561,7 +562,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                             </div>
                                                         )}
                                                     </div>
-                                                    <span className={cn("flex-1", isActive && "font-bold")}>{label.name}</span>
+                                                    <span className={cn("flex-1", isActive && "font-bold")}>{labelDisplayName(label.name, t)}</span>
                                                     {(label.count ?? 0) > 0 && (
                                                         <span className="ml-auto text-xs text-muted-foreground">{label.count}</span>
                                                     )}

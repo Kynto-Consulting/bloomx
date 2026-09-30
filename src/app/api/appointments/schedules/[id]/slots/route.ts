@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getClientIp, rateLimit } from '@/lib/security';
+import { getClientIp, rateLimitAsync } from '@/lib/security';
 import {
     addDaysToKey,
     computeWeekSlots,
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const dateParam = url.searchParams.get('date'); // YYYY-MM-DD (fecha de calendario en la zona de la agenda)
 
     // Endpoint publico: limite generoso por IP (el calendario pide una semana por navegacion).
-    const limit = rateLimit(`slots-ip:${getClientIp(req)}`, 120, 60 * 1000);
+    const limit = await rateLimitAsync(`slots-ip:${getClientIp(req)}`, 120, 60 * 1000);
     if (!limit.ok) {
         return NextResponse.json(
             { error: 'Too many requests' },

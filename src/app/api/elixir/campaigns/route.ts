@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { rateLimit } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
 import { campaigns, ElixirTablesMissingError } from '@/lib/elixir-campaign-store';
 import { publicCampaign } from '@/lib/elixir-campaigns';
 import { campaignCreateSchema, firstIssue, tablesMissing } from '@/lib/elixir-schemas';
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const rl = rateLimit(`elixir-campaign-create:${user.id}`, 60, 60 * 60 * 1000);
+    const rl = await rateLimitAsync(`elixir-campaign-create:${user.id}`, 60, 60 * 60 * 1000);
     if (!rl.ok) return NextResponse.json({ error: 'Too many campaigns. Try again later.' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
 
     const parsed = campaignCreateSchema.safeParse(await req.json().catch(() => null));

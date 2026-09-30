@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Popover } from './ui/Popover';
 import { AccountManager } from '@/lib/account-manager';
 import { splitAddressList, extractEmailOnly, buildReplyAllRecipients, findAttachmentForCid, replaceCidReferences, extractCidReferences } from '@/lib/email-utils';
+import { resolveInlineCidImages } from '@/lib/cid-display';
 import type { EmailAuthentication, AuthVerdict } from '@/lib/email-auth';
 import { mergeEmailPatchResponse, applyEmailPatch, optimisticEmailPatch } from '@/lib/mail-view-state';
 import {
@@ -709,6 +710,9 @@ export function MailView() {
                             const cleanHtml = sanitizeHtml(item.content || "");
                             const remoteAllowed = isRemoteImagesAllowed(imagePolicy, item.email.id, item.email.from);
                             const remoteBlocked = !remoteAllowed && hasRemoteImages(cleanHtml);
+                            // `cid:` -> URL firmada del adjunto inline (solo src="cid:...", solo /api/assets). Se calcula DESPUES de hasRemoteImages:
+                            // las imagenes propias no cuentan como remotas y las remotas de verdad siguen bloqueadas.
+                            const cidResolved = resolveInlineCidImages(cleanHtml, item.email.attachments, typeof window !== 'undefined' ? window.location.origin : undefined);
                             const invitePreview = item.invitePreview;
                             const inviteResponse = item.inviteResponse;
                             const formattedStartsAt = formatInviteDate(invitePreview?.startsAt);
@@ -901,7 +905,7 @@ export function MailView() {
                                                         </div>
                                                     )}
 
-                                                    <SafeIframe html={cleanHtml} blockRemoteImages={!remoteAllowed} />
+                                                    <SafeIframe html={cidResolved.html} blockRemoteImages={!remoteAllowed} trustedImageSources={cidResolved.sources} />
 
                                                     <div className="mt-8 flex gap-2 opacity-100">
                                                         <button type="button" onClick={() => handleReply(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">

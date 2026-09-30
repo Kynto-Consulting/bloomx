@@ -5,7 +5,9 @@ import { env } from "@/lib/env";
 import { buildSignedAssetUrl } from "@/lib/asset-url";
 
 const s3Client = new S3Client({
-    region: env.S3_REGION || env.B2_REGION,
+    // Sin region el constructor lanza "Region is missing" al importar el modulo y el fallback de almacenamiento local
+    // (sin S3/B2 configurado) nunca llega a usarse; el valor por defecto solo evita ese fallo.
+    region: env.S3_REGION || env.B2_REGION || 'us-east-1',
     endpoint: env.S3_ENDPOINT || env.B2_ENDPOINT,
     credentials: {
         accessKeyId: (env.S3_ACCESS_KEY || env.B2_ACCESS_KEY)!,

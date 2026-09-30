@@ -43,7 +43,7 @@ describe('ensureDatabaseSchema sobre Postgres real', () => {
         const t = (await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public'`)).rows.map((r: any) => r.table_name);
         for (const name of ['User', 'Account', 'Email', 'Attachment', 'EmailEvent', 'Draft', 'Label', 'Rule', 'RuleRun', 'MoltSession',
             'Calendar', 'CalendarEvent', 'CalendarAttendee', 'Contact', 'AppointmentSchedule', 'AppointmentAvailability',
-            'AppointmentBooking', 'AuditEvent', 'UserMfa', 'RevokedSession', 'push_subscriptions', 'push_vapid_config', '_EmailToLabel']) {
+            'AppointmentBooking', 'AuditEvent', 'UserMfa', 'RevokedSession', 'push_subscriptions', 'push_vapid_config', '_EmailToLabel', 'SecureMessageMeta']) {
             expect(t, name).toContain(name);
         }
     });

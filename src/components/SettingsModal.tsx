@@ -10,6 +10,7 @@ import { clientExpansionRegistry } from '@/lib/expansions/client/registry';
 import { useTheme } from '@/components/ThemeProvider';
 import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 import { LabelsSettings } from '@/components/settings/LabelsSettings';
+import { OrganizerProposals } from '@/components/settings/OrganizerProposals';
 import { RulesSettings } from '@/components/settings/RulesSettings';
 import { APPEARANCE_SETTINGS_KEY } from '@/lib/themes';
 import { useI18n } from '@/components/I18nProvider';
@@ -391,7 +392,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
                     {/* Appearance Tab */}
                     {activeTab === 'appearance' && <AppearanceSettings />}
-                    {activeTab === 'labels' && <LabelsSettings />}
+                    {activeTab === 'labels' && <><LabelsSettings /><OrganizerProposals /></>}
                     {activeTab === 'rules' && <RulesSettings />}
 
                     {/* Generic Extensions Tab */}

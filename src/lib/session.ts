@@ -4,21 +4,15 @@ import {
     signSessionJWT,
     verifyJWT,
     isSessionPayload,
-    COOKIE_NAME,
-    getSessionTtlSeconds,
     type SessionIssueOptions,
 } from "./jwt";
+import { clearSessionCookies, readSessionCookie, sessionCookieOptions, writeSessionCookie } from "./session-cookie";
 import { prisma } from "./prisma";
 import { checkSessionNotRevoked, getTokenVersion, revokeSession, bumpTokenVersion } from "./session-revocation";
 
 // Atributos de cookie de sesion: HttpOnly + Secure (prod) + SameSite=Lax (CIS 16.x, NIST SC-23, ISO 27002 8.26)
-export const SESSION_COOKIE_OPTIONS = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: getSessionTtlSeconds(),
-};
+// Nombre (`__Host-` en produccion), lectura dual y borrado viven en ./session-cookie.
+export const SESSION_COOKIE_OPTIONS = sessionCookieOptions();
 
 /**
  * Emite la sesion (JWT con jti + tokenVersion) y fija la cookie.
@@ -30,7 +24,7 @@ export async function setSessionCookie(
 ) {
     const tv = await getTokenVersion(payload.sub);
     const { token, ttl } = await signSessionJWT(payload, { ...opts, tv });
-    (await cookies()).set(COOKIE_NAME, token, { ...SESSION_COOKIE_OPTIONS, maxAge: ttl });
+    writeSessionCookie(await cookies(), token, ttl);
     return token; // Return token for client-side storage
 }
 
@@ -55,7 +49,7 @@ export async function getSessionCookie() {
 
     if (!token) {
         const cookieStore = await cookies();
-        token = cookieStore.get(COOKIE_NAME)?.value || null;
+        token = readSessionCookie(cookieStore).token;
     }
 
     if (!token) return null;
@@ -63,7 +57,7 @@ export async function getSessionCookie() {
 }
 
 export async function clearSessionCookie() {
-    (await cookies()).set(COOKIE_NAME, "", { ...SESSION_COOKIE_OPTIONS, maxAge: 0 });
+    clearSessionCookies(await cookies());
 }
 
 /** Revoca en servidor la sesion actual (el token deja de valer aunque alguien lo haya copiado). */

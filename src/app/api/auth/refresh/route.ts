@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { COOKIE_NAME, isSessionPayload, renewSessionIfNeeded, verifyJWT } from "@/lib/jwt";
+import { isSessionPayload, renewSessionIfNeeded, verifyJWT } from "@/lib/jwt";
 import { SESSION_COOKIE_OPTIONS } from "@/lib/session";
+import { readSessionCookie, writeSessionCookie } from "@/lib/session-cookie";
 import { checkSessionNotRevoked } from "@/lib/session-revocation";
 import { getClientIp, rateLimitAsync } from "@/lib/security";
 
@@ -42,8 +43,15 @@ export async function POST(req: NextRequest) {
     const outToken = renewed?.token ?? token;
 
     const cookieStore = await cookies();
-    if (renewed && cookieStore.get(COOKIE_NAME)?.value === token) {
-        cookieStore.set(COOKIE_NAME, renewed.token, { ...SESSION_COOKIE_OPTIONS, maxAge: renewed.ttl });
+    const current = readSessionCookie(cookieStore);
+    if (current.token === token) {
+        // Renueva la cookie (con el nombre actual `__Host-` y expirando la antigua); si vino de la cookie antigua y no
+        // hay renovacion, igualmente se migra conservando el tiempo restante.
+        if (renewed) writeSessionCookie(cookieStore, renewed.token, renewed.ttl);
+        else if (current.source === "legacy") {
+            const left = typeof payload.exp === "number" ? Math.floor(payload.exp - Date.now() / 1000) : 0;
+            if (left > 60) writeSessionCookie(cookieStore, token, Math.min(left, SESSION_COOKIE_OPTIONS.maxAge));
+        }
     }
 
     return NextResponse.json(

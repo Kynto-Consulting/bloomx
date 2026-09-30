@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { createMoltToken } from '@/lib/molt-auth';
 import { compare } from 'bcryptjs';
-import { auditLog, getClientIp, getDummyBcryptHash, rateLimit, safeEqual } from '@/lib/security';
+import { auditLog, getClientIp, getDummyBcryptHash, rateLimitAsync, safeEqual } from '@/lib/security';
 import { getMfaStatus, mfaRequiredFor, verifyMfa } from '@/lib/mfa';
 
 export async function POST(req: NextRequest) {
     try {
         const ip = getClientIp(req);
-        const rl = rateLimit(`molt:${ip}`, 10, 15 * 60_000);
+        const rl = await rateLimitAsync(`molt:${ip}`, 10, 15 * 60_000);
         if (!rl.ok) {
             return NextResponse.json({ error: 'Too many attempts' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
         }

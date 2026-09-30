@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { rateLimit, safeEqual } from '@/lib/security';
+import { rateLimitAsync, safeEqual } from '@/lib/security';
 import { internalMailRequest } from '@/lib/organizer/schemas';
 import { applyBatch, defaultDeps, getEmail, listRecent, undoRun } from '@/lib/organizer/mail-service';
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) return NextResponse.json({ error: 'Invalid request' }, { status: 400, headers: NO_STORE });
     const { userId } = parsed.data;
 
-    const rl = rateLimit(`internal-mail:${userId}`, 300, 60_000);
+    const rl = await rateLimitAsync(`internal-mail:${userId}`, 300, 60_000);
     if (!rl.ok) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(rl.retryAfter) } });
     }

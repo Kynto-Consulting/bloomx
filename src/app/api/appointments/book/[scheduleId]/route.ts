@@ -7,7 +7,7 @@ import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { buildAppointmentConfirmationHtml } from '@/lib/calendar/email-templates';
 import { patchMeetSpaceOpen } from '@/lib/google/meet';
 import { formatFromHeader, isValidEmailAddress, sanitizeDisplayName } from '@/lib/mail-validation';
-import { getClientIp, rateLimit } from '@/lib/security';
+import { getClientIp, rateLimitAsync } from '@/lib/security';
 import { signCancelToken } from '@/lib/appointments/cancel-token';
 import { hasConflict, isBookableSlot, isValidTimeZone } from '@/lib/appointments/slots';
 
@@ -317,7 +317,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
     const { scheduleId } = await params;
 
     // Anti-abuso, ANTES de parsear/validar: el endpoint publico envia correo a una direccion arbitraria.
-    const ipLimit = rateLimit(`book-ip:${getClientIp(req)}`, 10, 60 * 60 * 1000);
+    const ipLimit = await rateLimitAsync(`book-ip:${getClientIp(req)}`, 10, 60 * 60 * 1000);
     if (!ipLimit.ok) {
         return NextResponse.json(
             { error: 'Too many booking requests. Try again later.' },
@@ -336,7 +336,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
         return NextResponse.json({ error: 'Name, email, and slot are required' }, { status: 400 });
     }
 
-    const mailLimit = rateLimit(`book-mail:${guestEmail}`, 3, 60 * 60 * 1000);
+    const mailLimit = await rateLimitAsync(`book-mail:${guestEmail}`, 3, 60 * 60 * 1000);
     if (!mailLimit.ok) {
         return NextResponse.json(
             { error: 'Too many booking requests. Try again later.' },

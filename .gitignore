@@ -6,3 +6,8 @@ node_modules/*
 prisma/test.db*
 prisma/schema.test.prisma
 prisma/.pgdata/
+
+# E2E local
+.env.e2e
+.e2e/
+.gemini/

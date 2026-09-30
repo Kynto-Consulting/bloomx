@@ -42,7 +42,7 @@ export default function SecurityDocs() {
                     <SecurityCard
                         title="Secure Cookies"
                         icon={Fingerprint}
-                        desc="In production, sessions are tracked via `__Secure-next-auth.session-token`. Only HTTPS connections can transmit this cookie."
+                        desc="In production, sessions are tracked via `__Host-next-auth.session-token`. Only HTTPS connections can transmit this cookie."
                     />
                     <SecurityCard
                         title="Middleware Protection"
