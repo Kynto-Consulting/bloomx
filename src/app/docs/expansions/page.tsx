@@ -7,184 +7,178 @@ export default function ExpansionsDocs() {
             <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-4">Expansion Ecosystem</h1>
                 <p className="text-lg text-muted-foreground leading-relaxed">
-                    A complete catalog of every expansion available in Bloomx. Expansions are modular plugins that extend the core capabilities of the engine.
+                    The 21 extensions that ship with Bloomx. Each one is a manifest plus an optional server script; a domain installs the ones it needs and configures its own credentials.
                 </p>
             </div>
 
             {/* Core Integrations */}
-            <Section title="Core Integrations" icon={Globe} color="text-primary bg-primary/15" desc="Deeply integrated tools that require OAuth or API Key configuration.">
+            <Section title="Integrations" icon={Globe} color="text-primary bg-primary/15" desc="Connect to external services. Credentials are configured per domain and stored encrypted.">
                 <ExpansionCard
                     name="Google Drive"
                     id="core-google-drive"
-                    desc="Attach files directly from Google Drive. Uses OAuth2 for secure access."
-                    features={['File Picker Modal', 'Recent Files', 'Smart Attachments']}
-                    config="Settings > Expansions > Connect Google"
-                    env="EXPANSION_CORE_GOOGLE_DRIVE=true"
+                    desc="Browse your Drive files and insert links from the composer. Uses the linked Google account."
+                    features={['File search', 'Insert link']}
+                    config="Connect Google in Settings"
+                    env="Uploading from the panel is not available yet"
                 />
                 <ExpansionCard
                     name="Notion"
                     id="core-notion"
-                    desc="Save emails into any Notion database. Maps subject, sender, and content automatically."
-                    features={['Database Selector', 'Content Mapping', 'One-click Save']}
-                    config="Settings > Expansions > Notion API Key"
-                    env="EXPANSION_CORE_NOTION=true"
+                    desc="Save the open email into a Notion database (title, sender and excerpt)."
+                    features={['Database check', 'One-click save']}
+                    config="NOTION_API_KEY, NOTION_DATABASE_ID"
+                    env="Per-domain credentials"
                 />
                 <ExpansionCard
                     name="HubSpot CRM"
                     id="core-hubspot"
-                    desc="Two-way sync with HubSpot. View contact details in the sidebar and create new leads from incoming mail."
-                    features={['Contact Lookup', 'One-click Lead Gen', 'Activity Logging']}
-                    config="Settings > Expansions > HubSpot Token"
-                    env="EXPANSION_CORE_HUBSPOT=true"
-                />
-                <ExpansionCard
-                    name="Slack"
-                    id="core-slack"
-                    desc="Forward important threads to specific public or private Slack channels."
-                    features={['Channel Picker', 'Thread Context', 'Instant Forward']}
-                    config="Settings > Expansions > Slack Token"
-                    env="EXPANSION_CORE_SLACK=true"
+                    desc="Look up the sender in HubSpot and create the contact if it does not exist."
+                    features={['Contact lookup', 'Create contact']}
+                    config="OAuth or HUBSPOT_ACCESS_TOKEN, HUBSPOT_PORTAL_ID"
+                    env="Per-domain credentials"
                 />
                 <ExpansionCard
                     name="Trello"
                     id="core-trello"
-                    desc="Turn emails into Trello cards. Select Board and List directly from the email toolbar."
-                    features={['Board Selector', 'Link Back to Email', 'Task Management']}
-                    config="Settings > Expansions > Trello Key/Token"
-                    env="EXPANSION_CORE_TRELLO=true"
+                    desc="Turn an email into a Trello card: pick board and list, then edit title and description."
+                    features={['Board and list wizard', 'Prefilled card']}
+                    config="TRELLO_KEY, TRELLO_TOKEN"
+                    env="Per-domain credentials"
                 />
                 <ExpansionCard
                     name="Zoom"
                     id="core-zoom"
-                    desc="Generate unique Zoom meeting links instantly within the composer."
-                    features={['Smart Chip Insertion', 'One-click Create', 'Duration Control']}
-                    config="Settings > Expansions > Zoom Credentials"
-                    env="EXPANSION_CORE_ZOOM=true"
+                    desc="Create a Zoom meeting and insert the invitation with an .ics attachment."
+                    features={['Meeting link', 'Invitation email', 'ICS']}
+                    config="ZOOM_ACCOUNT_ID, ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET"
+                    env="Per-domain credentials"
+                />
+                <ExpansionCard
+                    name="Google Meet"
+                    id="core-google-meet"
+                    desc="Create a Google Meet space and insert the invitation with an .ics attachment."
+                    features={['Meeting link', 'Invitation email', 'ICS']}
+                    config="Linked Google account (or per-domain Google credentials)"
+                    env="GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_MEET_ADMIN_REFRESH_TOKEN"
+                />
+                <ExpansionCard
+                    name="Giphy"
+                    id="core-giphy"
+                    desc="Search or browse trending GIFs and insert them from the composer toolbar."
+                    features={['Search', 'Trending']}
+                    config="GIPHY_API_KEY"
+                    env="Per-domain, or global if the operator allows it"
                 />
             </Section>
 
             {/* AI Suite */}
-            <Section title="AI Native Suite" icon={Zap} color="text-purple-600 bg-purple-100" desc="Powered by Vercel AI SDK. Requires a valid LLM provider configured.">
+            <Section title="AI Suite" icon={Zap} color="text-brand-accent bg-brand-accent/15" desc="Requires an LLM provider configured on the backend.">
                 <div className="grid sm:grid-cols-2 gap-6">
                     <UtilityCard
                         name="Smart Reply"
                         id="core-smart-reply"
-                        desc="Analyzes incoming email context to suggest 3 rapid-response options in the footer."
+                        desc="Suggests three short replies for the draft or message."
                     />
                     <UtilityCard
                         name="Summarizer"
                         id="core-summarizer"
-                        desc="Collapses long email threads into a concise 3-bullet summary using LLMs."
-                    />
-                    <UtilityCard
-                        name="Organizer"
-                        id="core-organizer"
-                        desc="Automatically labels incoming mail (Receipts, Newsletters) based on semantic content."
+                        desc="Summarizes the open email in three bullet points."
                     />
                     <UtilityCard
                         name="Composer Helper"
                         id="core-composer-helper"
-                        desc="A 'Copilot' for your drafts. Ask it to rewrite for tone, grammar, or brevity."
+                        desc="Writing assistant in the composer: describe what you want and insert the result."
                     />
                     <UtilityCard
                         name="Translator"
                         id="core-translator"
-                        desc="Detects foreign languages in incoming mail and offers a one-click translation."
+                        desc="Translates the open email to English on demand."
                     />
                 </div>
             </Section>
 
             {/* Productivity */}
-            <Section title="Productivity & Tools" icon={Clock} color="text-success bg-success/15" desc="Enhancements to speed up your daily workflow.">
+            <Section title="Productivity" icon={Clock} color="text-success bg-success/15" desc="Enhancements to speed up your daily workflow.">
                 <div className="grid gap-6">
                     <ExpansionCard
                         name="Calendar"
                         id="core-calendar"
-                        desc="Insert calendar events as 'Smart Chips' and generate .ics attachments on the fly."
-                        features={['Smart Chips', '.ics Generation', 'Slash Command Support']}
-                        config="No Configuration Needed"
-                        env="EXPANSION_CORE_CALENDAR=true"
+                        desc="Create an event from the composer: attaches an .ics file and inserts a branded invitation. Can prefill the form from the draft with AI."
+                        features={['Invitation email', '.ics generation', 'AI prefill']}
+                        config="No configuration needed"
+                        env="-"
+                    />
+                    <ExpansionCard
+                        name="Appointments"
+                        id="core-appointments"
+                        desc="Share one of your booking links straight from the composer."
+                        features={['Booking link']}
+                        config="Create schedules in Appointments first"
+                        env="-"
                     />
                     <ExpansionCard
                         name="Mail Groups"
                         id="core-mail-groups"
-                        desc="Define custom aliases (e.g. @dev-team) that expand to multiple recipients."
-                        features={['Custom Aliases', 'Team BLAST', 'Private Lists']}
+                        desc="Define aliases such as @sales that expand to several recipients while you compose."
+                        features={['Custom aliases', 'Expands To / Cc / Bcc']}
                         config="Settings > Mail Groups"
-                        env="EXPANSION_CORE_MAIL_GROUPS=true"
+                        env="Synced across devices"
                     />
                     <ExpansionCard
-                        name="Signatures"
+                        name="Email Signature"
                         id="core-signature"
-                        desc="Rich text signatures supporting HTML and images, appended automatically."
-                        features={['Visual Editor', 'Multiple Profiles', 'Auto-Append']}
-                        config="Settings > Signature"
-                        env="default"
-                    />
-                    <ExpansionCard
-                        name="Templates"
-                        id="core-templates"
-                        desc="Save common responses as templates for quick insertion via slash commands."
-                        features={['Slash Command Access', 'Variable Substitution', 'Rich Text']}
-                        config="Settings > Templates"
-                        env="EXPANSION_CORE_TEMPLATES=true"
+                        desc="Signature that is added automatically when you open the composer."
+                        features={['Auto-append']}
+                        config="Settings > Email Signature"
+                        env="Stored encrypted in this browser only"
                     />
                 </div>
             </Section>
 
-            {/* Enhancements */}
-            <Section title="Enhancements" icon={Component} color="text-warning bg-warning/15" desc="UI and Functional upgrades to the composer.">
-                <div className="grid sm:grid-cols-2 gap-6">
-                    <UtilityCard
-                        name="Giphy"
-                        id="core-giphy"
-                        desc="Browse and insert GIFs directly into your emails using the Giphy API."
-                        extra="Requires Giphy API Key"
-                    />
-                    <UtilityCard
-                        name="Confidential Mode"
-                        id="core-confidential"
-                        desc="Adds a visual 'Confidential' badge and headers to sensitive emails."
-                    />
-                    <UtilityCard
-                        name="Slash Commands"
-                        id="core-slash-commands"
-                        desc="Power-user menu triggered by typing '/' in the composer."
-                    />
-                    <UtilityCard
-                        name="Auto Follow-up"
-                        id="core-followup"
-                        desc="Reminds you to follow up on sent emails if no reply is received within 3 days."
-                    />
-                </div>
-            </Section>
-
-            {/* Backend Services */}
-            <Section title="Background Services" icon={Database} color="text-muted-foreground bg-muted" desc="Invisible services running on the server.">
+            {/* Background Services */}
+            <Section title="Server-side Policies" icon={Database} color="text-muted-foreground bg-muted" desc="Run on the server when mail is sent or received.">
                 <div className="grid gap-6">
                     <ExpansionCard
                         name="DLP (Data Loss Prevention)"
                         id="core-dlp"
-                        desc="Scans outgoing emails for sensitive patterns (Credit Cards, SSNs) and warns or blocks sending."
-                        features={['Regex Matching', 'Block/Warn Modes', 'Audit Logging']}
-                        config="Environment Variables Only"
-                        env="EXPANSION_CORE_DLP=true"
+                        desc="Runs before every send. Blocks the message when it finds sensitive keywords, card numbers (Luhn), IBAN, SSN, private keys or secrets in the subject, body or attachment names."
+                        features={['Blocks sending', 'Pattern detectors', 'Fail-closed']}
+                        config="DLP_KEYWORDS, DLP_DETECTORS"
+                        env="Per-domain, defaults to built-in keywords"
                     />
                     <ExpansionCard
                         name="Webhooks"
                         id="core-webhooks"
-                        desc="Forwards 'email_received' events to an external URL payload for custom processing."
-                        features={['JSON Payload', 'Real-time', 'Fire & Forget']}
-                        config="EXPANSION_WEBHOOK_URL"
-                        env="EXPANSION_CORE_WEBHOOKS=true"
+                        desc="Sends an HMAC-signed email_received event (ids only, never the content) to your URL. The receive-side hook still has to be wired into the inbound mail webhook."
+                        features={['HMAC signature', 'SSRF-safe', 'Minimal payload']}
+                        config="WEBHOOK_URL, WEBHOOK_SECRET"
+                        env="Per-domain credentials"
                     />
                     <ExpansionCard
-                        name="CRM Generic"
-                        id="core-crm"
-                        desc="A generic logger that POSTs email metadata to any endpoint for custom CRM integration."
-                        features={['Metadata Logging', 'Flexible Endpoint']}
-                        config="EXPANSION_CRM_URL"
-                        env="EXPANSION_CORE_CRM=true"
+                        name="Slash Commands"
+                        id="core-slash-commands"
+                        desc="/shrug, /smile and /hr text shortcuts. Declared in the manifest; the editor does not consume them yet."
+                        features={['Declarative']}
+                        config="-"
+                        env="Not active yet"
+                    />
+                </div>
+            </Section>
+
+            {/* Disabled */}
+            <Section title="Disabled" icon={AlertTriangle} color="text-warning bg-warning/15" desc="Present in the catalog but not mounted, on purpose.">
+                <div className="grid sm:grid-cols-2 gap-6">
+                    <UtilityCard
+                        name="Sealer Encryption"
+                        id="core-sealer"
+                        desc="End-to-end encryption needs a public-key directory and a send hook that do not exist yet. It does not encrypt anything."
+                        extra="Disabled"
+                    />
+                    <UtilityCard
+                        name="Auto Organizer"
+                        id="core-organizer"
+                        desc="AI email classification exists, but extensions cannot read the mailbox or apply labels yet."
+                        extra="Disabled"
                     />
                 </div>
             </Section>
@@ -239,7 +233,7 @@ function ExpansionCard({ name, id, desc, features, config, env }: { name: string
                 <div className="p-3 bg-background/40 rounded-md text-xs space-y-2">
                     <div className="font-semibold flex items-center gap-2">
                         <Lock className="h-3 w-3" />
-                        Environment
+                        Credentials
                     </div>
                     <div className="font-mono text-muted-foreground break-all bg-background/50 p-1.5 rounded">
                         {env}
@@ -256,7 +250,7 @@ function UtilityCard({ name, id, desc, extra }: { name: string, id: string, desc
             <div className="space-y-2">
                 <div className="flex items-center gap-2 justify-between">
                     <h3 className="font-semibold">{name}</h3>
-                    <code className="text-[10px] px-1.5 py-0.5 bg-background/50 rounded font-mono text-muted-foreground">{id}</code>
+                    <code className="text-xs px-1.5 py-0.5 bg-background/50 rounded font-mono text-muted-foreground">{id}</code>
                 </div>
                 <p className="text-sm text-muted-foreground">{desc}</p>
             </div>

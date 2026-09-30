@@ -9,11 +9,12 @@ export interface ExpansionActionResponse {
 }
 
 /**
- * Fetch expansions for a specific trigger/mount point.
+ * Handlers de las extensiones instaladas para un punto de montaje de middleware
+ * (ON_RECIPIENTS_CHANGE_HANDLER, ...): [{ extensionId, handler, point, priority }].
  */
 export async function fetchExpansions(trigger: string): Promise<any[]> {
     try {
-        const res = await fetch(`/api/expansions?trigger=${trigger}`);
+        const res = await fetch(`/api/expansions?trigger=${encodeURIComponent(trigger)}`);
         if (!res.ok) {
             console.error(`Failed to fetch expansions for ${trigger}: ${res.statusText}`);
             return [];
@@ -26,7 +27,8 @@ export async function fetchExpansions(trigger: string): Promise<any[]> {
 }
 
 /**
- * Execute a backend action for an extension.
+ * Ejecuta una accion de servidor de una extension (CALL_BACKEND). El backend la invoca como handler(ctx) con
+ * ctx.args = params y el resto de `context` (ver bloomx/expansions.md). `auth`, `user` y `env` los fija el servidor.
  */
 export async function executeExtensionAction(
     extensionId: string,

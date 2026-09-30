@@ -1,73 +1,72 @@
+// Tipos del manifest de extensiones tal como los consume el frontend.
+// El vocabulario valido (puntos de montaje, componentes, acciones, permisos) y la validacion viven en
+// ./manifest-schema.ts, que es copia de bloomx-extensions/_shared/manifest-schema.ts (fuente canonica).
 
-// This file should match the backend JSON schema for extensions
-// Ideally imported from a shared package, but for now duplicated here.
+export type MountPoint = string; // ver KNOWN_MOUNT_POINTS
+export type ComponentType = string; // ver KNOWN_COMPONENT_TYPES
 
-export type MountPoint =
-    | 'EMAIL_TOOLBAR'
-    | 'SIDEBAR_HEADER'
-    | 'SIDEBAR_FOOTER'
-    | 'COMPOSER_TOOLBAR'
-    | 'EVENT_LOCATION_BUILDER'
-    | 'CALENDAR_HEADER'
-    | 'CALENDAR_SIDEBAR'
-    | 'CONTACTS_HEADER'
-    | 'CONTACTS_SIDEBAR'
-    | 'SETTINGS_TAB'
-    | 'OVERLAY';
-
-export type ComponentType =
-    | 'BUTTON'
-    | 'MODAL'
-    | 'PANEL'
-    | 'FORM'
-    | 'INPUT'
-    | 'TEXT'
-    | 'CARD'
-    | 'TABS'
-    | 'ROW'
-    | 'COLUMN'
-    | 'CONDITIONAL'
-    | 'LINK'
-    | 'TOGGLE_GROUP'
-    | 'UPLOAD'
-    | 'WIZARD'
-    | 'SELECT';
+export type ExtensionActionName =
+    | 'SET_STATE' | 'MERGE_STATE' | 'MAP_ARRAY' | 'FILTER_ARRAY' | 'SET_LOADING'
+    | 'OPEN_OVERLAY' | 'CLOSE_OVERLAY' | 'OPEN_URL' | 'NAVIGATE' | 'REFRESH' | 'DELAY' | 'CONFIRM'
+    | 'CALL_BACKEND' | 'CALL_API' | 'TOAST' | 'COPY_TO_CLIPBOARD'
+    | 'INSERT_CONTENT' | 'APPEND_BODY' | 'SET_SUBJECT' | 'ADD_ATTACHMENT' | 'SET_CONTEXT_VALUE'
+    | 'NEXT_STEP' | 'PREV_STEP'
+    | 'SECURE_SAVE' | 'SECURE_READ'
+    | 'OAUTH_CONNECT' | 'OAUTH_DISCONNECT';
 
 export interface ExtensionAction {
-    action: 'CALL_BACKEND' | 'CALL_API' | 'OPEN_OVERLAY' | 'TOAST' | 'INSERT_CONTENT' | 'navigate' | 'SET_STATE' | 'NEXT_STEP' | 'PREV_STEP';
-    function?: string;
-    targetId?: string; // For overlay
-    message?: string; // For toast
+    action: ExtensionActionName;
+    function?: string; // CALL_BACKEND: clave de api.functions
+    targetId?: string; // OPEN_OVERLAY
+    message?: string; // TOAST
     url?: string;
     method?: string;
     headers?: Record<string, string>;
     params?: any;
+    /** CALL_BACKEND: args explicitos; si se dispara desde un FORM, formData se completa solo. */
     args?: any;
     key?: string;
     value?: any;
     emitEvent?: string;
-    debounce?: number;
-    onSuccess?: ExtensionAction;
+    onSuccess?: ExtensionAction | ExtensionAction[] | { actions: ExtensionAction[] };
+    onError?: ExtensionAction | ExtensionAction[] | { actions: ExtensionAction[] };
+    [extra: string]: any;
 }
 
 export interface ExtensionComponent {
     type: ComponentType;
-    props: Record<string, any>; // e.g. label, variant, onClick -> ExtensionAction
+    props?: Record<string, any>; // strings con ${expresion}: ver expressions.ts
     children?: ExtensionComponent[];
 }
 
 export interface ExtensionMount {
     point: MountPoint;
-    component: ExtensionComponent;
-    priority?: number;
+    id?: string; // OVERLAY
+    component?: ExtensionComponent;
+    handler?: string; // ON_*_HANDLER: nombre en api.functions
+    priority?: 'HIGH' | 'NORMAL' | 'LOW' | 'MONITOR' | number;
+}
+
+export interface ExtensionIntercept {
+    point: 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON';
+    handler: string;
+    priority?: 'HIGH' | 'NORMAL' | 'LOW' | 'MONITOR' | number;
+    /** EMAIL_PRE_SEND: "block" impide el envio si el handler falla (p.ej. DLP). */
+    onError?: 'block' | 'continue';
+    /** CRON: cada cuanto corre (el planificador del operador llama con el mismo valor). */
+    schedule?: 'hourly' | 'daily';
 }
 
 export interface ExtensionManifest {
+    manifestVersion?: string;
     id: string;
     name: string;
-    description: string;
+    description?: string;
     version: string;
-    permissions: string[];
-    mounts: ExtensionMount[];
-    // ... other backend fields like intercepts not needed in frontend types usually
+    status?: 'active' | 'disabled';
+    permissions?: string[];
+    auth?: { type?: string; provider?: string; scopes?: string[] };
+    api?: { runtime?: 'nodejs'; entry?: string; functions?: Record<string, { handler: string; timeout?: number }> };
+    mounts?: ExtensionMount[];
+    intercepts?: ExtensionIntercept[];
 }

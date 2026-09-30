@@ -24,6 +24,12 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
+// Solo http(s) y mailto en href/src generados a partir de datos (evita javascript:/data: en el correo).
+function safeUrl(value) {
+    const raw = String(value == null ? '' : value).trim();
+    return /^(https?:\/\/|mailto:)/i.test(raw) ? raw : '#';
+}
+
 function darkenHex(hex, amount) {
     amount = amount == null ? 0.3 : amount;
     const clean = String(hex || '#2563EB').replace(/[^0-9a-fA-F]/g, '').padEnd(6, '0').slice(0, 6);
@@ -117,7 +123,7 @@ function renderInviteEmailHtml(opts) {
         whenLabel ? inviteRow('Cuándo', whenLabel) : '',
         (opts.location || effectiveMeetUrl)
             ? (isMeetUrl
-                ? inviteRow('Enlace', `<a href="${escapeHtml(effectiveMeetUrl)}" style="word-break:break-all;">${escapeHtml(meetProvider || effectiveMeetUrl)}</a>`, true)
+                ? inviteRow('Enlace', `<a href="${escapeHtml(safeUrl(effectiveMeetUrl))}" style="word-break:break-all;">${escapeHtml(meetProvider || effectiveMeetUrl)}</a>`, true)
                 : inviteRow('Lugar', opts.location))
             : '',
         organizerLabel ? inviteRow('Organizador', organizerLabel, true) : '',
@@ -130,7 +136,7 @@ function renderInviteEmailHtml(opts) {
     // background but keeps our text color (or vice versa). A border + inherited
     // text color survives both schemes.
     const btn = (url, label) =>
-        `<a href="${escapeHtml(url)}" style="display:inline-block;padding:10px 18px;border:1px solid ${RULE};text-decoration:none;font-size:14px;font-weight:bold;">${escapeHtml(label)}</a>`;
+        `<a href="${escapeHtml(safeUrl(url))}" style="display:inline-block;padding:10px 18px;border:1px solid ${RULE};text-decoration:none;font-size:14px;font-weight:bold;">${escapeHtml(label)}</a>`;
 
     const primaryBtn = opts.primaryAction
         ? btn(opts.primaryAction.url, opts.primaryAction.label)

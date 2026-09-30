@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { JsonRenderer } from '@/components/expansions/renderer/JsonRenderer';
+import { normalizeMount, validateManifest } from '@/lib/expansions/manifest-schema';
 
 interface ExtensionPageProps {
     params: Promise<{ slug: string[] }>;
@@ -22,17 +23,18 @@ function ExtensionContent({ slug }: { slug: string[] }) {
     // Iterate extensions to find a matching PAGE mount
     // Mount Schema: { point: 'PAGE', path: 'slug', component: ... }
     for (const ext of extensions) {
-        if (!ext.template?.mounts) continue;
+        if (!ext.template?.mounts || ext.template.status === 'disabled') continue;
+        if (!validateManifest(ext.template).ok) continue;
         const pageMount = ext.template.mounts.find((m: any) =>
             m.point === 'PAGE' && m.path === routePath
         );
         if (pageMount) {
-            match = { mount: pageMount, extensionId: ext.id };
+            match = { mount: normalizeMount(pageMount), extensionId: ext.id };
             break;
         }
     }
 
-    if (!match) {
+    if (!match || !match.mount.component) {
         return notFound();
     }
 

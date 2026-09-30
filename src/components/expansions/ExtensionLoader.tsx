@@ -4,6 +4,8 @@ import { Plus } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { JsonRenderer } from './renderer/JsonRenderer';
 import { Popover } from '@/components/ui/Popover';
+import { buildReadingContext } from '@/lib/expansions/context';
+import { formatManifestIssues, normalizeMount, validateManifest } from '@/lib/expansions/manifest-schema';
 
 function getCanonicalExtensionId(extension: any) {
     const templateId = typeof extension?.template?.id === 'string' ? extension.template.id.trim() : '';
@@ -18,35 +20,24 @@ function getMountKey(extensionId: string, mount: any) {
     return `${extensionId}:${mount?.point || 'unknown'}:${mount?.id || actionTarget || label}`;
 }
 
-function normalizeLegacyMount(mount: any) {
-    if (mount?.component) {
-        return mount;
-    }
+// Manifests ya validados: se evalua una vez por (id, version) y solo se registra el problema la primera vez.
+const manifestVerdicts = new Map<string, boolean>();
 
-    if (
-        mount?.point === 'COMPOSER_INIT' &&
-        mount?.config?.action === 'APPEND_BODY' &&
-        typeof mount?.config?.storageKey === 'string'
-    ) {
-        return {
-            ...mount,
-            component: {
-                type: 'HEADLESS',
-                props: {
-                    onLoad: {
-                        action: 'SECURE_READ',
-                        key: mount.config.storageKey,
-                        onSuccess: {
-                            action: 'APPEND_BODY',
-                            content: '${value}'
-                        }
-                    }
-                }
-            }
-        };
-    }
+/** Un manifest invalido (o con status "disabled") no se monta: nada de lo que declare se renderiza. */
+function isLoadableManifest(extensionId: string, template: any): boolean {
+    if (!template || typeof template !== 'object') return false;
+    if (template.status === 'disabled') return false;
 
-    return mount;
+    const cacheKey = `${extensionId}@${template.version || ''}:${Array.isArray(template.mounts) ? template.mounts.length : 0}`;
+    const cached = manifestVerdicts.get(cacheKey);
+    if (cached !== undefined) return cached;
+
+    const verdict = validateManifest(template);
+    if (!verdict.ok) {
+        console.warn(`[Extensions] Manifest de "${extensionId}" invalido, no se carga: ${formatManifestIssues(verdict.errors, 5)}`);
+    }
+    manifestVerdicts.set(cacheKey, verdict.ok);
+    return verdict.ok;
 }
 
 interface ExtensionLoaderProps {
@@ -55,8 +46,10 @@ interface ExtensionLoaderProps {
     priority?: 'HIGH' | 'LOW' | 'NORMAL';
 }
 
-export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, context, priority }) => {
+export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, context: rawContext, priority }) => {
     const { extensions, isLoading } = useDomainConfig();
+    // Correo abierto (MailView pasa el objeto email): se completan emailContent y fromContact como en el composer.
+    const context = useMemo(() => buildReadingContext(rawContext), [rawContext]);
     const containerRef = useRef<HTMLDivElement>(null);
     const overflowTriggerRef = useRef<HTMLButtonElement>(null);
     const [containerWidth, setContainerWidth] = useState(0);
@@ -68,6 +61,10 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
         for (const extension of extensions) {
             const canonicalId = getCanonicalExtensionId(extension);
             if (!canonicalId || uniqueExtensions.has(canonicalId)) {
+                continue;
+            }
+
+            if (!isLoadableManifest(canonicalId, extension.template)) {
                 continue;
             }
 
@@ -89,14 +86,14 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                 continue;
             }
 
-            const overlayMounts = extension.template.mounts.filter((mount: any) => mount.point === 'OVERLAY');
+            const overlayMounts = extension.template.mounts.filter((mount: any) => mount.point === 'OVERLAY').map(normalizeMount);
             const overlays = overlayMounts.reduce((acc: any, mount: any) => {
                 if (mount.id) acc[mount.id] = mount.component;
                 return acc;
             }, {});
 
             for (const rawMount of extension.template.mounts.filter((item: any) => item.point === mountPoint)) {
-                const mount = normalizeLegacyMount(rawMount);
+                const mount = normalizeMount(rawMount);
                 const preparedMount = {
                     ...mount,
                     extensionId: extension.id,

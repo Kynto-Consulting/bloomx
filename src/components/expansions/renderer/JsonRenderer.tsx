@@ -1,14 +1,19 @@
 
-import React, { useMemo, useState, createContext, useContext, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useRef, createContext, useContext, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
+import { useSession } from '@/components/SessionProvider';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { secureWrite, secureRead } from '@/lib/expansions/client/secure-storage';
 import { executeExtensionAction } from '@/lib/expansions/api';
+import { toBackendContext } from '@/lib/expansions/context';
+import { LAZY_KEYS, evaluateExpression, resolveDeep, resolveTemplate } from '@/lib/expansions/expressions';
+import { normalizeMount } from '@/lib/expansions/manifest-schema';
+import { safeHref, safeImageSrc, safeInternalPath } from '@/lib/expansions/safe-url';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { SafeIframe } from '@/components/ui/SafeIframe';
 import { Popover } from '@/components/ui/Popover'; // For TOOLTIP or custom usage
@@ -28,18 +33,67 @@ const MODAL_WIDTHS: Record<string, string> = {
 interface ExtensionStateContextType {
     state: Record<string, any>;
     setState: (key: string, value: any) => void;
+    /** Estado vigente en este instante (incluye SET_STATE ya ejecutados en la misma cadena de acciones). */
+    getState: () => Record<string, any>;
 }
-const ExtensionStateContext = createContext<ExtensionStateContextType>({ state: {}, setState: () => { } });
+const ExtensionStateContext = createContext<ExtensionStateContextType>({ state: {}, setState: () => { }, getState: () => ({}) });
 
 export const ExtensionStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [state, setInternalState] = useState<Record<string, any>>({});
-    const setState = (key: string, value: any) => {
-        setInternalState(prev => ({ ...prev, [key]: value }));
-    };
+    const stateRef = useRef<Record<string, any>>({});
+    const setState = useCallback((key: string, value: any) => {
+        stateRef.current = { ...stateRef.current, [key]: value };
+        setInternalState(stateRef.current);
+    }, []);
+    const getState = useCallback(() => stateRef.current, []);
+    const value = useMemo(() => ({ state, setState, getState }), [state, setState, getState]);
     return (
-        <ExtensionStateContext.Provider value={{ state, setState }}>
+        <ExtensionStateContext.Provider value={value}>
             {children}
         </ExtensionStateContext.Provider>
+    );
+};
+
+// --- Wizard Context (NEXT_STEP / PREV_STEP actuan sobre el WIZARD que contiene al componente) ---
+interface WizardContextType {
+    step: number;
+    next: () => void;
+    prev: () => void;
+}
+const WizardContext = createContext<WizardContextType | null>(null);
+
+const WizardRenderer: React.FC<{
+    steps: any[];
+    rawSteps: any[];
+    context?: any;
+}> = ({ steps, rawSteps, context }) => {
+    const [step, setStep] = useState(0);
+    const total = Array.isArray(rawSteps) ? rawSteps.length : 0;
+    const wizard = useMemo<WizardContextType>(() => ({
+        step,
+        next: () => setStep((current) => Math.min(current + 1, Math.max(total - 1, 0))),
+        prev: () => setStep((current) => Math.max(current - 1, 0)),
+    }), [step, total]);
+
+    const resolvedStep = Array.isArray(steps) ? steps[step] : null;
+    const rawStep = Array.isArray(rawSteps) ? rawSteps[step] : null;
+    if (!rawStep) {
+        return null;
+    }
+
+    return (
+        <WizardContext.Provider value={wizard}>
+            <div className="space-y-4">
+                <h3 className="text-lg font-medium">{resolvedStep?.title ?? rawStep.title}</h3>
+                <div>
+                    {rawStep.content?.map((child: any, i: number) => <InnerJsonRenderer key={`${step}-${i}`} component={child} context={context} />)}
+                </div>
+                <div className="flex justify-between mt-4">
+                    <Button disabled={step === 0} onClick={wizard.prev} variant="outline">Back</Button>
+                    {/* El avance lo dispara el contenido del paso con la accion NEXT_STEP */}
+                </div>
+            </div>
+        </WizardContext.Provider>
     );
 };
 
@@ -59,6 +113,17 @@ interface JsonFormRendererProps {
     handleAction: (actionDef: any, e?: any, extraContext?: any) => Promise<void>;
 }
 
+function buildFieldDefaults(fields: any[]): Record<string, any> {
+    const defaults: Record<string, any> = {};
+    for (const field of fields) {
+        if (!field?.name) {
+            continue;
+        }
+        defaults[field.name] = field.defaultValue ?? '';
+    }
+    return defaults;
+}
+
 const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
     fields,
     submitLabel,
@@ -66,20 +131,26 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
     context,
     handleAction,
 }) => {
-    const [formValues, setFormValues] = useState<Record<string, any>>({});
+    const [formValues, setFormValues] = useState<Record<string, any>>(() => buildFieldDefaults(fields));
+    const touchedRef = useRef<Set<string>>(new Set());
 
+    // Los valores por defecto pueden cambiar (p.ej. cuando una lectura asincrona rellena el estado). Solo se
+    // reaplican a los campos que el usuario aun no toco: lo tecleado nunca se pierde por un SET_STATE ajeno.
+    const defaultsKey = JSON.stringify(Object.entries(buildFieldDefaults(fields)));
     useEffect(() => {
-        const initialValues: Record<string, any> = {};
-        for (const field of fields) {
-            if (!field?.name) {
-                continue;
+        const defaults = buildFieldDefaults(fields);
+        setFormValues((prev) => {
+            const next: Record<string, any> = {};
+            for (const name of Object.keys(defaults)) {
+                next[name] = touchedRef.current.has(name) && name in prev ? prev[name] : defaults[name];
             }
-            initialValues[field.name] = field.defaultValue ?? '';
-        }
-        setFormValues(initialValues);
-    }, [fields]);
+            return next;
+        });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [defaultsKey]);
 
     const setFieldValue = (fieldName: string, value: any) => {
+        touchedRef.current.add(fieldName);
         setFormValues((prev) => ({
             ...prev,
             [fieldName]: value ?? '',
@@ -245,14 +316,8 @@ const JsonFormRenderer: React.FC<JsonFormRendererProps> = ({
 };
 
 export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context }) => {
-    // If not already inside a provider (top level), we might need one, 
-    // but usually the ExtensionLoader should wrap it or the Overlay.
-    // For recursive calls, we just use the context.
-
-    // We can't conditionally wrap. So we assume wrapper exists or we accept local state is per-component tree if not.
-    // However, manifests like Hubspot assume shared state between "onLoad" and "CONDITIONAL" children.
-    // So the ROOT renderer call must be wrapped in a state provider.
-
+    // La raiz debe tener su propio estado compartido: manifests como HubSpot asumen que "onLoad" y los hijos
+    // CONDITIONAL comparten `state`. Las llamadas recursivas reutilizan el mismo proveedor.
     return (
         <ExtensionStateProvider>
             <InnerJsonRenderer component={component} context={context} />
@@ -260,25 +325,120 @@ export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: a
     );
 };
 
-const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context }) => {
-    if (!component || typeof component !== 'object') {
-        return null;
+// --- Componentes con estado propio (antes usaban hooks dentro del switch) ---
+
+const AccordionRenderer: React.FC<{ sections: any[]; context?: any }> = ({ sections, context }) => {
+    const [openSections, setOpenSections] = useState<Record<number, boolean>>({});
+    return (
+        <div className="rounded-xl bg-muted/20 divide-y divide-border overflow-hidden">
+            {sections?.map((section: any, i: number) => (
+                <div key={i}>
+                    <button
+                        type="button"
+                        className="w-full flex justify-between items-center p-3 text-sm font-medium text-left hover:bg-muted/60 transition-colors"
+                        onClick={() => setOpenSections(prev => ({ ...prev, [i]: !prev[i] }))}
+                    >
+                        {section.title}
+                        <span className={`transition-transform ${openSections[i] ? 'rotate-180' : ''}`}>▼</span>
+                    </button>
+                    {openSections[i] && (
+                        <div className="p-3 pt-0">
+                            {section.content?.map((child: any, k: number) => (
+                                <InnerJsonRenderer key={k} component={child} context={context} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+};
+
+const ChildTabsRenderer: React.FC<{ tabs: any[]; context?: any }> = ({ tabs, context }) => {
+    const [activeTab, setActiveTab] = useState<any>(tabs?.[0]?.props?.value);
+    return (
+        <div className="w-full">
+            <div className="flex border-b">
+                {tabs?.map((child: any, i: number) => (
+                    <button
+                        type="button"
+                        key={i}
+                        className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === child.props?.value
+                            ? 'border-primary text-primary'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                            }`}
+                        onClick={() => setActiveTab(child.props?.value)}
+                    >
+                        {child.props?.label}
+                    </button>
+                ))}
+            </div>
+            <div className="p-4">
+                {tabs?.map((child: any, i: number) => (
+                    <div key={i} className={activeTab === child.props?.value ? 'block' : 'hidden'}>
+                        <InnerJsonRenderer component={child} context={context} />
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const SetVarRenderer: React.FC<{ name?: string; value: any }> = ({ name, value }) => {
+    const { getState, setState } = useContext(ExtensionStateContext);
+    useEffect(() => {
+        if (name && value !== undefined && getState()[name] !== value) {
+            setState(name, value);
+        }
+    }, [name, value, getState, setState]);
+    return null;
+};
+
+/** Solo estos atributos llegan al <input>/<textarea> (el resto son props del manifest: bindTo, onChange, ...). */
+const INPUT_DOM_PROPS = ['placeholder', 'type', 'name', 'value', 'defaultValue', 'disabled', 'readOnly', 'className', 'rows', 'maxLength', 'min', 'max', 'step', 'autoFocus', 'id', 'required'];
+
+function pickDomProps(source: Record<string, any>) {
+    const out: Record<string, any> = {};
+    for (const key of INPUT_DOM_PROPS) {
+        if (source[key] !== undefined) out[key] = source[key];
     }
+    return out;
+}
 
-    const type = typeof component.type === 'string' ? component.type : '';
-    const props = component.props ?? {};
+const BADGE_VARIANTS: Record<string, string> = {
+    default: 'bg-muted text-muted-foreground',
+    primary: 'bg-primary/10 text-primary',
+    success: 'bg-success/15 text-success',
+    warning: 'bg-warning/15 text-warning',
+    error: 'bg-destructive/15 text-destructive',
+    destructive: 'bg-destructive/15 text-destructive',
+    secondary: 'bg-secondary text-secondary-foreground',
+    outline: 'border text-foreground',
+};
 
-    if (!type) {
-        console.warn('[JsonRenderer] Skipping invalid component without type', component);
-        return null;
-    }
+const ALERT_STYLES: Record<string, string> = {
+    info: 'bg-primary/10 border-primary/20 text-foreground',
+    success: 'bg-success/10 border-success/30 text-success',
+    warning: 'bg-warning/10 border-warning/30 text-warning',
+    error: 'bg-destructive/10 border-destructive/30 text-destructive',
+    destructive: 'bg-destructive/10 border-destructive/30 text-destructive',
+};
 
-    const children = component.children || props?.children;
+const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any }> = ({ component, context: rawContext }) => {
+    // Todos los hooks van ANTES de cualquier retorno temprano (reglas de hooks).
+    const context = useMemo(() => rawContext ?? {}, [rawContext]);
+    const type = component && typeof component === 'object' && typeof component.type === 'string' ? component.type : '';
+    const props = (component && typeof component === 'object' ? component.props : undefined) ?? {};
+    const rawChildren = (component && typeof component === 'object' ? component.children : undefined) || props?.children;
+    // `children` solo es valido como arreglo de componentes (un string como "${state.gifs}" ya no rompe el render)
+    const children: any[] | undefined = Array.isArray(rawChildren) ? rawChildren : undefined;
+
     const expansionUI = useOptionalExpansionUI();
     const openOverlay = expansionUI?.openModal || context?.openOverlay;
     const closeOverlay = expansionUI?.closeModal || context?.onClose || context?.close;
-    const { state, setState } = useContext(ExtensionStateContext);
-    const [wizardStep, setWizardStep] = useState<number>(0);
+    const { state, setState, getState } = useContext(ExtensionStateContext);
+    const wizard = useContext(WizardContext);
+    const { data: session } = useSession();
     const [loadingKeys, setLoadingKeys] = useState<Record<string, boolean>>({});
     const [fallbackMenuOpen, setFallbackMenuOpen] = useState(false);
     const [fallbackMenuTrigger, setFallbackMenuTrigger] = useState<HTMLElement | null>(null);
@@ -299,132 +459,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         setFallbackOverlay(null);
     }, [closeOverlay]);
 
-    // Assume userId is available in context or we need to fetch it?
-    // For now, prompt User or use a default if context.userId is missing.
-    // Ideally, context should have user info.
-    const userId = context?.user?.id || 'default-user';
+    // Identidad del usuario para el almacenamiento local cifrado. Sin sesion NO se usa un usuario generico.
+    const userId: string | null = session?.user?.id || context?.user?.id || null;
 
-    const parseLiteral = (value: string) => {
-        const trimmed = value.trim();
-
-        if ((trimmed.startsWith("'") && trimmed.endsWith("'")) || (trimmed.startsWith('"') && trimmed.endsWith('"'))) {
-            return trimmed.slice(1, -1);
-        }
-        if (trimmed === 'true') return true;
-        if (trimmed === 'false') return false;
-        if (trimmed === 'null') return null;
-        if (trimmed === 'undefined') return undefined;
-
-        const numeric = Number(trimmed);
-        if (!Number.isNaN(numeric) && trimmed !== '') {
-            return numeric;
-        }
-
-        return undefined;
-    };
-
-    // Helper to look up a single dotted path like "context.from.email" or "state.contact"
-    const lookupPath = (key: string, ctx: any, st: any): any => {
-        let actualKey = key.trim();
-        let invert = false;
-
-        if (actualKey.includes('||')) {
-            const options = actualKey.split('||').map((part) => part.trim()).filter(Boolean);
-            let fallback: any;
-
-            for (const option of options) {
-                const literalValue = parseLiteral(option);
-                const resolved = literalValue !== undefined ? literalValue : lookupPath(option, ctx, st);
-                fallback = resolved;
-
-                if (!(resolved === undefined || resolved === null || resolved === '')) {
-                    return resolved;
-                }
-            }
-
-            return fallback;
-        }
-
-        const literalValue = parseLiteral(actualKey);
-        if (literalValue !== undefined) {
-            return literalValue;
-        }
-
-        if (actualKey.startsWith('!')) {
-            invert = true;
-            actualKey = actualKey.substring(1).trim();
-        }
-
-        let checkNotNull = false;
-        let checkNull = false;
-        if (actualKey.endsWith('!= null') || actualKey.endsWith('!== null')) {
-            checkNotNull = true;
-            actualKey = actualKey.replace(/!==?\s*null$/, '').trim();
-        } else if (actualKey.endsWith('== null') || actualKey.endsWith('=== null')) {
-            checkNull = true;
-            actualKey = actualKey.replace(/===?\s*null$/, '').trim();
-        }
-
-        const parts = actualKey.split('.');
-        let val: any = undefined;
-
-        if (parts[0] === 'context') val = ctx;
-        else if (parts[0] === 'state') val = st;
-        else if (parts[0] === 'env') val = ctx?.env;
-        else if (ctx && parts[0] in ctx) val = ctx;
-
-        if (val) {
-            let startIndex = 1;
-            if (parts[0] !== 'context' && parts[0] !== 'state' && parts[0] !== 'env') {
-                startIndex = 0;
-            }
-            for (let i = startIndex; i < parts.length; i++) {
-                val = val?.[parts[i]];
-            }
-        }
-        
-        let finalVal = val;
-        if (checkNotNull) finalVal = (val !== undefined && val !== null && val !== '');
-        if (checkNull) finalVal = (val === undefined || val === null || val === '');
-        if (invert) finalVal = !finalVal;
-
-        return finalVal;
-    };
-
-    // Resolve variables: supports pure refs "${context.email}" AND template strings "From: ${context.from}"
-    const resolveValue = (p: any, ctx: any, st: any): any => {
-        if (typeof p !== 'string') return p;
-
-        // Pure variable reference (entire string is one expression)
-        if (p.startsWith('${') && p.endsWith('}') && p.indexOf('${', 2) === -1) {
-            return lookupPath(p.slice(2, -1), ctx, st);
-        }
-
-        // Template string with embedded expressions
-        if (p.includes('${')) {
-            return p.replace(/\$\{([^}]+)\}/g, (_, key) => {
-                const val = lookupPath(key.trim(), ctx, st);
-                return val !== undefined && val !== null ? String(val) : '';
-            });
-        }
-
-        return p;
-    };
-
-    const resolveProps = (p: any, ctx: any, st: any): any => {
-        if (typeof p === 'object' && p !== null) {
-            if (Array.isArray(p)) {
-                return p.map((item: any) => resolveProps(item, ctx, st));
-            }
-            const newObj: any = {};
-            for (const k in p) {
-                newObj[k] = resolveProps(p[k], ctx, st);
-            }
-            return newObj;
-        }
-        // If it's a string, try resolving it.
-        return resolveValue(p, ctx, st);
-    };
+    // Evaluacion segura de `${...}` (sin eval): ver lib/expansions/expressions.ts
+    const resolveValue = (p: any, ctx: any, st: any): any => (typeof p === 'string' ? resolveTemplate(p, { ctx, state: st }) : p);
+    const resolveProps = (p: any, ctx: any, st: any): any => resolveDeep(p, { ctx, state: st }, LAZY_KEYS);
 
     const resolvedProps = useMemo(() => resolveProps(props, context, state), [props, context, state]);
 
@@ -443,368 +483,424 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         // Merge extraContext (like { result: ... }) into the context for resolution
         const processingContext = { ...context, ...extraContext };
 
-        let actions = Array.isArray(actionDef)
+        const actions = Array.isArray(actionDef)
             ? actionDef
             : (Array.isArray(actionDef.actions) ? actionDef.actions : [actionDef]);
 
         for (const act of actions) {
-            const resolvedAct = resolveProps(act, processingContext, state);
+            if (!act || typeof act !== 'object') continue;
+
+            // Estado fresco en cada paso: un SET_STATE anterior de la misma cadena ya es visible.
+            const currentState = getState();
+            const resolvedAct = resolveProps(act, processingContext, currentState);
             if (Array.isArray(resolvedAct?.actions)) {
-                await handleAction(resolvedAct.actions, e, extraContext);
+                await handleAction(act.actions, e, extraContext);
                 continue;
             }
-            console.log("handleAction executing:", resolvedAct, "with state:", state, "Context:", processingContext);
 
-            if (resolvedAct.action === 'SET_STATE') {
-                setState(resolvedAct.key, resolvedAct.value);
-            }
-            if (resolvedAct.action === 'OPEN_OVERLAY') {
-                const { targetId } = resolvedAct;
-                console.log("Opening overlay", targetId);
+            switch (resolvedAct.action) {
+                case 'SET_STATE':
+                    setState(resolvedAct.key, resolvedAct.value);
+                    break;
 
-                const activeOverlays = resolvedAct.overlays || processingContext.overlays || context.overlays;
-                const activeExtensionId = resolvedAct.extensionId || processingContext.extensionId || context.extensionId;
-                const overlayDef = activeOverlays?.[targetId];
-                if (overlayDef) {
-                    const overlayContext = {
-                        ...processingContext,
-                        extensionId: activeExtensionId,
-                        overlays: activeOverlays,
-                        onClose: closeOverlay || (() => setFallbackOverlay(null)),
-                        toolbarButtonMode: undefined,
-                    };
+                case 'OPEN_OVERLAY': {
+                    const { targetId } = resolvedAct;
 
-                    if (openOverlay) {
-                        openOverlay(
-                            <JsonRenderer component={overlayDef} context={overlayContext} />,
-                            { width: resolveModalWidth(overlayDef?.props?.width) }
-                        );
-                    } else {
-                        setFallbackOverlay({
-                            component: overlayDef,
-                            context: overlayContext,
-                            width: resolveModalWidth(overlayDef?.props?.width),
-                        });
-                    }
-                } else {
-                    console.warn(`Overlay ID ${targetId} not found in extension manifest`);
-                    toast.error("Overlay not found");
-                }
-            }
-            if (resolvedAct.action === 'OAUTH_CONNECT') {
-                const provider = resolvedAct.provider; // e.g. 'google', 'slack'
-                const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-                const url = resolvedAct.url || `/api/auth/${provider}?returnTo=${encodeURIComponent(returnTo)}`;
+                    const activeOverlays = resolvedAct.overlays || processingContext.overlays || context.overlays;
+                    const activeExtensionId = resolvedAct.extensionId || processingContext.extensionId || context.extensionId;
+                    const overlayDef = activeOverlays?.[targetId];
+                    if (overlayDef) {
+                        const overlayContext = {
+                            ...processingContext,
+                            extensionId: activeExtensionId,
+                            overlays: activeOverlays,
+                            onClose: closeOverlay || (() => setFallbackOverlay(null)),
+                            toolbarButtonMode: undefined,
+                        };
 
-                window.location.href = url;
-            }
-
-            if (resolvedAct.action === 'COPY_TO_CLIPBOARD') {
-                try {
-                    await navigator.clipboard.writeText(resolvedAct.text);
-                    toast.success("Copied to clipboard");
-                } catch (err) {
-                    toast.error("Failed to copy");
-                }
-            }
-
-            if (resolvedAct.action === 'OPEN_URL') {
-                window.open(resolvedAct.url, '_blank', 'noopener,noreferrer');
-            }
-
-            if (resolvedAct.action === 'NAVIGATE') {
-                router.push(resolvedAct.path);
-            }
-
-            if (resolvedAct.action === 'REFRESH') {
-                router.refresh();
-            }
-
-            if (resolvedAct.action === 'DELAY') {
-                await new Promise(resolve => setTimeout(resolve, resolvedAct.ms || 1000));
-            }
-
-            if (resolvedAct.action === 'CALL_BACKEND') {
-                try {
-                    const result = await executeExtensionAction(
-                        context.extensionId,
-                        resolvedAct.function,
-                        resolvedAct.args || resolvedAct.params,
-                        context // Automatically passed, but we might want to filter it? api.ts handles it.
-                    );
-
-                    if (!result.success) {
-                        throw new Error(result.error || 'Request failed');
-                    }
-
-                    // Pass the result to the next action via extraContext
-                    if (act.onSuccess) {
-                        console.log("CALL_BACKEND SUCCESS, firing handleAction with result:", result.result);
-                        await handleAction(act.onSuccess, e, { result: result.result });
-                    }
-
-                } catch (err: any) {
-                    console.error("Backend Call Failed", err);
-                    if (act.onError) {
-                        await handleAction(act.onError, e, { error: err.message });
-                    } else {
-                        toast.error(err.message || "Action failed");
-                    }
-                }
-            }
-            if (resolvedAct.action === 'CALL_API') {
-                try {
-                    const method = (resolvedAct.method || 'GET').toUpperCase();
-                    const requestHeaders: Record<string, string> = {
-                        ...(resolvedAct.headers || {}),
-                    };
-                    const requestBody = resolvedAct.body ?? resolvedAct.args ?? resolvedAct.params;
-                    const init: RequestInit = {
-                        method,
-                        headers: requestHeaders,
-                    };
-
-                    if (requestBody !== undefined && method !== 'GET') {
-                        if (!requestHeaders['Content-Type']) {
-                            requestHeaders['Content-Type'] = 'application/json';
+                        if (openOverlay) {
+                            openOverlay(
+                                <JsonRenderer component={normalizeOverlay(overlayDef)} context={overlayContext} />,
+                                { width: resolveModalWidth(overlayDef?.props?.width) }
+                            );
+                        } else {
+                            setFallbackOverlay({
+                                component: normalizeOverlay(overlayDef),
+                                context: overlayContext,
+                                width: resolveModalWidth(overlayDef?.props?.width),
+                            });
                         }
-                        init.body = requestHeaders['Content-Type'] === 'application/json'
-                            ? JSON.stringify(requestBody)
-                            : requestBody;
-                    }
-
-                    const response = await fetch(resolvedAct.url, init);
-                    const contentType = response.headers.get('content-type') || '';
-                    const result = contentType.includes('application/json')
-                        ? await response.json()
-                        : await response.text();
-
-                    if (!response.ok) {
-                        const errorMessage = typeof result === 'object' && result !== null && 'error' in result
-                            ? String((result as any).error)
-                            : `Request failed with status ${response.status}`;
-                        throw new Error(errorMessage);
-                    }
-
-                    if (resolvedAct.emitEvent && typeof window !== 'undefined') {
-                        window.dispatchEvent(new CustomEvent(resolvedAct.emitEvent, { detail: result }));
-                    }
-
-                    if (act.onSuccess) {
-                        await handleAction(act.onSuccess, e, { result });
-                    }
-                } catch (err: any) {
-                    console.error('Client API Call Failed', err);
-                    if (act.onError) {
-                        await handleAction(act.onError, e, { error: err.message });
                     } else {
-                        toast.error(err.message || 'Action failed');
+                        console.warn(`Overlay ID ${targetId} not found in extension manifest`);
+                        toast.error("Overlay not found");
                     }
-                }
-            }
-            if (resolvedAct.action === 'TOAST') {
-                if (resolvedAct.variant === 'error') {
-                    toast.error(resolvedAct.message);
-                } else if (resolvedAct.variant === 'success') {
-                    toast.success(resolvedAct.message);
-                } else {
-                    toast(resolvedAct.message);
-                }
-            }
-            if (resolvedAct.action === 'SET_SUBJECT') {
-                const nextSubject = resolvedAct.subject ?? resolvedAct.value;
-                const currentSubject = typeof context.subject === 'string' ? context.subject.trim() : '';
-
-                if (nextSubject && context.setSubject && (!resolvedAct.ifEmpty || !currentSubject)) {
-                    await context.setSubject(nextSubject);
-                }
-            }
-            if (resolvedAct.action === 'ADD_ATTACHMENT') {
-                const attachment = resolvedAct.attachment || resolvedAct;
-
-                if (attachment?.url && context.addAttachment) {
-                    context.addAttachment(attachment);
-                } else if (attachment?.contentBase64 && context.addAttachment) {
-                    const binary = atob(attachment.contentBase64);
-                    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-                    context.addAttachment({
-                        ...attachment,
-                        filename: attachment.filename || 'attachment.bin',
-                        mimeType: attachment.mimeType || 'application/octet-stream',
-                        contentBase64: attachment.contentBase64,
-                        size: attachment.size || bytes.byteLength,
-                    });
-                } else {
-                    toast.error('Attachment payload invalid');
-                }
-            }
-            if (resolvedAct.action === 'INSERT_CONTENT') {
-                console.log("Insert content", resolvedAct.content);
-                if (context.insertBody) {
-                    context.insertBody(resolvedAct.content);
-                } else {
-                    console.warn("No insertBody method in context");
-                    toast.error("Cannot insert content: Editor context missing");
+                    break;
                 }
 
-                // Handle closeOverlay if requested in the same action scope?
-                // Some manifests might omit "closeOverlay" action and expect it.
-                // Zoom manifest has "closeOverlay": true in the action props.
-                if (resolvedAct.closeOverlay) {
+                case 'OAUTH_CONNECT': {
+                    const provider = String(resolvedAct.provider || '');
+                    if (!/^[a-z0-9_-]{1,32}$/i.test(provider)) {
+                        toast.error('Invalid OAuth provider');
+                        break;
+                    }
+                    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+                    // Solo rutas internas: una URL del manifest no puede sacar al usuario a otro sitio.
+                    const url = safeInternalPath(resolvedAct.url) || `/api/auth/${provider}?returnTo=${encodeURIComponent(returnTo)}`;
+
+                    window.location.href = url;
+                    break;
+                }
+
+                case 'COPY_TO_CLIPBOARD':
+                    try {
+                        await navigator.clipboard.writeText(String(resolvedAct.text ?? ''));
+                        toast.success(resolvedAct.successMessage || 'Copied!');
+                    } catch {
+                        toast.error('Failed to copy');
+                    }
+                    break;
+
+                case 'OPEN_URL': {
+                    const href = safeHref(resolvedAct.url);
+                    if (!href) {
+                        toast.error('Blocked unsafe link');
+                        break;
+                    }
+                    window.open(href, '_blank', 'noopener,noreferrer');
+                    break;
+                }
+
+                case 'NAVIGATE': {
+                    const path = safeInternalPath(resolvedAct.path);
+                    if (!path) {
+                        toast.error('Blocked unsafe navigation');
+                        break;
+                    }
+                    router.push(path);
+                    break;
+                }
+
+                case 'REFRESH':
+                    router.refresh();
+                    break;
+
+                case 'DELAY':
+                    await new Promise(resolve => setTimeout(resolve, Math.min(Number(resolvedAct.ms) || 1000, 10_000)));
+                    break;
+
+                case 'CALL_BACKEND': {
+                    try {
+                        // Args explicitos ganan; formData del formulario que disparo la accion se completa solo.
+                        const explicitArgs = resolvedAct.args ?? resolvedAct.params;
+                        const formData = extraContext?.formData && typeof extraContext.formData === 'object' ? extraContext.formData : null;
+                        const params = formData && (explicitArgs === undefined || (explicitArgs && typeof explicitArgs === 'object' && !Array.isArray(explicitArgs)))
+                            ? { ...formData, ...(explicitArgs || {}) }
+                            : explicitArgs;
+
+                        const result = await executeExtensionAction(
+                            processingContext.extensionId,
+                            resolvedAct.function,
+                            params,
+                            toBackendContext(context)
+                        );
+
+                        if (!result.success) {
+                            throw new Error(result.error || 'Request failed');
+                        }
+
+                        // Pasa el resultado a la siguiente accion conservando value/formData del evento original
+                        if (act.onSuccess) {
+                            await handleAction(act.onSuccess, e, { ...extraContext, result: result.result });
+                        }
+
+                    } catch (err: any) {
+                        console.error("Backend Call Failed", err?.message);
+                        if (act.onError) {
+                            await handleAction(act.onError, e, { ...extraContext, error: err.message });
+                        } else {
+                            toast.error(err.message || "Action failed");
+                        }
+                    }
+                    break;
+                }
+
+                case 'CALL_API': {
+                    try {
+                        const method = (resolvedAct.method || 'GET').toUpperCase();
+                        const requestHeaders: Record<string, string> = {
+                            ...(resolvedAct.headers || {}),
+                        };
+                        const requestBody = resolvedAct.body ?? resolvedAct.args ?? resolvedAct.params;
+                        // Solo rutas del propio origen (/api/...): un manifest no puede hacer que el navegador llame a otros hosts con cookies.
+                        const url = safeInternalPath(resolvedAct.url);
+                        if (!url) throw new Error('Blocked unsafe API url');
+                        const init: RequestInit = {
+                            method,
+                            headers: requestHeaders,
+                        };
+
+                        if (requestBody !== undefined && method !== 'GET') {
+                            if (!requestHeaders['Content-Type']) {
+                                requestHeaders['Content-Type'] = 'application/json';
+                            }
+                            init.body = requestHeaders['Content-Type'] === 'application/json'
+                                ? JSON.stringify(requestBody)
+                                : requestBody;
+                        }
+
+                        const response = await fetch(url, init);
+                        const contentType = response.headers.get('content-type') || '';
+                        const result = contentType.includes('application/json')
+                            ? await response.json()
+                            : await response.text();
+
+                        if (!response.ok) {
+                            const errorMessage = typeof result === 'object' && result !== null && 'error' in result
+                                ? String((result as any).error)
+                                : `Request failed with status ${response.status}`;
+                            throw new Error(errorMessage);
+                        }
+
+                        if (resolvedAct.emitEvent && typeof window !== 'undefined') {
+                            window.dispatchEvent(new CustomEvent(resolvedAct.emitEvent, { detail: result }));
+                        }
+
+                        if (act.onSuccess) {
+                            await handleAction(act.onSuccess, e, { ...extraContext, result });
+                        }
+                    } catch (err: any) {
+                        console.error('Client API Call Failed', err?.message);
+                        if (act.onError) {
+                            await handleAction(act.onError, e, { ...extraContext, error: err.message });
+                        } else {
+                            toast.error(err.message || 'Action failed');
+                        }
+                    }
+                    break;
+                }
+
+                case 'TOAST':
+                    if (resolvedAct.variant === 'error') {
+                        toast.error(resolvedAct.message);
+                    } else if (resolvedAct.variant === 'success') {
+                        toast.success(resolvedAct.message);
+                    } else {
+                        toast(resolvedAct.message);
+                    }
+                    break;
+
+                case 'SET_SUBJECT': {
+                    const nextSubject = resolvedAct.subject ?? resolvedAct.value;
+                    const currentSubject = typeof context.subject === 'string' ? context.subject.trim() : '';
+
+                    if (nextSubject && context.setSubject && (!resolvedAct.ifEmpty || !currentSubject)) {
+                        await context.setSubject(nextSubject);
+                    }
+                    break;
+                }
+
+                case 'ADD_ATTACHMENT': {
+                    const attachment = resolvedAct.attachment || resolvedAct;
+
+                    if (attachment?.url && context.addAttachment) {
+                        context.addAttachment(attachment);
+                    } else if (attachment?.contentBase64 && context.addAttachment) {
+                        const binary = atob(attachment.contentBase64);
+                        const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+                        context.addAttachment({
+                            ...attachment,
+                            filename: attachment.filename || 'attachment.bin',
+                            mimeType: attachment.mimeType || 'application/octet-stream',
+                            contentBase64: attachment.contentBase64,
+                            size: attachment.size || bytes.byteLength,
+                        });
+                    } else {
+                        toast.error('Attachment payload invalid');
+                    }
+                    break;
+                }
+
+                case 'INSERT_CONTENT':
+                    if (context.insertBody) {
+                        context.insertBody(resolvedAct.content);
+                    } else {
+                        toast.error("Cannot insert content: Editor context missing");
+                    }
+
+                    if (resolvedAct.closeOverlay) {
+                        closeAnyOverlay();
+                    }
+                    break;
+
+                case 'APPEND_BODY': {
+                    const nextContent = typeof resolvedAct.content === 'string'
+                        ? resolvedAct.content
+                        : typeof resolvedAct.content?.content === 'string'
+                            ? resolvedAct.content.content
+                            : '';
+
+                    if (context.appendBody) {
+                        context.appendBody(nextContent);
+                    } else {
+                        toast.error('Cannot append content: Composer context missing');
+                    }
+
+                    if (resolvedAct.closeOverlay) {
+                        closeAnyOverlay();
+                    }
+                    break;
+                }
+
+                case 'CLOSE_OVERLAY':
                     closeAnyOverlay();
-                }
-            }
-            if (resolvedAct.action === 'APPEND_BODY') {
-                const nextContent = typeof resolvedAct.content === 'string'
-                    ? resolvedAct.content
-                    : typeof resolvedAct.content?.content === 'string'
-                        ? resolvedAct.content.content
-                        : '';
+                    break;
 
-                if (context.appendBody) {
-                    context.appendBody(nextContent);
-                } else {
-                    toast.error('Cannot append content: Composer context missing');
-                }
-
-                if (resolvedAct.closeOverlay) {
-                    closeAnyOverlay();
-                }
-            }
-            if (resolvedAct.action === 'CLOSE_OVERLAY') {
-                closeAnyOverlay();
-            }
-            if (resolvedAct.action === 'SET_CONTEXT_VALUE') {
-                const targetKey = resolvedAct.key;
-                if (targetKey && typeof context?.[targetKey] === 'function') {
-                    context[targetKey](resolvedAct.value);
-                } else {
-                    toast.error(`Context setter '${targetKey}' is unavailable`);
-                }
-            }
-            if (resolvedAct.action === 'NEXT_STEP') {
-                setWizardStep(prev => prev + 1);
-            }
-            if (resolvedAct.action === 'PREV_STEP') {
-                setWizardStep(prev => prev - 1);
-            }
-
-            // --- Secure Storage Actions ---
-            if (resolvedAct.action === 'SECURE_SAVE') {
-                try {
-                    await secureWrite(resolvedAct.key, resolvedAct.value, userId);
-                    if (act.onSuccess) {
-                        await handleAction(act.onSuccess, e, extraContext);
+                case 'SET_CONTEXT_VALUE': {
+                    const targetKey = resolvedAct.key;
+                    if (targetKey && typeof context?.[targetKey] === 'function') {
+                        context[targetKey](resolvedAct.value);
+                    } else {
+                        toast.error(`Context setter '${targetKey}' is unavailable`);
                     }
-                } catch (err: any) {
-                    console.error("Secure Save Failed", err);
-                    if (act.onError) await handleAction(act.onError, e, { error: err.message });
+                    break;
                 }
-            }
-            if (resolvedAct.action === 'SECURE_READ') {
-                try {
-                    const val = await secureRead(resolvedAct.key, userId);
-                    // Usually we want to set this to state
-                    if (resolvedAct.targetState) {
-                        setState(resolvedAct.targetState, val);
+
+                case 'NEXT_STEP':
+                    wizard?.next();
+                    break;
+
+                case 'PREV_STEP':
+                    wizard?.prev();
+                    break;
+
+                // --- Secure Storage Actions ---
+                case 'SECURE_SAVE':
+                    try {
+                        if (!userId) throw new Error('Sign in to save this setting');
+                        await secureWrite(resolvedAct.key, resolvedAct.value, userId);
+                        if (act.onSuccess) {
+                            await handleAction(act.onSuccess, e, extraContext);
+                        }
+                    } catch (err: any) {
+                        console.error("Secure Save Failed", err?.message);
+                        if (act.onError) await handleAction(act.onError, e, { ...extraContext, error: err.message });
+                        else toast.error(err?.message === 'SECURE_STORAGE_UNAVAILABLE' ? 'Secure storage is not available in this browser' : (err?.message || 'Could not save'));
                     }
-                    if (act.onSuccess) {
-                        await handleAction(act.onSuccess, e, { ...extraContext, value: val });
+                    break;
+
+                case 'SECURE_READ':
+                    try {
+                        // Sin sesion no hay clave: se trata como "sin dato" (no como un usuario generico compartido)
+                        const val = userId ? await secureRead(resolvedAct.key, userId) : null;
+                        // Usually we want to set this to state
+                        if (resolvedAct.targetState) {
+                            setState(resolvedAct.targetState, val);
+                        }
+                        if (act.onSuccess) {
+                            await handleAction(act.onSuccess, e, { ...extraContext, value: val });
+                        }
+                    } catch (err: any) {
+                        console.error("Secure Read Failed", err?.message);
+                        if (act.onError) await handleAction(act.onError, e, { ...extraContext, error: err.message });
                     }
-                } catch (err: any) {
-                    console.error("Secure Read Failed", err);
-                    if (act.onError) await handleAction(act.onError, e, { error: err.message });
-                }
-            }
+                    break;
 
-            // --- Navigation & UI Actions ---
-            if (resolvedAct.action === 'OPEN_URL') {
-                window.open(resolvedAct.url, resolvedAct.target || '_blank');
-            }
-            if (resolvedAct.action === 'NAVIGATE') {
-                router.push(resolvedAct.path);
-            }
-            if (resolvedAct.action === 'CONFIRM') {
-                const confirmed = window.confirm(resolvedAct.message || 'Are you sure?');
-                if (confirmed && act.onConfirm) {
-                    await handleAction(act.onConfirm, e, extraContext);
-                } else if (!confirmed && act.onCancel) {
-                    await handleAction(act.onCancel, e, extraContext);
+                // --- Navigation & UI Actions ---
+                case 'CONFIRM': {
+                    const confirmed = window.confirm(resolvedAct.message || 'Are you sure?');
+                    if (confirmed && act.onConfirm) {
+                        await handleAction(act.onConfirm, e, extraContext);
+                    } else if (!confirmed && act.onCancel) {
+                        await handleAction(act.onCancel, e, extraContext);
+                    }
+                    break;
                 }
-            }
-            if (resolvedAct.action === 'COPY_TO_CLIPBOARD') {
-                try {
-                    await navigator.clipboard.writeText(resolvedAct.text);
-                    toast.success(resolvedAct.successMessage || 'Copied!');
-                } catch {
-                    toast.error('Failed to copy');
-                }
-            }
-            if (resolvedAct.action === 'SET_LOADING') {
-                setLoadingKeys(prev => ({ ...prev, [resolvedAct.key]: resolvedAct.value ?? true }));
-            }
-            if (resolvedAct.action === 'DELAY') {
-                await new Promise(resolve => setTimeout(resolve, resolvedAct.ms || 1000));
-            }
 
-            // --- State Manipulation ---
-            if (resolvedAct.action === 'MERGE_STATE') {
-                const existing = state[resolvedAct.key] || {};
-                setState(resolvedAct.key, { ...existing, ...resolvedAct.value });
-            }
-            if (resolvedAct.action === 'MAP_ARRAY') {
-                const arr = state[resolvedAct.source];
-                if (Array.isArray(arr)) {
-                    const mapped = arr.map((item: any) => {
-                        const itemCtx = { ...processingContext, item };
-                        return resolveProps(resolvedAct.template, itemCtx, state);
-                    });
-                    setState(resolvedAct.target || resolvedAct.source, mapped);
-                }
-            }
-            if (resolvedAct.action === 'FILTER_ARRAY') {
-                const arr = state[resolvedAct.source];
-                if (Array.isArray(arr)) {
-                    const filtered = arr.filter((item: any) => {
-                        const itemCtx = { ...processingContext, item };
-                        return resolveValue(resolvedAct.condition, itemCtx, state);
-                    });
-                    setState(resolvedAct.target || resolvedAct.source, filtered);
-                }
-            }
+                case 'SET_LOADING':
+                    setLoadingKeys(prev => ({ ...prev, [resolvedAct.key]: resolvedAct.value ?? true }));
+                    break;
 
-            if (resolvedAct.action === 'OAUTH_DISCONNECT') {
-                try {
-                    await fetch(`/api/auth/oauth/${resolvedAct.provider}/disconnect`, {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ extensionId: context.extensionId })
-                    });
-                    toast.success('Disconnected');
-                    if (act.onSuccess) await handleAction(act.onSuccess, e, extraContext);
-                } catch {
-                    toast.error('Failed to disconnect');
+                // --- State Manipulation ---
+                case 'MERGE_STATE': {
+                    const existing = currentState[resolvedAct.key] || {};
+                    setState(resolvedAct.key, { ...existing, ...resolvedAct.value });
+                    break;
                 }
+
+                case 'MAP_ARRAY': {
+                    const arr = currentState[resolvedAct.source];
+                    if (Array.isArray(arr)) {
+                        const mapped = arr.map((item: any) => resolveProps(act.template, { ...processingContext, item }, currentState));
+                        setState(resolvedAct.target || resolvedAct.source, mapped);
+                    }
+                    break;
+                }
+
+                case 'FILTER_ARRAY': {
+                    const arr = currentState[resolvedAct.source];
+                    if (Array.isArray(arr)) {
+                        const filtered = arr.filter((item: any) => {
+                            const itemCtx = { ...processingContext, item };
+                            return typeof act.condition === 'string'
+                                ? Boolean(resolveValue(act.condition, itemCtx, currentState))
+                                : Boolean(act.condition);
+                        });
+                        setState(resolvedAct.target || resolvedAct.source, filtered);
+                    }
+                    break;
+                }
+
+                case 'OAUTH_DISCONNECT': {
+                    const provider = String(resolvedAct.provider || '');
+                    if (!/^[a-z0-9_-]{1,32}$/i.test(provider)) {
+                        toast.error('Invalid OAuth provider');
+                        break;
+                    }
+                    try {
+                        await fetch(`/api/auth/oauth/${provider}/disconnect`, {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ extensionId: context.extensionId })
+                        });
+                        toast.success('Disconnected');
+                        if (act.onSuccess) await handleAction(act.onSuccess, e, extraContext);
+                    } catch {
+                        toast.error('Failed to disconnect');
+                    }
+                    break;
+                }
+
+                default:
+                    console.warn('[JsonRenderer] Unknown action:', resolvedAct.action);
             }
         }
     };
 
-    // Auto-run onLoad
+    // Auto-run onLoad: una sola vez, al pasar onLoadWhen de falso a verdadero (o al montar si no hay condicion)
+    const shouldRunOnLoad = resolvedProps.onLoadWhen === undefined
+        ? true
+        : Boolean(
+            typeof resolvedProps.onLoadWhen === 'string'
+                ? resolvedProps.onLoadWhen.trim()
+                : resolvedProps.onLoadWhen
+        );
+    const hasOnLoad = Boolean(props?.onLoad);
+    const handleActionRef = useRef(handleAction);
+    handleActionRef.current = handleAction;
     useEffect(() => {
-        if (!props?.onLoad) return;
-
-        const shouldRunOnLoad = resolvedProps.onLoadWhen === undefined
-            ? true
-            : Boolean(
-                typeof resolvedProps.onLoadWhen === 'string'
-                    ? resolvedProps.onLoadWhen.trim()
-                    : resolvedProps.onLoadWhen
-            );
-
-        if (shouldRunOnLoad) {
-            handleAction(props.onLoad);
+        if (hasOnLoad && shouldRunOnLoad) {
+            handleActionRef.current(props.onLoad);
         }
-    }, [props?.onLoad, resolvedProps.onLoadWhen]);
+        // props.onLoad es dato estatico del manifest
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hasOnLoad, shouldRunOnLoad]);
+
+    if (!type) {
+        if (component && typeof component === 'object') {
+            console.warn('[JsonRenderer] Skipping invalid component without type');
+        }
+        return null;
+    }
 
     const renderIcon = (iconName: string, size: number = 16, className: string = '') => {
         if (!iconName) return null;
@@ -830,6 +926,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         // Fallback if not a Lucide icon (e.g. an emoji)
         return <span className={className} style={{ fontSize: size }}>{iconName}</span>;
     };
+
+    const renderChildren = (list: any[] | undefined, ctx: any = context) =>
+        list?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={ctx} />);
 
     const renderMenuOptionButton = (option: any, index: number) => {
         const optionLabel = option?.label || `Option ${index + 1}`;
@@ -1012,54 +1111,60 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     setState(props.bindTo, e.target.value);
                 }
             };
-            
+
+            const domProps = pickDomProps(resolvedProps);
             if (resolvedProps.multiline) {
-                const { multiline, ...textareaProps } = resolvedProps;
                 return (
-                    <textarea 
-                        {...textareaProps}
+                    <textarea
+                        {...domProps}
                         onChange={handleChange}
                         className="w-full min-h-[80px] rounded-xl bg-muted/50 px-3.5 py-2.5 text-sm outline-none hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0 transition-all resize-y placeholder:text-muted-foreground disabled:opacity-50"
                     />
                 );
             }
-            return <Input {...resolvedProps} onChange={handleChange} />;
+            return <Input {...domProps} onChange={handleChange} />;
         }
         case 'CARD':
             return (
                 <Card>
                     <CardHeader><CardTitle>{resolvedProps.title}</CardTitle></CardHeader>
                     <CardContent>
-                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {renderChildren(children)}
                     </CardContent>
                 </Card>
             );
         case 'ROW':
             return (
                 <div className="flex flex-row gap-2 items-center">
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
         case 'COLUMN':
             return (
                 <div className="flex flex-col gap-2">
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
         case 'CONDITIONAL':
             if (resolvedProps.condition) {
-                return <>{(props as any).true?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                return <>{renderChildren((props as any).true)}</>;
             } else {
-                return <>{(props as any).false?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                return <>{renderChildren((props as any).false)}</>;
             }
-        case 'LINK':
-            return <a href={resolvedProps.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{resolvedProps.label}</a>;
+        case 'LINK': {
+            const href = safeHref(resolvedProps.url);
+            if (!href) {
+                return <span className="text-muted-foreground">{resolvedProps.label}</span>;
+            }
+            return <a href={href} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{resolvedProps.label}</a>;
+        }
         case 'TABS': {
+            // Forma A: props.tabs = [{label, content:[...]}]. Forma B: children = TAB_ITEM {value,label}.
             const rawTabs = Array.isArray(props.tabs) ? props.tabs : [];
-            const resolvedTabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
             if (rawTabs.length === 0) {
-                return null;
+                return children ? <ChildTabsRenderer tabs={children} context={context} /> : null;
             }
+            const resolvedTabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
 
             return (
                 <Tabs defaultValue={resolvedTabs[0]?.label || rawTabs[0]?.label}>
@@ -1070,7 +1175,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     </TabsList>
                     {rawTabs.map((tab: any, i: number) => (
                         <TabsContent key={i} value={resolvedTabs[i]?.label || tab.label}>
-                            {tab.content?.map((child: any, k: number) => <InnerJsonRenderer key={k} component={child} context={context} />)}
+                            {renderChildren(tab.content)}
                         </TabsContent>
                     ))}
                 </Tabs>
@@ -1090,28 +1195,19 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         </div>
                     )}
                     <div className="flex flex-col gap-4 text-sm text-foreground overflow-y-auto custom-scrollbar">
-                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {renderChildren(children)}
                     </div>
                 </div>
             );
         case 'HEADLESS':
             return null;
         case 'WIZARD':
-            const step = resolvedProps.steps[wizardStep];
-            if (!step) {
-                return null;
-            }
             return (
-                <div className="space-y-4">
-                    <h3 className="text-lg font-medium">{step.title}</h3>
-                    <div>
-                        {step.content?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
-                    </div>
-                    <div className="flex justify-between mt-4">
-                        <Button disabled={wizardStep === 0} onClick={() => setWizardStep(s => s - 1)} variant="outline">Back</Button>
-                        {/* Next button usually handled by content actions, but we could add default */}
-                    </div>
-                </div>
+                <WizardRenderer
+                    steps={Array.isArray(resolvedProps.steps) ? resolvedProps.steps : []}
+                    rawSteps={Array.isArray(props.steps) ? props.steps : []}
+                    context={context}
+                />
             );
         case 'SELECT':
             return (
@@ -1122,7 +1218,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         onChange={(e) => handleAction(props.onChange, undefined, { value: e.target.value })}
                     >
                         <option value="">Select...</option>
-                        {resolvedProps.options?.map((opt: any) => (
+                        {(Array.isArray(resolvedProps.options) ? resolvedProps.options : []).map((opt: any) => (
                             <option key={opt[resolvedProps.valueKey || 'value']} value={opt[resolvedProps.valueKey || 'value']}>
                                 {opt[resolvedProps.labelKey || 'label']}
                             </option>
@@ -1140,30 +1236,35 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     handleAction={handleAction}
                 />
             );
-        case 'LIST':
-            // Renders a list of items using a template
+        case 'LIST': {
+            // Renders a list of items using a template (la plantilla se resuelve por item, no antes)
             const items = resolvedProps.items;
-            if (!Array.isArray(items)) return null;
+            if (!Array.isArray(items) || !props.itemTemplate) return null;
 
             return (
                 <div className="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto">
                     {items.map((item: any, i: number) => {
                         const itemContext = { ...context, item };
                         return (
-                            <InnerJsonRenderer key={i} component={resolvedProps.itemTemplate} context={itemContext} />
+                            <InnerJsonRenderer key={i} component={props.itemTemplate} context={itemContext} />
                         );
                     })}
                 </div>
             );
-        case 'IMAGE_BUTTON':
+        }
+        case 'IMAGE_BUTTON': {
+            const src = safeImageSrc(resolvedProps.src);
+            if (!src) return null;
             return (
                 <button
+                    type="button"
                     className="hover:opacity-80 transition-opacity rounded-xl overflow-hidden"
                     onClick={(e) => handleAction(props.onClick, e)}
                 >
-                    <img src={resolvedProps.src} alt={resolvedProps.alt} className="w-full h-auto object-cover" />
+                    <img src={src} alt={resolvedProps.alt} className="w-full h-auto object-cover" />
                 </button>
             );
+        }
 
         // --- New Components (Phase 2) ---
 
@@ -1185,14 +1286,28 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         }
 
         case 'SWITCH': {
-            const switchValue = resolvedProps.value;
-            const cases = resolvedProps.cases || {};
-            const matchedCase = cases[switchValue] || resolvedProps.default;
-            if (!matchedCase) return null;
-            if (Array.isArray(matchedCase)) {
-                return <>{matchedCase.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+            // Forma A: props.cases = { valor: componente | [componentes] } + props.default
+            // Forma B: children = CASE {value} / DEFAULT
+            const value = resolvedProps.value;
+            if (props.cases && typeof props.cases === 'object') {
+                const matchedCase = props.cases[String(value)] || props.default;
+                if (!matchedCase) return null;
+                if (Array.isArray(matchedCase)) {
+                    return <>{renderChildren(matchedCase)}</>;
+                }
+                return <InnerJsonRenderer component={matchedCase} context={context} />;
             }
-            return <InnerJsonRenderer component={matchedCase} context={context} />;
+
+            const cases = children?.filter((child: any) => child.type === 'CASE') || [];
+            const defaultCase = children?.find((child: any) => child.type === 'DEFAULT');
+            const match = cases.find((child: any) => child.props?.value === value);
+
+            if (match) {
+                return <InnerJsonRenderer component={match} context={context} />;
+            } else if (defaultCase) {
+                return <InnerJsonRenderer component={defaultCase} context={context} />;
+            }
+            return null;
         }
 
         case 'CHECKBOX':
@@ -1201,7 +1316,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     <input
                         type="checkbox"
                         className="w-4 h-4 rounded accent-primary"
-                        checked={resolvedProps.checked || state[resolvedProps.bindTo] || false}
+                        checked={Boolean(resolvedProps.checked || state[resolvedProps.bindTo])}
                         onChange={(e) => {
                             if (resolvedProps.bindTo) setState(resolvedProps.bindTo, e.target.checked);
                             if (props.onChange) handleAction(props.onChange, e, { value: e.target.checked });
@@ -1211,7 +1326,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </label>
             );
 
-        case 'TOGGLE':
+        case 'TOGGLE': {
             const toggleVal = resolvedProps.value ?? state[resolvedProps.bindTo] ?? false;
             return (
                 <label className="flex items-center gap-3 cursor-pointer">
@@ -1228,6 +1343,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     {resolvedProps.label && <span className="text-sm">{resolvedProps.label}</span>}
                 </label>
             );
+        }
 
         case 'TEXTAREA':
             return (
@@ -1248,16 +1364,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             );
 
         case 'BADGE':
-            const badgeVariants: Record<string, string> = {
-                default: 'bg-muted text-muted-foreground',
-                primary: 'bg-primary/10 text-primary',
-                success: 'bg-success/15 text-success',
-                warning: 'bg-warning/15 text-warning',
-                error: 'bg-destructive/15 text-destructive',
-            };
             return (
-                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badgeVariants[resolvedProps.variant || 'default']}`}>
-                    {resolvedProps.label}
+                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${BADGE_VARIANTS[resolvedProps.variant || 'default'] || BADGE_VARIANTS.default} ${resolvedProps.className || ''}`}>
+                    {resolvedProps.label ?? renderChildren(children)}
                 </span>
             );
 
@@ -1268,7 +1377,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             return <div style={{ height: resolvedProps.size || 16 }} />;
 
         case 'PROGRESS': {
-            const pct = Math.min(100, Math.max(0, resolvedProps.value || 0));
+            const pct = Math.min(100, Math.max(0, Number(resolvedProps.value) || 0));
             return (
                 <div className="space-y-1">
                     {resolvedProps.label && (
@@ -1317,57 +1426,45 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </div>
             );
 
-        case 'ALERT': {
-            const alertStyles: Record<string, string> = {
-                info: 'bg-primary/10 border-primary/20 text-foreground',
-                success: 'bg-success/10 border-success/30 text-success',
-                warning: 'bg-warning/10 border-warning/30 text-warning',
-                error: 'bg-destructive/10 border-destructive/30 text-destructive',
-            };
+        case 'ALERT':
             return (
-                <div className={`p-3 rounded-lg border ${alertStyles[resolvedProps.variant || 'info']}`}>
+                <div className={`p-3 rounded-lg border ${ALERT_STYLES[resolvedProps.variant || 'info'] || ALERT_STYLES.info} ${resolvedProps.className || ''}`}>
                     {resolvedProps.title && <div className="font-semibold text-sm mb-1">{resolvedProps.title}</div>}
-                    <div className="text-sm">{resolvedProps.message}</div>
+                    <div className="text-sm">{resolvedProps.message ?? resolvedProps.description ?? renderChildren(children)}</div>
                 </div>
             );
-        }
 
         case 'ICON': {
             // Render a real Lucide icon or an emoji/text icon fallback
             return renderIcon(resolvedProps.name, resolvedProps.size || 16, `inline-flex items-center ${resolvedProps.className || ''}`);
         }
 
-        case 'ACCORDION': {
-            const [openSections, setOpenSections] = useState<Record<number, boolean>>({});
+        case 'ACCORDION':
+            // Forma A: props.sections = [{title, content}]. Forma B: children = ACCORDION_ITEM.
+            if (Array.isArray(props.sections)) {
+                return <AccordionRenderer sections={Array.isArray(resolvedProps.sections) ? resolvedProps.sections.map((section: any, i: number) => ({ ...section, content: props.sections[i]?.content })) : []} context={context} />;
+            }
             return (
-                <div className="rounded-xl bg-muted/20 divide-y divide-border overflow-hidden">
-                    {resolvedProps.sections?.map((section: any, i: number) => (
-                        <div key={i}>
-                            <button
-                                className="w-full flex justify-between items-center p-3 text-sm font-medium text-left hover:bg-muted/60 transition-colors"
-                                onClick={() => setOpenSections(prev => ({ ...prev, [i]: !prev[i] }))}
-                            >
-                                {section.title}
-                                <span className={`transition-transform ${openSections[i] ? 'rotate-180' : ''}`}>▼</span>
-                            </button>
-                            {openSections[i] && (
-                                <div className="p-3 pt-0">
-                                    {section.content?.map((child: any, k: number) => (
-                                        <InnerJsonRenderer key={k} component={child} context={context} />
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    ))}
+                <div className="border rounded divide-y">
+                    {renderChildren(children)}
                 </div>
             );
-        }
 
         case 'GRID': {
-            const cols = resolvedProps.columns || 2;
+            const columns = Number(resolvedProps.columns) || 2;
+            const gap = Number(resolvedProps.gap ?? 2) * 4;
+            const maxHeight = resolvedProps.maxHeight === undefined ? undefined : `${Number(resolvedProps.maxHeight) / 4}rem`;
             return (
-                <div className={`grid gap-${resolvedProps.gap || 2} max-h-${resolvedProps.maxHeight || 60} overflow-y-auto`} style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}>
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                <div
+                    className={`grid ${maxHeight ? 'overflow-y-auto' : ''} ${resolvedProps.className || ''}`}
+                    style={{
+                        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+                        gap: `${gap}px`,
+                        maxHeight,
+                        ...(resolvedProps.style && typeof resolvedProps.style === 'object' ? resolvedProps.style : {}),
+                    }}
+                >
+                    {renderChildren(children)}
                 </div>
             );
         }
@@ -1419,7 +1516,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'MARKDOWN': {
             // Simple subset of markdown or allow HTML if sanitized
-            const content = resolvedProps.content || '';
+            const content = String(resolvedProps.content || '');
             const html = sanitizeHtml(
                 content
                     .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
@@ -1459,8 +1556,6 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                                         setLoadingKeys(prev => ({ ...prev, [props.key]: false }));
                                     }
                                 } else {
-                                    // Fallback: Read as base64 and pass to action?
-                                    // Or just warn
                                     toast.error("Upload handler not found in context");
                                 }
                             }
@@ -1475,7 +1570,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'BLOCK':
             return (
                 <div className={resolvedProps.className} style={resolvedProps.style}>
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
 
@@ -1487,7 +1582,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             if (Array.isArray(items)) {
                 loopItems = items;
             } else if (typeof count === 'number') {
-                loopItems = Array.from({ length: count }, (_, i) => i);
+                loopItems = Array.from({ length: Math.min(count, 200) }, (_, i) => i);
             }
 
             const alias = resolvedProps.as || 'item';
@@ -1499,7 +1594,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         const itemContext = { ...context, [alias]: item, [indexAlias]: i };
                         return (
                             <React.Fragment key={i}>
-                                {children?.map((child: any, k: number) => <InnerJsonRenderer key={k} component={child} context={itemContext} />)}
+                                {renderChildren(children, itemContext)}
                             </React.Fragment>
                         );
                     })}
@@ -1508,65 +1603,44 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         }
 
         case 'DEBUG':
+            // Solo desarrollo: el contexto puede contener el correo abierto.
+            if (process.env.NODE_ENV === 'production') return null;
             return (
                 <details className="mt-2 text-xs bg-muted/50 p-2 rounded border overflow-auto max-h-40">
                     <summary className="cursor-pointer font-bold text-muted-foreground">Debug Context</summary>
-                    <pre>{JSON.stringify({ context, state, props: resolvedProps }, null, 2)}</pre>
+                    <pre>{JSON.stringify({ context: toBackendContext(context), state, props: resolvedProps }, null, 2)}</pre>
                 </details>
             );
 
         case 'CONDITION': {
             const ifValue = resolvedProps.if;
-            const truthyBranch = Array.isArray(children) ? children : resolvedProps.true;
-            const falsyBranch = resolvedProps.false ?? resolvedProps.else;
+            const truthyBranch = Array.isArray(children) ? children : props.true;
+            const falsyBranch = props.false ?? props.else;
 
             if (ifValue) {
                 if (Array.isArray(truthyBranch)) {
-                    return <>{truthyBranch.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                    return <>{renderChildren(truthyBranch)}</>;
                 }
 
                 return truthyBranch ? <InnerJsonRenderer component={truthyBranch} context={context} /> : null;
             }
 
             if (Array.isArray(falsyBranch)) {
-                return <>{falsyBranch.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+                return <>{renderChildren(falsyBranch)}</>;
             }
 
             return falsyBranch ? <InnerJsonRenderer component={falsyBranch} context={context} /> : null;
         }
 
-        case 'SWITCH': {
-            const value = resolvedProps.value;
-            const cases = children?.filter((child: any) => child.type === 'CASE') || [];
-            const defaultCase = children?.find((child: any) => child.type === 'DEFAULT');
-
-            const match = cases.find((child: any) => child.props.value === value);
-
-            if (match) {
-                return <InnerJsonRenderer component={match} context={context} />;
-            } else if (defaultCase) {
-                return <InnerJsonRenderer component={defaultCase} context={context} />;
-            }
-            return null;
-        }
-
         case 'CASE':
         case 'DEFAULT':
-            // These just render their children, logic is handled by parent SWITCH
-            return <>{children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
+        case 'TAB_ITEM':
+            // Solo renderizan sus hijos; la logica la lleva el padre (SWITCH / TABS)
+            return <>{renderChildren(children)}</>;
 
         case 'SET_VAR':
-            // Invisible component to set state logic
-            // Careful with infinite loops
-            useEffect(() => {
-                if (resolvedProps.name && resolvedProps.value !== undefined) {
-                    // Check if different to avoid loop?
-                    if (state[resolvedProps.name] !== resolvedProps.value) {
-                        setState(resolvedProps.name, resolvedProps.value);
-                    }
-                }
-            }, [resolvedProps.name, resolvedProps.value]); // Dependencies matter
-            return null;
+            // Componente invisible que fija una variable de estado
+            return <SetVarRenderer name={resolvedProps.name} value={resolvedProps.value} />;
 
         // --- More UI Components ---
 
@@ -1609,11 +1683,12 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </div>
             );
 
-        case 'AVATAR':
+        case 'AVATAR': {
+            const avatarSrc = resolvedProps.src ? safeImageSrc(resolvedProps.src) : null;
             return (
-                <div className={`relative inline-block rounded-full overflow-hidden bg-muted ${resolvedProps.className}`} style={{ width: resolvedProps.size || 32, height: resolvedProps.size || 32 }}>
-                    {resolvedProps.src ? (
-                        <img src={resolvedProps.src} alt={resolvedProps.alt || 'Avatar'} className="w-full h-full object-cover" />
+                <div className={`relative inline-block rounded-full overflow-hidden bg-muted ${resolvedProps.className || ''}`} style={{ width: resolvedProps.size || 32, height: resolvedProps.size || 32 }}>
+                    {avatarSrc ? (
+                        <img src={avatarSrc} alt={resolvedProps.alt || 'Avatar'} className="w-full h-full object-cover" />
                     ) : (
                         <div className="w-full h-full flex items-center justify-center text-muted-foreground font-bold">
                             {(resolvedProps.initials || '?').substring(0, 2).toUpperCase()}
@@ -1621,14 +1696,13 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     )}
                 </div>
             );
+        }
 
         case 'TOOLTIP':
-            // Simple tooltip wrapper since we don't have the full component handy yet
-            // or use Popover on hover? Popover is typically click.
-            // Let's use standard title for MVP or a relative group.
+            // Tooltip simple con title nativo
             return (
                 <div className="group relative inline-block" title={resolvedProps.text}>
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
 
@@ -1638,10 +1712,10 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                     {resolvedProps.icon && <div className="text-4xl opacity-50">{resolvedProps.icon}</div>}
                     {resolvedProps.title && <h3 className="text-lg font-medium text-foreground">{resolvedProps.title}</h3>}
                     {resolvedProps.description && <p className="text-sm max-w-xs">{resolvedProps.description}</p>}
-                    {resolvedProps.action && (
+                    {props.action && (
                         <Button
                             variant="outline"
-                            onClick={(e) => handleAction(resolvedProps.action, e)}
+                            onClick={(e) => handleAction(props.action, e)}
                         >
                             {resolvedProps.actionLabel || 'Action'}
                         </Button>
@@ -1672,13 +1746,6 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </div>
             );
 
-        case 'ACCORDION':
-            return (
-                <div className="border rounded divide-y">
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
-                </div>
-            );
-
         case 'ACCORDION_ITEM':
             return (
                 <details className="group">
@@ -1689,62 +1756,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         </span>
                     </summary>
                     <div className="p-4 pt-0 text-sm text-muted-foreground">
-                        {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                        {renderChildren(children)}
                     </div>
                 </details>
-            );
-
-        case 'TABS': {
-            const defaultValue = children?.[0]?.props?.value;
-            const [activeTab, setActiveTab] = useState(defaultValue);
-
-            return (
-                <div className="w-full">
-                    <div className="flex border-b">
-                        {children?.map((child: any, i: number) => (
-                            <button
-                                key={i}
-                                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === child.props.value
-                                    ? 'border-primary text-primary'
-                                    : 'border-transparent text-muted-foreground hover:text-foreground'
-                                    }`}
-                                onClick={() => setActiveTab(child.props.value)}
-                            >
-                                {child.props.label}
-                            </button>
-                        ))}
-                    </div>
-                    <div className="p-4">
-                        {children?.map((child: any, i: number) => (
-                            <div key={i} className={activeTab === child.props.value ? 'block' : 'hidden'}>
-                                {/* Render children of TAB_ITEM */}
-                                <InnerJsonRenderer component={child} context={context} />
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            );
-        }
-
-        case 'TAB_ITEM':
-            return <>{children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
-
-        case 'BADGE':
-            return (
-                <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${resolvedProps.variant === 'secondary' ? 'border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80' :
-                    resolvedProps.variant === 'destructive' ? 'border-transparent bg-destructive text-destructive-foreground hover:bg-destructive/80' :
-                        resolvedProps.variant === 'outline' ? 'text-foreground' :
-                            'border-transparent bg-primary text-primary-foreground hover:bg-primary/80'
-                    } ${resolvedProps.className}`}>
-                    {resolvedProps.label || children}
-                </span>
-            );
-
-        case 'PROGRESS':
-            return (
-                <div className="w-full bg-muted rounded-full h-2.5">
-                    <div className="bg-primary h-2.5 rounded-full" style={{ width: `${Math.min(100, Math.max(0, resolvedProps.value || 0))}%` }}></div>
-                </div>
             );
 
         case 'CODE_BLOCK':
@@ -1754,32 +1768,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 </pre>
             );
 
-        case 'ALERT':
-            return (
-                <div className={`p-4 rounded-lg border ${resolvedProps.variant === 'destructive' ? 'bg-destructive/10 text-destructive border-destructive/30' :
-                        resolvedProps.variant === 'warning' ? 'bg-warning/10 text-warning border-warning/30' :
-                            'bg-primary/10 text-foreground border-primary/20'
-                    } ${resolvedProps.className}`}>
-                    {resolvedProps.title && <h5 className="font-medium mb-1">{resolvedProps.title}</h5>}
-                    <div className="text-sm">{resolvedProps.description || children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</div>
-                </div>
-            );
-
         // --- Layout Components ---
-
-        case 'GRID':
-            return (
-                <div
-                    className={`grid ${resolvedProps.className || ''}`}
-                    style={{
-                        gridTemplateColumns: `repeat(${resolvedProps.columns || 1}, minmax(0, 1fr))`,
-                        gap: `${resolvedProps.gap || 4}px`,
-                        ...resolvedProps.style
-                    }}
-                >
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
-                </div>
-            );
 
         case 'FLEX':
             return (
@@ -1793,7 +1782,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...resolvedProps.style
                     }}
                 >
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
 
@@ -1811,7 +1800,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                         ...resolvedProps.style,
                     }}
                 >
-                    {children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}
+                    {renderChildren(children)}
                 </div>
             );
 
@@ -1823,3 +1812,15 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             return null;
     }
 };
+
+/** Los OVERLAY del manifest pueden venir en la forma heredada `component: "MODAL"` (ver normalizeMount). */
+function normalizeOverlay(overlay: any): JsonComponentProps {
+    if (overlay && typeof overlay === 'object' && typeof overlay.type === 'string') return overlay;
+    const normalized = normalizeMount({ point: 'OVERLAY', component: overlay?.component ?? overlay, props: overlay?.props });
+    return normalized.component as JsonComponentProps;
+}
+
+// Exportado para pruebas y para otras superficies que necesiten evaluar una condicion suelta
+export function evaluateCondition(expression: string, ctx: any, state: any): any {
+    return evaluateExpression(expression, { ctx, state });
+}

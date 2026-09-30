@@ -1,8 +1,6 @@
 
-// This file is required by tsconfig to be present as a module?
-// Or maybe it was deleted but tsconfig still thinks it's there?
-// Let's create it as a placeholder or real registry if needed.
-// Based on file structure, this might be where we register default extensions.
+// Registro de extensiones "nativas" del cliente (componentes React propios, p.ej. Mail Groups) y de las pestanas de
+// ajustes que declaran los manifests JSON (ver dynamic-settings.ts).
 
 import { MailGroupsSettings } from '@/components/expansions/settings/MailGroupsSettings';
 import { Users } from 'lucide-react';
@@ -28,6 +26,7 @@ export const clientExpansionRegistry = {
     register: (expansion: ClientExpansion) => {
         registry.set(expansion.id, expansion);
     },
+    unregister: (id: string) => registry.delete(id),
     get: (id: string) => registry.get(id),
     getAll: () => Array.from(registry.values()),
     getByMountPoint: (point: string) => {
@@ -37,7 +36,8 @@ export const clientExpansionRegistry = {
             if (exp.mounts) {
                 for (const mount of exp.mounts) {
                     if (mount.point === point) {
-                        mounts.push({ ...mount, expansionId: exp.id });
+                        // `id` identifica la pestana (SettingsModal la usa como clave y como indice en expansionSettings)
+                        mounts.push({ ...mount, id: (mount as any).id || exp.id, expansionId: exp.id });
                     }
                 }
             }

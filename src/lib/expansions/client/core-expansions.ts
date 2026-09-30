@@ -1,12 +1,7 @@
-
-// Placeholder for core-expansions.ts
-// This file is imported by ComposeModal but seems missing or misplaced.
-// We'll create a stub that ensures clients are loaded.
-
-import { clientExpansionRegistry } from "./registry";
+// Las extensiones nativas del cliente se registran al importar ./registry (p.ej. core-mail-groups) y las
+// pestanas de manifests JSON las publica ./dynamic-settings. Se conserva el nombre por compatibilidad con
+// importadores antiguos; no hay nada que cargar de forma imperativa.
 
 export function ensureClientExpansions() {
-    // Logic to load default expansions if not already loaded
-    // For now, this is a no-op or could load static defaults
-    console.log("Ensuring client expansions are loaded...");
+    // no-op deliberado
 }

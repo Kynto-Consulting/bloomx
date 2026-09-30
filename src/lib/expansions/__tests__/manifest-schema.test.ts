@@ -1,0 +1,127 @@
+import { describe, expect, it } from 'vitest';
+import { normalizeMount, validateManifest } from '../manifest-schema';
+
+const base = () => ({
+    id: 'core-x',
+    name: 'X',
+    version: '1.0.0',
+    permissions: ['READ_EMAIL'],
+    api: { functions: { go: { handler: 'go' } } },
+});
+
+const button = (onClick: any) => ({ point: 'EMAIL_TOOLBAR', component: { type: 'BUTTON', props: { label: 'x', onClick } } });
+
+describe('validateManifest', () => {
+    it('acepta un manifest valido', () => {
+        const r = validateManifest({ ...base(), mounts: [button({ action: 'CALL_BACKEND', function: 'go' })] });
+        expect(r.ok).toBe(true);
+        expect(r.errors).toEqual([]);
+    });
+
+    it('rechaza lo que no es un objeto', () => {
+        expect(validateManifest(null).ok).toBe(false);
+        expect(validateManifest([]).ok).toBe(false);
+        expect(validateManifest('x').ok).toBe(false);
+    });
+
+    it('valida identidad: id, nombre y semver', () => {
+        const r = validateManifest({ id: '../etc', name: '', version: 'abc' });
+        expect(r.ok).toBe(false);
+        expect(r.errors.map((e) => e.path).sort()).toEqual(['id', 'name', 'version']);
+    });
+
+    it('ENV_READ: formato y variables reservadas de plataforma', () => {
+        const r = validateManifest({ ...base(), permissions: ['ENV_READ:NOTION_API_KEY', 'ENV_READ:DATABASE_URL', 'ENV_READ:ADMIN_PASSWORD', 'ENV_READ:bad-name'] });
+        expect(r.errors.map((e) => e.path)).toEqual(['permissions[1]', 'permissions[2]', 'permissions[3]']);
+    });
+
+    it('permisos desconocidos son solo aviso', () => {
+        const r = validateManifest({ ...base(), permissions: ['MAKE_COFFEE'] });
+        expect(r.ok).toBe(true);
+        expect(r.warnings).toHaveLength(1);
+    });
+
+    it('CALL_BACKEND debe referirse a una funcion de api.functions', () => {
+        const r = validateManifest({ ...base(), mounts: [button({ action: 'CALL_BACKEND', function: 'otra' })] });
+        expect(r.ok).toBe(false);
+        expect(r.errors[0].message).toMatch(/no esta declarada/);
+
+        const noApi = validateManifest({ id: 'a', name: 'A', version: '1.0.0', mounts: [button({ action: 'CALL_BACKEND', function: 'go' })] });
+        expect(noApi.ok).toBe(false);
+        expect(noApi.errors[0].message).toMatch(/no declara "api"/);
+    });
+
+    it('detecta acciones anidadas (onSuccess, actions, steps) desconocidas', () => {
+        const r = validateManifest({
+            ...base(),
+            mounts: [button({ action: 'CALL_BACKEND', function: 'go', onSuccess: { actions: [{ action: 'TOAST' }, { action: 'RUN_JS', code: 'x' }] } })],
+        });
+        expect(r.ok).toBe(false);
+        expect(r.errors[0].message).toMatch(/RUN_JS/);
+    });
+
+    it('componentes desconocidos: aviso; mounts sin component ni handler: error', () => {
+        const unknown = validateManifest({ ...base(), mounts: [{ point: 'EMAIL_TOOLBAR', component: { type: 'HOLOGRAM', props: {} } }] });
+        expect(unknown.ok).toBe(true);
+        expect(unknown.warnings.some((w) => /HOLOGRAM/.test(w.message))).toBe(true);
+
+        const empty = validateManifest({ ...base(), mounts: [{ point: 'EMAIL_TOOLBAR' }] });
+        expect(empty.ok).toBe(false);
+    });
+
+    it('los OVERLAY requieren id', () => {
+        const r = validateManifest({ ...base(), mounts: [{ point: 'OVERLAY', component: { type: 'MODAL', props: {} } }] });
+        expect(r.errors.some((e) => e.path === 'mounts[0].id')).toBe(true);
+    });
+
+    it('intercepts: punto, handler, prioridad, onError y schedule', () => {
+        const ok = validateManifest({ ...base(), intercepts: [{ point: 'EMAIL_PRE_SEND', handler: 'go', priority: 'HIGH', onError: 'block' }, { point: 'CRON', handler: 'go', schedule: 'daily' }] });
+        expect(ok.ok).toBe(true);
+
+        const bad = validateManifest({ ...base(), intercepts: [{ point: 'BOOM', handler: 'nope', priority: 'URGENT', onError: 'explode', schedule: 'weekly' }] });
+        expect(bad.errors.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('status solo admite active|disabled', () => {
+        expect(validateManifest({ ...base(), status: 'disabled' }).ok).toBe(true);
+        expect(validateManifest({ ...base(), status: 'maybe' }).ok).toBe(false);
+    });
+
+    it('slashCommands validan key y accion', () => {
+        const ok = validateManifest({ ...base(), slashCommands: [{ key: 'shrug', description: 'x', action: { action: 'INSERT_CONTENT', content: 'x' } }] });
+        expect(ok.ok).toBe(true);
+        const bad = validateManifest({ ...base(), slashCommands: [{ key: 'with space', description: 1 }] });
+        expect(bad.ok).toBe(false);
+    });
+
+    it('anidamiento excesivo se rechaza sin desbordar la pila', () => {
+        let node: any = { type: 'TEXT', props: {} };
+        for (let i = 0; i < 80; i++) node = { type: 'ROW', props: {}, children: [node] };
+        const r = validateManifest({ ...base(), mounts: [{ point: 'EMAIL_TOOLBAR', component: node }] });
+        expect(r.ok).toBe(false);
+    });
+});
+
+describe('normalizeMount', () => {
+    it('convierte component:"MODAL" heredado con props/children en el mount', () => {
+        const m = normalizeMount({ point: 'CUSTOM_SETTINGS_TAB', component: 'MODAL', props: { title: 'T', icon: 'PenLine', children: [{ type: 'TEXT', props: { content: 'x' } }] } });
+        expect(m.component).toEqual({ type: 'MODAL', props: { title: 'T', icon: 'PenLine' }, children: [{ type: 'TEXT', props: { content: 'x' } }] });
+        expect(m.props).toBeUndefined();
+    });
+
+    it('COMPOSER_INIT de firma pasa a un componente HEADLESS con SECURE_READ + APPEND_BODY', () => {
+        const m = normalizeMount({ point: 'COMPOSER_INIT', config: { action: 'APPEND_BODY', storageKey: 'signature-content' } });
+        expect(m.component.type).toBe('HEADLESS');
+        expect(m.component.props.onLoad).toEqual({
+            action: 'SECURE_READ',
+            key: 'signature-content',
+            onSuccess: { action: 'APPEND_BODY', content: '${value}' },
+        });
+    });
+
+    it('no toca mounts ya normalizados ni valores raros', () => {
+        const mount = { point: 'EMAIL_TOOLBAR', component: { type: 'BUTTON' } };
+        expect(normalizeMount(mount)).toBe(mount);
+        expect(normalizeMount(null)).toBeNull();
+    });
+});
