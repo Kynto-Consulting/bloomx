@@ -225,3 +225,8 @@
   color: var(--color-muted-foreground);
   margin-bottom: 4px;
 }
+
+/* Citas de correo en el redactor: sin comillas decorativas ni cursiva de @tailwindcss/typography (el historial es contenido, no una cita editorial). */
+.prose blockquote { font-style: normal; quotes: none; }
+.prose blockquote p::before,
+.prose blockquote p::after { content: none; }
