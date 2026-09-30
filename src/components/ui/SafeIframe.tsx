@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { useTheme } from '@/components/ThemeProvider';
 import { invert, normalizeHex } from '@/lib/color';
+import { analyzeLink, describeLinkRisk } from '@/lib/link-safety';
 
 interface SafeIframeProps {
     html: string;
@@ -39,6 +40,11 @@ blockquote { margin: 0 0 0 .8ex; border-left: 1px #999 solid; padding-left: 1ex;
     width: 32px; height: 24px; background-color: #f3f4f6; border: 1px solid #d1d5db;
     border-radius: 4px; cursor: pointer; margin: 8px 0; color: #6b7280;
     font-weight: bold; font-size: 12px; position: relative; z-index: 50;
+}
+.bx-linkwarn {
+    display: inline-block; margin: 0 0 0 4px; padding: 0 5px; font-size: 11px; line-height: 1.6;
+    color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px;
+    text-decoration: none; word-break: break-all; font-weight: 600;
 }
 #content { display: block; padding: 1px; width: 100%; max-width: 100%; overflow-x: hidden; }
 `;
@@ -150,6 +156,32 @@ img, video, picture, canvas, svg image, [style*="background-image"] { filter: in
 .gmail_quote_toggle { filter: none; }`;
 }
 
+/**
+ * Anti-phishing: junto a cada enlace sospechoso (el texto muestra otro dominio, punycode, IP,
+ * credenciales en la URL, acortador) se anade el dominio REAL de destino. Se trabaja sobre HTML ya
+ * sanitizado, con un <template> inerte, y el texto del aviso se inserta con textContent.
+ */
+function annotateSuspiciousLinks(safeHtml: string): string {
+    if (typeof document === 'undefined') return safeHtml;
+    try {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = safeHtml;
+        tpl.content.querySelectorAll('a[href]').forEach((a) => {
+            const risk = analyzeLink(a.textContent || '', a.getAttribute('href') || '');
+            if (!risk) return;
+            const reason = describeLinkRisk(risk);
+            a.setAttribute('title', `Destino real: ${risk.host} (${reason})`);
+            const badge = document.createElement('span');
+            badge.className = 'bx-linkwarn';
+            badge.textContent = `⚠ ${risk.host}`;
+            a.after(badge);
+        });
+        return tpl.innerHTML;
+    } catch {
+        return safeHtml;
+    }
+}
+
 function randomToken(): string {
     const bytes = new Uint8Array(16);
     crypto.getRandomValues(bytes);
@@ -165,7 +197,7 @@ function randomToken(): string {
  *     frames, sin formularios, sin CSS/fuentes/imagenes fuera de HTTPS.
  */
 function buildDocument(rawHtml: string, nonce: string, token: string, blockRemoteImages: boolean, themeCss = ''): string {
-    const safeHtml = sanitizeHtml(rawHtml);
+    const safeHtml = annotateSuspiciousLinks(sanitizeHtml(rawHtml));
     const csp = [
         "default-src 'none'",
         `img-src ${blockRemoteImages ? 'data: cid:' : 'https: data: cid:'}`,

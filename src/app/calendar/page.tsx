@@ -7,6 +7,7 @@ import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
 import { CreateEventForm } from '@/components/calendar/CreateEventForm';
 import { AddCalendarForm } from '@/components/calendar/AddCalendarForm';
 import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
+import { agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
 import { formatDate } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -406,13 +407,14 @@ export default function CalendarPage() {
                             key={p.ev.id}
                             onClick={(e) => handleOpenEvent(p.ev, e)}
                             title={p.ev.title}
-                            className={`absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium shadow-sm cursor-pointer hover:brightness-95 ${hol ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`}
+                            className={`absolute overflow-hidden rounded-md px-1.5 py-0.5 text-[11px] font-medium shadow-sm cursor-pointer hover:brightness-95 ${hol ? 'text-foreground bg-success/15 border border-success/30' : ''}`}
                             style={{
                                 top: p.top,
                                 height: Math.max(p.height - 2, 16),
                                 left: `calc(${p.lane * widthPct}% + 2px)`,
                                 width: `calc(${widthPct}% - 4px)`,
-                                backgroundColor: hol ? undefined : p.ev.calendar.color,
+                                backgroundColor: hol ? undefined : safeAgendaColor(p.ev.calendar.color),
+                                color: hol ? undefined : agendaTextOn(p.ev.calendar.color),
                                 zIndex: 5,
                             }}
                         >
@@ -430,7 +432,7 @@ export default function CalendarPage() {
                             e.stopPropagation();
                             setMoreList({ title: date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), events: eventsOnDate(date) });
                         }}
-                        className="absolute right-1 z-10 rounded bg-foreground/80 px-1.5 py-0.5 text-[10px] font-semibold text-background shadow hover:bg-foreground"
+                        className="absolute right-1 z-10 rounded bg-foreground/80 px-1.5 py-0.5 text-[11px] font-semibold text-background shadow hover:bg-foreground"
                         style={{ top: bucket * HOUR_PX + 2 }}
                     >
                         +{evs.length}
@@ -507,8 +509,8 @@ export default function CalendarPage() {
                             <div
                                 key={ev.id}
                                 onClick={(e) => handleOpenEvent(ev, e)}
-                                className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-teal-900 bg-teal-50 border border-teal-100' : 'text-white'}`}
-                                style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: ev.calendar.color } : {}}
+                                className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-foreground bg-success/15 border border-success/30' : ''}`}
+                                style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: safeAgendaColor(ev.calendar.color), color: agendaTextOn(ev.calendar.color) } : {}}
                             >
                                 {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} `}
                                 {ev.title}
@@ -626,8 +628,8 @@ export default function CalendarPage() {
                         return (
                             <div key={calendar.id} className="flex items-center gap-3 py-1.5 cursor-pointer group px-2 rounded-md hover:bg-muted/50" onClick={() => toggleCalendar(calendar.id)}>
                                 <div className="relative flex items-center justify-center w-5 h-5 rounded">
-                                    <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: calendar.color, backgroundColor: active ? calendar.color : 'transparent' }}>
-                                        {active && <Check className="w-3 h-3 text-white absolute inset-0 m-auto stroke-[3]" />}
+                                    <div className={`w-4 h-4 rounded-sm border-2`} style={{ borderColor: safeAgendaColor(calendar.color), backgroundColor: active ? safeAgendaColor(calendar.color) : 'transparent', color: agendaTextOn(calendar.color) }}>
+                                        {active && <Check className="w-3 h-3 absolute inset-0 m-auto stroke-[3]" aria-hidden="true" />}
                                     </div>
                                 </div>
                                 <span className="text-sm text-foreground/80 truncate">{calendar.name}</span>
@@ -810,7 +812,7 @@ export default function CalendarPage() {
                                         return (
                                             <div key={m} className="bg-card p-4 rounded-xl border border-border shadow-sm">
                                                 <div className="font-medium text-foreground mb-2">{monthNames[m]}</div>
-                                                <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground mb-1">
+                                                <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-muted-foreground mb-1">
                                                     {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
                                                 </div>
                                                 <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
@@ -868,7 +870,7 @@ export default function CalendarPage() {
                         >
                             <div className="mb-3 flex items-center justify-between">
                                 <span className="text-sm font-semibold capitalize text-foreground/80">{moreList.title}</span>
-                                <button onClick={() => setMoreList(null)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-muted-foreground">✕</button>
+                                <button type="button" onClick={() => setMoreList(null)} aria-label="Close" className="rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"><span aria-hidden="true">✕</span></button>
                             </div>
                             <div className="space-y-1.5">
                                 {moreList.events
@@ -878,8 +880,8 @@ export default function CalendarPage() {
                                         <div
                                             key={ev.id}
                                             onClick={(e) => { setMoreList(null); handleOpenEvent(ev, e); }}
-                                            className={`cursor-pointer truncate rounded-md px-2.5 py-1.5 text-[12px] font-medium hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'bg-teal-50 text-teal-900 border border-teal-100' : 'text-white'}`}
-                                            style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: ev.calendar.color } : {}}
+                                            className={`cursor-pointer truncate rounded-md px-2.5 py-1.5 text-xs font-medium hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'bg-success/15 text-foreground border border-success/30' : ''}`}
+                                            style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: safeAgendaColor(ev.calendar.color), color: agendaTextOn(ev.calendar.color) } : {}}
                                         >
                                             {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} `}
                                             {ev.title}

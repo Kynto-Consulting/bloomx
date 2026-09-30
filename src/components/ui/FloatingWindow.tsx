@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, Minimize2, Maximize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/components/I18nProvider';
 
 export interface FloatingWindowProps {
     id: string;
@@ -28,6 +29,7 @@ export function FloatingWindow({
     headerIcon,
     headerTools,
 }: FloatingWindowProps) {
+    const { t } = useI18n();
     const [maximized, setMaximized] = useState(false);
     const [dimensions, setDimensions] = useState({ width: 500, height: 550 });
     const [isResizing, setIsResizing] = useState(false);
@@ -86,8 +88,17 @@ export function FloatingWindow({
                 style={{ right: `${rightOffset}px` }}
             >
                 <div
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${t('common.restore')}: ${title}`}
                     className="flex items-center justify-between px-4 py-2 cursor-pointer bg-muted/50 rounded-t-lg hover:bg-muted"
                     onClick={onToggleMinimize}
+                    onKeyDown={(e) => {
+                        if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) {
+                            e.preventDefault();
+                            onToggleMinimize();
+                        }
+                    }}
                 >
                     <span className="text-sm font-semibold truncate flex items-center gap-2">
                         {headerIcon && <span className="w-4 h-4">{headerIcon}</span>}
@@ -99,9 +110,10 @@ export function FloatingWindow({
                                 e.stopPropagation();
                                 onClose();
                             }}
-                            className="p-1 hover:bg-accent hover:text-accent-foreground rounded-sm transition-colors"
+                            aria-label={t('common.close')}
+                            className="p-2 hover:bg-accent hover:text-accent-foreground rounded-sm transition-colors"
                         >
-                            <X className="h-4 w-4" />
+                            <X className="h-4 w-4" aria-hidden="true" />
                         </button>
                     </div>
                 </div>
@@ -126,6 +138,8 @@ export function FloatingWindow({
 
     return (
         <motion.div
+            role="dialog"
+            aria-label={title}
             className={modalClass}
             style={modalStyle}
             initial={maximized ? { opacity: 0, scale: 0.98 } : { opacity: 0, y: 50, scale: 0.95 }}
@@ -150,21 +164,25 @@ export function FloatingWindow({
                     {headerTools}
                     <button
                         onClick={onToggleMinimize}
-                        className="p-1.5 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground"
+                        aria-label={t('common.minimize')}
+                        className="p-2 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground"
                     >
-                        <Minimize2 className="h-4 w-4" />
+                        <Minimize2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                     <button
                         onClick={() => setMaximized(!maximized)}
-                        className="p-1.5 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground hidden md:block"
+                        aria-label={maximized ? t('common.restore') : t('common.maximize')}
+                        aria-pressed={maximized}
+                        className="p-2 hover:bg-muted rounded-md transition-colors text-muted-foreground hover:text-foreground hidden md:block"
                     >
-                        <Maximize2 className="h-4 w-4" />
+                        <Maximize2 className="h-4 w-4" aria-hidden="true" />
                     </button>
                     <button
                         onClick={onClose}
-                        className="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded-md transition-colors text-muted-foreground ml-1"
+                        aria-label={t('common.close')}
+                        className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-md transition-colors text-muted-foreground ml-1"
                     >
-                        <X className="h-4 w-4" />
+                        <X className="h-4 w-4" aria-hidden="true" />
                     </button>
                 </div>
             </div>

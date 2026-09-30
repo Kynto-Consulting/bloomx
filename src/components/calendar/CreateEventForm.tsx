@@ -514,7 +514,7 @@ export function CreateEventForm({
                 onChange={(e) => setTitle(e.target.value)} 
                 autoFocus 
                 readOnly={isReadOnly}
-                placeholder="Add title" 
+                placeholder="Add title" aria-label="Title" 
                 className="w-full border-b-2 border-border/60 focus:border-primary focus:outline-none pb-2 text-[22px] mb-4 placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none" 
             />
             
@@ -523,7 +523,7 @@ export function CreateEventForm({
                     <input
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
-                        placeholder="Location or meeting link"
+                        placeholder="Location or meeting link" aria-label="Location or meeting link"
                         readOnly={isReadOnly}
                         className="w-full flex-1 border-b border-border/60 focus:border-primary focus:outline-none py-2 text-sm placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none"
                     />
@@ -664,6 +664,7 @@ export function CreateEventForm({
                                     }
                                 }}
                                 placeholder="Start date & time"
+                                ariaLabel="Starts"
                                 className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}
@@ -679,6 +680,7 @@ export function CreateEventForm({
                                 value={(endsAt || '').slice(0, 16)}
                                 onChange={setEndsAt}
                                 placeholder="End date & time"
+                                ariaLabel="Ends"
                                 className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}

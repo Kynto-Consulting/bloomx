@@ -10,8 +10,8 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { contrast } from '../src/lib/color';
-import { THEMES, applyBrand, TOKEN_KEYS, type ThemeDefinition, type ThemeTokens } from '../src/lib/themes';
+import { contrast, hslToHex } from '../src/lib/color';
+import { DARK_ACCENT_SHADES, HUES, THEMES, applyBrand, TOKEN_KEYS, type ThemeDefinition, type ThemeTokens } from '../src/lib/themes';
 
 type Check = { label: string; fg: keyof ThemeTokens; bg: keyof ThemeTokens; min: number };
 
@@ -77,6 +77,7 @@ const BRANDS: Record<string, any> = {
         primaryColor: '#000000', secondaryColor: '#ffffff', backgroundColor: '#f9fafb', textColor: '#111827',
         accentColor: '#4f46e5', mutedColor: '#f3f4f6', borderColor: '#e5e7eb', cardColor: '#ffffff',
     },
+    'anillo e input propios muy claros (se corrigen)': { ringColor: '#dddddd', inputColor: '#eeeeee', textColor: '#bbbbbb' },
     'marca rosa palido #ffb6c1 (peor caso)': { primaryColor: '#ffb6c1', accentColor: '#ffff99', backgroundColor: '#fffbe6', textColor: '#cccccc' },
 };
 console.log('\nMarca del dominio superpuesta (temas brandable):');
@@ -86,6 +87,25 @@ for (const [bname, cfg] of Object.entries(BRANDS)) {
         const res = run(`${bname} @ ${t.id}`, merged);
         const worst = res.reduce((a, b) => (b.ratio - b.min < a.ratio - a.min ? b : a));
         console.log(`  ${bname} @ ${t.id}: primary=${merged.primary} peor margen: ${worst.key} ${worst.ratio.toFixed(2)}`);
+    }
+}
+
+// --- 3b. Escalas 500/600 remapeadas en temas oscuros -------------------------
+// En temas oscuros las clases crudas text-<color>-500/600 se reasignan a tonos claros
+// (ver darkPaletteRemap en themes.ts). Deben leerse (>= 4.5) sobre fondo, tarjeta y muted.
+for (const t of THEMES.filter((x) => x.scheme === 'dark')) {
+    for (const shade of [500, 600] as const) {
+        const { s: sat, l: lig } = DARK_ACCENT_SHADES[shade];
+        for (const [hue, h] of Object.entries(HUES)) {
+            const color = hslToHex(h, sat, lig);
+            for (const surface of ['background', 'card', 'muted'] as const) {
+                const ratio = contrast(color, t.tokens[surface]);
+                if (ratio < 4.5) {
+                    failures++;
+                    console.error(`FALLA  ${t.id}: ${hue}-${shade} (${color}) sobre ${surface} = ${ratio.toFixed(2)} (< 4.5)`);
+                }
+            }
+        }
     }
 }
 

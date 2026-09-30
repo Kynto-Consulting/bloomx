@@ -5,8 +5,9 @@ import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
 import { CreateContactForm } from '@/components/contacts/CreateContactForm';
-import { Menu, Users, Search, HelpCircle, Settings, User, Plus, MoreVertical, Archive, Phone, Mail, FileText } from 'lucide-react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { Menu, Users, Search, Settings, User, Plus } from 'lucide-react';
+import { Drawer } from '@/components/ui/Drawer';
+import { useI18n } from '@/components/I18nProvider';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 
 type ContactRecord = {
@@ -18,6 +19,7 @@ type ContactRecord = {
 };
 
 export default function ContactsPage() {
+    const { t } = useI18n();
     const [contacts, setContacts] = useState<ContactRecord[]>([]);
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
     const [isAppSidebarOpen, setIsAppSidebarOpen] = useState(false);
@@ -86,8 +88,8 @@ export default function ContactsPage() {
     const renderContactSidebarContent = () => (
         <>
             <div className="p-4 py-5 px-4 z-10 w-[256px]">
-                <button onClick={handleOpenCreateContact} className="flex items-center justify-center gap-2 bg-primary border border-primary/80 shadow-sm hover:bg-primary/90 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
-                    <Plus className="w-5 h-5 text-primary-foreground" />
+                <button type="button" onClick={handleOpenCreateContact} className="flex items-center justify-center gap-2 bg-primary border border-primary/80 shadow-sm hover:bg-primary/90 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-[calc(100%-1rem)] group">
+                    <Plus className="w-5 h-5 text-primary-foreground" aria-hidden="true" />
                     <span className="text-sm font-medium text-primary-foreground transition-colors">Create contact</span>
                 </button>
             </div>
@@ -112,16 +114,9 @@ export default function ContactsPage() {
 
     return (
         <div className="flex h-screen w-full bg-background overflow-hidden text-foreground font-sans">
-            <AnimatePresence>
-                {isAppSidebarOpen && (
-                    <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
-                        <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background lg:hidden shadow-2xl">
-                            <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
+            <Drawer open={isAppSidebarOpen} onClose={() => setIsAppSidebarOpen(false)} label={t('common.openMenu')} side="left" className="w-[80%] max-w-[300px] lg:hidden">
+                <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
+            </Drawer>
 
             <div className="hidden border-r border-border lg:block w-[260px] flex-shrink-0 h-full overflow-hidden">
                 <AppSidebar />
@@ -130,22 +125,24 @@ export default function ContactsPage() {
             <div className="flex-1 flex flex-col h-full overflow-hidden">
                 <header className="flex h-[64px] items-center justify-between px-4 border-b border-border">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-muted lg:hidden">
-                            <Menu className="w-6 h-6 text-foreground" />
+                        <button type="button" onClick={() => setIsAppSidebarOpen(true)} aria-label={t('common.openMenu')} aria-haspopup="dialog" className="p-2.5 -ml-2 rounded-full hover:bg-muted lg:hidden">
+                            <Menu className="w-6 h-6 text-foreground" aria-hidden="true" />
                         </button>
                         
                         <div className="flex items-center gap-2 pr-4 text-foreground">
                             <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-primary-foreground shadow-sm">
-                                <Users className="w-5 h-5 text-primary-foreground" />
+                                <Users className="w-5 h-5 text-primary-foreground" aria-hidden="true" />
                             </div>
-                            <span className="text-xl font-normal tracking-tight hidden sm:block text-foreground">Contacts</span>
+                            <h1 className="text-xl font-normal tracking-tight hidden sm:block text-foreground">Contacts</h1>
                         </div>
                     </div>
 
                     <div className="flex-1 max-w-2xl px-4 lg:px-8 hidden sm:block">
                         <div className="flex items-center bg-muted rounded-lg px-4 py-2 focus-within:bg-background focus-within:shadow-md focus-within:ring-1 focus-within:ring-border transition-all">
-                            <Search className="w-5 h-5 text-muted-foreground mr-3" />
-                            <input 
+                            <Search className="w-5 h-5 text-muted-foreground mr-3" aria-hidden="true" />
+                            <input
+                                type="search"
+                                aria-label={t('common.search')}
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 placeholder="Search" 
@@ -156,12 +153,26 @@ export default function ContactsPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: contacts.length }} />
-                        <button onClick={() => setIsContactSidebarOpen(true)} className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground lg:hidden">
-                            <Settings className="w-5 h-5 text-foreground" />
+                        <button type="button" onClick={() => setIsContactSidebarOpen(true)} aria-label="Contacts" aria-haspopup="dialog" className="p-2.5 hover:bg-muted rounded-full transition-colors text-muted-foreground lg:hidden">
+                            <Settings className="w-5 h-5 text-foreground" aria-hidden="true" />
                         </button>
-                        <button className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground sm:hidden"><Search className="w-6 h-6" /></button>
                     </div>
                 </header>
+
+                {/* Busqueda en movil (antes era un boton sin accion) */}
+                <div className="sm:hidden border-b border-border px-4 py-2">
+                    <div className="flex items-center bg-muted rounded-lg px-3 py-2 focus-within:bg-background focus-within:ring-2 focus-within:ring-ring transition-all">
+                        <Search className="w-5 h-5 text-muted-foreground mr-3" aria-hidden="true" />
+                        <input
+                            type="search"
+                            aria-label={t('common.search')}
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            placeholder={t('common.search')}
+                            className="bg-transparent border-none outline-none w-full text-foreground placeholder:text-muted-foreground"
+                        />
+                    </div>
+                </div>
 
                 <div className="flex flex-1 overflow-hidden">
                     <main className="flex-1 bg-background border-t border-border flex flex-col relative z-0">
@@ -198,9 +209,7 @@ export default function ContactsPage() {
                                             <div className="text-xs uppercase tracking-wider text-muted-foreground/60 hidden md:block text-right w-24">
                                                 {contact.source}
                                             </div>
-                                            <div className="w-8 hidden md:flex items-center justify-end opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <MoreVertical className="w-4 h-4 text-muted-foreground/60 hover:text-muted-foreground" />
-                                            </div>
+                                            <div className="w-8 hidden md:block" aria-hidden="true" />
                                         </div>
                                     ))}
                                 </div>
@@ -212,21 +221,9 @@ export default function ContactsPage() {
                         {renderContactSidebarContent()}
                     </aside>
 
-                    <AnimatePresence initial={false}>
-                        {isContactSidebarOpen && (
-                            <>
-                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsContactSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
-                                <motion.aside
-                                    initial={{ x: 256, opacity: 0 }}
-                                    animate={{ x: 0, opacity: 1 }}
-                                    exit={{ x: 256, opacity: 0 }}
-                                    className="bg-background flex flex-col border-l border-border fixed right-0 top-0 bottom-0 z-[70] h-full w-[256px] lg:hidden"
-                                >
-                                    {renderContactSidebarContent()}
-                                </motion.aside>
-                            </>
-                        )}
-                    </AnimatePresence>
+                    <Drawer open={isContactSidebarOpen} onClose={() => setIsContactSidebarOpen(false)} label="Contacts" side="right" className="flex flex-col border-l border-border w-[256px] lg:hidden">
+                        {renderContactSidebarContent()}
+                    </Drawer>
                 </div>
             </div>
         </div>

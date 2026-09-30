@@ -104,3 +104,13 @@ export function ensureContrast(color: string, backgrounds: string[], minRatio: n
     }
     return avgLum > 0.4 ? '#000000' : '#ffffff';
 }
+
+/** HSL (h 0-360, s/l 0-100) -> #rrggbb. Usado para verificar en tests los tonos que emite el CSS de temas. */
+export function hslToHex(h: number, s: number, l: number): string {
+    const sat = s / 100;
+    const lig = l / 100;
+    const k = (n: number) => (n + h / 30) % 12;
+    const a = sat * Math.min(lig, 1 - lig);
+    const f = (n: number) => lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return rgbToHex({ r: f(0) * 255, g: f(8) * 255, b: f(4) * 255 });
+}

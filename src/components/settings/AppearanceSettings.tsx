@@ -1,8 +1,10 @@
 'use client';
 
-import { Check, Monitor, Moon, Sun } from 'lucide-react';
+import { Check, Languages, Monitor, Moon, Sun } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/ThemeProvider';
+import { useI18n } from '@/components/I18nProvider';
+import { LOCALES, LOCALE_LABELS, type Locale } from '@/lib/i18n';
 import {
     DEFAULT_DARK_THEME,
     DEFAULT_LIGHT_THEME,
@@ -94,7 +96,7 @@ function ThemeOption({ value, label, description, checked, onSelect, icon, child
                             {icon}
                             <span className="truncate">{label}</span>
                         </div>
-                        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{description}</p>
+                        <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{description}</p>
                     </div>
                     {checked && (
                         <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
@@ -109,27 +111,32 @@ function ThemeOption({ value, label, description, checked, onSelect, icon, child
 
 export function AppearanceSettings() {
     const { themes, preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode } = useTheme();
+    const { t, locale, setLocale } = useI18n();
+    // Etiquetas de tema: diccionario si existe la clave, si no el texto del registro (themes.ts).
+    const tr = (key: string, fallback: string) => { const v = t(key); return v === key ? fallback : v; };
+    const themeLabel = (id: string, fb: string) => tr(`appearance.themes.${id}.label`, fb);
+    const themeDesc = (id: string, fb: string) => tr(`appearance.themes.${id}.description`, fb);
 
     return (
         <div className="space-y-8 animate-in fade-in duration-300">
             <div className="space-y-4">
                 <div>
                     <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        <Sun className="h-4 w-4" /> Tema
+                        <Sun className="h-4 w-4" aria-hidden="true" /> {t('appearance.themeTitle')}
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                        Se aplica al instante y se guarda en este dispositivo y en tu cuenta.
-                        Ahora mismo: <span className="font-medium text-foreground">{preference === 'system' ? `Sistema (${resolvedTheme.label})` : resolvedTheme.label}</span>.
+                        {t('appearance.themeHelp')}{' '}
+                        {t('appearance.currently')} <span className="font-medium text-foreground">{preference === 'system' ? t('appearance.systemWithTheme', { theme: themeLabel(resolvedTheme.id, resolvedTheme.label) }) : themeLabel(resolvedTheme.id, resolvedTheme.label)}</span>.
                     </p>
                 </div>
-                <div role="radiogroup" aria-label="Tema de la aplicacion" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div role="radiogroup" aria-label={t('appearance.themeGroupLabel')} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                     <ThemeOption
                         value="system"
-                        label="Sistema"
-                        description="Sigue el modo claro/oscuro de tu dispositivo."
+                        label={t('appearance.system')}
+                        description={t('appearance.systemDescription')}
                         checked={preference === 'system'}
                         onSelect={setPreference}
-                        icon={<Monitor className="h-3.5 w-3.5 shrink-0" />}
+                        icon={<Monitor className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                     >
                         <SystemSwatch />
                     </ThemeOption>
@@ -137,31 +144,31 @@ export function AppearanceSettings() {
                         <ThemeOption
                             key={theme.id}
                             value={theme.id}
-                            label={theme.label}
-                            description={theme.description}
+                            label={themeLabel(theme.id, theme.label)}
+                            description={themeDesc(theme.id, theme.description)}
                             checked={preference === theme.id}
                             onSelect={setPreference}
-                            icon={theme.scheme === 'dark' ? <Moon className="h-3.5 w-3.5 shrink-0" /> : undefined}
+                            icon={theme.scheme === 'dark' ? <Moon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : undefined}
                         >
                             <ThemeSwatch theme={theme} />
                         </ThemeOption>
                     ))}
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                    Los temas Claro y Oscuro usan los colores de marca de tu dominio. El resto son paletas propias.
+                <p className="text-xs text-muted-foreground">
+                    {t('appearance.brandNote')}
                 </p>
             </div>
 
             <div className="space-y-4">
                 <div>
                     <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-                        <Moon className="h-4 w-4" /> Correos en modo oscuro
+                        <Moon className="h-4 w-4" aria-hidden="true" /> {t('appearance.mailDarkTitle')}
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground">
-                        Los correos HTML traen sus propios colores. Solo afecta cuando el tema activo es oscuro.
+                        {t('appearance.mailDarkHelp')}
                     </p>
                 </div>
-                <div role="radiogroup" aria-label="Correos en modo oscuro" className="grid gap-3 sm:grid-cols-2">
+                <div role="radiogroup" aria-label={t('appearance.mailDarkTitle')} className="grid gap-3 sm:grid-cols-2">
                     {MAIL_DARK_MODES.map((mode) => {
                         const checked = mailDarkMode === mode.id;
                         return (
@@ -181,12 +188,45 @@ export function AppearanceSettings() {
                                         checked ? 'border-primary ring-2 ring-primary' : 'border-border',
                                     )}
                                 >
-                                    <div className="text-sm font-medium">{mode.label}</div>
-                                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{mode.description}</p>
+                                    <div className="text-sm font-medium">{tr(`appearance.mailModes.${mode.id}.label`, mode.label)}</div>
+                                    <p className="mt-0.5 text-xs leading-snug text-muted-foreground">{tr(`appearance.mailModes.${mode.id}.description`, mode.description)}</p>
                                 </div>
                             </label>
                         );
                     })}
+                </div>
+            </div>
+
+            <div className="space-y-4">
+                <div>
+                    <h3 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                        <Languages className="h-4 w-4" aria-hidden="true" /> {t('appearance.languageTitle')}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground">{t('appearance.languageHelp')}</p>
+                </div>
+                <div role="radiogroup" aria-label={t('appearance.languageGroupLabel')} className="grid gap-3 sm:grid-cols-2">
+                    {LOCALES.map((code: Locale) => (
+                        <label key={code} className="relative block cursor-pointer">
+                            <input
+                                type="radio"
+                                name="bloomx-locale"
+                                value={code}
+                                checked={locale === code}
+                                onChange={() => setLocale(code)}
+                                className="peer sr-only"
+                            />
+                            <div
+                                className={cn(
+                                    'flex h-full items-center justify-between rounded-xl border bg-card p-3 text-card-foreground transition-all hover:border-input',
+                                    'peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-background',
+                                    locale === code ? 'border-primary ring-2 ring-primary' : 'border-border',
+                                )}
+                            >
+                                <span lang={code} className="text-sm font-medium">{LOCALE_LABELS[code]}</span>
+                                {locale === code && <Check className="h-4 w-4 text-primary" aria-hidden="true" />}
+                            </div>
+                        </label>
+                    ))}
                 </div>
             </div>
         </div>

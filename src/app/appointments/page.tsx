@@ -1,11 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Sidebar } from '@/components/Sidebar';
 import { Clock, Copy, ExternalLink, Plus, Pencil, Trash2, Check, Video, X, CalendarDays, ToggleLeft, ToggleRight, ChevronRight, ChevronLeft, PlusCircle, Trash, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useI18n } from '@/components/I18nProvider';
+import { useDialog } from '@/components/ui/useDialog';
+import { useSurfaceColors } from '@/hooks/useSurfaceColors';
+import { agendaAccentText, agendaSoft, agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['UTC', 'America/Lima', 'America/New_York', 'Europe/London'];
@@ -82,15 +86,6 @@ function buildBookingUrl(scheduleId: string) {
     return `${base}/book/${scheduleId}`;
 }
 
-// Darken a hex color slightly for borders
-function darken(hex: string, amount = 0.15): string {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const d = (c: number) => Math.max(0, Math.round(c * (1 - amount))).toString(16).padStart(2, '0');
-    return `#${d(r)}${d(g)}${d(b)}`;
-}
-
 // ─── Step indicator ──────────────────────────────────────────────────────────
 
 function StepDots({ step, color }: { step: 1 | 2; color: string }) {
@@ -99,10 +94,10 @@ function StepDots({ step, color }: { step: 1 | 2; color: string }) {
             {[1, 2].map(s => (
                 <div
                     key={s}
-                    className="h-1.5 rounded-full transition-all duration-300"
+                    className={`h-1.5 rounded-full transition-all duration-300 ${step === s ? '' : 'bg-input'}`}
                     style={{
                         width: step === s ? 24 : 8,
-                        backgroundColor: step === s ? color : '#d1d5db',
+                        ...(step === s ? { backgroundColor: color } : {}),
                     }}
                 />
             ))}
@@ -117,6 +112,10 @@ function ScheduleForm({
 }: {
     initial?: Schedule; onSave: (data: FormState) => void; onCancel: () => void; saving: boolean; brandColor: string;
 }) {
+    const { t } = useI18n();
+    const uid = useId();
+    const surface = useSurfaceColors();
+    const { ref: dialogRef, titleId } = useDialog<HTMLDivElement>(true, onCancel, { disableEscape: saving });
     const userTz = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
     const [step, setStep] = useState<1 | 2>(1);
     const [form, setForm] = useState<FormState>({
@@ -130,7 +129,11 @@ function ScheduleForm({
     });
 
     const set = (k: keyof FormState, v: any) => setForm(p => ({ ...p, [k]: v }));
-    const accent = form.color || brandColor;
+    // Color elegido por el usuario: relleno solido (texto legible por contraste) y version "de texto" corregida.
+    const accentSolid = safeAgendaColor(form.color || brandColor);
+    const onAccent = agendaTextOn(accentSolid);
+    const accent = agendaAccentText(accentSolid, [surface.background]);
+    const softAccent = agendaSoft(accentSolid, surface.background, 0.1);
 
     const toggleDay = (i: number) =>
         set('days', form.days.map(d => d.dayOfWeek === i ? { ...d, isEnabled: !d.isEnabled } : d));
@@ -153,30 +156,35 @@ function ScheduleForm({
     const inputCls = `w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all bg-muted/50 hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0`;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onCancel(); }}>
             <motion.div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                tabIndex={-1}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.95 }}
-                className="bg-background rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col"
-                style={{ maxHeight: '90vh' }}
+                className="bg-background text-foreground rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col outline-none"
+                style={{ maxHeight: '90dvh' }}
             >
                 {/* Header */}
                 <div className="px-6 pt-5 pb-3 shrink-0">
                     <div className="flex items-center justify-between mb-3">
-                        <h2 className="font-semibold text-base">{initial ? 'Edit schedule' : 'New schedule'}</h2>
-                        <button onClick={onCancel} className="p-1 rounded-full hover:bg-muted text-muted-foreground">
-                            <X className="h-4 w-4" />
+                        <h2 id={titleId} className="font-semibold text-base">{initial ? 'Edit schedule' : 'New schedule'}</h2>
+                        <button type="button" onClick={onCancel} aria-label={t('common.close')} className="p-2 rounded-full hover:bg-muted text-muted-foreground">
+                            <X className="h-4 w-4" aria-hidden="true" />
                         </button>
                     </div>
-                    <StepDots step={step} color={accent} />
+                    <StepDots step={step} color={accentSolid} />
                     <div className="flex justify-between mt-2">
-                        <span className="text-xs font-medium" style={{ color: step === 1 ? accent : '#9ca3af' }}>Details</span>
-                        <span className="text-xs font-medium" style={{ color: step === 2 ? accent : '#9ca3af' }}>Availability</span>
+                        <span className={`text-xs font-medium ${step === 1 ? '' : 'text-muted-foreground'}`} style={step === 1 ? { color: accent } : undefined} aria-current={step === 1 ? 'step' : undefined}>Details</span>
+                        <span className={`text-xs font-medium ${step === 2 ? '' : 'text-muted-foreground'}`} style={step === 2 ? { color: accent } : undefined} aria-current={step === 2 ? 'step' : undefined}>Availability</span>
                     </div>
                 </div>
 
-                <div className="border-t" />
+                <div className="border-t border-border" />
 
                 {/* Body */}
                 <div className="overflow-y-auto flex-1 px-6 py-5">
@@ -184,35 +192,36 @@ function ScheduleForm({
                         {step === 1 ? (
                             <motion.div key="step1" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-4">
                                 <div className="space-y-1">
-                                    <label className="text-sm font-medium">Name</label>
-                                    <input value={form.name} onChange={e => set('name', e.target.value)}
+                                    <label htmlFor={`${uid}-name`} className="text-sm font-medium">Name</label>
+                                    <input id={`${uid}-name`} value={form.name} onChange={e => set('name', e.target.value)}
                                         placeholder="30 min meeting"
                                         className={inputCls}
                                         style={{ '--tw-ring-color': accent } as any} />
                                 </div>
 
                                 <div className="space-y-1">
-                                    <label className="text-sm font-medium">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
-                                    <textarea value={form.description} onChange={e => set('description', e.target.value)}
+                                    <label htmlFor={`${uid}-desc`} className="text-sm font-medium">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
+                                    <textarea id={`${uid}-desc`} value={form.description} onChange={e => set('description', e.target.value)}
                                         rows={2} placeholder="Quick intro call, demo, etc."
                                         className={`${inputCls} resize-none`} />
                                 </div>
 
                                 <div className="flex gap-3">
                                     <div className="flex-1 space-y-1">
-                                        <label className="text-sm font-medium">Duration</label>
-                                        <select value={form.duration} onChange={e => set('duration', Number(e.target.value))} className={inputCls}>
+                                        <label htmlFor={`${uid}-duration`} className="text-sm font-medium">Duration</label>
+                                        <select id={`${uid}-duration`} value={form.duration} onChange={e => set('duration', Number(e.target.value))} className={inputCls}>
                                             {DURATIONS.map(d => <option key={d} value={d}>{d} min</option>)}
                                         </select>
                                     </div>
-                                    <div className="space-y-1">
-                                        <label className="text-sm font-medium">Color</label>
+                                    <div className="space-y-1" role="group" aria-labelledby={`${uid}-color`}>
+                                        <span id={`${uid}-color`} className="text-sm font-medium">Color</span>
                                         <div className="flex gap-1.5 pt-1.5">
                                             {COLORS.map(c => (
                                                 <button key={c} type="button" onClick={() => set('color', c)}
-                                                    className="h-7 w-7 rounded-full flex items-center justify-center transition-all hover:scale-110"
-                                                    style={{ backgroundColor: c, outline: form.color === c ? `2px solid ${c}` : 'none', outlineOffset: 2 }}>
-                                                    {form.color === c && <Check className="h-3 w-3 text-white" />}
+                                                    aria-label={c} aria-pressed={form.color === c}
+                                                    className="h-8 w-8 rounded-full flex items-center justify-center transition-all hover:scale-110"
+                                                    style={{ backgroundColor: c, color: agendaTextOn(c), outline: form.color === c ? `2px solid ${c}` : 'none', outlineOffset: 2 }}>
+                                                    {form.color === c && <Check className="h-3.5 w-3.5" aria-hidden="true" />}
                                                 </button>
                                             ))}
                                         </div>
@@ -220,13 +229,14 @@ function ScheduleForm({
                                 </div>
 
                                 <div className="space-y-1">
-                                    <label className="text-sm font-medium">Video conferencing</label>
-                                    <div className="flex gap-2">
+                                    <span id={`${uid}-conf`} className="text-sm font-medium">Video conferencing</span>
+                                    <div className="flex gap-2" role="group" aria-labelledby={`${uid}-conf`}>
                                         {[{ value: '', label: 'None' }, { value: 'meet', label: 'Google Meet' }, { value: 'zoom', label: 'Zoom' }].map(opt => (
                                             <button key={opt.value} type="button" onClick={() => set('conferencing', opt.value)}
-                                                className="flex-1 rounded-xl bg-muted/40 px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/70"
+                                                aria-pressed={form.conferencing === opt.value}
+                                                className="flex-1 rounded-xl border border-transparent bg-muted px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/70"
                                                 style={form.conferencing === opt.value
-                                                    ? { borderColor: accent, backgroundColor: `${accent}15`, color: accent }
+                                                    ? { borderColor: softAccent.border, backgroundColor: softAccent.background, color: softAccent.foreground }
                                                     : {}}>
                                                 {opt.label}
                                             </button>
@@ -237,20 +247,21 @@ function ScheduleForm({
                         ) : (
                             <motion.div key="step2" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="space-y-4">
                                 <div className="space-y-1">
-                                    <label className="text-sm font-medium">Timezone</label>
-                                    <select value={form.timezone} onChange={e => set('timezone', e.target.value)} className={inputCls}>
+                                    <label htmlFor={`${uid}-tz`} className="text-sm font-medium">Timezone</label>
+                                    <select id={`${uid}-tz`} value={form.timezone} onChange={e => set('timezone', e.target.value)} className={inputCls}>
                                         {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
                                     </select>
                                 </div>
 
                                 <div className="space-y-1">
-                                    <label className="text-sm font-medium">Weekly hours</label>
-                                    <div className="rounded-xl bg-muted/30 divide-y divide-muted overflow-hidden">
+                                    <span className="text-sm font-medium">Weekly hours</span>
+                                    <div className="rounded-xl bg-muted/40 divide-y divide-border overflow-hidden">
                                         {form.days.map(d => (
                                             <div key={d.dayOfWeek} className="px-3 py-2.5">
                                                 <div className="flex items-center gap-3 min-h-[28px]">
                                                     <button type="button" onClick={() => toggleDay(d.dayOfWeek)}
-                                                        className="flex items-center gap-2 w-24 shrink-0">
+                                                        aria-pressed={d.isEnabled} aria-label={DAYS[d.dayOfWeek]}
+                                                        className="flex items-center gap-2 w-24 shrink-0 min-h-[32px]">
                                                         {d.isEnabled
                                                             ? <ToggleRight className="h-5 w-5" style={{ color: accent }} />
                                                             : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
@@ -263,17 +274,18 @@ function ScheduleForm({
                                                         <div className="flex-1 space-y-1.5">
                                                             {d.ranges.map((r, ri) => (
                                                                 <div key={ri} className="flex items-center gap-1.5">
-                                                                    <input type="time" value={r.startTime}
+                                                                    <input type="time" value={r.startTime} aria-label={`${DAYS[d.dayOfWeek]} start`}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'startTime', e.target.value)}
                                                                         className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     <span className="text-muted-foreground text-xs">–</span>
-                                                                    <input type="time" value={r.endTime}
+                                                                    <input type="time" value={r.endTime} aria-label={`${DAYS[d.dayOfWeek]} end`}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'endTime', e.target.value)}
                                                                         className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     {d.ranges.length > 1 && (
                                                                         <button type="button" onClick={() => removeRange(d.dayOfWeek, ri)}
-                                                                            className="text-muted-foreground hover:text-destructive transition-colors">
-                                                                            <Trash className="h-3.5 w-3.5" />
+                                                                            aria-label={t('common.delete')}
+                                                                            className="p-1.5 text-muted-foreground hover:text-destructive transition-colors">
+                                                                            <Trash className="h-3.5 w-3.5" aria-hidden="true" />
                                                                         </button>
                                                                     )}
                                                                 </div>
@@ -298,28 +310,30 @@ function ScheduleForm({
                 </div>
 
                 {/* Footer */}
-                <div className="border-t px-6 py-4 flex justify-between gap-3 shrink-0">
+                <div className="border-t border-border px-6 py-4 flex justify-between gap-3 shrink-0">
                     {step === 1 ? (
                         <>
-                            <button onClick={onCancel} className="px-4 py-2 rounded-lg border text-sm hover:bg-muted">Cancel</button>
+                            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted">Cancel</button>
                             <button
+                                type="button"
                                 onClick={() => setStep(2)}
                                 disabled={!form.name.trim()}
-                                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 disabled:opacity-40"
-                                style={{ backgroundColor: accent }}>
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                                style={{ backgroundColor: accentSolid, color: onAccent }}>
                                 Availability <ChevronRight className="h-4 w-4" />
                             </button>
                         </>
                     ) : (
                         <>
-                            <button onClick={() => setStep(1)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border text-sm hover:bg-muted">
+                            <button type="button" onClick={() => setStep(1)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted">
                                 <ChevronLeft className="h-4 w-4" /> Back
                             </button>
                             <button
+                                type="button"
                                 onClick={() => onSave(form)}
                                 disabled={saving}
-                                className="px-4 py-2 rounded-lg text-white text-sm font-medium hover:opacity-90 disabled:opacity-40"
-                                style={{ backgroundColor: accent }}>
+                                className="px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
+                                style={{ backgroundColor: accentSolid, color: onAccent }}>
                                 {saving ? 'Saving…' : initial ? 'Save changes' : 'Create schedule'}
                             </button>
                         </>
@@ -334,7 +348,10 @@ function ScheduleForm({
 
 export default function AppointmentsPage() {
     const { config: domainConfig } = useDomainConfig();
-    const brandColor = domainConfig.theme?.primaryColor || '#2563eb';
+    const { t } = useI18n();
+    const surface = useSurfaceColors();
+    const brandColor = safeAgendaColor(domainConfig.theme?.primaryColor, '#2563eb');
+    const brandText = agendaTextOn(brandColor);
 
     const [schedules, setSchedules] = useState<Schedule[]>([]);
     const [loading, setLoading] = useState(true);
@@ -472,8 +489,8 @@ export default function AppointmentsPage() {
                             )}
                             <button
                                 onClick={() => { setEditTarget(null); setShowForm(true); }}
-                                className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity"
-                                style={{ backgroundColor: brandColor }}
+                                className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
+                                style={{ backgroundColor: brandColor, color: brandText }}
                             >
                                 <Plus className="h-4 w-4" /> New schedule
                             </button>
@@ -491,8 +508,8 @@ export default function AppointmentsPage() {
                             <p className="text-sm text-muted-foreground mt-1">Create your first scheduling page to share with others.</p>
                             <button
                                 onClick={() => { setEditTarget(null); setShowForm(true); }}
-                                className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-                                style={{ backgroundColor: brandColor }}
+                                className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90"
+                                style={{ backgroundColor: brandColor, color: brandText }}
                             >
                                 <Plus className="h-4 w-4" /> Create schedule
                             </button>
@@ -500,22 +517,23 @@ export default function AppointmentsPage() {
                     ) : (
                         <div className="space-y-3">
                             {schedules.map(s => {
-                                const c = s.color || brandColor;
-                                const borderColor = darken(c, 0.05) + '55';
-                                const bgColor = c + '0d';
+                                const c = safeAgendaColor(s.color, brandColor);
+                                const soft = agendaSoft(c, surface.background, 0.07);
+                                // Color como texto/icono: corregido para leerse sobre el fondo y sobre el tinte de la tarjeta.
+                                const accent = agendaAccentText(c, [surface.background, soft.background]);
                                 return (
                                     <div key={s.id}
                                         className="rounded-2xl p-5 flex items-start gap-4 transition-shadow hover:shadow-sm"
-                                        style={{ backgroundColor: bgColor, border: `1.5px solid ${borderColor}` }}>
-                                        <div className="h-10 w-10 rounded-xl shrink-0 flex items-center justify-center text-white shadow-sm"
-                                            style={{ backgroundColor: c }}>
-                                            <Clock className="h-5 w-5" />
+                                        style={{ backgroundColor: soft.background, border: `1.5px solid ${soft.border}` }}>
+                                        <div className="h-10 w-10 rounded-xl shrink-0 flex items-center justify-center shadow-sm"
+                                            style={{ backgroundColor: c, color: agendaTextOn(c) }}>
+                                            <Clock className="h-5 w-5" aria-hidden="true" />
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center gap-2">
                                                 <span className="font-semibold truncate">{s.name}</span>
                                                 {!s.isActive && (
-                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-background/60 text-muted-foreground border">
+                                                    <span className="text-xs px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border">
                                                         Inactive
                                                     </span>
                                                 )}
@@ -530,35 +548,36 @@ export default function AppointmentsPage() {
                                                 )}
                                                 {!!s._count?.bookings && <span>{s._count.bookings} upcoming</span>}
                                             </div>
-                                            <div className="mt-1.5 text-xs truncate" style={{ color: c }}>
+                                            <div className="mt-1.5 text-xs truncate" style={{ color: accent }}>
                                                 <a href={buildBookingUrl(s.id)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
                                                     {buildBookingUrl(s.id)}
                                                 </a>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-0.5 shrink-0">
-                                            <button onClick={() => handleCopy(s.id)}
-                                                className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors" title="Copy link">
-                                                {copiedId === s.id ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
+                                            <button type="button" onClick={() => handleCopy(s.id)}
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Copy link" aria-label={`Copy link: ${s.name}`}>
+                                                {copiedId === s.id ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
                                             </button>
                                             <a href={buildBookingUrl(s.id)} target="_blank" rel="noopener noreferrer"
-                                                className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors" title="Open">
-                                                <ExternalLink className="h-4 w-4" />
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Open" aria-label={`Open: ${s.name}`}>
+                                                <ExternalLink className="h-4 w-4" aria-hidden="true" />
                                             </a>
-                                            <button onClick={() => handleToggleActive(s)}
-                                                className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors"
-                                                title={s.isActive ? 'Deactivate' : 'Activate'}>
+                                            <button type="button" onClick={() => handleToggleActive(s)}
+                                                role="switch" aria-checked={s.isActive}
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors"
+                                                title={s.isActive ? 'Deactivate' : 'Activate'} aria-label={`${s.isActive ? 'Deactivate' : 'Activate'}: ${s.name}`}>
                                                 {s.isActive
-                                                    ? <ToggleRight className="h-4 w-4" style={{ color: c }} />
-                                                    : <ToggleLeft className="h-4 w-4" />}
+                                                    ? <ToggleRight className="h-4 w-4" style={{ color: accent }} aria-hidden="true" />
+                                                    : <ToggleLeft className="h-4 w-4" aria-hidden="true" />}
                                             </button>
-                                            <button onClick={() => { setEditTarget(s); setShowForm(true); }}
-                                                className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors" title="Edit">
-                                                <Pencil className="h-4 w-4" />
+                                            <button type="button" onClick={() => { setEditTarget(s); setShowForm(true); }}
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Edit" aria-label={`Edit: ${s.name}`}>
+                                                <Pencil className="h-4 w-4" aria-hidden="true" />
                                             </button>
-                                            <button onClick={() => handleDelete(s.id)}
-                                                className="p-2 rounded-lg hover:bg-background/60 text-destructive transition-colors" title="Delete">
-                                                <Trash2 className="h-4 w-4" />
+                                            <button type="button" onClick={() => handleDelete(s.id)}
+                                                className="p-2.5 rounded-lg hover:bg-background text-destructive transition-colors" title="Delete" aria-label={`Delete: ${s.name}`}>
+                                                <Trash2 className="h-4 w-4" aria-hidden="true" />
                                             </button>
                                         </div>
                                     </div>

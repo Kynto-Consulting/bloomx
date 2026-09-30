@@ -6,7 +6,7 @@ export default function AiDocs() {
         <div className="space-y-12 animate-in fade-in duration-500">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-4 flex items-center gap-3">
-                    <Zap className="h-8 w-8 text-purple-600" />
+                    <Zap className="h-8 w-8 text-brand-accent" />
                     AI Capabilities
                 </h1>
                 <p className="text-lg text-muted-foreground leading-relaxed">
@@ -62,8 +62,8 @@ function AiCard({ title, icon: Icon, desc, env }: { title: string, icon: any, de
     return (
         <div className="p-6 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors">
             <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-purple-100 rounded-md">
-                    <Icon className="h-5 w-5 text-purple-600" />
+                <div className="p-2 bg-brand-accent/15 rounded-md">
+                    <Icon className="h-5 w-5 text-brand-accent" />
                 </div>
                 <h3 className="font-semibold text-lg">{title}</h3>
             </div>

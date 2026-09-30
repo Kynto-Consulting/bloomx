@@ -6,7 +6,7 @@ export default function StorageDocs() {
         <div className="space-y-12 animate-in fade-in duration-500">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-4 flex items-center gap-3">
-                    <Database className="h-8 w-8 text-cyan-600" />
+                    <Database className="h-8 w-8 text-info" />
                     Storage Providers
                 </h1>
                 <p className="text-lg text-muted-foreground leading-relaxed">
@@ -54,8 +54,8 @@ function StorageCard({ title, icon: Icon, desc }: { title: string, icon: any, de
     return (
         <div className="p-6 rounded-lg bg-muted/40 hover:bg-muted/60 transition-colors">
             <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-cyan-100 rounded-md">
-                    <Icon className="h-5 w-5 text-cyan-600" />
+                <div className="p-2 bg-info/15 rounded-md">
+                    <Icon className="h-5 w-5 text-info" />
                 </div>
                 <h3 className="font-semibold text-lg">{title}</h3>
             </div>

@@ -61,7 +61,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                     <div className="flex items-center gap-2 px-2 py-1.5 bg-primary/10 text-primary rounded-md font-medium">
                         <Inbox className="w-3.5 h-3.5" />
                         <span className="hidden md:inline">Inbox</span>
-                        <span className="ml-auto text-[10px] bg-primary text-primary-foreground px-1.5 rounded-full hidden md:inline-block">2</span>
+                        <span className="ml-auto text-[11px] bg-primary text-primary-foreground px-1.5 rounded-full hidden md:inline-block">2</span>
                     </div>
                     <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground rounded-md transition-colors">
                         <Star className="w-3.5 h-3.5" />
@@ -84,7 +84,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
                         <Settings className="w-4 h-4" />
-                        <div className="w-6 h-6 rounded-full bg-brand-accent/20 border border-brand-accent flex items-center justify-center text-brand-accent text-[10px] font-bold">
+                        <div className="w-6 h-6 rounded-full bg-brand-accent/20 border border-brand-accent flex items-center justify-center text-brand-accent text-[11px] font-bold">
                             JD
                         </div>
                     </div>
@@ -101,7 +101,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                         <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-baseline mb-0.5">
                                 <span className="font-semibold text-foreground truncate">Alice Brown</span>
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap">10:42 AM</span>
+                                <span className="text-[11px] text-muted-foreground whitespace-nowrap">10:42 AM</span>
                             </div>
                             <div className="font-medium text-foreground text-xs mb-0.5">Project Update: Q1 Goals</div>
                             <div className="text-muted-foreground line-clamp-1">Hi team, just wanted to share the latest numbers from the Q1 report...</div>
@@ -116,7 +116,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                         <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-baseline mb-0.5">
                                 <span className="font-medium text-foreground truncate">Charlie Davis</span>
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap">Yesterday</span>
+                                <span className="text-[11px] text-muted-foreground whitespace-nowrap">Yesterday</span>
                             </div>
                             <div className="text-foreground text-xs mb-0.5">Lunch next week?</div>
                             <div className="text-muted-foreground line-clamp-1">Are you free next Tuesday to grab some lunch and discuss the...</div>
@@ -131,7 +131,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                         <div className="flex-1 min-w-0">
                             <div className="flex justify-between items-baseline mb-0.5">
                                 <span className="font-medium text-foreground truncate">Emily Foster</span>
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap">2 Days ago</span>
+                                <span className="text-[11px] text-muted-foreground whitespace-nowrap">2 Days ago</span>
                             </div>
                             <div className="text-foreground text-xs mb-0.5">Invoice #4029</div>
                             <div className="text-muted-foreground line-clamp-1">Please find attached the invoice for the consultancy services...</div>

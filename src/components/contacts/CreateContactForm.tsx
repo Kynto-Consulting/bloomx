@@ -42,35 +42,35 @@ export function CreateContactForm({
         <form onSubmit={createContact} className="p-5 flex flex-col h-full overflow-y-auto">
             <div className="flex items-center gap-4 mb-4">
                 <div className="w-12 h-12 bg-muted rounded-full flex items-center justify-center flex-shrink-0 text-muted-foreground">
-                    <User className="w-6 h-6" />
+                    <User className="w-6 h-6" aria-hidden="true" />
                 </div>
                 <input 
                     value={name} 
                     onChange={(e) => setName(e.target.value)} 
                     autoFocus 
-                    placeholder="Name" 
+                    placeholder="Name" aria-label="Name" autoComplete="off" 
                     className="w-full border-b-2 border-border/60 focus:border-primary focus:outline-none pb-2 text-[22px] placeholder:text-muted-foreground" 
                 />
             </div>
             
             <div className="space-y-4 flex-1 mt-4">
                 <div className="flex items-center gap-3">
-                    <Mail className="w-4 h-4 text-muted-foreground mt-1" />
+                    <Mail className="w-4 h-4 text-muted-foreground mt-1" aria-hidden="true" />
                     <input 
                         value={email} 
                         onChange={(e) => setEmail(e.target.value)} 
-                        placeholder="Email" 
+                        placeholder="Email" aria-label="Email" autoComplete="off" 
                         type="email"
                         className="w-full border-b border-transparent hover:border-border focus:border-primary focus:outline-none py-2 px-1 text-sm bg-muted/50 transition-colors" 
                     />
                 </div>
                 
                 <div className="flex items-start gap-3 pt-2">
-                    <FileText className="w-4 h-4 text-muted-foreground mt-2.5" />
+                    <FileText className="w-4 h-4 text-muted-foreground mt-2.5" aria-hidden="true" />
                     <textarea 
                         value={notes} 
                         onChange={(e) => setNotes(e.target.value)} 
-                        placeholder="Notes..." 
+                        placeholder="Notes..." aria-label="Notes" 
                         rows={3}
                         className="w-full border-b border-border focus:border-primary focus:outline-none py-2 px-1 text-sm resize-none bg-muted/50 transition-colors" 
                     />

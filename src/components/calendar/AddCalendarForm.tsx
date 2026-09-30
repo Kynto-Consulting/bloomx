@@ -94,7 +94,7 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
                                     className={`w-full flex items-center justify-between p-3 border-b last:border-b-0 border-border/60 transition-colors text-left ${isAdded ? 'hover:bg-muted' : 'hover:bg-muted/50'}`}
                                 >
                                     <div className="flex items-center gap-3">
-                                        <div className="w-8 h-8 rounded bg-teal-50 flex flex-shrink-0 items-center justify-center text-teal-600">
+                                        <div className="w-8 h-8 rounded bg-success/15 flex flex-shrink-0 items-center justify-center text-success">
                                             <Globe className="w-4 h-4" />
                                         </div>
                                         <div>

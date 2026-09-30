@@ -9,7 +9,11 @@ import { Editor } from './Editor';
 import { clientExpansionRegistry } from '@/lib/expansions/client/registry';
 import { useTheme } from '@/components/ThemeProvider';
 import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
+import { LabelsSettings } from '@/components/settings/LabelsSettings';
+import { RulesSettings } from '@/components/settings/RulesSettings';
 import { APPEARANCE_SETTINGS_KEY } from '@/lib/themes';
+import { useI18n } from '@/components/I18nProvider';
+import { useDialog } from '@/components/ui/useDialog';
 
 interface SettingsModalProps {
     open: boolean;
@@ -20,6 +24,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const { data: session, update: updateSession } = useSession();
     const { setData } = useCache();
     const { getAppearance } = useTheme();
+    const { t } = useI18n();
+    // Modal accesible: foco atrapado, Escape, aria-modal, restauracion de foco y scroll bloqueado.
+    const { ref: dialogRef, titleId } = useDialog<HTMLDivElement>(open, onClose);
 
     // Reset state when opening
     useEffect(() => {
@@ -45,7 +52,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const [expansionSettings, setExpansionSettings] = useState<any>({});
     const mailboxSettings = expansionSettings['core-mailbox'] || {};
 
-    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'extensions'>('profile');
+    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'labels' | 'rules' | 'extensions'>('profile');
 
     // Password fields
     const [currentPassword, setCurrentPassword] = useState('');
@@ -74,7 +81,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             }
         } catch (err) {
             console.error('Upload failed', err);
-            setMessage({ type: 'error', text: 'Failed to upload avatar' });
+            setMessage({ type: 'error', text: t('settings.uploadFailed') });
         } finally {
             setLoading(false);
         }
@@ -86,7 +93,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
         setLoading(true);
 
         if (newPassword && newPassword !== confirmPassword) {
-            setMessage({ type: 'error', text: 'New passwords do not match' });
+            setMessage({ type: 'error', text: t('settings.passwordMismatch') });
             setLoading(false);
             return;
         }
@@ -119,13 +126,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
             const data = await res.json();
 
             if (!res.ok) {
-                throw new Error(data.error || 'Failed to update profile');
+                throw new Error(data.error || t('settings.updateFailed'));
             }
 
             // Update session explicitly
             await updateSession();
 
-            setMessage({ type: 'success', text: 'Settings updated successfully' });
+            setMessage({ type: 'success', text: t('settings.saved') });
             // Clear password fields
             setCurrentPassword('');
             setNewPassword('');
@@ -142,58 +149,87 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4">
-            {/* Backdrop */}
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in" onClick={onClose} />
+            {/* Backdrop (no enfocable: se cierra con clic o Escape) */}
+            <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in" onMouseDown={onClose} />
 
             {/* Modal Content */}
-            <div className="relative w-full h-full md:h-auto md:max-h-[85vh] md:max-w-2xl bg-background md:rounded-2xl shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 slide-in-from-bottom-5 duration-200">
+            <div
+                ref={dialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
+                tabIndex={-1}
+                className="relative w-full h-full md:h-auto md:max-h-[85vh] md:max-w-2xl bg-background text-foreground md:rounded-2xl shadow-2xl overflow-hidden flex flex-col outline-none animate-in zoom-in-95 slide-in-from-bottom-5 duration-200"
+            >
                 {/* Header */}
-                <div className="flex items-center justify-between px-6 py-4 shrink-0 bg-background/80 backdrop-blur-md sticky top-0 z-10 w-full overflow-x-auto">
-                    <div className="flex items-center gap-4">
-                        <h2 className="text-xl font-bold tracking-tight">Settings</h2>
-                        <div className="flex bg-muted rounded-lg p-1 shrink-0">
-                            <button
-                                onClick={() => setActiveTab('profile')}
-                                className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'profile' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
-                            >
-                                Profile
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('appearance')}
-                                className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'appearance' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
-                            >
-                                Appearance
-                            </button>
+                <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 shrink-0 bg-background/80 backdrop-blur-md sticky top-0 z-10 w-full">
+                    <div className="flex min-w-0 items-center gap-4">
+                        <h2 id={titleId} className="text-xl font-bold tracking-tight">{t('settings.title')}</h2>
+                        <div role="tablist" aria-label={t('settings.tabsLabel')} className="flex min-w-0 overflow-x-auto bg-muted rounded-lg p-1">
+                            {([
+                                ['profile', t('settings.tabs.profile')],
+                                ['appearance', t('settings.tabs.appearance')],
+                                ['labels', t('settings.tabs.labels')],
+                                ['rules', t('settings.tabs.rules')],
+                            ] as const).map(([id, label]) => (
+                                <button
+                                    key={id}
+                                    type="button"
+                                    role="tab"
+                                    id={`settings-tab-${id}`}
+                                    aria-selected={activeTab === id}
+                                    aria-controls="settings-panel"
+                                    onClick={() => setActiveTab(id)}
+                                    className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === id ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+                                >
+                                    {label}
+                                </button>
+                            ))}
                             {clientExpansionRegistry.getByMountPoint('CUSTOM_SETTINGS_TAB').map(tab => {
                                 const Icon = tab.icon;
                                 return (
                                     <button
                                         key={tab.id}
+                                        type="button"
+                                        role="tab"
+                                        id={`settings-tab-${tab.id}`}
+                                        aria-selected={activeTab === tab.id}
+                                        aria-controls="settings-panel"
                                         onClick={() => setActiveTab(tab.id as any)}
                                         // @ts-ignore
-                                        className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center gap-1.5", activeTab === tab.id ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+                                        className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center gap-1.5", activeTab === tab.id ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
                                     >
-                                        {Icon && <Icon className="h-3.5 w-3.5" />}
+                                        {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
                                         {/* @ts-ignore */}
                                         {tab.title || tab.id}
                                     </button>
                                 );
                             })}
                             <button
+                                type="button"
+                                role="tab"
+                                id="settings-tab-extensions"
+                                aria-selected={activeTab === 'extensions'}
+                                aria-controls="settings-panel"
                                 onClick={() => setActiveTab('extensions')}
-                                className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'extensions' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+                                className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'extensions' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
                             >
-                                Extensions
+                                {t('settings.tabs.extensions')}
                             </button>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 -mr-2 text-muted-foreground hover:bg-muted rounded-full transition-colors shrink-0">
-                        <X className="h-5 w-5" />
+                    <button type="button" onClick={onClose} aria-label={t('settings.close')} className="p-2 -mr-2 text-muted-foreground hover:bg-muted rounded-full transition-colors shrink-0">
+                        <X className="h-5 w-5" aria-hidden="true" />
                     </button>
                 </div>
 
                 {/* Scrollable Body */}
-                <div className="flex-1 overflow-y-auto p-6 md:p-8">
+                <div
+                    id="settings-panel"
+                    role="tabpanel"
+                    aria-labelledby={`settings-tab-${activeTab}`}
+                    className="flex-1 overflow-y-auto p-6 md:p-8"
+                >
                     {/* Check for Custom Tabs first */}
                     {clientExpansionRegistry.getByMountPoint('CUSTOM_SETTINGS_TAB').map(tab => {
                         if (activeTab === tab.id) {
@@ -204,8 +240,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                 <div key={tab.id} className="space-y-6 animate-in fade-in duration-300">
                                     <div>
                                         {/* @ts-ignore */}
-                                        <h3 className="text-lg font-medium">{tab.title || tab.id} Settings</h3>
-                                        <p className="text-sm text-muted-foreground">Manage your configuration for this extension.</p>
+                                        <h3 className="text-lg font-medium">{t('settings.extensionSettingsTitle', { name: String(tab.title || tab.id) })}</h3>
+                                        <p className="text-sm text-muted-foreground">{t('settings.extensionSettingsHelp')}</p>
                                     </div>
                                     <div className="bg-muted/30 rounded-xl p-4">
                                         <Component
@@ -230,35 +266,40 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                             {/* Profile Section */}
                             <div className="space-y-4">
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                                    <User className="h-4 w-4" /> Profile
+                                    <User className="h-4 w-4" aria-hidden="true" /> {t('settings.profileSection')}
                                 </h3>
                                 <div className="bg-muted/30 rounded-xl p-4">
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
                                         <div className="relative group shrink-0 mx-auto sm:mx-0">
                                             <div className="w-24 h-24 rounded-full bg-muted overflow-hidden border-2 border-background ring-2 ring-border/50">
                                                 {avatar ? (
-                                                    <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+                                                    <img src={avatar} alt={t('settings.avatarAlt')} className="w-full h-full object-cover" />
                                                 ) : (
                                                     <div className="w-full h-full flex items-center justify-center text-muted-foreground text-3xl font-medium bg-muted">
                                                         {(name?.[0] || session?.user?.email?.[0] || '?').toUpperCase()}
                                                     </div>
                                                 )}
                                             </div>
-                                            <label className="absolute inset-0 bg-black/40 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 transition-all cursor-pointer text-white font-medium text-xs rounded-full gap-1">
-                                                <Camera className="h-5 w-5" />
-                                                <span>Change</span>
-                                                <input type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
+                                            <label
+                                                title={t('settings.changeAvatarLabel')}
+                                                className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring transition-all cursor-pointer text-white font-medium text-xs rounded-full gap-1"
+                                            >
+                                                <Camera className="h-5 w-5" aria-hidden="true" />
+                                                <span>{t('settings.changeAvatar')}</span>
+                                                <input type="file" className="sr-only" accept="image/*" aria-label={t('settings.changeAvatarLabel')} onChange={handleAvatarUpload} />
                                             </label>
                                         </div>
                                         <div className="flex-1 w-full space-y-4">
                                             <div className="grid gap-2">
-                                                <label className="text-sm font-medium">Display Name</label>
+                                                <label htmlFor="settings-display-name" className="text-sm font-medium">{t('settings.displayName')}</label>
                                                 <input
+                                                    id="settings-display-name"
                                                     type="text"
+                                                    autoComplete="name"
                                                     value={name}
                                                     onChange={(e) => setName(e.target.value)}
                                                     className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
-                                                    placeholder="Your name"
+                                                    placeholder={t('settings.displayNamePlaceholder')}
                                                 />
                                             </div>
                                         </div>
@@ -268,7 +309,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
                             <div className="space-y-4">
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                                    <PenTool className="h-4 w-4" /> Mailbox
+                                    <PenTool className="h-4 w-4" aria-hidden="true" /> {t('settings.mailboxSection')}
                                 </h3>
                                 <div className="bg-muted/30 rounded-xl p-4 space-y-4">
                                     <label className="flex items-start gap-3 cursor-pointer rounded-lg border border-border/50 bg-background p-4">
@@ -291,9 +332,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                             className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
                                         />
                                         <div>
-                                            <div className="text-sm font-medium">Unified multi-account replies</div>
+                                            <div className="text-sm font-medium">{t('settings.unifiedReplies')}</div>
                                             <div className="text-xs text-muted-foreground">
-                                                When enabled, Bloomx replies from the original mailbox of each thread and shows your connected account count instead of the active email.
+                                                {t('settings.unifiedRepliesHelp')}
                                             </div>
                                         </div>
                                     </label>
@@ -304,33 +345,39 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                             {/* Security Section */}
                             <div className="space-y-4">
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                                    <Lock className="h-4 w-4" /> Security
+                                    <Lock className="h-4 w-4" aria-hidden="true" /> {t('settings.securitySection')}
                                 </h3>
                                 <div className="bg-muted/30 rounded-xl p-4 space-y-4">
                                     <div className="grid gap-2">
-                                        <label className="text-sm font-medium">Current Password</label>
+                                        <label htmlFor="settings-current-password" className="text-sm font-medium">{t('settings.currentPassword')}</label>
                                         <input
+                                            id="settings-current-password"
                                             type="password"
+                                            autoComplete="current-password"
                                             value={currentPassword}
                                             onChange={(e) => setCurrentPassword(e.target.value)}
-                                            placeholder="Required to set new password"
+                                            placeholder={t('settings.currentPasswordPlaceholder')}
                                             className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
                                         />
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div className="grid gap-2">
-                                            <label className="text-sm font-medium">New Password</label>
+                                            <label htmlFor="settings-new-password" className="text-sm font-medium">{t('settings.newPassword')}</label>
                                             <input
+                                                id="settings-new-password"
                                                 type="password"
+                                                autoComplete="new-password"
                                                 value={newPassword}
                                                 onChange={(e) => setNewPassword(e.target.value)}
                                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
                                             />
                                         </div>
                                         <div className="grid gap-2">
-                                            <label className="text-sm font-medium">Confirm Password</label>
+                                            <label htmlFor="settings-confirm-password" className="text-sm font-medium">{t('settings.confirmPassword')}</label>
                                             <input
+                                                id="settings-confirm-password"
                                                 type="password"
+                                                autoComplete="new-password"
                                                 value={confirmPassword}
                                                 onChange={(e) => setConfirmPassword(e.target.value)}
                                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 transition-all"
@@ -344,13 +391,15 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
                     {/* Appearance Tab */}
                     {activeTab === 'appearance' && <AppearanceSettings />}
+                    {activeTab === 'labels' && <LabelsSettings />}
+                    {activeTab === 'rules' && <RulesSettings />}
 
                     {/* Generic Extensions Tab */}
                     {activeTab === 'extensions' && (
                         <div className="space-y-8 animate-in fade-in duration-300">
                             <div className="space-y-4">
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
-                                    <Grid className="h-4 w-4" /> Attributes
+                                    <Grid className="h-4 w-4" aria-hidden="true" /> {t('settings.attributes')}
                                 </h3>
                                 <div className="grid gap-4">
                                     {clientExpansionRegistry.getAll().map(expansion => {
@@ -384,12 +433,21 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
 
                                     {clientExpansionRegistry.getAll().filter(e => !!e.SettingsComponent && !e.mounts.some((m: any) => m.point === 'CUSTOM_SETTINGS_TAB')).length === 0 && (
                                         <div className="p-8 text-center text-muted-foreground bg-muted/20 rounded-xl border border-dashed">
-                                            No configurable extensions found.
+                                            {t('settings.noConfigurable')}
                                         </div>
                                     )}
                                 </div>
                             </div>
                         </div>
+                    )}
+                </div>
+
+                {/* Mensaje de estado (anunciado por lectores de pantalla) */}
+                <div aria-live="polite" className={message ? 'px-4 pb-2 shrink-0' : 'sr-only'}>
+                    {message && (
+                        <p role={message.type === 'error' ? 'alert' : 'status'} className={cn('rounded-md border px-3 py-2 text-sm', message.type === 'error' ? 'border-destructive/30 bg-destructive/10 text-destructive' : 'border-success/30 bg-success/10 text-success')}>
+                            {message.text}
+                        </p>
                     )}
                 </div>
 
@@ -400,17 +458,19 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                         onClick={() => signOut({ callbackUrl: '/login' })}
                         className="flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-destructive/10 font-medium rounded-lg transition-colors"
                     >
-                        <LogOut className="h-4 w-4" />
-                        <span className="hidden sm:inline">Sign Out</span>
+                        <LogOut className="h-4 w-4" aria-hidden="true" />
+                        <span className="hidden sm:inline">{t('settings.signOut')}</span>
+                        <span className="sr-only sm:hidden">{t('settings.signOut')}</span>
                     </button>
 
                     <button
+                        type="button"
                         onClick={handleSubmit}
                         disabled={loading}
                         className="px-6 py-2 bg-primary text-primary-foreground font-medium rounded-lg hover:bg-primary/90 transition-all disabled:opacity-50 shadow-sm flex items-center gap-2"
                     >
-                        {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                        {loading ? 'Saving...' : 'Save Changes'}
+                        {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                        {loading ? t('settings.saving') : t('settings.save')}
                     </button>
                 </div>
             </div>

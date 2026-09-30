@@ -295,7 +295,7 @@ export function isMailDarkMode(value: unknown): value is MailDarkMode {
 // Generacion de CSS
 // ---------------------------------------------------------------------------
 
-const HUES: Record<string, number> = {
+export const HUES: Record<string, number> = {
     red: 0, orange: 25, amber: 40, yellow: 50, lime: 85, green: 142, emerald: 160,
     teal: 173, cyan: 190, sky: 200, blue: 217, indigo: 239, violet: 258,
     purple: 271, fuchsia: 292, pink: 330, rose: 350,
@@ -306,12 +306,23 @@ const NEUTRALS = ['gray', 'slate', 'zinc', 'neutral', 'stone'];
  * Red de seguridad para temas oscuros: reasigna la paleta por defecto de
  * Tailwind (--color-red-50, --color-gray-200, ...) para que las clases que aun
  * usen la paleta cruda (bg-amber-50 text-amber-900, border-gray-200, ...) queden
- * legibles. 500 y 600 no se tocan (rellenos solidos con texto blanco).
+ * legibles.
+ *
+ * 500 y 600 TAMBIEN se aclaran: en el codigo se usan como color de texto/acento
+ * (text-purple-600, border-teal-500, degradados), y sobre fondos oscuros los tonos
+ * originales dan 2-3:1. Consecuencia: NO usar bg-<color>-500/600 con texto blanco
+ * para rellenos solidos; para eso estan los tokens (bg-primary + text-primary-foreground,
+ * bg-destructive, ...). Los tintes (bg-<color>-500/10) no se ven afectados en la practica.
+ * `npm run check:themes` verifica >= 4.5:1 de estos tonos sobre fondo/tarjeta/muted de cada tema oscuro.
  */
+export const DARK_ACCENT_SHADES = { 500: { s: 92, l: 74 }, 600: { s: 90, l: 78 } } as const;
+
 function darkPaletteRemap(): string {
     const lines: string[] = [];
     for (const [name, h] of Object.entries(HUES)) {
         lines.push(
+            `--color-${name}-500:hsl(${h} ${DARK_ACCENT_SHADES[500].s}% ${DARK_ACCENT_SHADES[500].l}%)`,
+            `--color-${name}-600:hsl(${h} ${DARK_ACCENT_SHADES[600].s}% ${DARK_ACCENT_SHADES[600].l}%)`,
             `--color-${name}-50:hsl(${h} 40% 13%)`,
             `--color-${name}-100:hsl(${h} 38% 17%)`,
             `--color-${name}-200:hsl(${h} 36% 23%)`,
@@ -408,6 +419,10 @@ export function applyBrand(theme: ThemeDefinition, cfg: DomainThemeConfig): Part
             set('background', bg);
             const fg = normalizeHex(cfg.textColor);
             set('foreground', fg && contrast(fg, bg) >= 4.5 ? fg : readableOn(bg));
+        } else {
+            // Solo texto de marca (sin fondo propio): se corrige contra el fondo y la tarjeta del tema.
+            const fg = normalizeHex(cfg.textColor);
+            if (fg) set('foreground', ensureContrast(fg, [t.background, t.card], 4.5));
         }
         const card = normalizeHex(cfg.cardColor);
         if (card) {
@@ -438,6 +453,9 @@ export function applyBrand(theme: ThemeDefinition, cfg: DomainThemeConfig): Part
             set('accent', mix(t.muted, t.foreground, 0.04));
             set('accent-foreground', ensureContrast(t['accent-foreground'], [t.accent], 4.5));
             set('input', ensureContrast(normalizeHex(cfg.inputColor) ?? t.input, [t.background], 3));
+        } else {
+            const inputCfg = normalizeHex(cfg.inputColor);
+            if (inputCfg) set('input', ensureContrast(inputCfg, [t.background], 3));
         }
     }
 
@@ -449,8 +467,14 @@ export function applyBrand(theme: ThemeDefinition, cfg: DomainThemeConfig): Part
         set('primary', adjusted);
         const pf = normalizeHex(cfg.primaryForeground);
         set('primary-foreground', pf && contrast(pf, adjusted) >= 4.5 ? pf : readableOn(adjusted));
-        const ring = normalizeHex(cfg.ringColor);
-        set('ring', ring && contrast(ring, t.background) >= 3 ? ring : adjusted);
+    }
+    // Anillo de foco: propio del dominio si cumple 3:1; si no, el primario ya corregido (o el del tema).
+    const ringCfg = normalizeHex(cfg.ringColor);
+    if (ringCfg) {
+        const fallback = primary ? t.primary : ensureContrast(ringCfg, [t.background], 3);
+        set('ring', contrast(ringCfg, t.background) >= 3 ? ringCfg : fallback);
+    } else if (primary) {
+        set('ring', t.primary);
     }
     const accent = normalizeHex(cfg.accentColor);
     if (accent) {

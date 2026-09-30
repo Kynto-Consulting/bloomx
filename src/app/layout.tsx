@@ -10,6 +10,9 @@ import { ComposeWindows } from '@/components/ComposeWindows'
 import { Toaster } from '@/components/ui/sonner'
 import { RealTimeListener } from '@/components/RealTimeListener'
 import { PwaManager } from '@/components/PwaManager'
+import { I18nProvider } from '@/components/I18nProvider'
+import { getTranslator } from '@/lib/i18n'
+import { getRequestLocale } from '@/lib/i18n/server'
 import { buildBootScript, buildBrandCss, buildThemeCss, getTheme, isThemePreference, THEME_COOKIE, type DomainThemeConfig } from '@/lib/themes'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
@@ -38,6 +41,7 @@ const getDomainTheme = cache(async (): Promise<DomainThemeConfig | null> => {
 });
 
 export async function generateMetadata(): Promise<Metadata> {
+    const description = getTranslator(await getRequestLocale()).t('layout.description');
     const headersList = await headers();
     const host = process.env.TOP_DOMAIN || headersList.get('x-forwarded-host') || headersList.get('host') || '';
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev';
@@ -56,7 +60,7 @@ export async function generateMetadata(): Promise<Metadata> {
         if (!res.ok) {
             return {
                 title: 'BloomX Mail',
-                description: 'Serverless mail client',
+                description,
                 manifest: '/manifest.webmanifest'
             };
         }
@@ -66,7 +70,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
         return {
             title: config?.displayName || config?.name || 'BloomX Mail',
-            description: 'Serverless mail client',
+            description,
             manifest: '/manifest.webmanifest',
             icons: config?.logo ? [
                 { rel: 'icon', url: config.logo },
@@ -78,7 +82,7 @@ export async function generateMetadata(): Promise<Metadata> {
         console.error("Metadata generation failed:", e);
         return {
             title: 'BloomX Mail',
-            description: 'Serverless mail client',
+            description,
             manifest: '/manifest.webmanifest'
         };
     }
@@ -97,6 +101,9 @@ export default async function RootLayout({
     // Preferencia de tema persistida en cookie: permite renderizar <html data-theme> ya en el servidor.
     // Con "system" (o sin cookie) el servidor no sabe si el SO es oscuro: lo resuelve el script bloqueante.
     const cookieStore = await cookies();
+    // Idioma: cookie de preferencia -> Accept-Language -> es. Se pasa al cliente para que el primer HTML ya salga traducido.
+    const locale = await getRequestLocale();
+    const tr = getTranslator(locale);
     const cookiePref = cookieStore.get(THEME_COOKIE)?.value;
     const pref = isThemePreference(cookiePref) ? cookiePref : 'system';
     const concrete = pref !== 'system' ? getTheme(pref) : undefined;
@@ -104,7 +111,7 @@ export default async function RootLayout({
 
     return (
         <html
-            lang="en"
+            lang={locale}
             data-theme-pref={pref}
             data-theme={concrete?.id}
             data-scheme={concrete?.scheme}
@@ -116,13 +123,14 @@ export default async function RootLayout({
                 <script dangerouslySetInnerHTML={{ __html: buildBootScript() }} />
             </head>
             <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
+                <I18nProvider locale={locale}>
                 <SessionProvider>
                     <ReAuthProvider
                         initialChecks={[
                             {
                                 provider: 'google',
                                 scopes: ['https://www.googleapis.com/auth/meetings.space.created'],
-                                reason: 'Para crear salas de Google Meet abiertas sin sala de espera, necesita un permiso adicional.',
+                                reason: tr.t('layout.reauthMeetReason'),
                                 requestedBy: 'Google Meet',
                             },
                         ]}
@@ -147,6 +155,7 @@ export default async function RootLayout({
                         </GlobalWindowProvider>
                     </ReAuthProvider>
                 </SessionProvider>
+                </I18nProvider>
             </body>
         </html>
     )

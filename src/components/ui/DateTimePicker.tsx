@@ -13,6 +13,8 @@ export interface DateTimePickerProps {
     className?: string;
     minDate?: string;        // YYYY-MM-DD
     dateOnly?: boolean;
+    /** Nombre accesible del campo (p. ej. "Starts"); se combina con el valor mostrado. */
+    ariaLabel?: string;
 }
 
 const MONTHS = ['January','February','March','April','May','June',
@@ -52,7 +54,7 @@ function buildTimes(): string[] {
 const QUICK_TIMES = buildTimes();
 
 export function DateTimePicker({
-    value, onChange, placeholder, disabled, className, minDate, dateOnly,
+    value, onChange, placeholder, disabled, className, minDate, dateOnly, ariaLabel,
 }: DateTimePickerProps) {
     const triggerRef = useRef<HTMLButtonElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
@@ -130,11 +132,16 @@ export function DateTimePicker({
             setOpen(false);
         };
         const reposition = () => calcPosition();
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') { setOpen(false); triggerRef.current?.focus(); }
+        };
         document.addEventListener('mousedown', close);
+        document.addEventListener('keydown', onKey);
         window.addEventListener('scroll', reposition, true);
         window.addEventListener('resize', reposition);
         return () => {
             document.removeEventListener('mousedown', close);
+            document.removeEventListener('keydown', onKey);
             window.removeEventListener('scroll', reposition, true);
             window.removeEventListener('resize', reposition);
         };
@@ -194,6 +201,8 @@ export function DateTimePicker({
     const dropdown = open && mounted ? createPortal(
         <div
             ref={dropdownRef}
+            role="dialog"
+            aria-label={dateOnly ? 'Select date' : 'Select date and time'}
             style={{
                 position: 'fixed',
                 top: pos.top,
@@ -209,17 +218,17 @@ export function DateTimePicker({
                 {/* Calendar */}
                 <div className={cn('flex-1 p-3', !dateOnly && 'border-r border-border')}>
                     <div className="flex items-center justify-between mb-2">
-                        <button type="button" onClick={prevMonth} className="p-1 rounded hover:bg-accent transition-colors">
+                        <button type="button" onClick={prevMonth} aria-label="Previous month" className="p-2 rounded hover:bg-accent transition-colors">
                             <ChevronLeft className="h-4 w-4" />
                         </button>
                         <span className="text-sm font-semibold">{MONTHS[calMonth]} {calYear}</span>
-                        <button type="button" onClick={nextMonth} className="p-1 rounded hover:bg-accent transition-colors">
+                        <button type="button" onClick={nextMonth} aria-label="Next month" className="p-2 rounded hover:bg-accent transition-colors">
                             <ChevronRight className="h-4 w-4" />
                         </button>
                     </div>
                     <div className="grid grid-cols-7 mb-1">
                         {DAYS_SHORT.map(d => (
-                            <div key={d} className="text-center text-[10px] font-medium text-muted-foreground py-1">{d}</div>
+                            <div key={d} className="text-center text-[11px] font-medium text-muted-foreground py-1">{d}</div>
                         ))}
                     </div>
                     <div className="grid grid-cols-7 gap-y-0.5">
@@ -234,6 +243,9 @@ export function DateTimePicker({
                                     key={key}
                                     type="button"
                                     disabled={isPast}
+                                    aria-label={date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                                    aria-pressed={isSelected}
+                                    aria-current={isToday ? 'date' : undefined}
                                     onClick={() => handleDayClick(date)}
                                     className={cn(
                                         'flex items-center justify-center w-full aspect-square rounded-full text-xs font-medium transition-colors',
@@ -270,6 +282,7 @@ export function DateTimePicker({
                                     }
                                 }}
                                 placeholder="HH:MM"
+                                aria-label="Time (HH:MM)"
                                 className="w-full text-xs text-center border border-border rounded px-1 py-1 bg-background focus:outline-none focus:border-primary"
                                 maxLength={5}
                             />
@@ -281,6 +294,7 @@ export function DateTimePicker({
                                     key={t}
                                     type="button"
                                     onClick={() => applyTime(t)}
+                                    aria-pressed={t === selTime}
                                     className={cn(
                                         'w-full text-center py-[7px] text-xs transition-colors',
                                         t === selTime ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-accent',
@@ -303,6 +317,9 @@ export function DateTimePicker({
                 ref={triggerRef}
                 type="button"
                 disabled={disabled}
+                aria-haspopup="dialog"
+                aria-expanded={open}
+                aria-label={ariaLabel ? `${ariaLabel}: ${displayText}` : undefined}
                 onClick={() => open ? setOpen(false) : openPicker()}
                 className={cn(
                     'flex items-center gap-2 text-left text-sm px-3 py-2 rounded-lg border border-input bg-background hover:bg-accent transition-colors w-full min-h-[38px]',

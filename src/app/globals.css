@@ -115,6 +115,31 @@
   .theme-transition * { transition: none !important; }
 }
 
+/*
+ * Accesibilidad de movimiento: respeta prefers-reduced-motion en TODA la app (animate-pulse,
+ * animate-in, spinners de carga, transiciones). Se deja un 0.01ms (no 0) para que los eventos
+ * animationend/transitionend sigan disparandose. Los spinners `animate-spin` se conservan porque
+ * son un indicador de estado y no un efecto decorativo.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-spin { animation-duration: 1.5s !important; animation-iteration-count: infinite !important; }
+}
+
+/* Modo de alto contraste del sistema (Windows): el foco y los bordes deben seguir viendose. */
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea, summary, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid Highlight;
+  }
+}
+
 
 /* @tailwindcss/typography: enlaza .prose con los tokens (sin esto usa grises fijos ilegibles en temas oscuros). */
 .prose {
