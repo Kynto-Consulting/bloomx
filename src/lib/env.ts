@@ -4,6 +4,7 @@ const envSchema = z.object({
     // Core
     DATABASE_URL: z.string().min(1, "Database URL is required"),
     NEXT_PUBLIC_APP_URL: z.string().url().default("https://bloomx.arubik.dev"),
+    // En produccion el registro se deshabilita si se deja el valor por defecto (ver /api/register).
     REGISTRATION_KEY: z.string().default("dev-secret"),
 
     // Email Service (Resend)

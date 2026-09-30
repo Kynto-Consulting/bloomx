@@ -6,7 +6,7 @@ export default function SecurityDocs() {
         <div className="space-y-12 animate-in fade-in duration-500">
             <div>
                 <h1 className="text-3xl font-bold tracking-tight mb-4 flex items-center gap-3">
-                    <Shield className="h-8 w-8 text-blue-600" />
+                    <Shield className="h-8 w-8 text-primary" />
                     Security & Encryption
                 </h1>
                 <p className="text-lg text-muted-foreground leading-relaxed">
@@ -52,12 +52,12 @@ export default function SecurityDocs() {
                 </div>
             </section>
 
-            <section className="bg-red-50 border border-red-200 rounded-lg p-6">
-                <h3 className="text-lg font-bold text-red-800 flex items-center gap-2 mb-2">
+            <section className="bg-destructive/10 border border-destructive/30 rounded-lg p-6">
+                <h3 className="text-lg font-bold text-destructive flex items-center gap-2 mb-2">
                     <Server className="h-5 w-5" />
                     Data Ownership
                 </h3>
-                <p className="text-red-700">
+                <p className="text-destructive">
                     Unlike typical SaaS email clients, Bloomx is designed to point to <strong>your</strong> database and <strong>your</strong> S3 bucket. We do not proxy your data through a "Bloomx Cloud". You own the infrastructure.
                 </p>
             </section>

@@ -216,7 +216,7 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                     showLabel: false,
                     icon: 'Video',
                     variant: 'outline',
-                    className: 'h-10 w-10 rounded-md border border-slate-200 bg-white px-0 text-slate-600 hover:bg-slate-50 hover:text-slate-900 shadow-none',
+                    className: 'h-10 w-10 rounded-md border border-border bg-card px-0 text-muted-foreground hover:bg-muted/50 hover:text-foreground shadow-none',
                     menuOptions,
                 },
             },
@@ -242,7 +242,7 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                             title="More actions"
                             aria-label="More actions"
                             onClick={() => setOverflowOpen((current) => !current)}
-                            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-transparent bg-transparent text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
+                            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         >
                             <Plus className="h-5 w-5" />
                         </button>
@@ -253,7 +253,7 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                             onClose={() => setOverflowOpen(false)}
                             width={220}
                             header={false}
-                            className="rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl"
+                            className="rounded-2xl border border-border bg-card p-2 shadow-2xl"
                         >
                             <div className="flex flex-col gap-1">
                                 {composerOverflow.overflow.map((mount: any, i: number) => renderMount(mount, i, 'menu'))}

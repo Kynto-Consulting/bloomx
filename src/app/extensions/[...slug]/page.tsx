@@ -50,7 +50,7 @@ export default async function ExtensionPage({ params }: ExtensionPageProps) {
     const { slug } = await params;
 
     return (
-        <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Loader2 className="w-8 h-8 animate-spin text-gray-400" /></div>}>
+        <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>}>
             <ExtensionContent slug={slug} />
         </Suspense>
     );

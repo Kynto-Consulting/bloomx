@@ -110,9 +110,9 @@ export function FloatingWindow({
     }
 
     const modalClass = maximized
-        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-white rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
+        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-card rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
         : cn(
-            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-white rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
+            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-card rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
             isResizing ? "transition-none select-none" : ""
         );
 

@@ -51,7 +51,8 @@ export function useDomainConfig() {
         }
     }
 
-    const config = data.config;
+    // data puede ser undefined si /api/config falla (isLoading=false y error definido).
+    const config = data?.config ?? DEFAULT_CONFIG;
     return {
         config,
         extensions: normalizeExtensions(data?.extensions || []),

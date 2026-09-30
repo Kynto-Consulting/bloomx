@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { uploadToStorage, getSignedDownloadUrl } from '@/lib/storage'; // Assuming this exists per services.ts reference
+import { uploadToStorage } from '@/lib/storage';
+import { rateLimit } from '@/lib/security';
+import { stripControlChars } from '@/lib/mail-validation';
 import { encrypt } from '@/lib/encryption';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -11,16 +13,31 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        const body = await req.json();
-        const { content, subject } = body;
+        const rl = rateLimit(`secure-msg:${user.email}`, 30, 60 * 60 * 1000);
+        if (!rl.ok) {
+            return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
+        }
 
-        // 1. Generate ID and secure payload
+        const body = await req.json();
+        const content = typeof body?.content === 'string' ? body.content : '';
+        const subject = typeof body?.subject === 'string' ? stripControlChars(body.subject).slice(0, 300) : '';
+
+        if (!content.trim()) {
+            return NextResponse.json({ error: 'Content is required' }, { status: 400 });
+        }
+        if (content.length > 1_000_000) {
+            return NextResponse.json({ error: 'Content too large' }, { status: 413 });
+        }
+
+        // 1. Generate ID and secure payload (con caducidad)
         const id = uuidv4();
+        const ttlDays = Number.parseInt(process.env.SECURE_MESSAGE_TTL_DAYS || '30', 10) || 30;
         const payload = JSON.stringify({
             subject,
             content,
             sender: user.email,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString(),
         });
 
         // 2. Encrypt locally before storage (Double encryption, why not?)

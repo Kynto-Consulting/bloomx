@@ -14,6 +14,7 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { SafeIframe } from '@/components/ui/SafeIframe';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -511,8 +512,7 @@ export default function ElixirPage() {
                         <Menu className="h-5 w-5" />
                     </button>
                     <div className="flex items-center gap-2">
-                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center"
-                            style={brandColor ? { backgroundColor: `${brandColor}1a` } : undefined}>
+                        <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
                             <Zap className="h-4 w-4 text-primary" />
                         </div>
                         <div>
@@ -886,7 +886,7 @@ function FilterRow({
                 >
                     {headers.map(h => <option key={h} value={h}>{h}</option>)}
                 </select>
-                <button onClick={onRemove} className="p-1 text-muted-foreground hover:text-red-500 transition-colors">
+                <button onClick={onRemove} className="p-1 text-muted-foreground hover:text-destructive transition-colors">
                     <X className="h-3.5 w-3.5" />
                 </button>
             </div>
@@ -1107,7 +1107,7 @@ function TemplateTab({
                         <div className="flex flex-wrap gap-1.5">
                             {systemVarKeys.map(v => (
                                 <button key={v.key} onClick={() => insertVar(v.key)} title={v.label}
-                                    className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full hover:bg-amber-100 transition-colors font-mono">
+                                    className="text-xs bg-warning/10 text-warning border border-warning/30 px-2 py-0.5 rounded-full hover:bg-warning/15 transition-colors font-mono">
                                     {`{{${v.key}}}`}
                                 </button>
                             ))}
@@ -1116,19 +1116,19 @@ function TemplateTab({
                 </div>
 
                 {/* Syntax reference */}
-                <details className="border-b border-border shrink-0 bg-amber-50/60 group">
-                    <summary className="px-4 py-2 text-xs text-amber-800 font-semibold cursor-pointer select-none flex items-center gap-1">
+                <details className="border-b border-border shrink-0 bg-warning/6 group">
+                    <summary className="px-4 py-2 text-xs text-warning font-semibold cursor-pointer select-none flex items-center gap-1">
                         <span>Referencia sintaxis Liquid (Ample Market)</span>
                         <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform ml-auto" />
                     </summary>
-                    <div className="px-4 pb-3 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-amber-700 font-mono leading-relaxed">
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1 uppercase tracking-wider">Variables</span>
+                    <div className="px-4 pb-3 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-warning font-mono leading-relaxed">
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1 uppercase tracking-wider">Variables</span>
                         <span>{`{{campo}}`} → valor directo</span>
                         <span>{`{{campo | default: "texto"}}`} → fallback</span>
                         <span>{`{{ now | date: "%B %d, %Y" }}`} → fecha actual</span>
                         <span>{`{{brand_name}} {{today}}`} → sistema</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de texto</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Filtros de texto</span>
                         <span>{`| upcase / downcase / capitalize`}</span>
                         <span>{`| strip / lstrip / rstrip / strip_html`}</span>
                         <span>{`| truncate: 50 / truncatewords: 10`}</span>
@@ -1140,7 +1140,7 @@ function TemplateTab({
                         <span>{`| size / first / last / reverse`}</span>
                         <span>{`| slice: 0, 5`}</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de array</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Filtros de array</span>
                         <span>{`| split: ","` } → crea array</span>
                         <span>{`| join: " / "`} → une array</span>
                         <span>{`| sort / sort_natural / uniq`}</span>
@@ -1148,22 +1148,22 @@ function TemplateTab({
                         <span>{`| first / last / size / reverse`}</span>
                         <span>{`| sum / min / max`}</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros numéricos</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Filtros numéricos</span>
                         <span>{`| plus: 10 / minus: 5`}</span>
                         <span>{`| times: 2 / divided_by: 3`}</span>
                         <span>{`| round: 2 / ceil / floor / abs`}</span>
                         <span>{`| modulo: 7 / at_least: 0 / at_most: 100`}</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Filtros de fecha</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Filtros de fecha</span>
                         <span>{`| date: "%B %d, %Y"`}</span>
                         <span>{`| date: "%d/%m/%Y"`}</span>
                         <span>{`%Y %m %d %H %M %S %B %b %A %p`}</span>
                         <span>{`{{ now | date: "..." }}` } → hoy</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Cadena de filtros</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Cadena de filtros</span>
                         <span className="col-span-2">{`{{campo | upcase | truncate: 20 | append: "..."}}`}</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Control de flujo</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Control de flujo</span>
                         <span>{`{% if campo %} … {% endif %}`}</span>
                         <span>{`{% unless campo %} … {% endunless %}`}</span>
                         <span>{`{% if a == "X" %} … {% else %} … {% endif %}`}</span>
@@ -1173,7 +1173,7 @@ function TemplateTab({
                         <span>{`{% case x %}{% when "a" %}…{% when "b" %}…{% else %}…{% endcase %}`}</span>
                         <span>{`{% when "a" or "b" %}` } → múltiples valores</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Bucles for</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Bucles for</span>
                         <span>{`{% assign items = campo | split: "," %}`}</span>
                         <span>{`{% for x in items %}{{x}}{% endfor %}`}</span>
                         <span>{`{% for i in (1..5) %}{{i}}{% endfor %}`}</span>
@@ -1183,7 +1183,7 @@ function TemplateTab({
                         <span>{`{% break %} / {% continue %}`}</span>
                         <span>{`{% for x in arr %}…{% else %}vacío{% endfor %}`}</span>
 
-                        <span className="col-span-2 text-[10px] font-bold text-amber-900 mt-1.5 uppercase tracking-wider">Asignación y captura</span>
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Asignación y captura</span>
                         <span>{`{% assign x = campo | upcase %}`}</span>
                         <span>{`{% capture x %}texto {{campo}}{% endcapture %}`}</span>
                         <span>{`{% increment ctr %} / {% decrement ctr %}`}</span>
@@ -1236,7 +1236,7 @@ function TemplateTab({
             </div>
 
             {/* Preview side */}
-            <div className="w-[420px] shrink-0 flex flex-col bg-gray-50">
+            <div className="w-[420px] shrink-0 flex flex-col bg-muted/50">
                 <div className="px-4 py-3 border-b border-border bg-background shrink-0">
                     <div className="flex items-center justify-between">
                         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Vista previa</p>
@@ -1268,8 +1268,8 @@ function TemplateTab({
                         <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
                             {/* Sender preview */}
                             {(senderConfig.fromName || senderConfig.fromEmail || senderConfig.cc || senderConfig.bcc) && (
-                                <div className="bg-white rounded-xl border border-border overflow-hidden text-xs">
-                                    <div className="bg-gray-50 px-4 py-2 border-b border-border">
+                                <div className="bg-card rounded-xl border border-border overflow-hidden text-xs">
+                                    <div className="bg-muted/50 px-4 py-2 border-b border-border">
                                         <p className="font-semibold text-muted-foreground">Cabeceras del email</p>
                                     </div>
                                     <div className="divide-y divide-border/50">
@@ -1302,20 +1302,20 @@ function TemplateTab({
                             )}
 
                             {/* Email mock */}
-                            <div className="bg-white rounded-xl shadow-sm border border-border overflow-hidden">
-                                <div className="bg-gray-100 px-4 py-3 border-b border-border">
+                            <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden">
+                                <div className="bg-muted px-4 py-3 border-b border-border">
                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                         <span className="font-medium text-foreground">Asunto:</span>
                                         <span className="truncate">{previewSubject || '(sin asunto)'}</span>
                                     </div>
                                 </div>
-                                <div className="p-4 text-sm" dangerouslySetInnerHTML={{ __html: previewHtml }} />
+                                <div className="p-4 text-sm"><SafeIframe html={previewHtml} /></div>
                             </div>
 
                             {/* Row values */}
                             {headers.length > 0 && (
-                                <div className="bg-white rounded-xl border border-border overflow-hidden">
-                                    <div className="px-4 py-2 bg-gray-50 border-b border-border">
+                                <div className="bg-card rounded-xl border border-border overflow-hidden">
+                                    <div className="px-4 py-2 bg-muted/50 border-b border-border">
                                         <p className="text-xs font-semibold text-muted-foreground">Valores de la fila</p>
                                     </div>
                                     <div className="divide-y divide-border/50">
@@ -1373,19 +1373,19 @@ function SendTab({ results, sending, validRecipients }: {
     return (
         <div className="flex flex-col h-full min-h-0">
             <div className="flex gap-4 p-4 border-b border-border shrink-0">
-                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
+                <div className="flex items-center gap-2 bg-success/10 border border-success/30 rounded-lg px-4 py-3">
+                    <CheckCircle className="h-5 w-5 text-success" />
                     <div>
-                        <p className="text-lg font-bold text-green-700">{sent}</p>
-                        <p className="text-xs text-green-600">Enviados</p>
+                        <p className="text-lg font-bold text-success">{sent}</p>
+                        <p className="text-xs text-success">Enviados</p>
                     </div>
                 </div>
                 {failed > 0 && (
-                    <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
-                        <AlertCircle className="h-5 w-5 text-red-600" />
+                    <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3">
+                        <AlertCircle className="h-5 w-5 text-destructive" />
                         <div>
-                            <p className="text-lg font-bold text-red-700">{failed}</p>
-                            <p className="text-xs text-red-600">Fallidos</p>
+                            <p className="text-lg font-bold text-destructive">{failed}</p>
+                            <p className="text-xs text-destructive">Fallidos</p>
                         </div>
                     </div>
                 )}
@@ -1406,8 +1406,8 @@ function SendTab({ results, sending, validRecipients }: {
                                 <td className="px-4 py-2">
                                     <span className={cn(
                                         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium",
-                                        r.status === 'sent' ? "bg-green-100 text-green-700" :
-                                            r.status === 'error' ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-600"
+                                        r.status === 'sent' ? "bg-success/15 text-success" :
+                                            r.status === 'error' ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"
                                     )}>
                                         {r.status === 'sent' && <CheckCircle className="h-3 w-3" />}
                                         {r.status === 'error' && <AlertCircle className="h-3 w-3" />}

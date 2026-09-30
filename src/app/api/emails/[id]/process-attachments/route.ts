@@ -15,7 +15,19 @@ export const maxDuration = 300;
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const MAX_RETRIES = 3;
+import { safeEqual } from '@/lib/security';
 const INTERNAL_SECRET = process.env.INTERNAL_SECRET;
+// Limites anti-agotamiento de memoria/almacenamiento (raw MIME base64 ~ 1.37x el adjunto).
+const MAX_RAW_MIME_BYTES = 80 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 45 * 1024 * 1024;
+const MAX_ATTACHMENTS_PER_EMAIL = 50;
+
+function assertMimeSize(res: Response) {
+    const len = Number(res.headers.get('content-length') || 0);
+    if (len > MAX_RAW_MIME_BYTES) {
+        throw new Error(`Raw MIME too large (${len} bytes)`);
+    }
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -146,9 +158,13 @@ export async function POST(
     { params }: { params: Promise<{ id: string }> },
 ) {
     // Auth: internal secret
+    // Falla cerrado en produccion si INTERNAL_SECRET no esta configurado (la ruta es publica en middleware)
+    if (!INTERNAL_SECRET && process.env.NODE_ENV === 'production') {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
     if (INTERNAL_SECRET) {
-        const provided = req.headers.get('x-internal-secret');
-        if (provided !== INTERNAL_SECRET) {
+        const provided = req.headers.get('x-internal-secret') || '';
+        if (!safeEqual(provided, INTERNAL_SECRET)) {
             return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
         }
     }
@@ -194,6 +210,7 @@ export async function POST(
     let rawMime: string;
     try {
         const mimeRes = await fetchWithRetry(rawMimeUrl);
+        assertMimeSize(mimeRes);
         rawMime = await mimeRes.text();
     } catch (err) {
         const fresh = await resolveFreshRawMimeUrl(email.rawKey);
@@ -203,6 +220,7 @@ export async function POST(
         }
         try {
             const mimeRes = await fetchWithRetry(fresh);
+            assertMimeSize(mimeRes);
             rawMime = await mimeRes.text();
         } catch (err2) {
             console.error(`[process-attachments] Retry with fresh URL failed for email ${emailId}:`, err2);
@@ -211,7 +229,9 @@ export async function POST(
     }
 
     // Extract all attachment parts
-    const extracted = extractAttachmentsFromRawMime(rawMime);
+    const extracted = extractAttachmentsFromRawMime(rawMime)
+        .filter(a => a.buffer.byteLength <= MAX_ATTACHMENT_BYTES)
+        .slice(0, MAX_ATTACHMENTS_PER_EMAIL);
 
     // Also extract calendar ICS blocks that may not appear as explicit parts
     const calendarBlocks = extractCalendarIcsFromRawMime(rawMime);

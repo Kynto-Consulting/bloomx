@@ -2,6 +2,7 @@
 
 import { Inbox, Star, Clock, Send, File, MoreHorizontal, Search, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { applyBrand, getTheme, TOKEN_KEYS, type DomainThemeConfig } from '@/lib/themes';
 
 interface ThemePreviewProps {
     settings: {
@@ -22,25 +23,23 @@ interface ThemePreviewProps {
 
 export function ThemePreview({ settings }: ThemePreviewProps) {
     // Generate inline styles for the preview container to override global vars LOCALLY
-    const previewStyles = {
-        '--color-primary': settings.primaryColor,
-        '--color-secondary': settings.secondaryColor,
-        '--color-background': settings.backgroundColor,
-        '--color-foreground': settings.textColor,
-        '--color-accent': settings.accentColor,
-        '--color-muted': settings.mutedColor || '#f3f4f6',
-        '--color-border': settings.borderColor || '#e5e7eb',
-        '--color-card': settings.cardColor || '#ffffff',
-        '--color-input': settings.borderColor || '#e5e7eb',
+    // Usa la MISMA funcion que aplica la marca en produccion (applyBrand), sobre el tema claro:
+    // asi la vista previa muestra exactamente lo que se vera, incluidos los ajustes de contraste.
+    const light = getTheme('light')!;
+    const brand = applyBrand(light, settings as DomainThemeConfig);
+    const previewStyles: Record<string, string> = {
         '--font-title': settings.titleFont || 'Inter',
         '--font-body': settings.bodyFont || 'Inter',
-    } as React.CSSProperties;
+    };
+    for (const key of TOKEN_KEYS) {
+        previewStyles[`--color-${key}`] = brand[key] ?? light.tokens[key];
+    }
 
     return (
         <div
-            className="w-full h-[500px] rounded-xl overflow-hidden border border-border shadow-2xl flex text-xs select-none"
+            className="w-full h-[500px] rounded-xl overflow-hidden border border-border shadow-2xl flex text-xs select-none bg-background text-foreground"
             style={{
-                ...previewStyles,
+                ...(previewStyles as React.CSSProperties),
                 fontFamily: 'var(--font-body)',
             }}
         >
@@ -52,7 +51,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                             <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
                         </div>
                     ) : (
-                        <div className="w-6 h-6 rounded bg-primary text-white flex items-center justify-center flex-shrink-0">
+                        <div className="w-6 h-6 rounded bg-primary text-primary-foreground flex items-center justify-center flex-shrink-0">
                             {settings.displayName ? settings.displayName.charAt(0) : 'B'}
                         </div>
                     )}
@@ -62,7 +61,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                     <div className="flex items-center gap-2 px-2 py-1.5 bg-primary/10 text-primary rounded-md font-medium">
                         <Inbox className="w-3.5 h-3.5" />
                         <span className="hidden md:inline">Inbox</span>
-                        <span className="ml-auto text-[10px] bg-primary text-white px-1.5 rounded-full hidden md:inline-block">2</span>
+                        <span className="ml-auto text-[10px] bg-primary text-primary-foreground px-1.5 rounded-full hidden md:inline-block">2</span>
                     </div>
                     <div className="flex items-center gap-2 px-2 py-1.5 text-muted-foreground hover:bg-muted hover:text-foreground rounded-md transition-colors">
                         <Star className="w-3.5 h-3.5" />
@@ -85,7 +84,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                     </div>
                     <div className="flex items-center gap-2 text-muted-foreground">
                         <Settings className="w-4 h-4" />
-                        <div className="w-6 h-6 rounded-full bg-accent/20 border border-accent flex items-center justify-center text-accent text-[10px] font-bold">
+                        <div className="w-6 h-6 rounded-full bg-brand-accent/20 border border-brand-accent flex items-center justify-center text-brand-accent text-[10px] font-bold">
                             JD
                         </div>
                     </div>
@@ -111,7 +110,7 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
 
                     {/* Item 2 (Read) */}
                     <div className="bg-card/50 border border-border/50 p-3 rounded-lg hover:border-border transition-colors cursor-default flex gap-3 opacity-80 hover:opacity-100">
-                        <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center text-accent font-bold shrink-0">
+                        <div className="w-8 h-8 rounded-full bg-brand-accent/10 flex items-center justify-center text-brand-accent font-bold shrink-0">
                             CD
                         </div>
                         <div className="flex-1 min-w-0">
@@ -125,8 +124,8 @@ export function ThemePreview({ settings }: ThemePreviewProps) {
                     </div>
 
                     {/* Item 3 (Selected/Active) */}
-                    <div className="bg-accent/5 border border-accent/20 p-3 rounded-lg flex gap-3 ring-1 ring-accent/30">
-                        <div className="w-8 h-8 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-bold shrink-0">
+                    <div className="bg-brand-accent/5 border border-brand-accent/20 p-3 rounded-lg flex gap-3 ring-1 ring-brand-accent/30">
+                        <div className="w-8 h-8 rounded-full bg-success/15 text-success flex items-center justify-center font-bold shrink-0">
                             EF
                         </div>
                         <div className="flex-1 min-w-0">

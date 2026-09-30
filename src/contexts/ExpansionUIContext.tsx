@@ -88,13 +88,13 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
                     }}
                 >
                     <div
-                        className="relative bg-white rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto"
+                        className="relative bg-card rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto"
                         style={{ width: modalOptions.width || 'auto', maxWidth: '90vw' }}
                     >
                         {modalOptions.closable !== false && (
                             <button
                                 onClick={closeModal}
-                                className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                                className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors"
                             >
                                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                             </button>
@@ -113,7 +113,7 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
                     }}
                 >
                     <div
-                        className={`fixed top-0 bottom-0 bg-white shadow-2xl animate-in duration-200 overflow-y-auto ${drawerOptions.side === 'left'
+                        className={`fixed top-0 bottom-0 bg-card shadow-2xl animate-in duration-200 overflow-y-auto ${drawerOptions.side === 'left'
                                 ? 'left-0 slide-in-from-left'
                                 : 'right-0 slide-in-from-right'
                             }`}
@@ -121,7 +121,7 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
                     >
                         <button
                             onClick={closeDrawer}
-                            className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                            className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors"
                         >
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
                         </button>

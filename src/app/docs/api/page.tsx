@@ -103,10 +103,10 @@ function ApiSection({ title, icon: Icon, children }: { title: string, icon: any,
 
 function Endpoint({ method, path, desc, params, body }: { method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, desc: string, params?: any[], body?: any[] }) {
     const colors = {
-        GET: 'bg-blue-100 text-blue-700',
-        POST: 'bg-green-100 text-green-700',
-        PATCH: 'bg-yellow-100 text-yellow-700',
-        DELETE: 'bg-red-100 text-red-700',
+        GET: 'bg-primary/15 text-primary',
+        POST: 'bg-success/15 text-success',
+        PATCH: 'bg-warning/15 text-warning',
+        DELETE: 'bg-destructive/15 text-destructive',
     };
 
     return (

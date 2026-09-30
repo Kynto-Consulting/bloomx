@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { verifyMoltToken } from '@/lib/molt-auth';
 import { resend } from '@/lib/resend';
-import { normalizeEmailAddress } from '@/lib/email-utils';
+import { MAX_RECIPIENTS, formatFromHeader, parseRecipientList, sanitizeSubject } from '@/lib/mail-validation';
+import { rateLimit } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
     // 1. Authenticate
@@ -64,19 +65,37 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
         }
 
+        // Validacion anti header-injection / abuso (mismas reglas que /api/emails)
+        const toList = parseRecipientList(to);
+        const ccList = parseRecipientList(cc);
+        const bccList = parseRecipientList(bcc);
+        if (toList.invalid.length || ccList.invalid.length || bccList.invalid.length || toList.valid.length === 0) {
+            return NextResponse.json({ error: 'Invalid recipient address' }, { status: 400 });
+        }
+        if (toList.valid.length + ccList.valid.length + bccList.valid.length > MAX_RECIPIENTS) {
+            return NextResponse.json({ error: `Too many recipients (max ${MAX_RECIPIENTS})` }, { status: 400 });
+        }
+        const rl = rateLimit(`molt-send:${user.id}`, 60, 60 * 60 * 1000);
+        if (!rl.ok) {
+            return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
+        }
+
         const payload: any = {
-            // Use the authenticated user's email. 
+            // Use the authenticated user's email.
             // Note: This requires the user's email domain to be verified in Resend.
-            from: user.name ? `${user.name} <${user.email}>` : user.email,
-            to,
-            subject,
+            from: formatFromHeader(user.name, user.email),
+            to: toList.valid,
+            subject: sanitizeSubject(subject),
             text: text || '',
             html: html,
         };
 
-        if (cc) payload.cc = cc;
-        if (bcc) payload.bcc = bcc;
-        if (reply_to) payload.reply_to = reply_to;
+        if (ccList.valid.length) payload.cc = ccList.valid;
+        if (bccList.valid.length) payload.bcc = bccList.valid;
+        if (reply_to) {
+            const replyList = parseRecipientList(reply_to);
+            if (replyList.valid.length) payload.reply_to = replyList.valid.slice(0, 1);
+        }
         if (scheduled_at) payload.scheduled_at = scheduled_at;
 
         const { data, error } = await resend.emails.send(payload);
@@ -91,8 +110,8 @@ export async function POST(req: NextRequest) {
                 userId: user.id,
                 messageId: data?.id || `sent-${Date.now()}`,
                 from: user.email,
-                to: Array.isArray(to) ? to.join(', ') : normalizeEmailAddress(to),
-                subject,
+                to: toList.valid.join(', '),
+                subject: payload.subject,
                 snippet: text?.substring(0, 100) || '',
                 folder: 'sent',
                 status: 'sent',

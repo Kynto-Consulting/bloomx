@@ -3,33 +3,43 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, setSessionCookie } from "@/lib/session";
 import { patchAllUserMeetRooms } from "@/lib/google/meet";
+import { auditLog, getClientIp, isSafeRelativePath, safeEqual } from "@/lib/security";
 
-function resolveReturnTo(state: string | null) {
-    if (!state) {
-        return '/dashboard';
-    }
+function decodeState(state: string | null): { returnTo: string; nonce: string | null } {
+    const fallback = { returnTo: '/dashboard', nonce: null as string | null };
+    if (!state) return fallback;
 
     try {
         const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
-        if (typeof decoded?.returnTo === 'string' && decoded.returnTo.startsWith('/')) {
-            return decoded.returnTo;
-        }
+        return {
+            returnTo: isSafeRelativePath(decoded?.returnTo) ? decoded.returnTo : '/dashboard',
+            nonce: typeof decoded?.nonce === 'string' ? decoded.nonce : null,
+        };
     } catch {
         // Ignore malformed state.
     }
 
-    return '/dashboard';
+    return fallback;
 }
 
 export async function GET(req: NextRequest) {
     const code = req.nextUrl.searchParams.get("code");
-    const returnTo = resolveReturnTo(req.nextUrl.searchParams.get('state'));
+    const { returnTo, nonce } = decodeState(req.nextUrl.searchParams.get('state'));
+    const cookieNonce = req.cookies.get('bloomx_oauth_state')?.value ?? null;
     const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
     const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
     const REDIRECT_URI = `${process.env.NEXTAUTH_URL}/api/auth/callback/google`;
 
     if (!code || !GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
         return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=ConfigurationError`);
+    }
+
+    // Validar state/nonce contra la cookie (anti login-CSRF)
+    if (!nonce || !cookieNonce || !safeEqual(nonce, cookieNonce)) {
+        auditLog('auth.google.state_mismatch', { ip: getClientIp(req) });
+        const bad = NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=InvalidState`);
+        bad.cookies.set('bloomx_oauth_state', '', { path: '/api/auth/callback/google', maxAge: 0 });
+        return bad;
     }
 
     try {
@@ -49,7 +59,7 @@ export async function GET(req: NextRequest) {
         const tokens = await tokenResponse.json();
 
         if (tokens.error) {
-            console.error("Google Token Error:", tokens.error);
+            console.error("Google Token Error:", String(tokens.error).slice(0, 100));
             return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=GoogleAuthFailed`);
         }
 
@@ -62,6 +72,12 @@ export async function GET(req: NextRequest) {
 
         if (!profile.email) {
             return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=NoEmail`);
+        }
+
+        // Solo emails verificados por Google (evita toma de cuenta por coincidencia de email)
+        if (profile.verified_email === false) {
+            auditLog('auth.google.unverified_email', { email: profile.email });
+            return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=EmailNotVerified`);
         }
 
         // 3. Link Google to the current Bloomx user when available.
@@ -137,10 +153,13 @@ export async function GET(req: NextRequest) {
             after(patchAllUserMeetRooms(user.id, tokens.access_token).catch(() => undefined));
         }
 
-        return NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}`);
+        auditLog('auth.google.success', { userId: user.id, email: user.email, ip: getClientIp(req) });
+        const ok = NextResponse.redirect(`${process.env.NEXTAUTH_URL}${returnTo}`);
+        ok.cookies.set('bloomx_oauth_state', '', { path: '/api/auth/callback/google', maxAge: 0 });
+        return ok;
 
     } catch (error) {
-        console.error("Google Callback Error:", error);
+        console.error("Google Callback Error:", error instanceof Error ? error.message : "unknown");
         return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=ServerAuthError`);
     }
 }

@@ -10,6 +10,8 @@ import { ParsedInvite, parseInviteFromIcs } from '@/lib/calendar/ics';
 import { classifySpamFromHeaders } from '@/lib/spam-headers';
 import { decodeRFC2047, extractFilenameFromHeaders, extensionFromMimeType, sanitizeFilename } from '@/lib/mime-decode';
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
+import { escapeHtmlText, isValidEmailAddress, sanitizeSubject } from '@/lib/mail-validation';
+import { parseAuthenticationResults } from '@/lib/email-auth';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -20,6 +22,11 @@ export async function POST(req: NextRequest) {
         'svix-signature': req.headers.get('svix-signature') || '',
     };
 
+    // Falla cerrado en produccion: sin WEBHOOK_SECRET cualquiera podria inyectar correos
+    if (!process.env.WEBHOOK_SECRET && process.env.NODE_ENV === 'production') {
+        console.error('WEBHOOK_SECRET not configured; rejecting webhook');
+        return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    }
     if (process.env.WEBHOOK_SECRET) {
         const wh = new Webhook(process.env.WEBHOOK_SECRET);
         try {
@@ -30,8 +37,16 @@ export async function POST(req: NextRequest) {
         }
     }
 
-    const event = JSON.parse(payload);
-    const { type, data } = event;
+    let event: any;
+    try {
+        event = JSON.parse(payload);
+    } catch {
+        return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
+    const { type, data } = event || {};
+    if (!type || typeof type !== 'string') {
+        return NextResponse.json({ error: 'Invalid event' }, { status: 400 });
+    }
 
     try {
         if (type === 'email.received') {
@@ -45,6 +60,36 @@ export async function POST(req: NextRequest) {
         console.error('Webhook processing failed:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
+}
+
+/**
+ * Decide si es seguro enviar un rebote "usuario desconocido" al remitente.
+ * Evita backscatter hacia remitentes falsificados (SPF/DKIM/DMARC fail), listas, bulk,
+ * autorespuestas y direcciones de sistema.
+ */
+function shouldSendBounce(headers: Record<string, unknown>, senderEmail: string): boolean {
+    if (!isValidEmailAddress(senderEmail)) return false;
+
+    const local = senderEmail.split('@')[0].toLowerCase();
+    if (/^(no-?reply|do-?not-?reply|mailer-daemon|postmaster|bounce|bounces|abuse|root|daemon|notifications?)([+._-].*)?$/.test(local)) {
+        return false;
+    }
+
+    const lower: Record<string, string> = {};
+    for (const [k, v] of Object.entries(headers || {})) {
+        lower[k.toLowerCase()] = Array.isArray(v) ? v.join(', ') : String(v ?? '');
+    }
+
+    const autoSubmitted = (lower['auto-submitted'] || '').trim().toLowerCase();
+    if (autoSubmitted && autoSubmitted !== 'no') return false;
+    if (/\b(bulk|list|junk|auto_reply)\b/i.test(lower['precedence'] || '')) return false;
+    if (lower['list-id'] || lower['list-unsubscribe'] || lower['x-auto-response-suppress']) return false;
+    if (lower['return-path'] && /^<\s*>$/.test(lower['return-path'].trim())) return false; // null sender
+
+    const auth = parseAuthenticationResults(headers);
+    if (auth && (auth.dmarc === 'fail' || auth.spf === 'fail' || auth.dkim === 'fail')) return false;
+
+    return true;
 }
 
 // Helper function for email normalization (Gmail-style aliasing)
@@ -188,24 +233,27 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
         // Auto-reply logic for User Unknown
         const topDomain = process.env.TOP_DOMAIN;
-        if (topDomain) {
+        // Anti-backscatter (RFC 3834 / NIST 800-177r1): no rebotar a remitentes probablemente
+        // falsificados, listas, bulk, autorespuestas ni direcciones no validas.
+        if (topDomain && shouldSendBounce(headersMap as Record<string, unknown>, senderEmail)) {
             try {
                 await resend.emails.send({
                     from: `noreply@${topDomain}`,
                     to: senderEmail,
-                    subject: `Undeliverable: ${subject || 'No Subject'}`,
+                    subject: `Undeliverable: ${sanitizeSubject(subject) || 'No Subject'}`,
+                    headers: { 'Auto-Submitted': 'auto-replied', 'Precedence': 'auto_reply', 'X-Auto-Response-Suppress': 'All' },
                     html: `
                         <div style="font-family: sans-serif; padding: 20px;">
                             <h2 style="color: #d93025;">Delivery Status Notification (Failure)</h2>
                             <p>Hello,</p>
-                            <p>Your message to <strong>${toField}</strong> could not be delivered because the recipient(s) do not exist in the domain <strong>${topDomain}</strong>.</p>
+                            <p>Your message to <strong>${escapeHtmlText(toField)}</strong> could not be delivered because the recipient(s) do not exist in the domain <strong>${escapeHtmlText(topDomain)}</strong>.</p>
                             <p>Please check the email address and try again.</p>
                             <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;" />
-                            <p style="color: #666; font-size: 12px; text-align: center;">This is an automated message from ${topDomain}. Please do not reply.</p>
+                            <p style="color: #666; font-size: 12px; text-align: center;">This is an automated message from ${escapeHtmlText(topDomain)}. Please do not reply.</p>
                         </div>
                     `
                 });
-                console.log(`Auto-reply sent to ${senderEmail}`);
+                console.log('Auto-reply (user unknown) sent');
             } catch (replyError) {
                 console.error('Failed to send auto-reply:', replyError);
             }
@@ -304,7 +352,12 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // Process attachments that came with inline content in the webhook payload (small files)
     if (attachments && Array.isArray(attachments)) {
-        for (const att of attachments) {
+        // Limite de cantidad de adjuntos por correo (anti zip-bomb de metadatos / agotamiento de almacenamiento).
+        for (const att of attachments.slice(0, 50)) {
+            if (att.content && String(att.content?.data ? '' : att.content).length > 45 * 1024 * 1024) {
+                console.warn('[resend] Inline attachment too large, skipped');
+                continue;
+            }
             if (att.content) {
                 // Small file — content is inlined, upload immediately
                 const buffer = Buffer.from(att.content.data || att.content);
@@ -415,8 +468,11 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         for (const label of regexLabels) {
             if (label.filterRegex) {
                 try {
+                    // Mitigacion ReDoS: regex acotada y entrada truncada (la regex la define el usuario,
+                    // el texto lo controla un tercero).
+                    if (label.filterRegex.length > 200) continue;
                     const regex = new RegExp(label.filterRegex, 'i');
-                    if (regex.test(subject || '') || regex.test(text || '')) {
+                    if (regex.test(String(subject || '').slice(0, 1000)) || regex.test(String(text || '').slice(0, 20000))) {
                         matchingLabels.push({ id: label.id });
                     }
                 } catch (e) {

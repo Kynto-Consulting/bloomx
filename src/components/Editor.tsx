@@ -126,7 +126,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             }).configure({
                 openOnClick: false,
                 HTMLAttributes: {
-                    class: 'text-blue-500 hover:underline cursor-pointer',
+                    class: 'text-primary hover:underline cursor-pointer',
                 },
             }),
             Placeholder.configure({
@@ -422,7 +422,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
     }, [editor, slashMenu.open, filteredCommands, slashMenu.index, slashMenu.exactMatch, activeCommand, simple]);
 
     return (
-        <div className="flex flex-col h-full border border-gray-200 rounded-md overflow-hidden bg-white relative">
+        <div className="flex flex-col h-full border border-border rounded-md overflow-hidden bg-card relative">
             <style dangerouslySetInnerHTML={{
                 __html: `
                 .bloomx-editor-table {
@@ -448,13 +448,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             {/* Slash Menu Overlay */}
             {slashMenu.open && (
                 <div
-                    className="fixed z-50 bg-white border border-gray-200 shadow-xl rounded-md w-80 max-h-[500px] flex flex-col animate-in fade-in zoom-in-95 font-sans"
+                    className="fixed z-50 bg-card border border-border shadow-xl rounded-md w-80 max-h-[500px] flex flex-col animate-in fade-in zoom-in-95 font-sans"
                     style={{ left: slashMenu.x, top: slashMenu.y }}
                 >
                     {/* Header / Preview Area - Only shown if command is typed exactly */}
                     {slashMenu.exactMatch && PreviewComponent && (
                         <div className={cn(
-                            activeCommand.header !== false && "border-b bg-gray-50/50"
+                            activeCommand.header !== false && "border-b bg-muted/50"
                         )}>
                             {/* Passed args and context props to component */}
                             {/* @ts-ignore */}
@@ -466,25 +466,25 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                     {(!slashMenu.exactMatch || filteredCommands.length > 1) && (
                         <div className="overflow-y-auto p-1 max-h-48">
                             {filteredCommands.length === 0 ? (
-                                <div className="px-3 py-2 text-xs text-gray-400">No commands found</div>
+                                <div className="px-3 py-2 text-xs text-muted-foreground">No commands found</div>
                             ) : (
                                 filteredCommands.map((cmd, i) => (
                                     <div
                                         key={cmd.key}
                                         className={cn(
                                             "flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer",
-                                            i === slashMenu.index ? "bg-blue-50 text-blue-700" : "hover:bg-gray-100"
+                                            i === slashMenu.index ? "bg-primary/10 text-primary" : "hover:bg-muted"
                                         )}
                                         onClick={() => executeCommand(cmd)}
                                     >
-                                        <div className="flex items-center justify-center w-5 h-5 rounded bg-gray-200/50 text-gray-500 font-bold text-[10px]">/</div>
+                                        <div className="flex items-center justify-center w-5 h-5 rounded bg-secondary/50 text-muted-foreground font-bold text-[10px]">/</div>
                                         <div className="flex flex-col leading-tight overflow-hidden">
                                             <span className="font-semibold text-xs truncate">
                                                 {cmd.key}
                                                 {/* @ts-ignore */}
-                                                {cmd.arguments && <span className="ml-1 text-gray-400 font-normal opacity-75">{cmd.arguments}</span>}
+                                                {cmd.arguments && <span className="ml-1 text-muted-foreground font-normal opacity-75">{cmd.arguments}</span>}
                                             </span>
-                                            <span className="text-[10px] text-gray-500 truncate">{cmd.description}</span>
+                                            <span className="text-[10px] text-muted-foreground truncate">{cmd.description}</span>
                                         </div>
                                     </div>
                                 ))
@@ -494,8 +494,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                 </div>
             )}
 
-            <div className="flex flex-wrap items-center gap-1 p-2 border-b border-gray-200 bg-gray-50/50 sticky top-0 z-10">
-                <div className="flex items-center gap-0.5 border-r border-gray-300 pr-2 mr-1">
+            <div className="flex flex-wrap items-center gap-1 p-2 border-b border-border bg-muted/50 sticky top-0 z-10">
+                <div className="flex items-center gap-0.5 border-r border-input pr-2 mr-1">
                     <ToolbarButton
                         onClick={() => editor?.chain().focus().undo().run()}
                         disabled={!editor?.can().undo()}
@@ -511,7 +511,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                 </div>
 
                 <select
-                    className="h-7 text-xs border border-gray-200 rounded px-1 min-w-[100px] focus:outline-none focus:border-gray-400 bg-transparent"
+                    className="h-7 text-xs border border-border rounded px-1 min-w-[100px] focus:outline-none focus:border-input bg-transparent"
                     onChange={(e) => editor?.chain().focus().setFontFamily(e.target.value).run()}
                     value={editor?.getAttributes('textStyle')?.fontFamily || ''}
                 >
@@ -519,7 +519,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                     {fonts.map(font => <option key={font.name} value={font.value}>{font.name}</option>)}
                 </select>
 
-                <div className="w-px h-4 bg-gray-300 mx-1" />
+                <div className="w-px h-4 bg-border mx-1" />
 
                 <ToolbarButton onClick={() => editor?.chain().focus().toggleBold().run()} isActive={editor?.isActive('bold')} icon={<Bold className="w-4 h-4" />} title="Bold" />
                 <ToolbarButton onClick={() => editor?.chain().focus().toggleItalic().run()} isActive={editor?.isActive('italic')} icon={<Italic className="w-4 h-4" />} title="Italic" />
@@ -528,14 +528,14 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
 
                 {!simple && (
                     <div className="relative group">
-                        <button className={cn("p-1.5 rounded hover:bg-gray-200 text-gray-700", editor?.isActive('textStyle') && "bg-gray-200")}>
+                        <button className={cn("p-1.5 rounded hover:bg-secondary text-foreground/80", editor?.isActive('textStyle') && "bg-secondary")}>
                             <Palette className="w-4 h-4" style={{ color: editor?.getAttributes('textStyle')?.color }} />
                         </button>
-                        <div className="absolute top-full left-0 mt-1 p-2 bg-white border border-gray-200 shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid z-50">
+                        <div className="absolute top-full left-0 mt-1 p-2 bg-card border border-border shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid z-50">
                             {colors.map(color => (
                                 <button
                                     key={color}
-                                    className="w-4 h-4 rounded-full border border-gray-100 hover:scale-125 transition-transform"
+                                    className="w-4 h-4 rounded-full border border-border/60 hover:scale-125 transition-transform"
                                     style={{ backgroundColor: color }}
                                     onClick={() => editor?.chain().focus().setColor(color).run()}
                                     title={color}
@@ -545,13 +545,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                     </div>
                 )}
 
-                <div className="w-px h-4 bg-gray-300 mx-1" />
+                <div className="w-px h-4 bg-border mx-1" />
 
                 <ToolbarButton onClick={() => editor?.chain().focus().setTextAlign('left').run()} isActive={editor?.isActive({ textAlign: 'left' })} icon={<AlignLeft className="w-4 h-4" />} title="Align Left" />
                 <ToolbarButton onClick={() => editor?.chain().focus().setTextAlign('center').run()} isActive={editor?.isActive({ textAlign: 'center' })} icon={<AlignCenter className="w-4 h-4" />} title="Align Center" />
                 <ToolbarButton onClick={() => editor?.chain().focus().setTextAlign('right').run()} isActive={editor?.isActive({ textAlign: 'right' })} icon={<AlignRight className="w-4 h-4" />} title="Align Right" />
 
-                <div className="w-px h-4 bg-gray-300 mx-1" />
+                <div className="w-px h-4 bg-border mx-1" />
 
                 <ToolbarButton onClick={() => editor?.chain().focus().toggleBulletList().run()} isActive={editor?.isActive('bulletList')} icon={<List className="w-4 h-4" />} title="Bullet List" />
                 <ToolbarButton onClick={() => editor?.chain().focus().toggleOrderedList().run()} isActive={editor?.isActive('orderedList')} icon={<ListOrdered className="w-4 h-4" />} title="Ordered List" />
@@ -564,7 +564,7 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             </div>
 
             <div
-                className="flex-1 overflow-y-auto cursor-text text-gray-900"
+                className="flex-1 overflow-y-auto cursor-text text-foreground"
                 onClick={(e) => {
                     if (e.target === e.currentTarget) {
                         editor?.chain().focus().run();
@@ -587,8 +587,8 @@ function ToolbarButton({ onClick, isActive, icon, title, disabled }: { onClick: 
             disabled={disabled}
             title={title}
             className={cn(
-                "p-1.5 rounded transition-colors text-gray-600 hover:text-gray-900",
-                isActive ? "bg-gray-200 text-gray-900" : "hover:bg-gray-200",
+                "p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground",
+                isActive ? "bg-secondary text-foreground" : "hover:bg-secondary",
                 disabled && "opacity-50 cursor-not-allowed hover:bg-transparent"
             )}
         >

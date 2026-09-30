@@ -3,13 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyManagerSession } from "@/lib/manager-auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
+import { auditLog, BCRYPT_COST, validateNewPassword } from "@/lib/security";
 
 // GET: List all users
 export async function GET(req: NextRequest) {
     const manager = await verifyManagerSession(req);
 
     if (!manager) {
-        console.log("[ADMIN_USERS_GET] Unauthorized Manager access attempt");
+        console.warn("[ADMIN_USERS_GET] Unauthorized Manager access attempt");
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -47,6 +48,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
         }
 
+        const passwordError = validateNewPassword(password, email);
+        if (passwordError) {
+            return NextResponse.json({ error: passwordError }, { status: 400 });
+        }
+
         const existingUser = await prisma.user.findUnique({
             where: { email },
         });
@@ -55,7 +61,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "User already exists" }, { status: 409 });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
 
         const newUser = await prisma.user.create({
             data: {
@@ -65,6 +71,7 @@ export async function POST(req: NextRequest) {
             },
         });
 
+        auditLog("admin.user.created", { userId: newUser.id, email: newUser.email, managerId: (manager as any)?.id });
         return NextResponse.json({
             success: true,
             user: { id: newUser.id, email: newUser.email, name: newUser.name },

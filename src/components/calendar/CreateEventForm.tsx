@@ -30,10 +30,10 @@ function getResponseLabel(responseStatus?: string | null) {
 
 function getResponseClass(responseStatus?: string | null) {
     const normalized = String(responseStatus || '').toLowerCase();
-    if (normalized === 'accepted') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
-    if (normalized === 'declined') return 'bg-rose-50 text-rose-700 border-rose-200';
-    if (normalized === 'tentative') return 'bg-amber-50 text-amber-700 border-amber-200';
-    return 'bg-slate-50 text-slate-600 border-slate-200';
+    if (normalized === 'accepted') return 'bg-success/10 text-success border-success/30';
+    if (normalized === 'declined') return 'bg-destructive/10 text-destructive border-destructive/30';
+    if (normalized === 'tentative') return 'bg-warning/10 text-warning border-warning/30';
+    return 'bg-muted/50 text-muted-foreground border-border';
 }
 
 function formatToLocalString(value?: string): string {
@@ -515,7 +515,7 @@ export function CreateEventForm({
                 autoFocus 
                 readOnly={isReadOnly}
                 placeholder="Add title" 
-                className="w-full border-b-2 border-slate-100 focus:border-blue-600 focus:outline-none pb-2 text-[22px] mb-4 placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none" 
+                className="w-full border-b-2 border-border/60 focus:border-primary focus:outline-none pb-2 text-[22px] mb-4 placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none" 
             />
             
             <div className="space-y-4 flex-1">
@@ -525,7 +525,7 @@ export function CreateEventForm({
                         onChange={(e) => setLocation(e.target.value)}
                         placeholder="Location or meeting link"
                         readOnly={isReadOnly}
-                        className="w-full flex-1 border-b border-slate-100 focus:border-blue-600 focus:outline-none py-2 text-sm placeholder:text-slate-400 bg-transparent read-only:outline-none read-only:border-none"
+                        className="w-full flex-1 border-b border-border/60 focus:border-primary focus:outline-none py-2 text-sm placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none"
                     />
 
                     {!isReadOnly && isGoogleMeetAvailable && !conferenceUrl && (
@@ -534,7 +534,7 @@ export function CreateEventForm({
                             onClick={createGoogleMeet}
                             disabled={isCreatingMeet}
                             title="Add Google Meet"
-                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-slate-200 bg-white text-slate-600 text-xs hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-border bg-card text-muted-foreground text-xs hover:bg-muted/50 disabled:opacity-50 transition-colors"
                         >
                             {isCreatingMeet ? <SpinIcon className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
                             {isCreatingMeet ? 'Creating…' : 'Meet'}
@@ -545,7 +545,7 @@ export function CreateEventForm({
                             type="button"
                             onClick={() => { setConferenceUrl(null); setLocation(''); }}
                             title="Remove video meeting"
-                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 text-xs hover:bg-blue-100 transition-colors"
+                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary text-xs hover:bg-primary/15 transition-colors"
                         >
                             <Video className="h-3 w-3" />
                             Meet
@@ -580,7 +580,7 @@ export function CreateEventForm({
 
                 <div className="space-y-1">
                     {isReadOnly ? (
-                        <div className="min-h-[42px] w-full border-b border-slate-100 py-2 text-sm text-slate-600">
+                        <div className="min-h-[42px] w-full border-b border-border/60 py-2 text-sm text-muted-foreground">
                             {attendeeTags.length > 0 ? attendeeTags.join(', ') : 'No attendees'}
                         </div>
                     ) : (
@@ -589,7 +589,7 @@ export function CreateEventForm({
                                 value={attendeeTags}
                                 onChange={handleAttendeesChange}
                                 placeholder="Invite recipients or mail groups"
-                                className="flex-1 border-b border-slate-100 px-0 py-1.5"
+                                className="flex-1 border-b border-border/60 px-0 py-1.5"
                                 suggestionEndpoint="/api/contacts/suggestions"
                             />
                             {eventId && (
@@ -597,7 +597,7 @@ export function CreateEventForm({
                                     type="button"
                                     onClick={inviteAttendees}
                                     disabled={isSaving || isInviting || getAttendeeList().length === 0}
-                                    className="mb-1 ml-2 rounded-md border border-blue-200 bg-blue-50 px-4 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
+                                    className="mb-1 ml-2 rounded-md border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
                                 >
                                     {isInviting ? 'Enviando...' : 'Invitar'}
                                 </button>
@@ -607,16 +607,16 @@ export function CreateEventForm({
                 </div>
 
                 {attendeeDetails.length > 0 && (
-                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Attendee Status</p>
+                    <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-3">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Attendee Status</p>
                         <div className="space-y-1.5">
                             {attendeeDetails
                                 .filter((attendee) => !attendee.isOrganizer)
                                 .map((attendee) => (
-                                    <div key={attendee.email} className="flex items-center justify-between gap-3 rounded-md bg-white px-2.5 py-2 border border-slate-100">
+                                    <div key={attendee.email} className="flex items-center justify-between gap-3 rounded-md bg-card px-2.5 py-2 border border-border/60">
                                         <div className="min-w-0">
-                                            <p className="truncate text-sm text-slate-700">{attendee.name || attendee.email}</p>
-                                            {attendee.name && <p className="truncate text-xs text-slate-500">{attendee.email}</p>}
+                                            <p className="truncate text-sm text-foreground/80">{attendee.name || attendee.email}</p>
+                                            {attendee.name && <p className="truncate text-xs text-muted-foreground">{attendee.email}</p>}
                                         </div>
                                         <span className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${getResponseClass(attendee.responseStatus)}`}>
                                             {getResponseLabel(attendee.responseStatus)}
@@ -628,14 +628,14 @@ export function CreateEventForm({
                 )}
 
                 {attendeeAvailability.length > 0 && (
-                    <div className="rounded-lg border border-amber-200 bg-amber-50/50 p-3 space-y-1.5">
-                        <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Conflictos de horario</p>
+                    <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-1.5">
+                        <p className="text-xs font-medium uppercase tracking-wide text-warning">Conflictos de horario</p>
                         {attendeeAvailability.map(a => (
                             <div key={a.email} className="flex items-start gap-2 text-sm">
-                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" />
+                                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
                                 <div className="min-w-0">
-                                    <span className="font-medium text-slate-700">{a.name || a.email}</span>
-                                    <span className="text-slate-500 ml-1">
+                                    <span className="font-medium text-foreground/80">{a.name || a.email}</span>
+                                    <span className="text-muted-foreground ml-1">
                                         — {a.events.map(e => `${String(e.title || 'Evento')} (${new Date(e.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${new Date(e.endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
                                     </span>
                                 </div>
@@ -646,9 +646,9 @@ export function CreateEventForm({
 
                 <div className="flex gap-4">
                     <div className="flex-1 space-y-1">
-                        <label className="text-xs font-medium text-slate-500">Starts</label>
+                        <label className="text-xs font-medium text-muted-foreground">Starts</label>
                         {isReadOnly ? (
-                            <p className="text-sm py-2 text-slate-700">
+                            <p className="text-sm py-2 text-foreground/80">
                                 {startsAt ? new Date(startsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                             </p>
                         ) : (
@@ -664,14 +664,14 @@ export function CreateEventForm({
                                     }
                                 }}
                                 placeholder="Start date & time"
-                                className="border-slate-200 bg-slate-50 hover:bg-white"
+                                className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}
                     </div>
                     <div className="flex-1 space-y-1">
-                        <label className="text-xs font-medium text-slate-500">Ends</label>
+                        <label className="text-xs font-medium text-muted-foreground">Ends</label>
                         {isReadOnly ? (
-                            <p className="text-sm py-2 text-slate-700">
+                            <p className="text-sm py-2 text-foreground/80">
                                 {endsAt ? new Date(endsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
                             </p>
                         ) : (
@@ -679,7 +679,7 @@ export function CreateEventForm({
                                 value={(endsAt || '').slice(0, 16)}
                                 onChange={setEndsAt}
                                 placeholder="End date & time"
-                                className="border-slate-200 bg-slate-50 hover:bg-white"
+                                className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}
                     </div>
@@ -692,7 +692,7 @@ export function CreateEventForm({
                         type="button" 
                         onClick={deleteEvent}
                         disabled={isSaving}
-                        className="text-red-500 hover:text-red-700 font-medium px-2 py-2 text-sm"
+                        className="text-destructive hover:text-destructive font-medium px-2 py-2 text-sm"
                     >
                         Delete
                     </button>
@@ -703,7 +703,7 @@ export function CreateEventForm({
                         <button 
                             type="button" 
                             onClick={onClose}
-                            className="text-slate-500 hover:text-slate-700 font-medium px-4 py-2 mr-2 text-sm"
+                            className="text-muted-foreground hover:text-foreground/80 font-medium px-4 py-2 mr-2 text-sm"
                         >
                             {isReadOnly ? 'Close' : 'Cancel'}
                         </button>
@@ -712,7 +712,7 @@ export function CreateEventForm({
                         <button 
                             type="submit" 
                             disabled={isSaving || isInviting}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-md text-sm font-medium px-6 py-2 transition-colors"
+                            className="bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-md text-sm font-medium px-6 py-2 transition-colors"
                         >
                             {isSaving ? 'Saving...' : 'Save'}
                         </button>

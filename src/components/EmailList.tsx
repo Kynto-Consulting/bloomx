@@ -948,7 +948,7 @@ export function EmailList() {
                         <div className="flex items-center gap-2 mr-2">
                             <input
                                 type="checkbox"
-                                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
                                 checked={selectedIds.size === filteredEmails.length && filteredEmails.length > 0}
                                 onChange={handleSelectAll}
                             />
@@ -967,7 +967,7 @@ export function EmailList() {
                             <button onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title="Archive">
                                 <Archive className="h-4 w-4" />
                             </button>
-                            <button onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-red-50 hover:text-red-600 rounded-md text-muted-foreground" title="Trash">
+                            <button onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-md text-muted-foreground" title="Trash">
                                 <Trash2 className="h-4 w-4" />
                             </button>
                         </div>
@@ -981,7 +981,7 @@ export function EmailList() {
                                 className={cn(
                                     "inline-flex h-full items-center justify-center rounded-md px-3 text-xs font-medium transition-all",
                                     activeTab === 'all'
-                                        ? "bg-white text-foreground shadow-sm"
+                                        ? "bg-background text-foreground shadow-sm"
                                         : "text-muted-foreground hover:text-foreground"
                                 )}
                             >
@@ -992,7 +992,7 @@ export function EmailList() {
                                 className={cn(
                                     "inline-flex h-full items-center justify-center rounded-md px-3 text-xs font-medium transition-all",
                                     activeTab === 'unread'
-                                        ? "bg-white text-foreground shadow-sm"
+                                        ? "bg-background text-foreground shadow-sm"
                                         : "text-muted-foreground hover:text-foreground"
                                 )}
                             >
@@ -1023,7 +1023,7 @@ export function EmailList() {
                     />
                     <button
                         onClick={() => setShowFilters(!showFilters)}
-                        className={cn("absolute right-2 top-1.5 p-1.5 rounded-md hover:bg-background/80 transition-colors", (filterFrom || filterHasAttachment || filterSince || filterUntil) && "text-blue-600")}
+                        className={cn("absolute right-2 top-1.5 p-1.5 rounded-md hover:bg-background/80 transition-colors", (filterFrom || filterHasAttachment || filterSince || filterUntil) && "text-primary")}
                     >
                         <SlidersHorizontal className="h-4 w-4" />
                     </button>
@@ -1069,7 +1069,7 @@ export function EmailList() {
                                 <input
                                     type="checkbox"
                                     id="hasAttachment"
-                                    className="h-4 w-4 rounded border-gray-300"
+                                    className="h-4 w-4 rounded border-input"
                                     checked={filterHasAttachment}
                                     onChange={(e) => setFilterHasAttachment(e.target.checked)}
                                 />
@@ -1251,7 +1251,7 @@ export function EmailList() {
                             <button onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-full" title="Archive">
                                 <Archive className="h-5 w-5" />
                             </button>
-                            <button onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-red-50 text-red-600 rounded-full" title="Trash">
+                            <button onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 text-destructive rounded-full" title="Trash">
                                 <Trash2 className="h-5 w-5" />
                             </button>
                         </div>
@@ -1304,15 +1304,15 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
         <div className="relative overflow-hidden rounded-xl">
             {/* Background Layers */}
             <div
-                className="absolute inset-0 bg-green-500 flex items-center justify-start pl-6 transition-colors"
+                className="absolute inset-0 bg-success flex items-center justify-start pl-6 transition-colors"
                 style={{ opacity: archiveOpacity }}
             >
-                <Archive className="text-white h-6 w-6" />
+                <Archive className="text-success-foreground h-6 w-6" />
             </div>
             <div
-                className="absolute inset-0 bg-red-500 flex items-center justify-end pr-6 transition-colors"
+                className="absolute inset-0 bg-destructive flex items-center justify-end pr-6 transition-colors"
                 style={{ opacity: trashOpacity }}            >
-                <Trash2 className="text-white h-6 w-6" />
+                <Trash2 className="text-destructive-foreground h-6 w-6" />
             </div>
 
             <motion.div
@@ -1330,11 +1330,11 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                 exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: 'hidden' }}
                 transition={{ duration: 0.2, delay: index * 0.03 }}
                 className={cn(
-                    "group relative flex items-start gap-3 p-3 text-left text-sm transition-colors border border-transparent select-none cursor-pointer bg-white z-10",
-                    isFocused && "ring-2 ring-blue-500 ring-inset z-20", // Focused State
+                    "group relative flex items-start gap-3 p-3 text-left text-sm transition-colors border border-transparent select-none cursor-pointer bg-background z-10",
+                    isFocused && "ring-2 ring-ring ring-inset z-20", // Focused State
                     isSelected || selectedIds.has(email.id)
-                        ? "bg-blue-50/50 hover:bg-blue-50 border-blue-100"
-                        : "hover:bg-gray-50 hover:shadow-sm border-gray-100",
+                        ? "bg-primary/5 hover:bg-primary/10 border-primary/20"
+                        : "hover:bg-muted/50 hover:shadow-sm border-border/60",
                     !email.read && !isSelected && !selectedIds.has(email.id) && "border-l-4 border-l-blue-500 shadow-sm"
                 )}
                 onMouseEnter={() => {
@@ -1360,9 +1360,9 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                 >
                     <div className={cn(
                         "h-5 w-5 rounded border flex items-center justify-center transition-colors",
-                        selectedIds.has(email.id) ? "bg-blue-600 border-blue-600" : "border-gray-300 bg-white hover:border-gray-400"
+                        selectedIds.has(email.id) ? "bg-primary border-primary" : "border-input bg-background hover:border-input"
                     )}>
-                        {selectedIds.has(email.id) && <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
+                        {selectedIds.has(email.id) && <svg className="h-3.5 w-3.5 text-primary-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>}
                     </div>
                 </div>
 
@@ -1373,7 +1373,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                         onSwipeAction(email.id, { starred: !email.starred });
                     }}
                 >
-                    <Star className={cn("h-5 w-5 transition-colors", email.starred ? "fill-yellow-400 text-yellow-400" : "text-gray-300 hover:text-yellow-400")} />
+                    <Star className={cn("h-5 w-5 transition-colors", email.starred ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground/60 hover:text-yellow-400")} />
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -1381,7 +1381,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                         <div className={cn(
                             "font-semibold truncate",
                             "text-foreground",
-                            !email.read && "text-blue-600"
+                            !email.read && "text-primary"
                         )}>
                             {folder === 'sent' && email.to ? `To: ${email.to}` : email.from}
                             {threadCount > 1 && (

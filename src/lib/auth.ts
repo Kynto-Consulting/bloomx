@@ -4,7 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { env } from "@/lib/env";
+import { auditLog, getDummyBcryptHash, rateLimit } from "@/lib/security";
 
 export const authOptions: NextAuthOptions = {
     adapter: PrismaAdapter(prisma),
@@ -27,36 +27,32 @@ export const authOptions: NextAuthOptions = {
                 email: { label: "Email", type: "email" },
                 password: { label: "Password", type: "password" }
             },
-            async authorize(credentials) {
+            async authorize(credentials, req) {
                 if (!credentials?.email || !credentials?.password) {
                     return null;
                 }
 
-                console.log(`[AUTH] Attempting login for: ${credentials.email}`);
+                const ip = String((req as any)?.headers?.["x-forwarded-for"] || "unknown").split(",")[0].trim();
+                const rl = rateLimit(`nextauth:${ip}:${String(credentials.email).toLowerCase()}`, 10, 15 * 60_000);
+                if (!rl.ok) {
+                    auditLog("auth.nextauth.rate_limited", { ip });
+                    return null;
+                }
+
                 const user = await prisma.user.findUnique({
                     where: { email: credentials.email }
                 });
 
-                if (!user) {
-                    console.log(`[AUTH] User not found: ${credentials.email}`);
+                // bcrypt.compare siempre (igualar tiempos, anti-enumeracion); sin logs con PII
+                const hash = user?.password || (await getDummyBcryptHash());
+                const isPasswordValid = await bcrypt.compare(credentials.password, hash);
+
+                if (!user || !user.password || !isPasswordValid) {
+                    auditLog("auth.nextauth.failure", { email: credentials.email, ip });
                     return null;
                 }
 
-                console.log(`[AUTH] User found, checking password...`);
-                // Allow password login if user has password set
-                if (!user.password) {
-                    console.log(`[AUTH] User has no password set (OAuth user?): ${credentials.email}`);
-                    return null;
-                }
-
-                const isPasswordValid = await bcrypt.compare(credentials.password, user.password);
-
-                if (!isPasswordValid) {
-                    console.log(`[AUTH] Invalid password for: ${credentials.email}`);
-                    return null;
-                }
-
-                console.log(`[AUTH] Login successful: ${credentials.email}`);
+                auditLog("auth.nextauth.success", { userId: user.id, ip });
 
                 return {
                     id: user.id,
@@ -69,6 +65,7 @@ export const authOptions: NextAuthOptions = {
     ],
     session: {
         strategy: "jwt",
+        maxAge: 30 * 24 * 60 * 60,
     },
     pages: {
         signIn: "/login",
@@ -86,7 +83,6 @@ export const authOptions: NextAuthOptions = {
             return session;
         },
         async jwt({ token, user, trigger, session }) {
-            console.log(`[AUTH-CB] JWT Callback Triggered`, { trigger, hasUser: !!user });
             if (user) {
                 token.id = user.id;
                 // token.picture = user.image;
@@ -101,11 +97,14 @@ export const authOptions: NextAuthOptions = {
             return token;
         },
         async redirect({ url, baseUrl }) {
-            console.log(`[AUTH-CB] Redirect Callback`, { url, baseUrl });
             // Allows relative callback URLs
             if (url.startsWith("/")) return `${baseUrl}${url}`;
             // Allows callback URLs on the same origin
-            if (new URL(url).origin === baseUrl) return url;
+            try {
+                if (new URL(url).origin === baseUrl) return url;
+            } catch {
+                // URL invalida: volver a baseUrl
+            }
             return baseUrl;
         }
     },

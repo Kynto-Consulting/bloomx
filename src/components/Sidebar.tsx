@@ -337,7 +337,6 @@ function SidebarContent({ onClose }: SidebarProps) {
     const { config: domainConfig } = useDomainConfig();
     const brandName = domainConfig.displayName || domainConfig.name;
     const brandLogo = domainConfig.logo;
-    const brandColor = domainConfig.theme?.primaryColor;
 
     return (
         <div className="flex h-full min-h-0 flex-col bg-muted/10 group">
@@ -348,8 +347,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                         <img src={brandLogo} alt={brandName} className="h-7 w-7 rounded-lg object-contain" />
                     ) : (
                         <div
-                            className="h-7 w-7 text-primary-foreground rounded-lg flex items-center justify-center transition-colors"
-                            style={{ backgroundColor: brandColor }}
+                            className="h-7 w-7 bg-primary text-primary-foreground rounded-lg flex items-center justify-center transition-colors"
                         >
                             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
@@ -675,8 +673,8 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                                 const isActive = acc.id === session.user?.id;
                                 return (
                                     <div key={acc.id} className="group flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => handleSwitch(acc)}>
-                                        <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0",
-                                            isActive ? "bg-primary" : "bg-muted-foreground/40")}>
+                                        <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
+                                            isActive ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
                                             {acc.name?.[0] || acc.email[0]}
                                         </div>
                                         <div className="flex flex-col overflow-hidden flex-1">
@@ -687,7 +685,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                                         {!isActive && (
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleLogout(acc.id); }}
-                                                className="p-1.5 text-muted-foreground hover:bg-red-100 hover:text-red-600 rounded-md opacity-0 group-hover:opacity-100 transition-all"
+                                                className="p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive rounded-md opacity-0 group-hover:opacity-100 transition-all"
                                                 title="Forget account"
                                             >
                                                 <LogOut className="h-3.5 w-3.5" />
@@ -709,7 +707,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                                 Settings
                             </button>
 
-                            <button onClick={() => handleLogout(session.user?.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-red-50 text-red-600 text-sm font-medium">
+                            <button onClick={() => handleLogout(session.user?.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-destructive/10 text-destructive text-sm font-medium">
                                 <LogOut className="h-4 w-4" />
                                 Sign out
                             </button>

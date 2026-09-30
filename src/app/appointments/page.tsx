@@ -272,7 +272,7 @@ function ScheduleForm({
                                                                         className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     {d.ranges.length > 1 && (
                                                                         <button type="button" onClick={() => removeRange(d.dayOfWeek, ri)}
-                                                                            className="text-muted-foreground hover:text-rose-500 transition-colors">
+                                                                            className="text-muted-foreground hover:text-destructive transition-colors">
                                                                             <Trash className="h-3.5 w-3.5" />
                                                                         </button>
                                                                     )}
@@ -539,7 +539,7 @@ export default function AppointmentsPage() {
                                         <div className="flex items-center gap-0.5 shrink-0">
                                             <button onClick={() => handleCopy(s.id)}
                                                 className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors" title="Copy link">
-                                                {copiedId === s.id ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                                                {copiedId === s.id ? <Check className="h-4 w-4 text-success" /> : <Copy className="h-4 w-4" />}
                                             </button>
                                             <a href={buildBookingUrl(s.id)} target="_blank" rel="noopener noreferrer"
                                                 className="p-2 rounded-lg hover:bg-background/60 text-muted-foreground transition-colors" title="Open">
@@ -557,7 +557,7 @@ export default function AppointmentsPage() {
                                                 <Pencil className="h-4 w-4" />
                                             </button>
                                             <button onClick={() => handleDelete(s.id)}
-                                                className="p-2 rounded-lg hover:bg-background/60 text-rose-400 transition-colors" title="Delete">
+                                                className="p-2 rounded-lg hover:bg-background/60 text-destructive transition-colors" title="Delete">
                                                 <Trash2 className="h-4 w-4" />
                                             </button>
                                         </div>

@@ -4,6 +4,9 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
+import { canAccessEmail, getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
+import { escapeHtmlText } from '@/lib/mail-validation';
+import { parseAuthenticationResults } from '@/lib/email-auth';
 
 function extractMailboxEmail(value: unknown): string {
     if (!value) return '';
@@ -98,6 +101,24 @@ async function buildInvitePreview(email: any) {
     };
 }
 
+/**
+ * Resultado SPF/DKIM/DMARC del correo entrante, leido de la cabecera Authentication-Results
+ * guardada en el payload crudo (sin migracion de esquema). null si no hay datos o es un correo enviado.
+ */
+async function resolveAuthentication(email: any) {
+    try {
+        const rawKey = String(email?.rawKey || '').trim();
+        if (!rawKey) return null;
+        const rawPayload = await getFromStorage(rawKey);
+        if (!rawPayload) return null;
+        const parsed = JSON.parse(rawPayload);
+        const dataNode = parsed?.data || parsed;
+        return parseAuthenticationResults(dataNode?.headers);
+    } catch {
+        return null;
+    }
+}
+
 async function buildEmailPayload(email: any, content: string, signedAttachments: any[]) {
     const invitePreview = await buildInvitePreview(email);
     const inviteResponse = await buildInviteState(email.id);
@@ -106,9 +127,11 @@ async function buildEmailPayload(email: any, content: string, signedAttachments:
         email: {
             ...email,
             replyTo: email.replyTo || null,
+            rawMimeUrl: undefined, // URL de descarga del proveedor: no exponer al cliente
             attachments: signedAttachments,
         },
         content,
+        authentication: await resolveAuthentication(email),
         invitePreview,
         inviteResponse,
     };
@@ -134,7 +157,8 @@ export async function GET(
             }
         });
 
-        if (!email) {
+        // Anti-IDOR: el correo debe pertenecer al usuario (o a un buzon vinculado). 404 para no filtrar existencia.
+        if (!email || !(await canAccessEmail(user.id, email.userId))) {
             return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 
@@ -147,7 +171,7 @@ export async function GET(
                 return storedHtml ?? "";
             } else if (e.textKey) {
                 const storedText = await getFromStorage(e.textKey);
-                return storedText ? `<pre>${storedText}</pre>` : "";
+                return storedText ? `<pre>${escapeHtmlText(storedText)}</pre>` : "";
             }
             return e.snippet || "";
         };
@@ -215,7 +239,7 @@ export async function GET(
             // Only search if not empty and length sufficient to be a "topic"
             if (normalized && normalized.length >= 3) {
                 const threadWhere: any = {
-                    userId: user.id,
+                    userId: email.userId,
                     OR: [
                         { subject: { equals: normalized, mode: 'insensitive' } },
                         { subject: { startsWith: 'Re: ' + normalized, mode: 'insensitive' } }, // Simple heuristic
@@ -284,6 +308,16 @@ export async function PATCH(
         const body = await req.json();
         const { starred, folder, labelIds, toggleLabelId, read } = body;
 
+        // Anti-IDOR: solo correos de buzones accesibles por el usuario.
+        const accessibleIds = await getAccessibleMailboxUserIds(user.id);
+        const existing = await prisma.email.findFirst({
+            where: { id, userId: { in: accessibleIds } },
+            include: { labels: true },
+        });
+        if (!existing) {
+            return NextResponse.json({ error: 'Email not found' }, { status: 404 });
+        }
+
         const updateData: any = {};
 
         if (typeof starred === 'boolean') {
@@ -294,42 +328,45 @@ export async function PATCH(
             updateData.read = read;
         }
 
-        if (folder) {
+        if (folder !== undefined && folder !== null && folder !== '') {
+            if (typeof folder !== 'string' || !/^[A-Za-z0-9_-]{1,50}$/.test(folder)) {
+                return NextResponse.json({ error: 'Invalid folder' }, { status: 400 });
+            }
             updateData.folder = folder;
         }
 
+        // Solo se pueden asociar etiquetas del mismo propietario del correo.
+        const ownedLabelIds = async (ids: unknown): Promise<string[]> => {
+            if (!Array.isArray(ids)) return [];
+            const wanted = ids.filter((v): v is string => typeof v === 'string');
+            if (wanted.length === 0) return [];
+            const rows = await prisma.label.findMany({
+                where: { id: { in: wanted }, userId: existing.userId },
+                select: { id: true },
+            });
+            return rows.map((r) => r.id);
+        };
+
         // Handle full label replacement or toggling single label
         if (labelIds) {
+            const allowed = await ownedLabelIds(labelIds);
             updateData.labels = {
-                set: labelIds.map((lid: string) => ({ id: lid }))
+                set: allowed.map((lid) => ({ id: lid }))
             };
         }
 
         if (toggleLabelId) {
-            // Logic to toggle a specific label would require fetching first, 
-            // but Prisma doesn't have a simple "toggle" operator for many-to-many.
-            // We'll handle this by fetching the email first.
-            const email = await prisma.email.findUnique({
-                where: { id },
-                include: { labels: true }
-            });
-
-            if (email) {
-                const hasLabel = email.labels.some(l => l.id === toggleLabelId);
-                if (hasLabel) {
-                    updateData.labels = {
-                        disconnect: { id: toggleLabelId }
-                    };
-                } else {
-                    updateData.labels = {
-                        connect: { id: toggleLabelId }
-                    };
-                }
+            const [allowedLabel] = await ownedLabelIds([toggleLabelId]);
+            if (allowedLabel) {
+                const hasLabel = existing.labels.some(l => l.id === allowedLabel);
+                updateData.labels = hasLabel
+                    ? { disconnect: { id: allowedLabel } }
+                    : { connect: { id: allowedLabel } };
             }
         }
 
         const email = await prisma.email.update({
-            where: { id },
+            where: { id: existing.id },
             data: updateData,
             include: { labels: true }
         });

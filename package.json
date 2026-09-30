@@ -13,6 +13,7 @@
         "start": "next start",
         "lint": "next lint",
         "db:ensure": "tsx scripts/ensure-schema.ts",
+        "check:themes": "tsx scripts/check-theme-contrast.ts",
         "postinstall": "prisma generate"
     },
     "keywords": [],

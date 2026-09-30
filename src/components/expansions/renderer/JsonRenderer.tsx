@@ -997,8 +997,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         case 'TEXT': {
             let className = resolvedProps.className || "text-sm text-foreground whitespace-pre-wrap";
             if (resolvedProps.variant === 'h4') return <h4 className={`text-base font-semibold ${resolvedProps.className || ''}`}>{resolvedProps.content}</h4>;
-            if (resolvedProps.variant === 'error') className += " text-red-500 bg-red-50 p-3 rounded-md";
-            if (resolvedProps.variant === 'success') className += " text-green-600 bg-green-50 p-3 rounded-md";
+            if (resolvedProps.variant === 'error') className += " text-destructive bg-destructive/10 p-3 rounded-md";
+            if (resolvedProps.variant === 'success') className += " text-success bg-success/10 p-3 rounded-md";
             if (resolvedProps.variant === 'body') className += " leading-relaxed bg-muted/40 p-3 rounded-lg";
             if (resolvedProps.variant === 'muted') className += " text-muted-foreground";
             return <div className={className}>{resolvedProps.content}</div>;
@@ -1053,7 +1053,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 return <>{(props as any).false?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</>;
             }
         case 'LINK':
-            return <a href={resolvedProps.url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline">{resolvedProps.label}</a>;
+            return <a href={resolvedProps.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{resolvedProps.label}</a>;
         case 'TABS': {
             const rawTabs = Array.isArray(props.tabs) ? props.tabs : [];
             const resolvedTabs = Array.isArray(resolvedProps.tabs) ? resolvedProps.tabs : [];
@@ -1251,9 +1251,9 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
             const badgeVariants: Record<string, string> = {
                 default: 'bg-muted text-muted-foreground',
                 primary: 'bg-primary/10 text-primary',
-                success: 'bg-green-100 text-green-700',
-                warning: 'bg-yellow-100 text-yellow-700',
-                error: 'bg-red-100 text-red-700',
+                success: 'bg-success/15 text-success',
+                warning: 'bg-warning/15 text-warning',
+                error: 'bg-destructive/15 text-destructive',
             };
             return (
                 <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${badgeVariants[resolvedProps.variant || 'default']}`}>
@@ -1319,10 +1319,10 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'ALERT': {
             const alertStyles: Record<string, string> = {
-                info: 'bg-blue-50 border-blue-200 text-blue-800',
-                success: 'bg-green-50 border-green-200 text-green-800',
-                warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-                error: 'bg-red-50 border-red-200 text-red-800',
+                info: 'bg-primary/10 border-primary/20 text-foreground',
+                success: 'bg-success/10 border-success/30 text-success',
+                warning: 'bg-warning/10 border-warning/30 text-warning',
+                error: 'bg-destructive/10 border-destructive/30 text-destructive',
             };
             return (
                 <div className={`p-3 rounded-lg border ${alertStyles[resolvedProps.variant || 'info']}`}>
@@ -1424,7 +1424,7 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
                 content
                     .replace(/\*\*(.*?)\*\*/g, '<b>$1</b>')
                     .replace(/\*(.*?)\*/g, '<i>$1</i>')
-                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-blue-500 hover:underline">$1</a>')
+                    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" class="text-primary hover:underline">$1</a>')
                     .replace(/\n/g, '<br/>')
             );
             return (
@@ -1749,16 +1749,16 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
 
         case 'CODE_BLOCK':
             return (
-                <pre className="p-4 rounded bg-slate-950 text-slate-50 overflow-x-auto text-xs font-mono my-2">
+                <pre className="p-4 rounded bg-muted text-foreground border border-border overflow-x-auto text-xs font-mono my-2">
                     <code>{resolvedProps.code}</code>
                 </pre>
             );
 
         case 'ALERT':
             return (
-                <div className={`p-4 rounded-lg border ${resolvedProps.variant === 'destructive' ? 'bg-red-50 text-red-900 border-red-200' :
-                        resolvedProps.variant === 'warning' ? 'bg-yellow-50 text-yellow-900 border-yellow-200' :
-                            'bg-blue-50 text-blue-900 border-blue-200'
+                <div className={`p-4 rounded-lg border ${resolvedProps.variant === 'destructive' ? 'bg-destructive/10 text-destructive border-destructive/30' :
+                        resolvedProps.variant === 'warning' ? 'bg-warning/10 text-warning border-warning/30' :
+                            'bg-primary/10 text-foreground border-primary/20'
                     } ${resolvedProps.className}`}>
                     {resolvedProps.title && <h5 className="font-medium mb-1">{resolvedProps.title}</h5>}
                     <div className="text-sm">{resolvedProps.description || children?.map((child: any, i: number) => <InnerJsonRenderer key={i} component={child} context={context} />)}</div>

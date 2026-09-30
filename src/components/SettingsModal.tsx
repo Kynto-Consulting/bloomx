@@ -7,6 +7,9 @@ import { useCache } from '@/contexts/CacheContext';
 import { cn } from '@/lib/utils';
 import { Editor } from './Editor';
 import { clientExpansionRegistry } from '@/lib/expansions/client/registry';
+import { useTheme } from '@/components/ThemeProvider';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
+import { APPEARANCE_SETTINGS_KEY } from '@/lib/themes';
 
 interface SettingsModalProps {
     open: boolean;
@@ -16,6 +19,7 @@ interface SettingsModalProps {
 export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const { data: session, update: updateSession } = useSession();
     const { setData } = useCache();
+    const { getAppearance } = useTheme();
 
     // Reset state when opening
     useEffect(() => {
@@ -41,7 +45,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const [expansionSettings, setExpansionSettings] = useState<any>({});
     const mailboxSettings = expansionSettings['core-mailbox'] || {};
 
-    const [activeTab, setActiveTab] = useState<'profile' | 'extensions'>('profile');
+    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'extensions'>('profile');
 
     // Password fields
     const [currentPassword, setCurrentPassword] = useState('');
@@ -100,15 +104,17 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                 })
             });
 
-            // Update Settings (Extensions)
+            // Update Settings (Extensions). La apariencia se guarda al elegir tema; aqui se re-inyecta
+            // la version actual para que este guardado (objeto completo) no restaure una copia vieja.
+            const fullSettings = { ...expansionSettings, [APPEARANCE_SETTINGS_KEY]: getAppearance() };
             await fetch('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ expansionSettings })
+                body: JSON.stringify({ expansionSettings: fullSettings })
             });
 
             // Update Cache
-            await setData('system:expansion-settings-full', expansionSettings);
+            await setData('system:expansion-settings-full', fullSettings);
 
             const data = await res.json();
 
@@ -151,6 +157,12 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                 className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'profile' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
                             >
                                 Profile
+                            </button>
+                            <button
+                                onClick={() => setActiveTab('appearance')}
+                                className={cn("px-3 py-1 text-xs font-medium rounded-md transition-all whitespace-nowrap", activeTab === 'appearance' ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+                            >
+                                Appearance
                             </button>
                             {clientExpansionRegistry.getByMountPoint('CUSTOM_SETTINGS_TAB').map(tab => {
                                 const Icon = tab.icon;
@@ -330,6 +342,9 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                         </form>
                     )}
 
+                    {/* Appearance Tab */}
+                    {activeTab === 'appearance' && <AppearanceSettings />}
+
                     {/* Generic Extensions Tab */}
                     {activeTab === 'extensions' && (
                         <div className="space-y-8 animate-in fade-in duration-300">
@@ -383,7 +398,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     <button
                         type="button"
                         onClick={() => signOut({ callbackUrl: '/login' })}
-                        className="flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium rounded-lg transition-colors"
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-destructive hover:bg-destructive/10 font-medium rounded-lg transition-colors"
                     >
                         <LogOut className="h-4 w-4" />
                         <span className="hidden sm:inline">Sign Out</span>

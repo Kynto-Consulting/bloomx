@@ -10,10 +10,32 @@ import { ComposeWindows } from '@/components/ComposeWindows'
 import { Toaster } from '@/components/ui/sonner'
 import { RealTimeListener } from '@/components/RealTimeListener'
 import { PwaManager } from '@/components/PwaManager'
+import { buildBootScript, buildBrandCss, buildThemeCss, getTheme, isThemePreference, THEME_COOKIE, type DomainThemeConfig } from '@/lib/themes'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
-import { headers } from 'next/headers';
+import { cache } from 'react';
+import { cookies, headers } from 'next/headers';
+
+/** Config de dominio (marca/tema). Misma peticion que generateMetadata: Next la deduplica. */
+const getDomainTheme = cache(async (): Promise<DomainThemeConfig | null> => {
+    try {
+        const headersList = await headers();
+        const host = process.env.TOP_DOMAIN || headersList.get('x-forwarded-host') || headersList.get('host') || '';
+        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev';
+        const targetUrl = new URL(`${backendUrl}/api/config`);
+        if (host) targetUrl.searchParams.set('domain', host.split(':')[0]);
+        const res = await fetch(targetUrl.toString(), {
+            headers: { 'x-forwarded-host': host },
+            next: { revalidate: 60 }
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data?.config?.theme ?? null;
+    } catch {
+        return null;
+    }
+});
 
 export async function generateMetadata(): Promise<Metadata> {
     const headersList = await headers();
@@ -67,14 +89,33 @@ import { ThemeProvider } from '@/components/ThemeProvider';
 import { ReAuthProvider } from '@/contexts/ReAuthContext';
 import { ReAuthBanner } from '@/components/ReAuthBanner';
 
-export default function RootLayout({
+export default async function RootLayout({
     children,
 }: {
     children: React.ReactNode
 }) {
+    // Preferencia de tema persistida en cookie: permite renderizar <html data-theme> ya en el servidor.
+    // Con "system" (o sin cookie) el servidor no sabe si el SO es oscuro: lo resuelve el script bloqueante.
+    const cookieStore = await cookies();
+    const cookiePref = cookieStore.get(THEME_COOKIE)?.value;
+    const pref = isThemePreference(cookiePref) ? cookiePref : 'system';
+    const concrete = pref !== 'system' ? getTheme(pref) : undefined;
+    const brandCss = buildBrandCss(await getDomainTheme());
+
     return (
-        <html lang="en" className="light" suppressHydrationWarning>
-            <body className={`${inter.variable} font-sans antialiased bg-white text-slate-900`}>
+        <html
+            lang="en"
+            data-theme-pref={pref}
+            data-theme={concrete?.id}
+            data-scheme={concrete?.scheme}
+            suppressHydrationWarning
+        >
+            <head>
+                <style id="bx-themes" dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
+                {brandCss ? <style id="bx-brand" dangerouslySetInnerHTML={{ __html: brandCss }} /> : null}
+                <script dangerouslySetInnerHTML={{ __html: buildBootScript() }} />
+            </head>
+            <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
                 <SessionProvider>
                     <ReAuthProvider
                         initialChecks={[

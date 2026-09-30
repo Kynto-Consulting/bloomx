@@ -489,6 +489,12 @@ function parse(toks: Tok[]): Node[] {
 
 // ── Evaluator ─────────────────────────────────────────────────────────────────
 
+// Limites anti-DoS (plantillas escritas por usuarios; renderizado dentro del servidor).
+const MAX_RANGE_ITEMS = 10_000;
+const MAX_TOTAL_ITERATIONS = 100_000;
+const MAX_OUTPUT_LENGTH = 5 * 1024 * 1024;
+let iterationBudget = 0;
+
 const SIG_BREAK = Symbol('break');
 const SIG_CONTINUE = Symbol('continue');
 type Signal = typeof SIG_BREAK | typeof SIG_CONTINUE;
@@ -558,6 +564,8 @@ function evalNodes(ns: Node[], ctx: Ctx, cyc: Record<string, number> = {}): stri
                 if (rangeM) {
                     const a = parseInt(toStr(resolveExpr(rangeM[1], ctx)) || rangeM[1]) || 0;
                     const b = parseInt(toStr(resolveExpr(rangeM[2], ctx)) || rangeM[2]) || 0;
+                    // Anti-DoS: un rango gigante (1..999999999) agotaria memoria.
+                    if (Math.abs(b - a) + 1 > MAX_RANGE_ITEMS) throw new Error('liquid: range too large');
                     items = a <= b
                         ? Array.from({ length: b - a + 1 }, (_, i) => String(a + i))
                         : Array.from({ length: a - b + 1 }, (_, i) => String(a - i));
@@ -585,6 +593,7 @@ function evalNodes(ns: Node[], ctx: Ctx, cyc: Record<string, number> = {}): stri
 
                 const innerCyc: Record<string, number> = {};
                 for (let i = 0; i < arr.length; i++) {
+                    if (++iterationBudget > MAX_TOTAL_ITERATIONS) throw new Error('liquid: iteration budget exceeded');
                     ctxPush(ctx, {
                         [node.varName]: arr[i],
                         'forloop.index': String(i + 1),
@@ -612,10 +621,12 @@ function evalNodes(ns: Node[], ctx: Ctx, cyc: Record<string, number> = {}): stri
 
 export function renderTemplate(template: string, data: LiquidRow): string {
     try {
+        iterationBudget = 0;
         const ctx = mkCtx(data);
         const toks = tokenize(template);
         const ast = parse(toks);
         const result = evalNodes(ast, ctx);
+        if (typeof result === 'string' && result.length > MAX_OUTPUT_LENGTH) return template;
         return typeof result === 'string' ? result : '';
     } catch {
         return template; // fail gracefully

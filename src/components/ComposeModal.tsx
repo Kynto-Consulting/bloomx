@@ -23,6 +23,7 @@ import { Popover } from './ui/Popover';
 import { motion } from 'framer-motion';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { AccountManager } from '@/lib/account-manager';
+import { splitAddressList } from '@/lib/email-utils';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -77,7 +78,7 @@ export function ComposeModal({
     const { data: session } = useSession();
     const router = useRouter();
 
-    const [toTags, setToTags] = useState<string[]>(initialTo ? initialTo.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const [toTags, setToTags] = useState<string[]>(splitAddressList(initialTo));
     const [senderOptions, setSenderOptions] = useState<string[]>([]);
     const [fromAddress, setFromAddress] = useState(String(initialFrom || '').trim().toLowerCase());
     const [subject, setSubject] = useState(initialSubject);
@@ -91,8 +92,8 @@ export function ComposeModal({
 
 
     // CC/BCC State
-    const [ccTags, setCcTags] = useState<string[]>(initialCc ? initialCc.split(',').map(s => s.trim()).filter(Boolean) : []);
-    const [bccTags, setBccTags] = useState<string[]>(initialBcc ? initialBcc.split(',').map(s => s.trim()).filter(Boolean) : []);
+    const [ccTags, setCcTags] = useState<string[]>(splitAddressList(initialCc));
+    const [bccTags, setBccTags] = useState<string[]>(splitAddressList(initialBcc));
 
     const [showCcBcc, setShowCcBcc] = useState(!!initialCc || !!initialBcc);
     const [sending, setSending] = useState(false);
@@ -821,9 +822,9 @@ export function ComposeModal({
     }
 
     const modalClass = maximized
-        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-white rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
+        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-card rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
         : cn(
-            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-white rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
+            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-card rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
             isResizing ? "transition-none select-none" : ""
         );
 
@@ -848,42 +849,42 @@ export function ComposeModal({
             {!maximized && (
                 <>
                     <div
-                        className="absolute top-0 left-0 w-full h-1 cursor-ns-resize z-[60] hover:bg-blue-500/20"
+                        className="absolute top-0 left-0 w-full h-1 cursor-ns-resize z-[60] hover:bg-primary/20"
                         onMouseDown={handleResizeStart}
                     />
                     <div
-                        className="absolute top-0 left-0 w-1 h-full cursor-ew-resize z-[60] hover:bg-blue-500/20"
+                        className="absolute top-0 left-0 w-1 h-full cursor-ew-resize z-[60] hover:bg-primary/20"
                         onMouseDown={handleResizeStart}
                     />
                     <div
                         className="absolute top-0 left-0 w-4 h-4 cursor-nwse-resize z-[60] group rounded-tl-lg"
                         onMouseDown={handleResizeStart}
                     >
-                        <div className="absolute top-1 left-1 w-px h-2 bg-gray-300 group-hover:bg-blue-400 rotate-45 transform origin-top-left" />
-                        <div className="absolute top-1 left-2 w-px h-2 bg-gray-300 group-hover:bg-blue-400 rotate-45 transform origin-top-left" />
+                        <div className="absolute top-1 left-1 w-px h-2 bg-border group-hover:bg-primary/70 rotate-45 transform origin-top-left" />
+                        <div className="absolute top-1 left-2 w-px h-2 bg-border group-hover:bg-primary/70 rotate-45 transform origin-top-left" />
                     </div>
                 </>
             )}
 
             {/* Header */}
-            <div className="flex items-center justify-between px-3 py-2 bg-gray-100 select-none ">
+            <div className="flex items-center justify-between px-3 py-2 bg-muted select-none ">
                 <span className="text-sm font-semibold pl-1">New Message</span>
                 <div className="flex items-center gap-1">
                     <button
                         onClick={() => toggleMinimize(id)}
-                        className="p-1 hover:bg-gray-200 rounded-sm transition-colors text-gray-600"
+                        className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
                         <Minimize2 className="h-4 w-4" />
                     </button>
                     <button
                         onClick={() => setMaximized(!maximized)}
-                        className="p-1 hover:bg-gray-200 rounded-sm transition-colors text-gray-600"
+                        className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
                         <Maximize2 className="h-4 w-4" />
                     </button>
                     <button
                         onClick={handleClose}
-                        className="p-1 hover:bg-gray-200 rounded-sm transition-colors text-gray-600"
+                        className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
                         <X className="h-4 w-4" />
                     </button>
@@ -898,9 +899,9 @@ export function ComposeModal({
 
             {/* Active Slash Command Overlay */}
             {activeSlashComponent && (
-                <div className="absolute inset-x-0 bottom-0 top-auto z-50 bg-white shadow-2xl border-t animate-in slide-in-from-bottom-5 rounded-b-xl overflow-hidden">
-                    <div className="flex justify-end p-1 bg-gray-50 border-b">
-                        <button onClick={() => setActiveSlashComponent(null)} className="p-1 hover:bg-gray-200 rounded"><X className="w-3 h-3" /></button>
+                <div className="absolute inset-x-0 bottom-0 top-auto z-50 bg-card shadow-2xl border-t animate-in slide-in-from-bottom-5 rounded-b-xl overflow-hidden">
+                    <div className="flex justify-end p-1 bg-muted/50 border-b">
+                        <button onClick={() => setActiveSlashComponent(null)} className="p-1 hover:bg-secondary rounded"><X className="w-3 h-3" /></button>
                     </div>
                     <activeSlashComponent.Component context={contextProps} />
                 </div>
@@ -908,31 +909,31 @@ export function ComposeModal({
 
             {/* Form */}
             <div className="flex flex-col flex-1 h-full overflow-hidden relative">
-                <div className="px-3 py-1 flex flex-col gap-1 bg-white">
-                    <div className="flex items-center gap-2 border-b border-transparent focus-within:border-gray-200 transition-colors">
-                        <span className="text-sm font-medium text-gray-500 w-10">From</span>
+                <div className="px-3 py-1 flex flex-col gap-1 bg-card">
+                    <div className="flex items-center gap-2 border-b border-transparent focus-within:border-border transition-colors">
+                        <span className="text-sm font-medium text-muted-foreground w-10">From</span>
                         <div className="flex-1 py-1.5">
                             {canSwitchSender ? (
                                 <select
                                     value={fromAddress}
                                     onChange={(event) => setFromAddress(event.target.value)}
-                                    className="w-full bg-transparent text-sm text-gray-700 outline-none"
+                                    className="w-full bg-transparent text-sm text-foreground/80 outline-none"
                                 >
                                     {senderOptions.map((email) => (
                                         <option key={email} value={email}>{email}</option>
                                     ))}
                                 </select>
                             ) : (
-                                <div className="text-sm text-gray-700 truncate">
+                                <div className="text-sm text-foreground/80 truncate">
                                     {effectiveSenderEmail || session?.user?.email || 'Unknown sender'}
                                 </div>
                             )}
                         </div>
                     </div>
 
-                    <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200 transition-colors">
+                    <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border transition-colors">
                         <div className="pt-2">
-                            <span className="text-sm font-medium text-gray-500">To</span>
+                            <span className="text-sm font-medium text-muted-foreground">To</span>
                         </div>
                         <div className="flex-1">
                             <TagInput
@@ -947,7 +948,7 @@ export function ComposeModal({
                             <button
                                 type="button"
                                 onClick={() => setShowCcBcc(!showCcBcc)}
-                                className="text-xs text-gray-500 hover:text-gray-900 transition-colors px-2 py-1"
+                                className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
                             >
                                 Cc/Bcc
                             </button>
@@ -956,14 +957,14 @@ export function ComposeModal({
 
                     {showCcBcc && (
                         <div className="animate-in slide-in-from-top-2 duration-200 flex flex-col gap-1">
-                            <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200">
-                                <span className="text-sm font-medium text-gray-500 pt-2 w-8">Cc</span>
+                            <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border">
+                                <span className="text-sm font-medium text-muted-foreground pt-2 w-8">Cc</span>
                                 <div className="flex-1">
                                     <TagInput value={ccTags} onChange={actions.setCc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
                             </div>
-                            <div className="flex items-start gap-2 border-b border-transparent focus-within:border-gray-200">
-                                <span className="text-sm font-medium text-gray-500 pt-2 w-8">Bcc</span>
+                            <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border">
+                                <span className="text-sm font-medium text-muted-foreground pt-2 w-8">Bcc</span>
                                 <div className="flex-1">
                                     <TagInput value={bccTags} onChange={actions.setBcc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
@@ -972,19 +973,19 @@ export function ComposeModal({
                     )}
                 </div>
 
-                <div className="px-3 py-2 bg-white">
+                <div className="px-3 py-2 bg-card">
                     <input
-                        className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-gray-400"
+                        className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
                         placeholder="Subject"
                         value={subject}
                         onChange={(e) => actions.setSubject(e.target.value)}
                     />
                 </div>
 
-                <div className="h-px bg-gray-100 mx-3" />
+                <div className="h-px bg-muted mx-3" />
 
                 {/* Editor Area */}
-                <div className="flex-1 bg-white p-3 overflow-hidden flex flex-col relative">
+                <div className="flex-1 bg-card p-3 overflow-hidden flex flex-col relative">
                     <div className="flex-1 overflow-y-auto">
                         <Editor
                             ref={editorRef}
@@ -997,12 +998,12 @@ export function ComposeModal({
 
                     {/* Attachment list overlay */}
                     {attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+                        <div className="flex flex-wrap gap-2 pt-2 border-t border-border/60">
                             {attachments.map((att, i) => (
-                                <div key={i} className="flex items-center gap-1 bg-gray-50 border border-gray-200 rounded-md px-2 py-1 text-xs max-w-[150px]">
-                                    <Paperclip className="w-3 h-3 text-gray-500 shrink-0" />
+                                <div key={i} className="flex items-center gap-1 bg-muted/50 border border-border rounded-md px-2 py-1 text-xs max-w-[150px]">
+                                    <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />
                                     <span className="truncate">{att.filename || att.name}</span>
-                                    <button onClick={() => removeAttachment(i)} className="text-gray-400 hover:text-red-500 ml-1">
+                                    <button onClick={() => removeAttachment(i)} className="text-muted-foreground hover:text-destructive ml-1">
                                         <X className="w-3 h-3" />
                                     </button>
                                 </div>
@@ -1014,7 +1015,7 @@ export function ComposeModal({
 
                 {/* Active Slash Component (e.g. Zoom Form) */}
                 {activeSlashComponent && activeSlashComponent.Component && (
-                    <div className="absolute bottom-14 left-4 z-40 bg-white border border-gray-200 rounded-lg shadow-xl p-0 animate-in fade-in zoom-in-95">
+                    <div className="absolute bottom-14 left-4 z-40 bg-card border border-border rounded-lg shadow-xl p-0 animate-in fade-in zoom-in-95">
                         <activeSlashComponent.Component
                             context={{ ...contextProps, onClose: () => setActiveSlashComponent(null) }}
                             args={activeSlashComponent.args}
@@ -1036,7 +1037,7 @@ export function ComposeModal({
                     </Popover>
                 )}
 
-                <div className="bg-white px-3 pb-2">
+                <div className="bg-card px-3 pb-2">
                     <ExtensionLoader
                         mountPoint="EMAIL_FOOTER"
                         context={contextProps}
@@ -1044,14 +1045,14 @@ export function ComposeModal({
                 </div>
 
                 {/* Footer / Send Button */}
-                <div className="flex items-center justify-between p-3 bg-gray-50/50 relative">
+                <div className="flex items-center justify-between p-3 bg-muted/50 relative">
                     <div className="flex items-center gap-2">
-                        <div className="flex items-center rounded-full shadow-sm bg-blue-600 text-white transition-all hover:bg-blue-700">
+                        <div className="flex items-center rounded-full shadow-sm bg-primary text-primary-foreground transition-all hover:bg-primary/90">
                             <button
                                 onClick={handleSend}
                                 disabled={sending || toTags.length === 0 || isUploading}
                                 className={cn(
-                                    "inline-flex items-center justify-center gap-2 rounded-l-full text-sm font-semibold pl-4 pr-3 h-9 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 border-r border-blue-500",
+                                    "inline-flex items-center justify-center gap-2 rounded-l-full text-sm font-semibold pl-4 pr-3 h-9 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 border-r border-primary",
                                     sending && "opacity-70 cursor-not-allowed"
                                 )}
                             >
@@ -1064,7 +1065,7 @@ export function ComposeModal({
                                     "Send"
                                 )}
                             </button>
-                            <div className="relative h-9 flex items-center pr-1 rounded-r-full hover:bg-blue-800/50 transition-colors">
+                            <div className="relative h-9 flex items-center pr-1 rounded-r-full hover:bg-primary-foreground/10 transition-colors">
                                 <button
                                     type="button"
                                     onClick={() => setSchedulePickerOpen(o => !o)}
@@ -1100,7 +1101,7 @@ export function ComposeModal({
                         </div>
                         <div className="overflow-hidden flex items-center gap-2 scroll-x w-full">
                             <label className={cn(
-                                "text-gray-500 hover:bg-gray-200 p-2 rounded-full cursor-pointer transition-colors relative",
+                                "text-muted-foreground hover:bg-secondary p-2 rounded-full cursor-pointer transition-colors relative",
                                 isUploading && "opacity-50 cursor-wait"
                             )}>
                                 {isUploading ? <Loader2 className="w-5 h-5 animate-spin p-0.5" /> : <Paperclip className="w-5 h-5" />}
@@ -1151,15 +1152,15 @@ export function ComposeModal({
                                 }}
                                 className={cn(
                                     "p-2 rounded-full transition-colors relative",
-                                    isListening ? "text-red-600 bg-red-50 animate-pulse" : "text-gray-500 hover:bg-gray-200"
+                                    isListening ? "text-destructive bg-destructive/10 animate-pulse" : "text-muted-foreground hover:bg-secondary"
                                 )}
                                 title="Dictate"
                             >
                                 <Mic className="w-5 h-5" />
                                 {isListening && (
                                     <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive/70 opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-destructive"></span>
                                     </span>
                                 )}
                             </button>
@@ -1173,7 +1174,7 @@ export function ComposeModal({
 
                     <button
                         onClick={handleDelete}
-                        className="text-gray-400 hover:bg-gray-200 hover:text-gray-700 p-2 rounded-full transition-colors"
+                        className="text-muted-foreground hover:bg-secondary hover:text-foreground/80 p-2 rounded-full transition-colors"
                         title="Delete Draft"
                     >
                         <Trash2 className="w-5 h-5" />

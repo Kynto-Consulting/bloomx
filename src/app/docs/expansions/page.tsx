@@ -12,7 +12,7 @@ export default function ExpansionsDocs() {
             </div>
 
             {/* Core Integrations */}
-            <Section title="Core Integrations" icon={Globe} color="text-blue-600 bg-blue-100" desc="Deeply integrated tools that require OAuth or API Key configuration.">
+            <Section title="Core Integrations" icon={Globe} color="text-primary bg-primary/15" desc="Deeply integrated tools that require OAuth or API Key configuration.">
                 <ExpansionCard
                     name="Google Drive"
                     id="core-google-drive"
@@ -95,7 +95,7 @@ export default function ExpansionsDocs() {
             </Section>
 
             {/* Productivity */}
-            <Section title="Productivity & Tools" icon={Clock} color="text-green-600 bg-green-100" desc="Enhancements to speed up your daily workflow.">
+            <Section title="Productivity & Tools" icon={Clock} color="text-success bg-success/15" desc="Enhancements to speed up your daily workflow.">
                 <div className="grid gap-6">
                     <ExpansionCard
                         name="Calendar"
@@ -133,7 +133,7 @@ export default function ExpansionsDocs() {
             </Section>
 
             {/* Enhancements */}
-            <Section title="Enhancements" icon={Component} color="text-orange-600 bg-orange-100" desc="UI and Functional upgrades to the composer.">
+            <Section title="Enhancements" icon={Component} color="text-warning bg-warning/15" desc="UI and Functional upgrades to the composer.">
                 <div className="grid sm:grid-cols-2 gap-6">
                     <UtilityCard
                         name="Giphy"
@@ -160,7 +160,7 @@ export default function ExpansionsDocs() {
             </Section>
 
             {/* Backend Services */}
-            <Section title="Background Services" icon={Database} color="text-slate-600 bg-slate-100" desc="Invisible services running on the server.">
+            <Section title="Background Services" icon={Database} color="text-muted-foreground bg-muted" desc="Invisible services running on the server.">
                 <div className="grid gap-6">
                     <ExpansionCard
                         name="DLP (Data Loss Prevention)"
@@ -261,7 +261,7 @@ function UtilityCard({ name, id, desc, extra }: { name: string, id: string, desc
                 <p className="text-sm text-muted-foreground">{desc}</p>
             </div>
             {extra && (
-                <div className="mt-4 flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded w-fit">
+                <div className="mt-4 flex items-center gap-1 text-xs text-warning bg-warning/10 px-2 py-1 rounded w-fit">
                     <AlertTriangle className="h-3 w-3" /> {extra}
                 </div>
             )}

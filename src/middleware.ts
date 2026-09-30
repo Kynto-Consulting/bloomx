@@ -3,8 +3,44 @@ import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
 import { verifyJWT, COOKIE_NAME } from "@/lib/jwt";
 
+// Rutas que legitimamente reciben POST cross-origin (webhooks, clientes externos, reservas publicas embebibles)
+const CSRF_EXEMPT_PREFIXES = [
+    '/api/auth',            // NextAuth aplica su propio token CSRF
+    '/api/webhooks',
+    '/api/cron',
+    '/api/molt',
+    '/api/config',
+    '/api/register',
+    '/api/appointments/book',
+    '/api/appointments/schedules/',
+];
+
+// Defensa CSRF en profundidad (CIS 16.x, NIST SC-23, OWASP ASVS 4.2.2): para peticiones que cambian estado
+// y usan la cookie de sesion, si el navegador envia Origin este debe coincidir con el host.
+function isCrossOriginStateChange(req: NextRequest): boolean {
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false;
+    const { pathname } = req.nextUrl;
+    if (!pathname.startsWith('/api/')) return false;
+    if (CSRF_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p) && !(p === '/api/auth' && (pathname === '/api/auth/login' || pathname === '/api/auth/logout' || pathname === '/api/auth/set-cookie')))) return false;
+    if (req.headers.get('authorization')?.startsWith('Bearer ')) return false; // no depende de cookie ambiente
+    const origin = req.headers.get('origin');
+    if (!origin) return false; // clientes no-navegador
+    try {
+        const host = req.headers.get('x-forwarded-host') || req.headers.get('host') || req.nextUrl.host;
+        return new URL(origin).host !== host;
+    } catch {
+        return true;
+    }
+}
+
 export async function middleware(req: NextRequest) {
     const { pathname } = req.nextUrl;
+
+    if (isCrossOriginStateChange(req)) {
+        console.warn(`[MIDDLEWARE] Blocked cross-origin ${req.method} ${pathname}`);
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     // 1. Define public paths (login, register, api auth routes, static files)
 
@@ -54,7 +90,6 @@ export async function middleware(req: NextRequest) {
         const payload = await verifyJWT(token);
 
         if (!payload) {
-            console.log("[MIDDLEWARE] Verify failed for token");
             throw new Error("Invalid token");
         }
 
@@ -64,7 +99,7 @@ export async function middleware(req: NextRequest) {
         return NextResponse.next();
 
     } catch (error) {
-        console.error(`[MIDDLEWARE-ERROR] Path: ${pathname}, Error:`, error);
+        // Sin volcar el error completo ni tokens al log
         // On error, also redirect to login
         const url = req.nextUrl.clone();
         url.pathname = "/login";

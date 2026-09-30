@@ -237,8 +237,8 @@ export function DateTimePicker({
                                     onClick={() => handleDayClick(date)}
                                     className={cn(
                                         'flex items-center justify-center w-full aspect-square rounded-full text-xs font-medium transition-colors',
-                                        isSelected ? 'bg-blue-600 text-white' :
-                                        isToday ? 'text-blue-600 font-bold hover:bg-accent' :
+                                        isSelected ? 'bg-primary text-primary-foreground' :
+                                        isToday ? 'text-primary font-bold hover:bg-accent' :
                                         'hover:bg-accent',
                                         isPast && 'opacity-30 pointer-events-none',
                                     )}
@@ -270,7 +270,7 @@ export function DateTimePicker({
                                     }
                                 }}
                                 placeholder="HH:MM"
-                                className="w-full text-xs text-center border border-border rounded px-1 py-1 bg-background focus:outline-none focus:border-blue-500"
+                                className="w-full text-xs text-center border border-border rounded px-1 py-1 bg-background focus:outline-none focus:border-primary"
                                 maxLength={5}
                             />
                         </div>
@@ -283,7 +283,7 @@ export function DateTimePicker({
                                     onClick={() => applyTime(t)}
                                     className={cn(
                                         'w-full text-center py-[7px] text-xs transition-colors',
-                                        t === selTime ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-accent',
+                                        t === selTime ? 'bg-primary text-primary-foreground font-semibold' : 'hover:bg-accent',
                                     )}
                                 >
                                     {t}

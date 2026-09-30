@@ -82,18 +82,19 @@ DMARC le dice a otros servidores qué hacer cuando SPF o DKIM fallan y además a
 Empieza así:
 
 ```txt
-TXT _dmarc  v=DMARC1; p=none; adkim=s; aspf=s; pct=100
+TXT _dmarc  v=DMARC1; p=none; adkim=r; aspf=r; pct=100
 ```
 
 Recomendación simple:
-- empieza con `p=none`
-- cuando confirmes que SPF y DKIM pasan de forma consistente, sube a `p=quarantine`
-- finalmente considera `p=reject`
+- empieza con `p=none` y alineación **relajada** (`adkim=r; aspf=r`). No uses alineación estricta (`s`) al inicio: Resend firma/enruta con un subdominio (return-path), y con `aspf=s` el SPF nunca alinea y todo dependería solo de DKIM
+- cuando confirmes durante 2 a 4 semanas (con los reportes `rua`) que SPF y/o DKIM alinean, sube a `p=quarantine; pct=25`, luego `pct=100`
+- finalmente `p=reject`. Añade `sp=reject` para proteger subdominios que no envían correo
+- DMARC pasa si **SPF o DKIM** pasan *y alinean* con el dominio del `From:`; mantén DKIM siempre correcto
 
 Si quieres reportes, añade una casilla real:
 
 ```txt
-TXT _dmarc  v=DMARC1; p=none; rua=mailto:dmarc@tudominio.com; adkim=s; aspf=s; pct=100
+TXT _dmarc  v=DMARC1; p=none; rua=mailto:dmarc@tudominio.com; adkim=r; aspf=r; pct=100
 ```
 
 Necesitas crear ese buzón o alias si vas a recibir reportes.
@@ -180,3 +181,64 @@ Si quieres la versión corta:
 4. Configura `TOP_DOMAIN` con tu dominio real.
 5. Apunta el webhook a `/api/webhooks/resend`.
 6. No envíes volumen alto hasta confirmar `PASS` en SPF, DKIM y DMARC.
+
+## 12. Advertencias importantes sobre MX y coexistencia con otro correo
+
+- Publicar los `MX` de Resend en el dominio raíz **reemplaza** cualquier otro proveedor de correo entrante (Google Workspace, Microsoft 365). Si ya recibes correo en ese dominio, usa un subdominio dedicado para Bloomx (por ejemplo `mail.example.com`) y ajusta `TOP_DOMAIN` en consecuencia.
+- Mantén un solo conjunto de `MX` activo por dominio o subdominio. Mezclar proveedores hace que parte del correo se pierda.
+- El buzón `rua` de DMARC (`dmarc@tudominio.com`) también depende de tus `MX`: si el dominio apunta a Bloomx, los reportes llegarán como adjuntos `.zip`/`.gz` al usuario `dmarc` (debe existir en Bloomx).
+
+## 13. TLS en tránsito: MTA-STS y TLS-RPT (NIST SP 800-177r1 sec. 5, ISO 27002:2022 8.24)
+
+Bloomx recibe y envía a través de Resend, que negocia TLS oportunista. Para **exigir** TLS a quienes te envían correo:
+
+1. Publica el registro `TXT` de política:
+
+```txt
+TXT _mta-sts  v=STSv1; id=20260101000000
+```
+
+2. Sirve la política por HTTPS en `https://mta-sts.tudominio.com/.well-known/mta-sts.txt` (certificado válido, sin redirecciones):
+
+```txt
+version: STSv1
+mode: testing
+mx: <host MX exacto que te da Resend>
+max_age: 86400
+```
+
+3. Empieza con `mode: testing`; cuando los reportes no muestren fallos, pasa a `mode: enforce` y sube `max_age` a 604800 o más. **Cada vez que cambies la política, cambia el `id`.**
+4. Habilita reportes de TLS:
+
+```txt
+TXT _smtp._tls  v=TLSRPTv1; rua=mailto:tlsrpt@tudominio.com
+```
+
+Si no puedes alojar el archivo de política en `mta-sts.tudominio.com`, omite MTA-STS (un `id` publicado sin política accesible causa fallos de entrega en algunos emisores). TLS-RPT sí puede publicarse siempre.
+
+## 14. Otros registros recomendados
+
+- **DNSSEC** en el dominio (habilítalo en tu registrador o DNS): protege SPF/DKIM/DMARC/MTA-STS contra falsificación de respuestas DNS.
+- **CAA**: limita qué autoridades pueden emitir certificados para tu dominio, por ejemplo `CAA 0 issue "letsencrypt.org"`.
+- **SPF**: máximo 10 consultas DNS (`include`, `a`, `mx`, `redirect`). Pasar de 10 produce `permerror` y DMARC falla. Usa `-all` (o `~all` mientras pruebas) y nunca `+all` ni `?all`.
+- **DKIM**: claves de 2048 bits. Rota el selector periódicamente (cada 6 a 12 meses) y publica el selector nuevo antes de retirar el antiguo.
+- **ARC**: solo aplica si reenvías o alojas listas. Bloomx no firma ARC; no lo necesitas para envío directo.
+- **BIMI** (opcional): requiere DMARC con `p=quarantine` o `p=reject`.
+- **Reverse DNS / IP dedicada**: solo aplica si tu plan de Resend usa IP dedicada; en ese caso configura el PTR con el proveedor.
+
+## 15. Autenticación de correos entrantes en Bloomx
+
+- Bloomx lee la cabecera `Authentication-Results` (SPF/DKIM/DMARC) añadida por Resend, la usa para puntuar spam (`dmarc=fail`, `spf=fail`, `dkim=fail` suben el puntaje) y **no envía rebotes** a remitentes con fallos de autenticación (evita backscatter).
+- `GET /api/emails/[id]` devuelve el campo `authentication` (`spf`, `dkim`, `dmarc`, `summary`) para mostrarlo en la interfaz.
+- Verifica en un correo real recibido que la cabecera exista. Si Resend no la incluye para tu región o plan, no habrá veredicto y `authentication` será `null`.
+- No confíes en el nombre visible del remitente: un `From:` con `dmarc=fail` puede ser suplantación.
+
+## 16. Envíos masivos (Elixir) y baja (RFC 8058)
+
+Gmail y Yahoo exigen a remitentes de volumen (más de 5000 correos al día) SPF, DKIM y DMARC alineados, tasa de quejas menor a 0,3 % y baja de un clic.
+
+- Los envíos masivos de Elixir incluyen `List-Unsubscribe` y `List-Unsubscribe-Post: List-Unsubscribe=One-Click` y omiten a quienes ya se dieron de baja.
+- Requisitos: `NEXT_PUBLIC_APP_URL` con `https://` público y un secreto (`UNSUBSCRIBE_SECRET`, o `NEXTAUTH_SECRET` como respaldo). Sin estos, la cabecera no se añade.
+- Endpoint público de baja: `https://tu-dominio-publico/api/webhooks/unsubscribe`.
+- Variables de operación relacionadas: `MAX_SENDS_PER_HOUR` (por defecto 200, envíos normales), `MAX_BULK_ROWS` (por defecto 500 filas por solicitud), `WEBHOOK_SECRET`, `INTERNAL_SECRET`.
+- Calienta el dominio: sube el volumen de forma gradual durante 2 a 4 semanas.

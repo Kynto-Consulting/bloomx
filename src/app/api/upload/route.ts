@@ -1,7 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from "@/lib/session";
-import { uploadToStorage, getSignedDownloadUrl } from '@/lib/storage';
+import { uploadToStorage } from '@/lib/storage';
+import { hasDangerousExtension, isActiveContentType } from '@/lib/mail-validation';
 
 export async function POST(req: NextRequest) {
     try {
@@ -23,13 +24,24 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'File size exceeds 200MB limit' }, { status: 400 });
         }
 
+        if (file.size === 0) {
+            return NextResponse.json({ error: 'Empty file' }, { status: 400 });
+        }
+
+        // Extensiones ejecutables / de script no se aceptan (vector de malware en correo saliente).
+        if (hasDangerousExtension(file.name)) {
+            return NextResponse.json({ error: 'File type not allowed' }, { status: 400 });
+        }
+
         const buffer = Buffer.from(await file.arrayBuffer());
         const timestamp = Date.now();
         // Sanitize filename
-        const safeFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+        const safeFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_').replace(/\.{2,}/g, '_').slice(0, 200);
         const key = `attachments/${user.email}/${timestamp}-${safeFilename}`;
 
-        await uploadToStorage(key, buffer, file.type);
+        // Tipos activos (html/svg/js) se guardan como binario opaco para que nunca se rendericen.
+        const storedType = isActiveContentType(file.type) ? 'application/octet-stream' : (file.type || 'application/octet-stream');
+        await uploadToStorage(key, buffer, storedType);
 
         // Generate Proxy URL for the Private Bucket
         let protocol = 'https';

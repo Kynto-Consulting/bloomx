@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 import { deleteFromStorage } from '@/lib/storage';
+import { canAccessEmail } from '@/lib/mailbox-access';
 
 export async function DELETE(
     req: NextRequest,
@@ -24,6 +25,10 @@ export async function DELETE(
         });
 
         if (!email) {
+            return NextResponse.json({ error: 'Email not found' }, { status: 404 });
+        }
+
+        if (!(await canAccessEmail(user.id, email.userId))) {
             return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 

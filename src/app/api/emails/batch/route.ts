@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from "@/lib/session";
 import { prisma } from '@/lib/prisma';
+import { getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
+
+const ALLOWED_UPDATE_FIELDS = ['read', 'starred', 'folder'] as const;
 
 export async function PATCH(req: NextRequest) {
     try {
@@ -16,21 +19,18 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: 'Invalid IDs' }, { status: 400 });
         }
 
+        const safeUpdates: Record<string, unknown> = {};
+        for (const key of ALLOWED_UPDATE_FIELDS) {
+            if (updates && typeof updates === 'object' && key in updates) safeUpdates[key] = updates[key];
+        }
+        if (Object.keys(safeUpdates).length === 0) {
+            return NextResponse.json({ error: 'No valid updates' }, { status: 400 });
+        }
+
+        const mailboxIds = await getAccessibleMailboxUserIds(user.id);
         const result = await prisma.email.updateMany({
-            where: {
-                id: { in: ids },
-                // Ensure user owns these emails (assuming simplistic ownership by 'to' or 'from' isn't enough, 
-                // but usually we'd have a userId on the Email model. 
-                // For now, based on previous code, we might rely on the fact that only user's emails are in DB 
-                // or we need to filter by user. The Email model in schema doesn't seem to have userId yet, 
-                // but let's proceed assuming global or single-tenant for this specific codebase part 
-                // OR relies on labels/folders. 
-                // WAIT: schema.prisma showed Email DOes NOT have userId. 
-                // But let's look at how GET /api/emails does it. 
-                // It doesn't seem to filter by User ID in previous `view_file`.
-                // We will trust the request for now or if 'Label' has userId.
-            },
-            data: updates,
+            where: { id: { in: ids }, userId: { in: mailboxIds } },
+            data: safeUpdates,
         });
 
         return NextResponse.json({ count: result.count });
@@ -50,20 +50,16 @@ export async function DELETE(req: NextRequest) {
         const body = await req.json();
         const { ids } = body;
 
-        console.log(`[BatchDelete] User: ${user.email}`);
 
         if (!Array.isArray(ids) || ids.length === 0) {
             return NextResponse.json({ error: 'Invalid IDs' }, { status: 400 });
         }
 
-        console.log("BATCH DELETE IDS:", ids);
-
         // 1. Fetch emails to get storage keys
         const emails = await prisma.email.findMany({
-            where: { id: { in: ids }, AND: { userId: user.id } },
+            where: { id: { in: ids }, userId: { in: await getAccessibleMailboxUserIds(user.id) } },
             include: { attachments: true }
         });
-        console.log("BATCH DELETE FOUND:", emails.length);
 
         // 2. Delete from Storage
         // We import dynamically or top-level? Top-level is fine if not circular.
@@ -88,11 +84,8 @@ export async function DELETE(req: NextRequest) {
 
         // 3. Delete from DB
         const result = await prisma.email.deleteMany({
-            where: {
-                id: { in: ids }
-            }
+            where: { id: { in: emails.map((e) => e.id) } }
         });
-        console.log(result)
         return NextResponse.json({ count: result.count });
     } catch (error) {
         console.error('Failed to batch delete emails:', error);

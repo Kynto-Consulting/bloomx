@@ -411,14 +411,14 @@ export default function AdminDashboard() {
     const requiredEnvVars = inferRequiredEnvVars(selectedExtension);
 
     if (configLoading) {
-        return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-indigo-600" /></div>;
+        return <div className="min-h-screen flex items-center justify-center"><Loader2 className="animate-spin h-8 w-8 text-primary" /></div>;
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 flex">
+        <div className="min-h-screen bg-muted/50 flex">
             {/* Sidebar */}
-            <aside className="w-64 bg-white border-r border-gray-200 fixed h-full z-10 flex flex-col">
-                <div className="p-6 border-b border-gray-100">
+            <aside className="w-64 bg-background border-r border-border fixed h-full z-10 flex flex-col">
+                <div className="p-6 border-b border-border/60">
                     <div className="flex items-center gap-3">
                         {settings.logo ? (
                             <img src={settings.logo} alt="Logo" className="w-8 h-8 rounded-md object-cover" />
@@ -430,7 +430,7 @@ export default function AdminDashboard() {
                                 {settings.displayName ? settings.displayName.charAt(0) : 'B'}
                             </div>
                         )}
-                        <span className="font-bold text-gray-900 truncate">{settings.displayName || settings.name || 'BloomX'}</span>
+                        <span className="font-bold text-foreground truncate">{settings.displayName || settings.name || 'BloomX'}</span>
                     </div>
                 </div>
                 <div className="flex-1 overflow-y-auto py-4">
@@ -438,8 +438,8 @@ export default function AdminDashboard() {
                         <button
                             onClick={() => setActiveTab('extensions')}
                             className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${activeTab === 'extensions'
-                                ? 'bg-indigo-50 text-indigo-700'
-                                : 'text-gray-600 hover:bg-gray-50'
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground hover:bg-muted/50'
                                 }`}
                         >
                             <Puzzle className="w-5 h-5" />
@@ -448,8 +448,8 @@ export default function AdminDashboard() {
                         <button
                             onClick={() => setActiveTab('users')}
                             className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${activeTab === 'users'
-                                ? 'bg-indigo-50 text-indigo-700'
-                                : 'text-gray-600 hover:bg-gray-50'
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground hover:bg-muted/50'
                                 }`}
                         >
                             <Users className="w-5 h-5" />
@@ -458,8 +458,8 @@ export default function AdminDashboard() {
                         <button
                             onClick={() => setActiveTab('settings')}
                             className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${activeTab === 'settings'
-                                ? 'bg-indigo-50 text-indigo-700'
-                                : 'text-gray-600 hover:bg-gray-50'
+                                ? 'bg-primary/10 text-primary'
+                                : 'text-muted-foreground hover:bg-muted/50'
                                 }`}
                         >
                             <Settings className="w-5 h-5" />
@@ -472,37 +472,37 @@ export default function AdminDashboard() {
             {/* Main Content */}
             <main className="flex-1 ml-64 p-8">
                 <header className="mb-8">
-                    <h1 className="text-2xl font-bold text-gray-900 capitalize">
+                    <h1 className="text-2xl font-bold text-foreground capitalize">
                         {activeTab} Management
                     </h1>
-                    <p className="text-gray-500 mt-1">Manage your {activeTab} for {settings.displayName}</p>
+                    <p className="text-muted-foreground mt-1">Manage your {activeTab} for {settings.displayName}</p>
                 </header>
 
                 {activeTab === 'extensions' && (
                     <div className="space-y-6">
                         <section>
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Installed Extensions</h2>
+                            <h2 className="text-lg font-semibold text-foreground mb-4">Installed Extensions</h2>
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {installedExtensions.map((ext: any) => (
-                                    <div key={ext.extensionId || ext.id} className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
+                                    <div key={ext.extensionId || ext.id} className="bg-card p-6 rounded-xl border border-border shadow-sm hover:shadow-md transition-shadow">
                                         <div className="flex items-start justify-between mb-4">
-                                            <div className="p-3 bg-indigo-50 rounded-lg">
-                                                <Puzzle className="w-6 h-6 text-indigo-600" />
+                                            <div className="p-3 bg-primary/10 rounded-lg">
+                                                <Puzzle className="w-6 h-6 text-primary" />
                                             </div>
-                                            <span className="px-2 py-1 bg-green-50 text-green-700 text-xs font-medium rounded-full border border-green-100">
+                                            <span className="px-2 py-1 bg-success/10 text-success text-xs font-medium rounded-full border border-success/30">
                                                 Active
                                             </span>
                                         </div>
-                                        <h3 className="font-semibold text-gray-900 mb-1">{ext.name}</h3>
-                                        <p className="text-sm text-gray-500 mb-4">{ext.description || "No description"}</p>
+                                        <h3 className="font-semibold text-foreground mb-1">{ext.name}</h3>
+                                        <p className="text-sm text-muted-foreground mb-4">{ext.description || "No description"}</p>
                                         <div className="flex gap-2">
-                                            <button className="flex-1 py-2 px-4 border border-gray-200 text-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50">
+                                            <button className="flex-1 py-2 px-4 border border-border text-muted-foreground rounded-lg text-sm font-medium hover:bg-muted/50 disabled:opacity-50">
                                                 Configure
                                             </button>
                                             <button
                                                 onClick={() => handleUninstall(ext)}
                                                 disabled={extensionActionId === (ext.extensionId || ext.id)}
-                                                className="py-2 px-4 border border-red-200 text-red-600 rounded-lg text-sm font-medium hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                                className="py-2 px-4 border border-destructive/30 text-destructive rounded-lg text-sm font-medium hover:bg-destructive/10 disabled:opacity-50 disabled:cursor-not-allowed"
                                             >
                                                 {extensionActionId === (ext.extensionId || ext.id) ? '...' : 'Uninstall'}
                                             </button>
@@ -510,41 +510,41 @@ export default function AdminDashboard() {
                                     </div>
                                 ))}
                                 {installedExtensions.length === 0 && (
-                                    <div className="col-span-3 text-center py-8 bg-white rounded-xl border border-dashed border-gray-300">
-                                        <Puzzle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                        <p className="text-gray-500 font-medium">No extensions installed.</p>
-                                        <p className="text-gray-400 text-sm">Browse available extensions below.</p>
+                                    <div className="col-span-3 text-center py-8 bg-card rounded-xl border border-dashed border-input">
+                                        <Puzzle className="w-12 h-12 text-muted-foreground/60 mx-auto mb-3" />
+                                        <p className="text-muted-foreground font-medium">No extensions installed.</p>
+                                        <p className="text-muted-foreground text-sm">Browse available extensions below.</p>
                                     </div>
                                 )}
                             </div>
                         </section>
 
-                        <section className="pt-8 border-t border-gray-200">
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                                <Search className="w-5 h-5 text-gray-500" />
+                        <section className="pt-8 border-t border-border">
+                            <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                                <Search className="w-5 h-5 text-muted-foreground" />
                                 Browse Catalog
                             </h2>
                             {loadingExtensions ? (
-                                <div className="py-12 text-center"><Loader2 className="animate-spin h-8 w-8 mx-auto text-indigo-600" /></div>
+                                <div className="py-12 text-center"><Loader2 className="animate-spin h-8 w-8 mx-auto text-primary" /></div>
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                     {availableExtensions.map(ext => (
-                                        <div key={ext.id} className="bg-white rounded-lg border shadow-sm p-6 flex flex-col transition-all hover:shadow-md">
+                                        <div key={ext.id} className="bg-card rounded-lg border shadow-sm p-6 flex flex-col transition-all hover:shadow-md">
                                             <div className="flex justify-between items-start mb-2">
-                                                <h3 className="font-bold text-gray-900 line-clamp-1">{ext.name}</h3>
+                                                <h3 className="font-bold text-foreground line-clamp-1">{ext.name}</h3>
                                                 {ext.isPaid && (
-                                                    <span className="text-xs font-medium bg-green-100 text-green-700 px-2 py-0.5 rounded">
+                                                    <span className="text-xs font-medium bg-success/15 text-success px-2 py-0.5 rounded">
                                                         {ext.price} {ext.currency}
                                                     </span>
                                                 )}
                                             </div>
-                                            <p className="text-gray-500 text-sm mb-4 line-clamp-2 flex-1">{ext.description}</p>
+                                            <p className="text-muted-foreground text-sm mb-4 line-clamp-2 flex-1">{ext.description}</p>
 
-                                            <div className="mt-auto pt-4 flex items-center justify-between border-t border-gray-100">
+                                            <div className="mt-auto pt-4 flex items-center justify-between border-t border-border/60">
                                                 <button
                                                     type="button"
                                                     onClick={() => setSelectedExtension(buildExtensionDetails(ext))}
-                                                    className="text-gray-400 hover:text-gray-600 flex items-center gap-1 text-xs"
+                                                    className="text-muted-foreground hover:text-muted-foreground flex items-center gap-1 text-xs"
                                                 >
                                                     <Info className="w-3 h-3" /> Details
                                                 </button>
@@ -553,13 +553,13 @@ export default function AdminDashboard() {
                                                     <button
                                                         onClick={() => handleInstall(ext)}
                                                         disabled={extensionActionId === ext.id}
-                                                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm"
+                                                        className="bg-primary text-primary-foreground px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 transition-colors shadow-sm"
                                                     >
                                                         {extensionActionId === ext.id ? 'Working...' : ext.isPaid ? 'Buy & Install' : 'Install'}
                                                     </button>
                                                 )}
                                                 {isInstalled(ext.id) && (
-                                                    <button disabled className="bg-gray-100 text-gray-400 px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
+                                                    <button disabled className="bg-muted text-muted-foreground px-4 py-2 rounded-lg text-sm font-medium cursor-not-allowed">
                                                         Installed
                                                     </button>
                                                 )}
@@ -575,23 +575,23 @@ export default function AdminDashboard() {
                 {activeTab === 'users' && (
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                         <div className="lg:col-span-2 space-y-6">
-                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
-                                    <h2 className="text-lg font-semibold text-gray-900">All Users</h2>
+                            <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+                                <div className="p-6 border-b border-border/60 flex justify-between items-center">
+                                    <h2 className="text-lg font-semibold text-foreground">All Users</h2>
                                     <div className="relative">
-                                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                                         <input
                                             type="text"
                                             placeholder="Search users..."
-                                            className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none w-64"
+                                            className="pl-9 pr-4 py-2 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent outline-none w-64"
                                         />
                                     </div>
                                 </div>
                                 {usersLoading ? (
-                                    <div className="p-8 text-center"><Loader2 className="animate-spin h-6 w-6 mx-auto text-indigo-600" /></div>
+                                    <div className="p-8 text-center"><Loader2 className="animate-spin h-6 w-6 mx-auto text-primary" /></div>
                                 ) : (
                                     <table className="w-full">
-                                        <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                                        <thead className="bg-muted/50 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                             <tr>
                                                 <th className="px-6 py-3">User</th>
                                                 <th className="px-6 py-3">Email</th>
@@ -599,23 +599,23 @@ export default function AdminDashboard() {
                                                 <th className="px-6 py-3 text-right">Actions</th>
                                             </tr>
                                         </thead>
-                                        <tbody className="divide-y divide-gray-100">
+                                        <tbody className="divide-y divide-border/60">
                                             {users.map((user: any) => (
-                                                <tr key={user.id} className="hover:bg-gray-50">
+                                                <tr key={user.id} className="hover:bg-muted/50">
                                                     <td className="px-6 py-4">
                                                         <div className="flex items-center gap-3">
-                                                            <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs uppercase">
+                                                            <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center text-primary font-bold text-xs uppercase">
                                                                 {user.name?.[0] || user.email[0]}
                                                             </div>
-                                                            <span className="font-medium text-gray-900">{user.name || 'Unnamed'}</span>
+                                                            <span className="font-medium text-foreground">{user.name || 'Unnamed'}</span>
                                                         </div>
                                                     </td>
-                                                    <td className="px-6 py-4 text-sm text-gray-600">{user.email}</td>
-                                                    <td className="px-6 py-4 text-sm text-gray-500">
+                                                    <td className="px-6 py-4 text-sm text-muted-foreground">{user.email}</td>
+                                                    <td className="px-6 py-4 text-sm text-muted-foreground">
                                                         {new Date(user.createdAt).toLocaleDateString()}
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
-                                                        <button className="text-gray-400 hover:text-red-600 transition-colors">
+                                                        <button className="text-muted-foreground hover:text-destructive transition-colors">
                                                             <Trash2 className="w-4 h-4" />
                                                         </button>
                                                     </td>
@@ -623,7 +623,7 @@ export default function AdminDashboard() {
                                             ))}
                                             {users.length === 0 && (
                                                 <tr>
-                                                    <td colSpan={4} className="px-6 py-8 text-center text-gray-500">
+                                                    <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
                                                         No users found. Create one to get started.
                                                     </td>
                                                 </tr>
@@ -635,37 +635,37 @@ export default function AdminDashboard() {
                         </div>
 
                         <div className="lg:col-span-1">
-                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6 sticky top-8">
-                                <h2 className="text-lg font-semibold text-gray-900 mb-4">Create New User</h2>
+                            <div className="bg-background rounded-xl border border-border shadow-sm p-6 sticky top-8">
+                                <h2 className="text-lg font-semibold text-foreground mb-4">Create New User</h2>
                                 <form onSubmit={handleCreateUser} className="space-y-4">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+                                        <label className="block text-sm font-medium text-foreground/80 mb-1">Full Name</label>
                                         <input
                                             type="text"
                                             required
-                                            className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            className="w-full px-4 py-2 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent outline-none"
                                             value={newUser.name}
                                             onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
                                             placeholder="Jane Doe"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Email Address</label>
+                                        <label className="block text-sm font-medium text-foreground/80 mb-1">Email Address</label>
                                         <input
                                             type="email"
                                             required
-                                            className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            className="w-full px-4 py-2 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent outline-none"
                                             value={newUser.email}
                                             onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                                             placeholder="jane@company.com"
                                         />
                                     </div>
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                                        <label className="block text-sm font-medium text-foreground/80 mb-1">Password</label>
                                         <input
                                             type="password"
                                             required
-                                            className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            className="w-full px-4 py-2 border border-border rounded-lg text-sm focus:ring-2 focus:ring-ring focus:border-transparent outline-none"
                                             value={newUser.password}
                                             onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
                                             placeholder="Min 8 characters"
@@ -674,7 +674,7 @@ export default function AdminDashboard() {
                                     <button
                                         type="submit"
                                         disabled={creatingUser}
-                                        className="w-full flex items-center justify-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                                        className="w-full flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
                                     >
                                         {creatingUser ? <Loader2 className="animate-spin w-4 h-4" /> : <Plus className="w-4 h-4" />}
                                         Create User
@@ -689,62 +689,62 @@ export default function AdminDashboard() {
                     <div className="flex flex-col xl:flex-row gap-8">
                         {/* Left: Form */}
                         <div className="flex-1 max-w-2xl">
-                            <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-8">
-                                <h2 className="text-xl font-semibold text-gray-900 mb-6">General Settings</h2>
+                            <div className="bg-card rounded-xl border border-border shadow-sm p-8">
+                                <h2 className="text-xl font-semibold text-foreground mb-6">General Settings</h2>
                                 <form onSubmit={handleSaveSettings} className="space-y-6">
 
                                     {/* Technical Domain */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        <label className="block text-sm font-medium text-foreground/80 mb-2">
                                             Server Domain (Immutable)
                                         </label>
                                         <div className="flex items-center gap-2 relative">
-                                            <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                                            <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                                             <input
                                                 type="text"
                                                 value={settings.name}
                                                 readOnly
-                                                className="w-full pl-9 pr-4 py-2 border border-gray-200 bg-gray-50 text-gray-500 rounded-lg outline-none cursor-not-allowed"
+                                                className="w-full pl-9 pr-4 py-2 border border-border bg-muted/50 text-muted-foreground rounded-lg outline-none cursor-not-allowed"
                                             />
                                         </div>
                                     </div>
 
                                     {/* Public Name */}
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                                        <label className="block text-sm font-medium text-foreground/80 mb-2">
                                             Public Name
                                         </label>
                                         <input
                                             type="text"
                                             value={settings.displayName}
                                             onChange={(e) => setSettings({ ...settings, displayName: e.target.value })}
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-ring focus:border-primary outline-none"
                                         />
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-2">Logo URL</label>
+                                        <label className="block text-sm font-medium text-foreground/80 mb-2">Logo URL</label>
                                         <input
                                             type="url"
                                             value={settings.logo}
                                             onChange={(e) => setSettings({ ...settings, logo: e.target.value })}
-                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                                            className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-ring focus:border-primary outline-none"
                                         />
                                     </div>
 
-                                    <hr className="my-6 border-gray-100" />
+                                    <hr className="my-6 border-border/60" />
 
-                                    <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center gap-2">
+                                    <h3 className="text-lg font-medium text-foreground mb-4 flex items-center gap-2">
                                         <Palette className="w-5 h-5" /> Theme Configuration
                                     </h3>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">Title Font</label>
+                                            <label className="block text-sm font-medium text-foreground/80 mb-2">Title Font</label>
                                             <select
                                                 value={(settings as any).titleFont || 'Inter'}
                                                 onChange={(e) => setSettings({ ...settings, titleFont: e.target.value } as any)}
-                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-ring outline-none"
                                             >
                                                 <option value="Inter">Inter (Default)</option>
                                                 <option value="Arial">Arial</option>
@@ -755,11 +755,11 @@ export default function AdminDashboard() {
                                             </select>
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-2">Body Font</label>
+                                            <label className="block text-sm font-medium text-foreground/80 mb-2">Body Font</label>
                                             <select
                                                 value={(settings as any).bodyFont || 'Inter'}
                                                 onChange={(e) => setSettings({ ...settings, bodyFont: e.target.value } as any)}
-                                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                className="w-full px-4 py-2 border border-input rounded-lg focus:ring-2 focus:ring-ring outline-none"
                                             >
                                                 <option value="Inter">Inter (Default)</option>
                                                 <option value="Arial">Arial</option>
@@ -776,7 +776,7 @@ export default function AdminDashboard() {
                                             .filter(([key]) => key.includes('Color'))
                                             .map(([key, value]) => (
                                                 <div key={key}>
-                                                    <label className="block text-sm font-medium text-gray-700 mb-2 capitalize">
+                                                    <label className="block text-sm font-medium text-foreground/80 mb-2 capitalize">
                                                         {key.replace('Color', '').replace(/([A-Z])/g, ' $1').trim()}
                                                     </label>
                                                     <div className="flex items-center gap-2">
@@ -784,24 +784,24 @@ export default function AdminDashboard() {
                                                             type="color"
                                                             value={value as string}
                                                             onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
-                                                            className="h-10 w-12 p-1 rounded border border-gray-300 cursor-pointer"
+                                                            className="h-10 w-12 p-1 rounded border border-input cursor-pointer"
                                                         />
                                                         <input
                                                             type="text"
                                                             value={value as string}
                                                             onChange={(e) => setSettings({ ...settings, [key]: e.target.value })}
-                                                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
+                                                            className="flex-1 px-3 py-2 border border-input rounded-lg text-sm focus:ring-2 focus:ring-ring outline-none font-mono"
                                                         />
                                                     </div>
                                                 </div>
                                             ))}
                                     </div>
 
-                                    <div className="pt-6 border-t border-gray-100 flex justify-end">
+                                    <div className="pt-6 border-t border-border/60 flex justify-end">
                                         <button
                                             type="submit"
                                             disabled={savingSettings}
-                                            className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
+                                            className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-primary-foreground px-6 py-2.5 rounded-lg font-medium transition-colors disabled:opacity-50"
                                         >
                                             {savingSettings ? <Loader2 className="animate-spin w-4 h-4" /> : <Save className="w-4 h-4" />}
                                             Save Changes
@@ -813,9 +813,9 @@ export default function AdminDashboard() {
 
                         {/* Right: Preview */}
                         <div className="flex-1 lg:max-w-md sticky top-8 h-fit">
-                            <h3 className="text-lg font-semibold text-gray-900 mb-4">Live Preview</h3>
+                            <h3 className="text-lg font-semibold text-foreground mb-4">Live Preview</h3>
                             <ThemePreview settings={settings} />
-                            <p className="mt-4 text-sm text-gray-500">
+                            <p className="mt-4 text-sm text-muted-foreground">
                                 This preview approximates how your theme will look in the Mail application.
                                 Some OS-specific rendering may vary.
                             </p>
@@ -833,16 +833,16 @@ export default function AdminDashboard() {
                         aria-label="Close details"
                     />
 
-                    <div className="relative z-[121] w-full max-w-2xl rounded-2xl border border-gray-200 bg-white shadow-2xl">
-                        <div className="flex items-start justify-between px-6 py-5 border-b border-gray-100">
+                    <div className="relative z-[121] w-full max-w-2xl rounded-2xl border border-border bg-card shadow-2xl">
+                        <div className="flex items-start justify-between px-6 py-5 border-b border-border/60">
                             <div>
-                                <h3 className="text-lg font-semibold text-gray-900">{selectedExtension.name}</h3>
-                                <p className="text-xs text-gray-500 mt-1">{selectedExtension.id}</p>
+                                <h3 className="text-lg font-semibold text-foreground">{selectedExtension.name}</h3>
+                                <p className="text-xs text-muted-foreground mt-1">{selectedExtension.id}</p>
                             </div>
                             <button
                                 type="button"
                                 onClick={() => setSelectedExtension(null)}
-                                className="rounded-lg p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                                className="rounded-lg p-2 text-muted-foreground hover:text-foreground/80 hover:bg-muted"
                                 aria-label="Close"
                             >
                                 <X className="w-4 h-4" />
@@ -851,39 +851,39 @@ export default function AdminDashboard() {
 
                         <div className="px-6 py-5 space-y-5 max-h-[75vh] overflow-y-auto">
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                                    <div className="text-xs uppercase tracking-wider text-gray-500">Version</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.version || normalizeTemplate(selectedExtension.template)?.version || 'N/A'}</div>
+                                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Version</div>
+                                    <div className="text-sm font-medium text-foreground mt-1">{selectedExtension.version || normalizeTemplate(selectedExtension.template)?.version || 'N/A'}</div>
                                 </div>
-                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                                    <div className="text-xs uppercase tracking-wider text-gray-500">Auth Type</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{selectedExtension.authType || normalizeTemplate(selectedExtension.template)?.auth?.type || 'NONE'}</div>
+                                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Auth Type</div>
+                                    <div className="text-sm font-medium text-foreground mt-1">{selectedExtension.authType || normalizeTemplate(selectedExtension.template)?.auth?.type || 'NONE'}</div>
                                 </div>
-                                <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                                    <div className="text-xs uppercase tracking-wider text-gray-500">Manifest Version</div>
-                                    <div className="text-sm font-medium text-gray-900 mt-1">{normalizeTemplate(selectedExtension.template)?.manifestVersion || 'N/A'}</div>
+                                <div className="rounded-lg border border-border bg-muted/50 p-3">
+                                    <div className="text-xs uppercase tracking-wider text-muted-foreground">Manifest Version</div>
+                                    <div className="text-sm font-medium text-foreground mt-1">{normalizeTemplate(selectedExtension.template)?.manifestVersion || 'N/A'}</div>
                                 </div>
                             </div>
 
                             <div>
-                                <h4 className="text-sm font-semibold text-gray-900">Description</h4>
-                                <p className="text-sm text-gray-600 mt-1">{selectedExtension.description || 'No description provided.'}</p>
+                                <h4 className="text-sm font-semibold text-foreground">Description</h4>
+                                <p className="text-sm text-muted-foreground mt-1">{selectedExtension.description || 'No description provided.'}</p>
                             </div>
 
                             <div>
-                                <h4 className="text-sm font-semibold text-gray-900">Required Environment Variables</h4>
-                                <p className="text-xs text-gray-500 mt-1">Detected from extension manifest and auth configuration.</p>
+                                <h4 className="text-sm font-semibold text-foreground">Required Environment Variables</h4>
+                                <p className="text-xs text-muted-foreground mt-1">Detected from extension manifest and auth configuration.</p>
 
                                 {requiredEnvVars.length > 0 ? (
-                                    <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                                        <div className="space-y-1 font-mono text-xs text-gray-700">
+                                    <div className="mt-3 rounded-lg border border-border bg-muted/50 p-3">
+                                        <div className="space-y-1 font-mono text-xs text-foreground/80">
                                             {requiredEnvVars.map((envVar) => (
                                                 <div key={envVar}>{envVar}=</div>
                                             ))}
                                         </div>
                                     </div>
                                 ) : (
-                                    <div className="mt-3 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-xs text-gray-500">
+                                    <div className="mt-3 rounded-lg border border-dashed border-input bg-muted/50 p-3 text-xs text-muted-foreground">
                                         No required environment variables were detected for this extension.
                                     </div>
                                 )}

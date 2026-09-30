@@ -6,6 +6,8 @@ import { randomBytes } from 'crypto';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { buildAppointmentConfirmationHtml } from '@/lib/calendar/email-templates';
 import { patchMeetSpaceOpen } from '@/lib/google/meet';
+import { formatFromHeader, isValidEmailAddress, sanitizeDisplayName } from '@/lib/mail-validation';
+import { getClientIp, rateLimit } from '@/lib/security';
 
 // ─── ICS builder ────────────────────────────────────────────────────────────
 
@@ -257,7 +259,7 @@ async function sendAndPersistEmail({
     subject: string; html: string; attachmentIcs: string; icsFilename: string;
 }) {
     const timestamp = Date.now();
-    const formattedFrom = `${fromName} <${fromEmail}>`;
+    const formattedFrom = formatFromHeader(fromName, fromEmail);
     const icsBuffer = Buffer.from(attachmentIcs, 'utf8');
     const safeSubject = subject.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
     const htmlKey = `sent/${fromEmail}/${timestamp}-${safeSubject}.html`;
@@ -306,12 +308,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
     const { scheduleId } = await params;
     const body = await req.json();
 
-    const guestName = String(body?.guestName || '').trim();
+    // Datos del invitado (endpoint publico): sin caracteres de control y con longitud acotada
+    const guestName = sanitizeDisplayName(body?.guestName).slice(0, 100);
     const guestEmail = String(body?.guestEmail || '').trim().toLowerCase();
     const slotIso = String(body?.startsAt || '').trim();
 
-    if (!guestName || !guestEmail || !guestEmail.includes('@') || !slotIso) {
+    if (!guestName || !guestEmail || !isValidEmailAddress(guestEmail) || !slotIso) {
         return NextResponse.json({ error: 'Name, email, and slot are required' }, { status: 400 });
+    }
+
+    // Anti-abuso: el endpoint publico envia correo a una direccion arbitraria (relay de spam).
+    const ipLimit = rateLimit(`book-ip:${getClientIp(req)}`, 10, 60 * 60 * 1000);
+    const mailLimit = rateLimit(`book-mail:${guestEmail}`, 3, 60 * 60 * 1000);
+    if (!ipLimit.ok || !mailLimit.ok) {
+        return NextResponse.json({ error: 'Too many booking requests. Try again later.' }, { status: 429 });
     }
 
     const startsAt = new Date(slotIso);
@@ -427,7 +437,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
             calendarEventId,
             guestName,
             guestEmail,
-            guestNotes: body?.guestNotes ? String(body.guestNotes).trim() : null,
+            guestNotes: body?.guestNotes ? String(body.guestNotes).trim().slice(0, 2000) : null,
             startsAt,
             endsAt,
             meetUrl,

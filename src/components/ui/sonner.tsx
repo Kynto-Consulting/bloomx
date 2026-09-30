@@ -1,10 +1,13 @@
 'use client';
 
 import { Toaster as Sonner } from 'sonner';
+import { useTheme } from '@/components/ThemeProvider';
 
 export function Toaster() {
+    const { scheme } = useTheme();
     return (
         <Sonner
+            theme={scheme}
             className="toaster group"
             toastOptions={{
                 classNames: {

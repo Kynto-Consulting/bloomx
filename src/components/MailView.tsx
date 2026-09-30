@@ -16,6 +16,7 @@ import { ExtensionLoader } from './expansions/ExtensionLoader';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover } from './ui/Popover';
 import { AccountManager } from '@/lib/account-manager';
+import { splitAddressList, extractEmailOnly, buildReplyAllRecipients } from '@/lib/email-utils';
 
 const ENABLE_THREAD_VIEW = true;
 
@@ -85,17 +86,7 @@ function formatInviteDate(value?: string | null) {
 }
 
 function extractRecipientEmails(value?: string | null): string[] {
-    return String(value || '')
-        .split(',')
-        .map((entry) => {
-            const trimmed = entry.trim();
-            if (!trimmed) return '';
-
-            const angled = trimmed.match(/<([^>]+)>/);
-            const candidate = angled?.[1] ? angled[1].trim() : trimmed;
-            return candidate.toLowerCase();
-        })
-        .filter((email) => email.includes('@'));
+    return splitAddressList(value).map(extractEmailOnly).filter(Boolean);
 }
 
 function resolveSenderFromEmail(email: { to?: string | null; cleanTo?: string | null }): string | undefined {
@@ -441,20 +432,28 @@ export function MailView() {
         const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
         const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
 
-        const replyTarget = targetEmail.replyTo || targetEmail.from;
         const replyFrom = resolveSenderFromEmail(targetEmail);
-        const currentEmail = (replyFrom || AccountManager.getActiveAccount()?.email || '').toLowerCase();
+        const ownEmails = [
+            replyFrom || '',
+            AccountManager.getActiveAccount()?.email || '',
+            ...AccountManager.getAccounts().map(a => a.email),
+            ...extractRecipientEmails(targetEmail.cleanTo).filter(e => !!AccountManager.getAccountByEmail(e)),
+            ...extractRecipientEmails(targetEmail.to).filter(e => !!AccountManager.getAccountByEmail(e)),
+        ];
 
-        // All original To recipients except ourselves and the sender we're replying to
-        const replyTargetEmail = extractRecipientEmails(replyTarget)[0]?.toLowerCase() || '';
-        const ccRecipients = extractRecipientEmails(targetEmail.to)
-            .filter(e => e.toLowerCase() !== currentEmail && e.toLowerCase() !== replyTargetEmail);
+        const recipients = buildReplyAllRecipients({
+            from: targetEmail.from,
+            replyTo: targetEmail.replyTo,
+            to: targetEmail.to,
+            cc: targetEmail.cc,
+            ownEmails,
+        });
 
         openCompose({
             id: crypto.randomUUID(),
             from: replyFrom,
-            to: replyTarget,
-            cc: ccRecipients.length > 0 ? ccRecipients.join(', ') : undefined,
+            to: recipients.to.join(', '),
+            cc: recipients.cc.length > 0 ? recipients.cc.join(', ') : undefined,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
             body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
             minimized: false
@@ -473,6 +472,17 @@ export function MailView() {
             id: crypto.randomUUID(),
             from: forwardFrom,
             to: '',
+            attachments: (targetEmail.attachments || [])
+                .filter((att: any) => att && (att.key || att.url))
+                .map((att: any) => ({
+                    filename: att.filename,
+                    mimeType: att.mimeType || 'application/octet-stream',
+                    size: att.size || 0,
+                    key: att.key,
+                    // Solo enviamos la URL si no hay key (el servidor lee los bytes por key).
+                    url: att.key ? undefined : att.url,
+                    forwarded: true,
+                })),
             subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
             body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${targetContent}`,
             minimized: false
@@ -537,13 +547,13 @@ export function MailView() {
                     onClose={() => setShowLabelMenu(false)}
                     width={260}
                     header={false}
-                    className="rounded-xl border border-gray-200 bg-white p-2 shadow-2xl"
+                    className="rounded-xl border border-border bg-card p-2 shadow-2xl"
                 >
                     <div className="flex flex-col gap-1">
-                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-gray-500">Labels</div>
+                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Labels</div>
 
                         {availableLabels.length === 0 ? (
-                            <div className="px-2 py-2 text-sm text-gray-500">No labels yet</div>
+                            <div className="px-2 py-2 text-sm text-muted-foreground">No labels yet</div>
                         ) : (
                             availableLabels.map((label) => {
                                 const selected = Boolean(data?.email?.labels?.some((item: any) => item.id === label.id));
@@ -553,21 +563,21 @@ export function MailView() {
                                         key={label.id}
                                         type="button"
                                         onClick={() => toggleLabel(label.id)}
-                                        className="flex items-center justify-between rounded-lg px-2 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                                        className="flex items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground/80 hover:bg-muted"
                                     >
                                         <span className="truncate">{label.name}</span>
-                                        {selected ? <Check className="h-4 w-4 text-green-600" /> : null}
+                                        {selected ? <Check className="h-4 w-4 text-success" /> : null}
                                     </button>
                                 );
                             })
                         )}
 
-                        <div className="my-1 border-t border-gray-100" />
+                        <div className="my-1 border-t border-border/60" />
 
                         <button
                             type="button"
                             onClick={createAndApplyLabel}
-                            className="rounded-lg px-2 py-2 text-left text-sm font-medium text-blue-700 hover:bg-blue-50"
+                            className="rounded-lg px-2 py-2 text-left text-sm font-medium text-primary hover:bg-primary/10"
                         >
                             Create label
                         </button>
@@ -669,16 +679,16 @@ export function MailView() {
                                                     {invitePreview && (() => {
                                                         const meetProvider = getMeetProvider(invitePreview.meetUrl);
                                                         return (
-                                                        <div className="mb-6 rounded-2xl border border-blue-200 bg-blue-50/70 p-4 text-sm text-slate-900">
+                                                        <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/7 p-4 text-sm text-foreground">
                                                             <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
                                                                 <div className="space-y-2">
-                                                                    <div className="flex items-center gap-2 font-medium text-blue-900">
+                                                                    <div className="flex items-center gap-2 font-medium text-foreground">
                                                                         <CalendarDays className="h-4 w-4" />
                                                                         <span>Calendar invitation detected</span>
                                                                     </div>
-                                                                    <div className="text-base font-semibold text-slate-900">{invitePreview.title}</div>
+                                                                    <div className="text-base font-semibold text-foreground">{invitePreview.title}</div>
                                                                     {formattedStartsAt && (
-                                                                        <div className="flex items-center gap-2 text-slate-700">
+                                                                        <div className="flex items-center gap-2 text-foreground/80">
                                                                             <Clock className="h-4 w-4" />
                                                                             <span>
                                                                                 {formattedStartsAt}
@@ -687,14 +697,14 @@ export function MailView() {
                                                                         </div>
                                                                     )}
                                                                     {(invitePreview.location || invitePreview.meetUrl) && (
-                                                                        <div className="flex items-center gap-2 text-slate-700">
+                                                                        <div className="flex items-center gap-2 text-foreground/80">
                                                                             <MapPin className="h-4 w-4 shrink-0" />
                                                                             {invitePreview.meetUrl ? (
                                                                                 <a
                                                                                     href={invitePreview.meetUrl}
                                                                                     target="_blank"
                                                                                     rel="noopener noreferrer"
-                                                                                    className="font-medium text-blue-700 hover:underline"
+                                                                                    className="font-medium text-primary hover:underline"
                                                                                 >
                                                                                     {meetProvider || invitePreview.location || 'Unirse a la reunión'}
                                                                                 </a>
@@ -708,7 +718,7 @@ export function MailView() {
                                                                             type="button"
                                                                             disabled={isInviteActionPending}
                                                                             onClick={() => handleInviteResponse(item.email.id, 'accepted')}
-                                                                            className="inline-flex items-center rounded-full border border-emerald-300 bg-white px-3 py-2 text-sm font-medium text-emerald-900 transition-colors hover:bg-emerald-50 disabled:opacity-60"
+                                                                            className="inline-flex items-center rounded-full border border-success/45 bg-card px-3 py-2 text-sm font-medium text-success transition-colors hover:bg-success/10 disabled:opacity-60"
                                                                         >
                                                                             Accept
                                                                         </button>
@@ -716,7 +726,7 @@ export function MailView() {
                                                                             type="button"
                                                                             disabled={isInviteActionPending}
                                                                             onClick={() => handleInviteResponse(item.email.id, 'tentative')}
-                                                                            className="inline-flex items-center rounded-full border border-amber-300 bg-white px-3 py-2 text-sm font-medium text-amber-900 transition-colors hover:bg-amber-50 disabled:opacity-60"
+                                                                            className="inline-flex items-center rounded-full border border-warning/45 bg-card px-3 py-2 text-sm font-medium text-warning transition-colors hover:bg-warning/10 disabled:opacity-60"
                                                                         >
                                                                             Maybe
                                                                         </button>
@@ -724,7 +734,7 @@ export function MailView() {
                                                                             type="button"
                                                                             disabled={isInviteActionPending}
                                                                             onClick={() => handleInviteResponse(item.email.id, 'declined')}
-                                                                            className="inline-flex items-center rounded-full border border-rose-300 bg-white px-3 py-2 text-sm font-medium text-rose-900 transition-colors hover:bg-rose-50 disabled:opacity-60"
+                                                                            className="inline-flex items-center rounded-full border border-destructive/45 bg-card px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
                                                                         >
                                                                             Decline
                                                                         </button>
@@ -733,7 +743,7 @@ export function MailView() {
                                                                                 href={invitePreview.meetUrl}
                                                                                 target="_blank"
                                                                                 rel="noopener noreferrer"
-                                                                                className="inline-flex items-center rounded-full border border-blue-400 bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                                                                                className="inline-flex items-center rounded-full border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
                                                                             >
                                                                                 Unirse a {meetProvider || 'la reunión'}
                                                                             </a>
@@ -744,7 +754,7 @@ export function MailView() {
                                                                     type="button"
                                                                     disabled={addCalendarEmailId === item.email.id}
                                                                     onClick={() => handleAddToCalendar(item.email.id, invitePreview)}
-                                                                    className="inline-flex items-center gap-2 rounded-full border border-blue-300 bg-white px-3 py-2 text-sm font-medium text-blue-900 transition-colors hover:bg-blue-100 disabled:opacity-60"
+                                                                    className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-primary/15 disabled:opacity-60"
                                                                 >
                                                                     <CalendarDays className="h-4 w-4" />
                                                                     Agregar al calendario

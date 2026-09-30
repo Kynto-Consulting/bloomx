@@ -28,7 +28,6 @@ function LoginForm() {
         setLoading(true);
         setError('');
 
-        console.log('[LOGIN-CLIENT] Submitting login request...', { email: data.email });
         try {
             const res = await fetch('/api/auth/login', {
                 method: 'POST',
@@ -37,14 +36,12 @@ function LoginForm() {
             });
 
             const result = await res.json();
-            console.log('[LOGIN-CLIENT] Login response:', result);
 
             if (!res.ok) {
-                console.error('[LOGIN-CLIENT] Login error:', result.error);
+                console.error('[LOGIN-CLIENT] Login failed');
                 setError(result.error || 'Invalid credentials');
                 setLoading(false);
             } else {
-                console.log('[LOGIN-CLIENT] Login successful, redirecting manually...');
 
                 // Store in Account Manager (Multi-account support)
                 if (result.token && result.user) {
@@ -66,7 +63,7 @@ function LoginForm() {
                 window.location.href = '/';
             }
         } catch (e) {
-            console.error('[LOGIN-CLIENT] Login Exception:', e);
+            console.error('[LOGIN-CLIENT] Login exception');
             setError('An unexpected error occurred');
             setLoading(false);
         }
@@ -75,15 +72,14 @@ function LoginForm() {
     return (
         <div className="container relative h-screen flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
             {/* Left Side - Hero */}
-            <div className="relative hidden h-full flex-col bg-muted p-10 text-white lg:flex">
+            <div className="relative hidden h-full flex-col bg-muted p-10 text-primary-foreground lg:flex">
                 <div
                     className="absolute inset-0 bg-primary/95"
-                    style={{ backgroundColor: brand.color ? `${brand.color}F2` : undefined }} // F2 = 95% opacity
                 />
                 <div className="relative z-20 flex items-center gap-2 text-lg font-medium">
                     {brand.logo ? <img src={brand.logo} className="h-6 w-6 object-contain" alt={brand.name} /> : <Mail className="h-6 w-6" />}
                     {brand.name}
-                    <Link href="/docs" className="ml-6 text-sm font-normal text-zinc-300 hover:text-white transition-colors flex items-center gap-1 border-l border-zinc-600 pl-6">
+                    <Link href="/docs" className="ml-6 text-sm font-normal text-primary-foreground/70 hover:text-primary-foreground transition-colors flex items-center gap-1 border-l border-primary-foreground/40 pl-6">
                         <Book className="h-4 w-4" />
                         Docs
                     </Link>
@@ -120,7 +116,7 @@ function LoginForm() {
                     </div>
 
                     {registered && (
-                        <div className="p-3 rounded-md bg-green-500/10 border border-green-500/20 text-green-600 text-sm text-center">
+                        <div className="p-3 rounded-md bg-success/10 border border-success text-success text-sm text-center">
                             Account created successfully! Please log in.
                         </div>
                     )}

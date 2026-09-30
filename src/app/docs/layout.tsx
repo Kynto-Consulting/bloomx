@@ -78,7 +78,7 @@ function NavLink({ href, children, icon: Icon }: { href: string, children: React
     return (
         <Link
             href={href}
-            className="group flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-md text-primary-foreground/90 hover:bg-white/10 hover:text-white transition-all duration-200"
+            className="group flex items-center gap-2.5 px-3 py-2 text-sm font-medium rounded-md text-primary-foreground/90 hover:bg-primary-foreground/10 hover:text-primary-foreground transition-all duration-200"
         >
             {Icon && <Icon className="h-4 w-4 opacity-70 group-hover:opacity-100 transition-colors" />}
             {children}

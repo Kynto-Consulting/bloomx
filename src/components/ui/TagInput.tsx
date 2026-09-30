@@ -3,6 +3,7 @@
 import * as React from 'react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { splitAddressList } from '@/lib/email-utils';
 
 interface TagInputSuggestion {
     email: string;
@@ -26,9 +27,13 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
     const lastCommitWasKeyboardRef = React.useRef(false);
 
     const addTag = React.useCallback((nextValue: string, commitSource: 'keyboard' | 'mouse' | 'blur' = 'keyboard') => {
-        const newTag = nextValue.trim().replace(',', '');
-        if (newTag && !value.includes(newTag)) {
-            onChange([...value, newTag]);
+        const incoming = splitAddressList(nextValue);
+        const merged = [...value];
+        for (const tag of incoming) {
+            if (!merged.includes(tag)) merged.push(tag);
+        }
+        if (merged.length !== value.length) {
+            onChange(merged);
         }
         lastCommitWasKeyboardRef.current = commitSource !== 'blur';
         setInputValue('');

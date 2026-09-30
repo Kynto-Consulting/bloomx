@@ -10,7 +10,7 @@ import { useReAuth, type ReAuthRequest } from '@/contexts/ReAuthContext';
 const PROVIDER_META: Record<string, { label: string; color: string; logo: React.ReactNode }> = {
     google: {
         label: 'Google',
-        color: 'bg-white border border-slate-200',
+        color: 'bg-card border border-border',
         logo: (
             <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden>
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -22,7 +22,7 @@ const PROVIDER_META: Record<string, { label: string; color: string; logo: React.
     },
     zoom: {
         label: 'Zoom',
-        color: 'bg-blue-50 border border-blue-200',
+        color: 'bg-primary/10 border border-primary/20',
         logo: (
             <svg viewBox="0 0 24 24" className="w-4 h-4" fill="#2D8CFF" aria-hidden>
                 <path d="M24 12c0 6.627-5.373 12-12 12S0 18.627 0 12 5.373 0 12 0s12 5.373 12 12zm-6.793-4.5H8.793C7.246 7.5 6 8.746 6 10.293v5.414l2.793-2.086v1.086c0 .828.672 1.5 1.5 1.5h6.414c.828 0 1.5-.672 1.5-1.5v-5.414l-2.793 2.086v-1.086c0-.828-.672-1.5-1.5-1.5H6.793z" />
@@ -46,8 +46,8 @@ const PROVIDER_META: Record<string, { label: string; color: string; logo: React.
 function getProviderMeta(provider: string) {
     return PROVIDER_META[provider] ?? {
         label: provider.charAt(0).toUpperCase() + provider.slice(1),
-        color: 'bg-slate-50 border border-slate-200',
-        logo: <span className="w-4 h-4 rounded-full bg-slate-400 inline-block" />,
+        color: 'bg-muted/50 border border-border',
+        logo: <span className="w-4 h-4 rounded-full bg-muted-foreground/40 inline-block" />,
     };
 }
 
@@ -67,18 +67,18 @@ function ReAuthCard({ request, onReconnect, onDismiss }: {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-            className="w-80 rounded-xl bg-white shadow-xl ring-1 ring-black/8 overflow-hidden"
+            className="w-80 rounded-xl bg-card shadow-xl ring-1 ring-border overflow-hidden"
         >
             {/* Header stripe */}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-100">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="text-xs font-semibold text-amber-700 tracking-wide uppercase">
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-warning/10 border-b border-warning/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+                <span className="text-xs font-semibold text-warning tracking-wide uppercase">
                     Permiso requerido
                 </span>
                 <button
                     onClick={onDismiss}
                     aria-label="Descartar"
-                    className="ml-auto p-0.5 rounded-md text-amber-400 hover:text-amber-600 hover:bg-amber-100 transition-colors"
+                    className="ml-auto p-0.5 rounded-md text-warning hover:text-warning hover:bg-warning/15 transition-colors"
                 >
                     <X className="w-3.5 h-3.5" />
                 </button>
@@ -92,14 +92,14 @@ function ReAuthCard({ request, onReconnect, onDismiss }: {
                 </div>
 
                 {/* Reason */}
-                <p className="text-sm text-slate-700 leading-snug">
+                <p className="text-sm text-foreground/80 leading-snug">
                     {request.reason}
                 </p>
 
                 {/* Requested by */}
                 {request.requestedBy && (
-                    <p className="text-xs text-slate-400">
-                        Solicitado por <span className="font-medium text-slate-500">{request.requestedBy}</span>
+                    <p className="text-xs text-muted-foreground">
+                        Solicitado por <span className="font-medium text-muted-foreground">{request.requestedBy}</span>
                     </p>
                 )}
 
@@ -107,14 +107,14 @@ function ReAuthCard({ request, onReconnect, onDismiss }: {
                 <div className="flex items-center gap-2 pt-1">
                     <button
                         onClick={onReconnect}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold hover:bg-slate-700 active:scale-95 transition-all"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-foreground text-background text-xs font-semibold hover:bg-foreground/80 active:scale-95 transition-all"
                     >
                         <RefreshCw className="w-3 h-3" />
                         Reconectar {meta.label}
                     </button>
                     <button
                         onClick={onDismiss}
-                        className="px-3 py-1.5 rounded-lg text-slate-500 text-xs font-medium hover:bg-slate-100 active:scale-95 transition-all"
+                        className="px-3 py-1.5 rounded-lg text-muted-foreground text-xs font-medium hover:bg-muted active:scale-95 transition-all"
                     >
                         Más tarde
                     </button>
@@ -140,17 +140,17 @@ function CollapsedSummaryCard({ requests, onExpand, onDismissAll }: {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 16, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 380, damping: 28 }}
-            className="w-80 rounded-xl bg-white shadow-xl ring-1 ring-black/8 overflow-hidden"
+            className="w-80 rounded-xl bg-card shadow-xl ring-1 ring-border overflow-hidden"
         >
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border-b border-amber-100">
-                <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                <span className="text-xs font-semibold text-amber-700 tracking-wide uppercase">
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-warning/10 border-b border-warning/30">
+                <AlertTriangle className="w-3.5 h-3.5 text-warning shrink-0" />
+                <span className="text-xs font-semibold text-warning tracking-wide uppercase">
                     {requests.length} conexiones necesitan atención
                 </span>
                 <button
                     onClick={onDismissAll}
                     aria-label="Descartar todo"
-                    className="ml-auto p-0.5 rounded-md text-amber-400 hover:text-amber-600 hover:bg-amber-100 transition-colors"
+                    className="ml-auto p-0.5 rounded-md text-warning hover:text-warning hover:bg-warning/15 transition-colors"
                 >
                     <X className="w-3.5 h-3.5" />
                 </button>
@@ -166,7 +166,7 @@ function CollapsedSummaryCard({ requests, onExpand, onDismissAll }: {
                                 {meta.logo}
                                 {meta.label}
                             </div>
-                            <span className="text-xs text-slate-500">
+                            <span className="text-xs text-muted-foreground">
                                 {count === 1 ? '1 permiso' : `${count} permisos`}
                             </span>
                         </div>
@@ -175,7 +175,7 @@ function CollapsedSummaryCard({ requests, onExpand, onDismissAll }: {
 
                 <button
                     onClick={onExpand}
-                    className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 pt-1 transition-colors"
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground pt-1 transition-colors"
                 >
                     <ChevronUp className="w-3 h-3" />
                     Ver detalles
@@ -232,7 +232,7 @@ export function ReAuthBanner() {
                 <motion.button
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    className="pointer-events-auto flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800 bg-white/80 backdrop-blur-sm px-2 py-1 rounded-lg shadow ring-1 ring-black/5 transition-colors"
+                    className="pointer-events-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground bg-card/80 backdrop-blur-sm px-2 py-1 rounded-lg shadow ring-1 ring-border transition-colors"
                     onClick={() => setExpanded(false)}
                 >
                     <ChevronDown className="w-3 h-3" />

@@ -228,14 +228,14 @@ function BookingModal({
                             {/* Form */}
                             <div className="px-5 py-4 space-y-3.5">
                                 <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Your name <span className="text-rose-500">*</span></label>
+                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Your name <span className="text-destructive">*</span></label>
                                     <input value={name} onChange={e => setName(e.target.value)}
                                         placeholder="John Doe"
                                         className={inputCls}
                                         style={{ '--tw-ring-color': c } as any} />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email <span className="text-rose-500">*</span></label>
+                                    <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Email <span className="text-destructive">*</span></label>
                                     <input type="email" value={email} onChange={e => setEmail(e.target.value)}
                                         placeholder="john@example.com"
                                         className={inputCls}

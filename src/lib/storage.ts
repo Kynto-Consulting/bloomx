@@ -15,6 +15,10 @@ const s3Client = new S3Client({
 
 const BUCKET = (env.S3_BUCKET || env.B2_BUCKET)!;
 
+const SSE_RAW = String(process.env.S3_SSE || '').trim();
+const SSE_MODE: 'AES256' | 'aws:kms' | undefined =
+    SSE_RAW === 'AES256' || SSE_RAW === 'aws:kms' ? SSE_RAW : undefined;
+
 // Basic Local Storage Implementation for Dev
 import fs from 'fs';
 import path from 'path';
@@ -51,6 +55,8 @@ export async function uploadToStorage(key: string, body: Buffer | string | Reada
                     Key: key,
                     Body: body,
                     ContentType: contentType,
+                    // Cifrado en reposo del lado del proveedor (opt-in: S3_SSE=AES256 o aws:kms).
+                    ...(SSE_MODE ? { ServerSideEncryption: SSE_MODE } : {}),
                 },
             });
             await upload.done();
@@ -98,6 +104,26 @@ export async function getFromStorage(key: string) {
         } catch (e) {
             return null;
         }
+    }
+}
+
+export async function getBufferFromStorage(key: string): Promise<Buffer | null> {
+    if (isS3Configured) {
+        try {
+            const response = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
+            const bytes = await response.Body?.transformToByteArray();
+            return bytes ? Buffer.from(bytes) : null;
+        } catch (error) {
+            console.error("Error getting binary from storage:", error);
+            return null;
+        }
+    }
+    try {
+        const fullPath = path.join(LOCAL_STORAGE_PATH, key);
+        if (!fs.existsSync(fullPath)) return null;
+        return await fs.promises.readFile(fullPath);
+    } catch (e) {
+        return null;
     }
 }
 

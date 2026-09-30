@@ -59,9 +59,9 @@ export function MailGroupsSettings({ settings, onSave }: MailGroupsSettingsProps
 
     return (
         <div className="space-y-4">
-            <div className="flex items-start justify-between gap-3 rounded-2xl border bg-white p-4">
+            <div className="flex items-start justify-between gap-3 rounded-2xl border bg-card p-4">
                 <div>
-                    <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                         <Users className="h-4 w-4" /> Mail groups
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -71,20 +71,20 @@ export function MailGroupsSettings({ settings, onSave }: MailGroupsSettingsProps
                 <button
                     type="button"
                     onClick={() => setDraftGroups((current) => [...current, { key: crypto.randomUUID(), alias: '', members: [] }])}
-                    className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    className="inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium text-foreground/80 hover:bg-muted/50"
                 >
                     <Plus className="h-4 w-4" /> Add group
                 </button>
             </div>
 
             {draftGroups.length === 0 && (
-                <div className="rounded-2xl border border-dashed bg-white p-6 text-sm text-muted-foreground">
+                <div className="rounded-2xl border border-dashed bg-card p-6 text-sm text-muted-foreground">
                     No aliases yet. Add one and use contact suggestions to assemble the members.
                 </div>
             )}
 
             {draftGroups.map((group, index) => (
-                <div key={group.key} className="space-y-3 rounded-2xl border bg-white p-4">
+                <div key={group.key} className="space-y-3 rounded-2xl border bg-card p-4">
                     <div className="flex items-center justify-between gap-3">
                         <input
                             value={group.alias}
@@ -98,7 +98,7 @@ export function MailGroupsSettings({ settings, onSave }: MailGroupsSettingsProps
                         <button
                             type="button"
                             onClick={() => setDraftGroups((current) => current.filter((_, entryIndex) => entryIndex !== index))}
-                            className="rounded-xl border px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                            className="rounded-xl border px-3 py-2 text-sm font-medium text-foreground/80 hover:bg-muted/50"
                         >
                             Remove
                         </button>
