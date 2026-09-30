@@ -14,12 +14,17 @@ import {
     Upload, FileSpreadsheet, Mail, Send, Eye, ChevronDown, ChevronUp,
     X, Plus, Zap, Filter, CheckCircle, AlertCircle, Menu,
     RotateCcw, Variable, Table2, Hash, Calendar, Type,
-    Download, FolderOpen, Maximize2, Minimize2, PanelTopClose
+    Download, FolderOpen, Maximize2, Minimize2, PanelTopClose, FileText, Clock, Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { SafeIframe } from '@/components/ui/SafeIframe';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { TemplateLibrary } from '@/components/elixir/TemplateLibrary';
+import { CampaignHistory } from '@/components/elixir/CampaignHistory';
+import { useI18n } from '@/components/I18nProvider';
+import { createBackgroundCampaign, ElixirApiError, type TemplateDto } from '@/lib/elixir-campaigns-client';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -218,7 +223,16 @@ const SYSTEM_VAR_KEYS = [
 
 export default function ElixirPage() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<'data' | 'template' | 'send'>('data');
+    const [activeTab, setActiveTab] = useState<'data' | 'template' | 'send' | 'campaigns'>('data');
+    const { t } = useI18n();
+    // Plantillas persistentes y envio en segundo plano
+    const [templatesOpen, setTemplatesOpen] = useState(false);
+    const [bgConfirmOpen, setBgConfirmOpen] = useState(false);
+    const [bgBusy, setBgBusy] = useState(false);
+    const [bgProgress, setBgProgress] = useState<{ done: number; total: number } | null>(null);
+    const [bgError, setBgError] = useState<string | null>(null);
+    const [focusCampaignId, setFocusCampaignId] = useState<string | null>(null);
+    const [historyKey, setHistoryKey] = useState(0);
 
     // Domain config for brand system vars + theme
     const { config: domainConfig } = useDomainConfig();
@@ -529,6 +543,60 @@ export default function ElixirPage() {
     };
     const handleCancel = () => { abortRef.current.aborted = true; };
 
+    // ── Envio en segundo plano (campana persistente procesada por el servidor) ──
+    const handleBackgroundSend = () => {
+        if (sending || bgBusy) return;
+        if (validRecipients.length === 0) { toast.error('No hay destinatarios válidos'); return; }
+        if (!subject.trim()) { toast.error('Asunto vacío'); return; }
+        if (!templateHtml.trim()) { toast.error('La plantilla está vacía'); return; }
+        const pf = preflight(validRecipients, {
+            subject: { source: subject },
+            body: { source: templateHtml, autoescape: true },
+            fromName: { source: senderConfig.fromName },
+            fromEmail: { source: senderConfig.fromEmail },
+            cc: { source: senderConfig.cc },
+            bcc: { source: senderConfig.bcc },
+        }, systemVars, { strictVariables: true, timezone, locale: 'es' });
+        if (pf.compileError) {
+            toast.error(`Error en ${pf.compileError.field}: ${pf.compileError.message}`);
+            setActiveTab('template');
+            return;
+        }
+        if (pf.issueCount > 0) {
+            const first = pf.issues[0];
+            toast.warning(`${pf.issueCount} fila(s) con problema de plantilla se marcarán como error. Ej.: fila ${first.index + 1} (${first.field}): ${first.message}`);
+        }
+        setBgError(null);
+        setBgConfirmOpen(true);
+    };
+
+    const startBackground = async () => {
+        if (bgBusy) return;
+        setBgBusy(true); setBgError(null); setBgProgress({ done: 0, total: validRecipients.length });
+        try {
+            const c = await createBackgroundCampaign({
+                name: subject.slice(0, 80), subject, template: templateHtml, recipientColumn, senderConfig,
+                systemVars, timezone, autoescape: true, strictVariables: true, unsubscribeFooter: true,
+            }, validRecipients, { onProgress: (done, total) => setBgProgress({ done, total }) });
+            toast.success(t('elixir.bgStarted'));
+            setBgConfirmOpen(false);
+            setFocusCampaignId(c.id);
+            setHistoryKey(k => k + 1);
+            setActiveTab('campaigns');
+        } catch (e) {
+            setBgError(e instanceof ElixirApiError && e.code === 'elixir_tables_missing' ? t('elixir.tablesMissing')
+                : e instanceof ElixirApiError && e.status === 0 ? t('common.networkError')
+                : e instanceof ElixirApiError && e.status > 0 && e.status < 500 ? e.message : t('elixir.bgFailed'));
+        } finally { setBgBusy(false); setBgProgress(null); }
+    };
+
+    const handleLoadTemplate = (tpl: TemplateDto) => {
+        setSubject(tpl.subject);
+        setTemplateHtml(tpl.body);
+        const sc = tpl.senderConfig || {};
+        setSenderConfig({ fromName: sc.fromName ?? '', fromEmail: sc.fromEmail ?? '', cc: sc.cc ?? '', bcc: sc.bcc ?? '' });
+    };
+
     useEffect(() => {
         if (!sending) return;
         const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
@@ -603,6 +671,27 @@ export default function ElixirPage() {
                             </span>
                         )}
                         <button
+                            type="button"
+                            onClick={() => setTemplatesOpen(true)}
+                            aria-haspopup="dialog"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors"
+                        >
+                            <FileText className="h-4 w-4" aria-hidden="true" />
+                            <span className="hidden sm:inline">{t('elixir.templates')}</span>
+                            <span className="sr-only sm:hidden">{t('elixir.templates')}</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleBackgroundSend}
+                            disabled={sending || bgBusy || validRecipients.length === 0}
+                            aria-haspopup="dialog"
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <Clock className="h-4 w-4" aria-hidden="true" />
+                            <span className="hidden lg:inline">{t('elixir.bgSend')}</span>
+                            <span className="sr-only lg:hidden">{t('elixir.bgSend')}</span>
+                        </button>
+                        <button
                             onClick={handleSend}
                             disabled={sending || validRecipients.length === 0}
                             className={cn(
@@ -626,7 +715,8 @@ export default function ElixirPage() {
                         { id: 'data', label: 'Datos', icon: Table2 },
                         { id: 'template', label: 'Plantilla', icon: Variable },
                         { id: 'send', label: 'Resultados', icon: CheckCircle },
-                    ] as { id: 'data' | 'template' | 'send'; label: string; icon: any }[]).map(tab => (
+                        { id: 'campaigns', label: t('elixir.campaignsTab'), icon: Clock },
+                    ] as { id: 'data' | 'template' | 'send' | 'campaigns'; label: string; icon: any }[]).map(tab => (
                         <button key={tab.id} onClick={() => setActiveTab(tab.id)}
                             className={cn(
                                 "flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
@@ -686,8 +776,39 @@ export default function ElixirPage() {
                     {activeTab === 'send' && (
                         <SendTab campaign={campaign} onResume={handleResume} onCancel={handleCancel} onRetryErrors={handleRetryErrors} />
                     )}
+                    {activeTab === 'campaigns' && (
+                        <CampaignHistory initialId={focusCampaignId} refreshKey={historyKey} />
+                    )}
                 </div>
             </div>
+
+            <TemplateLibrary
+                open={templatesOpen}
+                onClose={() => setTemplatesOpen(false)}
+                current={{ subject, body: templateHtml, senderConfig }}
+                onLoad={handleLoadTemplate}
+            />
+            <ConfirmDialog
+                open={bgConfirmOpen}
+                busy={bgBusy}
+                error={bgError}
+                title={t('elixir.bgConfirmTitle')}
+                description={
+                    <>
+                        <span>{t('elixir.bgConfirmBody', { count: validRecipients.length })}</span>
+                        {bgProgress && (
+                            <span role="status" className="mt-3 flex items-center gap-2 text-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                                {t('elixir.bgUploading', { done: bgProgress.done, total: bgProgress.total })}
+                            </span>
+                        )}
+                    </>
+                }
+                confirmLabel={bgBusy ? t('elixir.bgSending') : t('elixir.bgConfirm')}
+                cancelLabel={t('common.cancel')}
+                onConfirm={() => void startBackground()}
+                onCancel={() => setBgConfirmOpen(false)}
+            />
         </div>
     );
 }

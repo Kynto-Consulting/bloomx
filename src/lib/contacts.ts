@@ -51,3 +51,37 @@ export function parseContactPagination(params: URLSearchParams): { limit: number
     const q = stripControlChars(params.get('q')).slice(0, 100);
     return { limit, offset, q };
 }
+
+// ── Helpers de UI (puros) ────────────────────────────────────────────────────
+
+/** Correo valido para un contacto (mismas reglas que el servidor). */
+export function isValidContactEmail(email: string): boolean {
+    return !!normalizeEmailAddressAscii(String(email ?? '').trim().toLowerCase());
+}
+
+export type ContactLike = { id: string };
+
+/** Anade una pagina a la lista sin duplicar ids (la paginacion por offset puede solaparse si hay altas/bajas). */
+export function mergeContactPages<T extends ContactLike>(prev: T[], next: T[]): T[] {
+    const seen = new Set(prev.map(c => c.id));
+    return [...prev, ...next.filter(c => !seen.has(c.id))];
+}
+
+export function contactDisplayName(c: { name?: string | null; email: string }): string {
+    return (c.name && c.name.trim()) || c.email;
+}
+
+export function contactInitial(c: { name?: string | null; email?: string | null }): string {
+    const s = (c.name && c.name.trim()) || (c.email && c.email.trim()) || '';
+    return s ? Array.from(s)[0].toUpperCase() : '?';
+}
+
+/** Interpreta las cabeceras de paginacion de GET /api/contacts. */
+export function parsePageHeaders(headers: { get(name: string): string | null }, loaded: number): { total: number; hasMore: boolean } {
+    const total = Number.parseInt(headers.get('X-Total-Count') ?? '', 10);
+    const hasMoreHeader = headers.get('X-Has-More');
+    return {
+        total: Number.isFinite(total) ? total : loaded,
+        hasMore: hasMoreHeader !== null ? hasMoreHeader === 'true' : false,
+    };
+}
