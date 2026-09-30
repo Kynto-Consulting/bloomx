@@ -63,7 +63,8 @@ export async function GET() {
                 _count: {
                     select: {
                         emails: {
-                            where: { read: false }
+                            // Igual que la vista de label en /api/emails: trash y spam no cuentan
+                            where: { read: false, folder: { notIn: ['trash', 'spam'] } }
                         }
                     }
                 }
@@ -85,6 +86,7 @@ export async function GET() {
                 archive: archiveCount
             },
             labels: labels.map(l => ({
+                id: l.id,
                 name: l.name,
                 color: l.color,
                 count: l._count.emails

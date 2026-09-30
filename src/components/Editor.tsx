@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import { sanitizePastedColors } from '@/lib/paste-utils';
 
 // Define fonts
 const fonts = [
@@ -147,6 +148,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             attributes: {
                 class: 'prose prose-sm max-w-none focus:outline-none min-h-[200px] h-full p-4',
             },
+            // Colores inline casi negros/blancos pegados desde otras webs/Word quedarian invisibles segun el tema.
+            transformPastedHTML: (html) => sanitizePastedColors(html),
             handlePaste: (view, event, slice) => {
                 const items = Array.from(event.clipboardData?.items || []);
                 const images = items.filter(item => item.type.startsWith('image/'));
@@ -512,7 +515,13 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
 
                 <select
                     className="h-7 text-xs border border-border rounded px-1 min-w-[100px] focus:outline-none focus:border-input bg-transparent"
-                    onChange={(e) => editor?.chain().focus().setFontFamily(e.target.value).run()}
+                    aria-label="Fuente"
+                    onChange={(e) => {
+                        const chain = editor?.chain().focus();
+                        if (!chain) return;
+                        if (e.target.value) chain.setFontFamily(e.target.value).run();
+                        else chain.unsetFontFamily().run();
+                    }}
                     value={editor?.getAttributes('textStyle')?.fontFamily || ''}
                 >
                     <option value="">Font</option>
@@ -528,13 +537,15 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
 
                 {!simple && (
                     <div className="relative group">
-                        <button className={cn("p-1.5 rounded hover:bg-secondary text-foreground/80", editor?.isActive('textStyle') && "bg-secondary")}>
+                        <button type="button" aria-label="Color de texto" aria-haspopup="true" title="Color de texto" className={cn("p-1.5 rounded hover:bg-secondary text-foreground/80", editor?.isActive('textStyle') && "bg-secondary")}>
                             <Palette className="w-4 h-4" style={{ color: editor?.getAttributes('textStyle')?.color }} />
                         </button>
-                        <div className="absolute top-full left-0 mt-1 p-2 bg-card border border-border shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid z-50">
+                        <div className="absolute top-full left-0 mt-1 p-2 bg-card border border-border shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid group-focus-within:grid z-50">
                             {colors.map(color => (
                                 <button
                                     key={color}
+                                    type="button"
+                                    aria-label={`Color ${color}`}
                                     className="w-4 h-4 rounded-full border border-border/60 hover:scale-125 transition-transform"
                                     style={{ backgroundColor: color }}
                                     onClick={() => editor?.chain().focus().setColor(color).run()}
@@ -586,6 +597,8 @@ function ToolbarButton({ onClick, isActive, icon, title, disabled }: { onClick: 
             onClick={onClick}
             disabled={disabled}
             title={title}
+            aria-label={title}
+            aria-pressed={isActive === undefined ? undefined : !!isActive}
             className={cn(
                 "p-1.5 rounded transition-colors text-muted-foreground hover:text-foreground",
                 isActive ? "bg-secondary text-foreground" : "hover:bg-secondary",

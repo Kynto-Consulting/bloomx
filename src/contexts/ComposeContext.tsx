@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 
 interface ComposeWindow {
     id: string;
@@ -28,22 +28,6 @@ const ComposeContext = createContext<ComposeContextType | undefined>(undefined);
 export function ComposeProvider({ children }: { children: React.ReactNode }) {
     const [windows, setWindows] = useState<ComposeWindow[]>([]);
 
-    // Load drafts on mount
-    useEffect(() => {
-        async function loadDrafts() {
-            try {
-                const res = await fetch('/api/drafts');
-                const data = await res.json();
-                if (data.drafts && data.drafts.length > 0) {
-                    // Don't auto-open drafts, just keep them available
-                }
-            } catch (err) {
-                console.error('Failed to load drafts:', err);
-            }
-        }
-        loadDrafts();
-    }, []);
-
     const openCompose = useCallback((draft?: Partial<ComposeWindow>) => {
         setWindows((prev) => {
             // If opening a draft that is already open, just bring it to attention (maximize if minimized)
@@ -51,6 +35,14 @@ export function ComposeProvider({ children }: { children: React.ReactNode }) {
                 const existing = prev.find(w => w.id === draft.id);
                 if (existing) {
                     return prev.map(w => w.id === draft.id ? { ...w, minimized: false, ...draft } : w);
+                }
+            }
+
+            // Un borrador (draftId) solo puede estar abierto una vez: evita duplicarlo al reabrirlo desde la lista.
+            if (draft?.draftId) {
+                const sameDraft = prev.find(w => w.draftId === draft.draftId);
+                if (sameDraft) {
+                    return prev.map(w => w.id === sameDraft.id ? { ...w, minimized: false } : w);
                 }
             }
 

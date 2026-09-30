@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles, CalendarDays, MapPin } from 'lucide-react';
+import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles, CalendarDays, MapPin, ShieldCheck, ShieldAlert, ShieldQuestion, ImageOff } from 'lucide-react';
 import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
 import { formatDate, cn } from '@/lib/utils';
@@ -16,7 +16,13 @@ import { ExtensionLoader } from './expansions/ExtensionLoader';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover } from './ui/Popover';
 import { AccountManager } from '@/lib/account-manager';
-import { splitAddressList, extractEmailOnly, buildReplyAllRecipients } from '@/lib/email-utils';
+import { splitAddressList, extractEmailOnly, buildReplyAllRecipients, findAttachmentForCid, replaceCidReferences, extractCidReferences } from '@/lib/email-utils';
+import type { EmailAuthentication, AuthVerdict } from '@/lib/email-auth';
+import { mergeEmailPatchResponse, applyEmailPatch, optimisticEmailPatch } from '@/lib/mail-view-state';
+import {
+    hasRemoteImages, isRemoteImagesAllowed, allowForEmail, allowForSender, loadPolicy, savePolicy, emptyPolicy,
+    type RemoteImagePolicy,
+} from '@/lib/remote-images';
 
 const ENABLE_THREAD_VIEW = true;
 
@@ -60,6 +66,7 @@ interface EmailDetails {
         organizerName?: string;
         uid?: string;
     } | null;
+    authentication?: EmailAuthentication | null;
     thread?: EmailDetails[]; // Thread support
 }
 
@@ -101,6 +108,74 @@ function resolveSenderFromEmail(email: { to?: string | null; cleanTo?: string | 
     return AccountManager.getActiveAccount()?.email || undefined;
 }
 
+const VERDICT_LABEL: Record<AuthVerdict, string> = {
+    pass: 'correcto', fail: 'fallo', softfail: 'fallo suave', neutral: 'neutral', none: 'sin registro',
+    temperror: 'error temporal', permerror: 'error permanente', unknown: 'desconocido',
+};
+
+/** Insignia de autenticacion SPF/DKIM/DMARC (solo informativa; ver src/lib/email-auth.ts). */
+function AuthBadge({ auth }: { auth?: EmailAuthentication | null }) {
+    if (!auth) return null;
+    const detail = `SPF: ${VERDICT_LABEL[auth.spf]} · DKIM: ${VERDICT_LABEL[auth.dkim]} · DMARC: ${VERDICT_LABEL[auth.dmarc]}` +
+        (auth.trusted ? '' : ' · cabeceras contradictorias: no fiable');
+    const cfg = {
+        verified: { Icon: ShieldCheck, text: 'Verificado', cls: 'border-success/40 bg-success/10 text-success' },
+        partial: { Icon: ShieldQuestion, text: 'Parcial', cls: 'border-warning/40 bg-warning/10 text-warning' },
+        failed: { Icon: ShieldAlert, text: 'Sin autenticar', cls: 'border-destructive/40 bg-destructive/10 text-destructive' },
+        unknown: { Icon: ShieldQuestion, text: 'Sin datos', cls: 'border-border bg-muted text-muted-foreground' },
+    }[auth.summary];
+    const Icon = cfg.Icon;
+    const untrusted = !auth.trusted && auth.summary === 'verified';
+    return (
+        <span
+            className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium', untrusted ? 'border-warning/40 bg-warning/10 text-warning' : cfg.cls)}
+            title={detail}
+            aria-label={`Autenticacion del remitente: ${cfg.text}. ${detail}`}
+        >
+            <Icon className="h-3 w-3" aria-hidden="true" />
+            {untrusted ? 'Verificado (no fiable)' : cfg.text}
+            <span className="hidden md:inline font-normal opacity-80">
+                SPF {auth.spf === 'pass' ? '✓' : auth.spf === 'fail' || auth.spf === 'softfail' ? '✗' : '?'}{' '}
+                DKIM {auth.dkim === 'pass' ? '✓' : auth.dkim === 'fail' ? '✗' : '?'}{' '}
+                DMARC {auth.dmarc === 'pass' ? '✓' : auth.dmarc === 'fail' ? '✗' : '?'}
+            </span>
+        </span>
+    );
+}
+
+const CID_INLINE_LIMIT = 2 * 1024 * 1024;
+
+/**
+ * Reemplaza imagenes cid: por data: URIs descargando el adjunto (el esquema no guarda Content-ID, se
+ * resuelve por nombre de archivo; ver findAttachmentForCid). Las que no se pueden resolver se dejan
+ * como estan. Sirve para que las imagenes incrustadas viajen en reenvios/respuestas.
+ */
+async function inlineCidImages(html: string, attachments: any[] | undefined): Promise<string> {
+    const cids = extractCidReferences(html);
+    if (cids.length === 0 || !attachments?.length) return html;
+
+    const resolved = new Map<string, string>();
+    await Promise.all(cids.map(async (cid) => {
+        const att = findAttachmentForCid(cid, attachments);
+        if (!att?.url) return;
+        try {
+            const res = await fetch(att.url);
+            if (!res.ok) return;
+            const blob = await res.blob();
+            if (blob.size > CID_INLINE_LIMIT) return;
+            const dataUrl: string = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result));
+                reader.onerror = () => reject(reader.error);
+                reader.readAsDataURL(blob);
+            });
+            if (dataUrl.startsWith('data:image/')) resolved.set(cid, dataUrl);
+        } catch { /* sin CORS / sin red: dejar el cid original */ }
+    }));
+
+    return replaceCidReferences(html, (cid) => resolved.get(cid) ?? null);
+}
+
 export function MailView() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -118,11 +193,20 @@ export function MailView() {
 
     const { openCompose } = useCompose();
 
+    // Politica de imagenes remotas (bloqueadas por defecto; se permite por correo o por remitente).
+    const [imagePolicy, setImagePolicy] = useState<RemoteImagePolicy>(emptyPolicy);
+    useEffect(() => { setImagePolicy(loadPolicy()); }, []);
+    const updateImagePolicy = (next: RemoteImagePolicy) => {
+        setImagePolicy(next);
+        savePolicy(next);
+    };
+
     // Track expanded state for thread items
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
     useEffect(() => {
         if (!id) return;
+        let cancelled = false; // evita que una respuesta tardia de otro correo pise la vista actual
 
         async function fetchEmailAndLabels() {
             setLoading(true);
@@ -150,10 +234,14 @@ export function MailView() {
                     }
                 }
 
+                if (cancelled) return;
+
                 if (emailData?.email) {
                     // Mark as read if needed
                     if (!emailData.email.read) {
-                        emailData.email.read = true;
+                        // Copia: emailData puede ser el mismo objeto que vive en la cache.
+                        emailData = { ...emailData, email: { ...emailData.email, read: true } };
+                        const readEmail = emailData!;
                         // Fire and forget API update
                         fetch(`/api/emails/${emailData.email.id}`, {
                             method: 'PATCH',
@@ -161,12 +249,12 @@ export function MailView() {
                             body: JSON.stringify({ read: true })
                         }).then(async () => {
                             // Optimistically update the list cache to avoid full re-render
-                            const folder = emailData.email.folder || 'inbox';
+                            const folder = readEmail.email.folder || 'inbox';
                             const listKey = `emails-${folder}`;
                             const cachedList = await getData<any[]>(listKey);
 
                             if (Array.isArray(cachedList)) {
-                                const idx = cachedList.findIndex((e: any) => e.id === emailData.email.id);
+                                const idx = cachedList.findIndex((e: any) => e.id === readEmail.email.id);
                                 if (idx !== -1) {
                                     const newList = [...cachedList];
                                     newList[idx] = { ...newList[idx], read: true };
@@ -199,26 +287,29 @@ export function MailView() {
             } catch (err) {
                 console.error(err);
             } finally {
-                setLoading(false);
+                if (!cancelled) setLoading(false);
             }
         }
         fetchEmailAndLabels();
+        return () => { cancelled = true; };
     }, [id, getData, setCacheData]);
 
     const handleUpdate = async (updates: any) => {
         if (!data) return;
 
-        const previousData = { ...data };
-        const newData = {
-            ...previousData,
-            email: { ...previousData.email, ...updates }
-        };
+        const emailId = data.email.id;
+        const cacheKey = `email-${emailId}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`;
+        const previousData = data;
 
-        setLocalData(newData);
-        setCacheData(`email-${data.email.id}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`, newData);
+        // Parche optimista sin claves de UI (toggleLabelId) y con las etiquetas ya resueltas.
+        const patch = optimisticEmailPatch(updates, data.email.labels || [], availableLabels);
+        const optimistic = applyEmailPatch(data, emailId, patch);
+
+        setLocalData(optimistic);
+        setCacheData(cacheKey, optimistic);
 
         try {
-            const res = await fetch(`/api/emails/${data.email.id}`, {
+            const res = await fetch(`/api/emails/${emailId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updates)
@@ -226,17 +317,19 @@ export function MailView() {
 
             if (!res.ok) throw new Error('Failed to update');
 
-            if (updates.toggleLabelId) {
+            if (updates.toggleLabelId || updates.labelIds) {
+                // La respuesta de PATCH es la fila de Email (labels) SIN adjuntos firmados ni replyTo resuelto:
+                // se fusiona con lo que hay en pantalla en vez de reemplazar el correo.
                 const json = await res.json();
-                const updatedData = { ...previousData, email: json };
-                setLocalData(updatedData);
-                setCacheData(`email-${data.email.id}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`, updatedData);
+                const merged = applyEmailPatch(optimistic, emailId, json, mergeEmailPatchResponse);
+                setLocalData(merged);
+                setCacheData(cacheKey, merged);
             }
 
             toast.success('Updated');
         } catch (error) {
             setLocalData(previousData);
-            setCacheData(`email-${data.email.id}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`, previousData);
+            setCacheData(cacheKey, previousData);
             toast.error('Failed to update');
         }
     };
@@ -401,17 +494,25 @@ export function MailView() {
         }
     };
 
-    const handleReply = () => {
-        if (!data) return;
-        // If threading, we might want to reply to the specific visible message, but standard is last.
-        // With reversed order (newest first), we target index 0.
-        const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
-        const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
+    /** Mensaje al que se responde: el pulsado (boton dentro del mensaje) o, en la barra, el mas reciente. */
+    const resolveTarget = (item?: EmailDetails) => {
+        if (item?.email) return { targetEmail: item.email, targetContent: item.content };
+        const newest = data && data.thread && data.thread.length > 0 ? data.thread[0] : data;
+        return { targetEmail: newest!.email, targetContent: newest!.content };
+    };
 
+    const buildQuote = async (targetEmail: EmailDetails['email'], targetContent: string) => {
+        // Las imagenes cid: solo existen dentro del correo original: se incrustan para que sigan visibles.
+        const content = await inlineCidImages(targetContent || '', targetEmail.attachments);
         const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
-        const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
-        const replyTarget = targetEmail.replyTo || targetEmail.from;
+        const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${content}</blockquote>`;
+        return `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`;
+    };
 
+    const handleReply = async (item?: EmailDetails) => {
+        if (!data) return;
+        const { targetEmail, targetContent } = resolveTarget(item);
+        const replyTarget = targetEmail.replyTo || targetEmail.from;
         const replyFrom = resolveSenderFromEmail(targetEmail);
 
         openCompose({
@@ -419,18 +520,14 @@ export function MailView() {
             from: replyFrom,
             to: replyTarget,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
-            body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
+            body: await buildQuote(targetEmail, targetContent),
             minimized: false
         });
     };
 
-    const handleReplyAll = () => {
+    const handleReplyAll = async (item?: EmailDetails) => {
         if (!data) return;
-        const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
-        const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
-
-        const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
-        const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${targetContent}</blockquote>`;
+        const { targetEmail, targetContent } = resolveTarget(item);
 
         const replyFrom = resolveSenderFromEmail(targetEmail);
         const ownEmails = [
@@ -455,18 +552,16 @@ export function MailView() {
             to: recipients.to.join(', '),
             cc: recipients.cc.length > 0 ? recipients.cc.join(', ') : undefined,
             subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
-            body: `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`,
+            body: await buildQuote(targetEmail, targetContent),
             minimized: false
         });
     };
 
-    const handleForward = () => {
+    const handleForward = async (item?: EmailDetails) => {
         if (!data) return;
-        // With reversed order (newest first), we target index 0.
-        const targetEmail = (data.thread && data.thread.length > 0) ? data.thread[0].email : data.email;
-        const targetContent = (data.thread && data.thread.length > 0) ? data.thread[0].content : data.content;
-
+        const { targetEmail, targetContent } = resolveTarget(item);
         const forwardFrom = resolveSenderFromEmail(targetEmail);
+        const content = await inlineCidImages(targetContent || '', targetEmail.attachments);
 
         openCompose({
             id: crypto.randomUUID(),
@@ -484,7 +579,7 @@ export function MailView() {
                     forwarded: true,
                 })),
             subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
-            body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${targetContent}`,
+            body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${content}`,
             minimized: false
         });
     };
@@ -513,32 +608,35 @@ export function MailView() {
     return (
         <div className="flex h-full flex-col bg-background overflow-x-hidden">
             <div className="flex items-center gap-2 p-2 bg-background/95 backdrop-blur-sm sticky top-0 z-10 border-b overflow-x-auto">
-                <button onClick={() => router.push('/')} className="md:hidden p-2"><ArrowLeft className="h-5 w-5" /></button>
+                <button type="button" onClick={() => router.push('/')} className="md:hidden p-2" aria-label="Volver a la lista" title="Volver"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
                 <div className="flex items-center gap-1">
                     <button onClick={() => {
                         const params = new URLSearchParams(searchParams);
                         params.delete('id');
                         router.push(`/?${params.toString()}`);
-                    }} className="p-2 hover:bg-muted rounded-md hidden md:block" title="Close"><X className="h-4 w-4" /></button>
+                    }} className="p-2 hover:bg-muted rounded-md hidden md:block" title="Cerrar" aria-label="Cerrar correo"><X className="h-4 w-4" aria-hidden="true" /></button>
                     <div className="h-5 w-px bg-border mx-1 hidden md:block" />
 
-                    <button onClick={() => handleUpdate({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md"><Archive className="h-4 w-4" /></button>
-                    <button onClick={() => handleUpdate({ folder: 'spam' })} className="p-2 hover:bg-muted rounded-md"><ArchiveX className="h-4 w-4" /></button>
-                    <button onClick={trashEmail} className="p-2 hover:bg-muted rounded-md"><Trash2 className="h-4 w-4" /></button>
+                    <button type="button" onClick={() => handleUpdate({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md" title="Archivar" aria-label="Archivar"><Archive className="h-4 w-4" aria-hidden="true" /></button>
+                    <button type="button" onClick={() => handleUpdate({ folder: 'spam' })} className="p-2 hover:bg-muted rounded-md" title="Marcar como spam" aria-label="Marcar como spam"><ArchiveX className="h-4 w-4" aria-hidden="true" /></button>
+                    <button type="button" onClick={trashEmail} className="p-2 hover:bg-muted rounded-md" title="Eliminar" aria-label="Eliminar"><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
                     <button
                         ref={labelMenuTriggerRef}
                         onClick={() => setShowLabelMenu((current) => !current)}
                         className="p-2 hover:bg-muted rounded-md"
-                        title="Labels"
+                        title="Etiquetas"
+                        aria-label="Etiquetas"
+                        aria-haspopup="menu"
+                        aria-expanded={showLabelMenu}
                     >
                         <Tag className="h-4 w-4" />
                     </button>
-                    <button onClick={handleReply} className="p-2 hover:bg-muted rounded-md" title="Reply"><Reply className="h-4 w-4 text-muted-foreground" /></button>
-                    <button onClick={handleReplyAll} className="p-2 hover:bg-muted rounded-md" title="Reply All"><ReplyAll className="h-4 w-4 text-muted-foreground" /></button>
-                    <button onClick={handleForward} className="p-2 hover:bg-muted rounded-md" title="Forward"><Forward className="h-4 w-4 text-muted-foreground" /></button>
+                    <button type="button" onClick={() => handleReply()} className="p-2 hover:bg-muted rounded-md" title="Responder" aria-label="Responder"><Reply className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
+                    <button type="button" onClick={() => handleReplyAll()} className="p-2 hover:bg-muted rounded-md" title="Responder a todos" aria-label="Responder a todos"><ReplyAll className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
+                    <button type="button" onClick={() => handleForward()} className="p-2 hover:bg-muted rounded-md" title="Reenviar" aria-label="Reenviar"><Forward className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
 
                     {/* JSON Extensions Toolbar */}
-                    <ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email} />
+                    <ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email ? { ...data.email, content: data.content } : undefined} />
                 </div>
 
                 <Popover
@@ -562,6 +660,8 @@ export function MailView() {
                                     <button
                                         key={label.id}
                                         type="button"
+                                        role="menuitemcheckbox"
+                                        aria-checked={selected}
                                         onClick={() => toggleLabel(label.id)}
                                         className="flex items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground/80 hover:bg-muted"
                                     >
@@ -585,7 +685,7 @@ export function MailView() {
                 </Popover>
 
                 <div className="h-5 w-px bg-border mx-1" />
-                <button onClick={() => handleUpdate({ starred: !data.email?.starred })} className={cn("p-2 hover:bg-muted rounded-md", data.email?.starred && "text-yellow-500")}>
+                <button type="button" onClick={() => handleUpdate({ starred: !data.email?.starred })} className={cn("p-2 hover:bg-muted rounded-md", data.email?.starred && "text-yellow-500")} title={data.email?.starred ? 'Quitar estrella' : 'Marcar con estrella'} aria-label={data.email?.starred ? 'Quitar estrella' : 'Marcar con estrella'} aria-pressed={!!data.email?.starred}>
                     <Star className={cn("h-4 w-4", data.email?.starred && "fill-current")} />
                 </button>
             </div>
@@ -607,6 +707,8 @@ export function MailView() {
                             // So we render Newest first (Index 0).
 
                             const cleanHtml = sanitizeHtml(item.content || "");
+                            const remoteAllowed = isRemoteImagesAllowed(imagePolicy, item.email.id, item.email.from);
+                            const remoteBlocked = !remoteAllowed && hasRemoteImages(cleanHtml);
                             const invitePreview = item.invitePreview;
                             const inviteResponse = item.inviteResponse;
                             const formattedStartsAt = formatInviteDate(invitePreview?.startsAt);
@@ -625,6 +727,17 @@ export function MailView() {
                                 >
                                     <div
                                         className="p-4"
+                                        role="button"
+                                        tabIndex={0}
+                                        aria-expanded={isExpanded}
+                                        aria-label={`${isExpanded ? 'Contraer' : 'Expandir'} mensaje de ${item.email.from}`}
+                                        onKeyDown={(e) => {
+                                            if (e.target !== e.currentTarget) return;
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                toggleExpand(item.email.id);
+                                            }
+                                        }}
                                         onClick={(e) => {
                                             if (!isExpanded) {
                                                 toggleExpand(item.email.id);
@@ -644,6 +757,9 @@ export function MailView() {
                                                         <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
                                                         <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
                                                     </div>
+                                                    {isExpanded && item.authentication && (
+                                                        <span className="mt-1"><AuthBadge auth={item.authentication} /></span>
+                                                    )}
                                                     {isExpanded && item.email.cc && (
                                                         <span className="text-xs text-muted-foreground truncate">CC: {item.email.cc}</span>
                                                     )}
@@ -764,17 +880,38 @@ export function MailView() {
                                                         );
                                                     })()}
 
-                                                    <SafeIframe html={cleanHtml} />
+                                                    {remoteBlocked && (
+                                                        <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground/80">
+                                                            <ImageOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                                            <span className="flex-1 min-w-[180px]">Se bloquearon las imagenes remotas para proteger tu privacidad (pueden avisar al remitente de que abriste el correo).</span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateImagePolicy(allowForEmail(imagePolicy, item.email.id))}
+                                                                className="rounded-full border bg-background px-3 py-1 font-medium hover:bg-muted"
+                                                            >
+                                                                Cargar imagenes remotas
+                                                            </button>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => updateImagePolicy(allowForSender(imagePolicy, item.email.from))}
+                                                                className="rounded-full border bg-background px-3 py-1 font-medium hover:bg-muted"
+                                                            >
+                                                                Siempre de este remitente
+                                                            </button>
+                                                        </div>
+                                                    )}
+
+                                                    <SafeIframe html={cleanHtml} blockRemoteImages={!remoteAllowed} />
 
                                                     <div className="mt-8 flex gap-2 opacity-100">
-                                                        <button onClick={handleReply} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <Reply className="h-4 w-4" /> Reply
+                                                        <button type="button" onClick={() => handleReply(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
+                                                            <Reply className="h-4 w-4" aria-hidden="true" /> Responder
                                                         </button>
-                                                        <button onClick={handleReplyAll} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <ReplyAll className="h-4 w-4" /> Reply All
+                                                        <button type="button" onClick={() => handleReplyAll(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
+                                                            <ReplyAll className="h-4 w-4" aria-hidden="true" /> Responder a todos
                                                         </button>
-                                                        <button onClick={handleForward} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <Forward className="h-4 w-4" /> Forward
+                                                        <button type="button" onClick={() => handleForward(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
+                                                            <Forward className="h-4 w-4" aria-hidden="true" /> Reenviar
                                                         </button>
                                                     </div>
 
@@ -782,7 +919,7 @@ export function MailView() {
                                                         <div className="mt-6 pt-4 border-t">
                                                             <div className="flex flex-wrap gap-3">
                                                                 {item.email.attachments.map((att: any) => (
-                                                                    <a key={att.id} href={att.url || '#'} target="_blank" rel="noopener noreferrer" className="flex items-center gap-3 p-2 rounded-lg border bg-background hover:bg-accent transition-colors">
+                                                                    <a key={att.id} href={att.url || '#'} download={att.filename || undefined} target="_blank" rel="noopener noreferrer" title={`Descargar ${att.filename || 'adjunto'}`} className="flex items-center gap-3 p-2 rounded-lg border bg-background hover:bg-accent transition-colors">
                                                                         <Icons.File className="w-4 h-4 text-muted-foreground" />
                                                                         <span className="text-sm truncate max-w-[200px]">{att.filename}</span>
                                                                     </a>

@@ -18,6 +18,14 @@ import { AccountManager, StoredAccount } from '@/lib/account-manager';
 import { toast } from 'sonner';
 import { SettingsModal } from './SettingsModal';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import {
+    LABELS_CACHE_KEY,
+    COUNTS_CACHE_KEY,
+    normalizeLabelList,
+    mergeLabelCounts,
+    shouldSidebarRefresh,
+    type LabelRef,
+} from '@/lib/mail-list';
 
 // Init
 
@@ -60,7 +68,7 @@ function SidebarContent({ onClose }: SidebarProps) {
         archive: 0,
         scheduled: 0
     });
-    const [labels, setLabels] = useState<any[]>([]);
+    const [labels, setLabels] = useState<LabelRef[]>([]);
     const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
 
     const activeLabels = searchParams.get('label')?.split(',') || [];
@@ -189,6 +197,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 <button
                     type="button"
                     onClick={() => toggleSection(section)}
+                    aria-expanded={!isCollapsed}
                     className="flex flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-muted/60"
                 >
                     {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
@@ -203,6 +212,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     disabled={index <= 0}
                     className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Move up"
+                    aria-label={`Move ${sectionMeta[section].title} up`}
                 >
                     <ArrowUp className="h-3 w-3" />
                 </button>
@@ -212,6 +222,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     disabled={index >= sectionOrder.length - 1}
                     className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
                     title="Move down"
+                    aria-label={`Move ${sectionMeta[section].title} down`}
                 >
                     <ArrowDown className="h-3 w-3" />
                 </button>
@@ -222,18 +233,15 @@ function SidebarContent({ onClose }: SidebarProps) {
     useEffect(() => {
         async function loadData() {
             // Load Counts
-            const countsKey = 'stats-counts';
-            const cachedCounts = await getData<typeof counts>(countsKey);
+            const cachedCounts = await getData<typeof counts>(COUNTS_CACHE_KEY);
 
             if (cachedCounts) {
                 setCounts(cachedCounts);
             }
 
-            // Load Labels
-            const labelsKey = 'labels-all';
-            const cachedLabels = await getData<any[]>(labelsKey);
-
-            if (cachedLabels) {
+            // Load Labels (forma unica del cache: siempre con id)
+            const cachedLabels = normalizeLabelList(await getData<unknown>(LABELS_CACHE_KEY));
+            if (cachedLabels.length > 0) {
                 setLabels(cachedLabels);
             }
 
@@ -244,16 +252,25 @@ function SidebarContent({ onClose }: SidebarProps) {
                     fetch('/api/settings', { cache: 'no-store' }),
                 ]);
 
-                const data = await countsResponse.json();
-                const settingsData = await settingsResponse.json().catch(() => null);
+                const data = countsResponse.ok ? await countsResponse.json().catch(() => null) : null;
+                const settingsData = settingsResponse.ok ? await settingsResponse.json().catch(() => null) : null;
 
-                if (data.counts) {
+                if (data?.counts) {
                     setCounts(data.counts);
-                    setData(countsKey, data.counts, { silent: true });
+                    setData(COUNTS_CACHE_KEY, data.counts, { silent: true });
                 }
-                if (data.labels) {
-                    setLabels(data.labels);
-                    setData(labelsKey, data.labels, { silent: true });
+                if (Array.isArray(data?.labels)) {
+                    let normalized = normalizeLabelList(data.labels);
+                    if (normalized.length < data.labels.length) {
+                        // /api/counts sin id (servidor antiguo): completamos con /api/labels
+                        const labelsRes = await fetch('/api/labels', { cache: 'no-store' }).catch(() => null);
+                        if (labelsRes?.ok) {
+                            const full = normalizeLabelList(await labelsRes.json().catch(() => null));
+                            normalized = mergeLabelCounts(full, data.labels);
+                        }
+                    }
+                    setLabels(normalized);
+                    setData(LABELS_CACHE_KEY, normalized, { silent: true });
                 }
 
                 const mailboxSettings = settingsData?.expansionSettings?.['core-mailbox'] || {};
@@ -268,13 +285,15 @@ function SidebarContent({ onClose }: SidebarProps) {
         }
 
         // Subscription for immediate updates
-        const unsubscribe = subscribe(() => {
-            if (status === 'authenticated') loadData();
+        // Solo claves relevantes (contadores, labels, ajustes) o avisos globales:
+        // abrir un correo ya no dispara counts + settings.
+        const unsubscribe = subscribe((key) => {
+            if (status === 'authenticated' && shouldSidebarRefresh(key)) loadData();
         });
 
-        // Poll every 30s
+        // Poll every 30s (en pausa con la pestana oculta)
         const interval = setInterval(() => {
-            if (status === 'authenticated') loadData();
+            if (status === 'authenticated' && document.visibilityState !== 'hidden') loadData();
         }, 30000);
         return () => {
             clearInterval(interval);
@@ -293,14 +312,16 @@ function SidebarContent({ onClose }: SidebarProps) {
             });
 
             if (res.ok) {
-                const label = await res.json();
-                setLabels(prev => [...prev, { ...label, count: 0 }]); // Optimistic add
+                const [label] = normalizeLabelList([await res.json()]);
+                if (label) {
+                    const created = { ...label, count: 0 };
+                    setLabels(prev => (prev.some(l => l.id === created.id) ? prev : [...prev, created])); // Optimistic add
 
-                // Update global cache for MailView
-                const cachedLabels = await getData<any[]>('labels-all') || [];
-                // Check if already exists to be safe
-                if (!cachedLabels.some((l: any) => l.id === label.id)) {
-                    await setData('labels-all', [...cachedLabels, label], { silent: true });
+                    // Update global cache for MailView (misma forma: siempre con id)
+                    const cachedLabels = normalizeLabelList(await getData<unknown>(LABELS_CACHE_KEY));
+                    if (!cachedLabels.some((l) => l.id === created.id)) {
+                        await setData(LABELS_CACHE_KEY, [...cachedLabels, created], { silent: true });
+                    }
                 }
 
                 setNewLabelName('');
@@ -358,7 +379,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </div>
                 {/* Mobile Close Button */}
                 {onClose && (
-                    <button onClick={onClose} className="md:hidden p-2 text-muted-foreground hover:text-foreground">
+                    <button onClick={onClose} aria-label="Close sidebar" className="md:hidden p-2 text-muted-foreground hover:text-foreground">
                         <X className="h-5 w-5" />
                     </button>
                 )}
@@ -471,6 +492,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                                         onClick={() => setIsCreatingLabel(!isCreatingLabel)}
                                         className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
                                         title="Create Label"
+                                        aria-label="Create label"
+                                        aria-expanded={isCreatingLabel}
                                     >
                                         <Plus className="h-3 w-3" />
                                     </button>
@@ -491,6 +514,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                     autoFocus
                                                     type="text"
                                                     placeholder="Label name..."
+                                                    aria-label="Label name"
                                                     value={newLabelName}
                                                     onChange={(e) => setNewLabelName(e.target.value)}
                                                     className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
@@ -499,10 +523,10 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                         if (e.key === 'Escape') setIsCreatingLabel(false);
                                                     }}
                                                 />
-                                                <button onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
+                                                <button type="button" aria-label="Save label" onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
                                                     <Check className="h-3 w-3" />
                                                 </button>
-                                                <button onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
+                                                <button type="button" aria-label="Cancel" onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
@@ -513,11 +537,11 @@ function SidebarContent({ onClose }: SidebarProps) {
                                         {labels.length === 0 && !isCreatingLabel && (
                                             <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">No labels</div>
                                         )}
-                                        {labels.map((label: any) => {
+                                        {labels.map((label) => {
                                             const isActive = activeLabels.includes(label.name.toLowerCase());
                                             return (
                                                 <Link
-                                                    key={label.name}
+                                                    key={label.id}
                                                     href={getLabelUrl(label.name)}
                                                     className={cn(
                                                         "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
@@ -527,7 +551,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                     <div className="flex items-center justify-center w-4 relative">
                                                         <span
                                                             className="h-2.5 w-2.5 rounded-full ring-2 ring-transparent group-hover:ring-border transition-all"
-                                                            style={{ backgroundColor: label.color }}
+                                                            style={{ backgroundColor: label.color ?? undefined }}
                                                         />
                                                         {isActive && (
                                                             <div className="absolute inset-0 flex items-center justify-center">
@@ -536,7 +560,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                         )}
                                                     </div>
                                                     <span className={cn("flex-1", isActive && "font-bold")}>{label.name}</span>
-                                                    {label.count > 0 && (
+                                                    {(label.count ?? 0) > 0 && (
                                                         <span className="ml-auto text-xs text-muted-foreground">{label.count}</span>
                                                     )}
                                                     {isActive && <Check className="h-3 w-3 text-primary ml-1" />}
@@ -642,6 +666,9 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
         <div className="relative">
             <button
                 onClick={() => setIsOpen(!isOpen)}
+                aria-haspopup="menu"
+                aria-expanded={isOpen}
+                aria-label="Account menu"
                 className="flex w-full items-center gap-3 hover:bg-muted/50 p-2 rounded-lg transition-colors -mx-2 text-left"
             >
                 <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-pink-500 to-violet-500 flex items-center justify-center text-white font-medium text-xs shrink-0 border border-border">
@@ -687,6 +714,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                                                 onClick={(e) => { e.stopPropagation(); handleLogout(acc.id); }}
                                                 className="p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive rounded-md opacity-0 group-hover:opacity-100 transition-all"
                                                 title="Forget account"
+                                                aria-label={`Forget account ${acc.email}`}
                                             >
                                                 <LogOut className="h-3.5 w-3.5" />
                                             </button>

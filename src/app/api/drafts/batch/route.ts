@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { resolveAuthorizedSenders } from '@/lib/draft-access';
 
 export async function POST(req: NextRequest) {
     try {
@@ -17,10 +18,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (action === 'delete') {
+            const senders = Array.from(await resolveAuthorizedSenders(user.id, user.email));
             const result = await prisma.draft.deleteMany({
                 where: {
-                    id: { in: ids },
-                    from: user.email // Security: Ensure ownership
+                    id: { in: ids.filter((v: unknown): v is string => typeof v === 'string').slice(0, 500) },
+                    from: { in: senders } // Security: Ensure ownership (cualquier cuenta propia/vinculada)
                 }
             });
             return NextResponse.json({ count: result.count });

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useRef, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useRef, useCallback, useMemo } from 'react';
 import { useSession } from '@/components/SessionProvider';
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 
@@ -18,7 +18,8 @@ interface CacheContextType {
     getData: <T>(key: string) => Promise<T | null>;
     setData: <T>(key: string, data: T, options?: { silent?: boolean }) => Promise<void>;
     invalidate: (key: string | RegExp) => Promise<void>;
-    subscribe: (listener: () => void) => () => void;
+    /** El listener recibe la clave que cambio; `undefined` = cambio global (invalidate con regex). */
+    subscribe: (listener: (key?: string) => void) => () => void;
 }
 
 const CacheContext = createContext<CacheContextType | undefined>(undefined);
@@ -33,17 +34,21 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
     // L1 Cache (Memory) - for super fast access during session
     const memoryCache = useRef(new Map<string, { data: any, timestamp: number }>());
     const dbPromise = useRef<Promise<IDBPDatabase<BloomxDB>> | null>(null);
-    const listeners = useRef(new Set<() => void>());
+    const listeners = useRef(new Set<(key?: string) => void>());
 
-    // Init DB
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-
-        dbPromise.current = openDB<BloomxDB>(DB_NAME, 1, {
-            upgrade(db) {
-                db.createObjectStore(STORE_NAME);
-            },
-        });
+    // Apertura perezosa: los efectos de los hijos corren antes que los del provider,
+    // asi que abrir en un useEffect dejaba las primeras lecturas en null.
+    const getDb = useCallback((): Promise<IDBPDatabase<BloomxDB>> | null => {
+        if (typeof window === 'undefined') return null;
+        if (!dbPromise.current) {
+            dbPromise.current = openDB<BloomxDB>(DB_NAME, 1, {
+                upgrade(db) {
+                    db.createObjectStore(STORE_NAME);
+                },
+            });
+            dbPromise.current.catch(() => { dbPromise.current = null; });
+        }
+        return dbPromise.current;
     }, []);
 
     const getNamespacedKey = useCallback((key: string) => {
@@ -51,8 +56,10 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
         return `${userEmail}:${key}`;
     }, [userEmail]);
 
-    const notifyListeners = useCallback(() => {
-        listeners.current.forEach(l => l());
+    const notifyListeners = useCallback((key?: string) => {
+        listeners.current.forEach(l => {
+            try { l(key); } catch (e) { console.error('Cache listener error', e); }
+        });
     }, []);
 
     const getData = useCallback(async <T,>(key: string): Promise<T | null> => {
@@ -70,9 +77,10 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. Check IndexedDB (L2)
-        if (!dbPromise.current) return null;
+        const dbp = getDb();
+        if (!dbp) return null;
         try {
-            const db = await dbPromise.current;
+            const db = await dbp;
             const entry = await db.get(STORE_NAME, namespacedKey);
 
             if (entry) {
@@ -85,7 +93,7 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
         }
 
         return null;
-    }, [getNamespacedKey]);
+    }, [getNamespacedKey, getDb]);
 
     const setData = useCallback(async <T,>(key: string, data: T, options?: { silent?: boolean }) => {
         const namespacedKey = getNamespacedKey(key);
@@ -97,9 +105,10 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
         memoryCache.current.set(namespacedKey, entry);
 
         // 2. Update DB
-        if (dbPromise.current) {
+        const dbp = getDb();
+        if (dbp) {
             try {
-                const db = await dbPromise.current;
+                const db = await dbp;
                 await db.put(STORE_NAME, entry, namespacedKey);
             } catch (e) {
                 console.error("Cache write error", e);
@@ -107,56 +116,65 @@ export function CacheProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (!options?.silent) {
-            notifyListeners();
+            notifyListeners(key);
         }
-    }, [getNamespacedKey, notifyListeners]);
+    }, [getNamespacedKey, notifyListeners, getDb]);
 
     const invalidate = useCallback(async (key: string | RegExp) => {
         const namespacedKeyPrefix = userEmail ? `${userEmail}:` : '';
         if (!namespacedKeyPrefix) return;
 
-        const db = dbPromise.current ? await dbPromise.current : null;
+        let db: IDBPDatabase<BloomxDB> | null = null;
+        try {
+            const dbp = getDb();
+            db = dbp ? await dbp : null;
+        } catch (e) {
+            console.error('Cache open error', e);
+        }
 
-        if (typeof key === 'string') {
-            const fullKey = namespacedKeyPrefix + key;
-            memoryCache.current.delete(fullKey);
-            if (db) await db.delete(STORE_NAME, fullKey);
-        } else {
-            // Regex invalidation
-            // Memory first
-            for (const k of Array.from(memoryCache.current.keys())) {
-                if (k.startsWith(namespacedKeyPrefix) && key.test(k.substring(namespacedKeyPrefix.length))) {
-                    memoryCache.current.delete(k);
-                }
-            }
-
-            // DB
-            if (db) {
-                const keys = await db.getAllKeys(STORE_NAME);
-                const tx = db.transaction(STORE_NAME, 'readwrite');
-                const store = tx.objectStore(STORE_NAME);
-                const promises = []; // Collect promises if necessary
-
-                // Using a loop with logic
-                for (const k of keys) {
+        try {
+            if (typeof key === 'string') {
+                const fullKey = namespacedKeyPrefix + key;
+                memoryCache.current.delete(fullKey);
+                if (db) await db.delete(STORE_NAME, fullKey);
+            } else {
+                for (const k of Array.from(memoryCache.current.keys())) {
                     if (k.startsWith(namespacedKeyPrefix) && key.test(k.substring(namespacedKeyPrefix.length))) {
-                        // Delete allows async
-                        store.delete(k);
+                        memoryCache.current.delete(k);
                     }
                 }
-                await tx.done;
-            }
-        }
-        notifyListeners();
-    }, [userEmail, notifyListeners]);
 
-    const subscribe = useCallback((listener: () => void) => {
+                if (db) {
+                    const keys = await db.getAllKeys(STORE_NAME);
+                    const tx = db.transaction(STORE_NAME, 'readwrite');
+                    const store = tx.objectStore(STORE_NAME);
+                    for (const k of keys) {
+                        if (k.startsWith(namespacedKeyPrefix) && key.test(k.substring(namespacedKeyPrefix.length))) {
+                            store.delete(k);
+                        }
+                    }
+                    await tx.done;
+                }
+            }
+        } catch (e) {
+            console.error('Cache invalidate error', e);
+        }
+        // string -> se avisa con su clave; regex -> aviso global (undefined)
+        notifyListeners(typeof key === 'string' ? key : undefined);
+    }, [userEmail, notifyListeners, getDb]);
+
+    const subscribe = useCallback((listener: (key?: string) => void) => {
         listeners.current.add(listener);
         return () => listeners.current.delete(listener);
     }, []);
 
+    const value = useMemo(
+        () => ({ getData, setData, invalidate, subscribe }),
+        [getData, setData, invalidate, subscribe]
+    );
+
     return (
-        <CacheContext.Provider value={{ getData, setData, invalidate, subscribe }}>
+        <CacheContext.Provider value={value}>
             {children}
         </CacheContext.Provider>
     );

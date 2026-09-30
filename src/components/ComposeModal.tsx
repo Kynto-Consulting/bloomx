@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, Minimize2, Trash2, Maximize2, Loader2, Send, Paperclip, Clock, Mic } from 'lucide-react';
 import { toast } from 'sonner';
@@ -11,6 +11,7 @@ import { useCompose } from '@/contexts/ComposeContext';
 // Initialize client expansions
 // ensureClientExpansions();
 import { useCache } from '@/contexts/CacheContext';
+import { useOffline } from '@/contexts/OfflineContext';
 import { cn } from '@/lib/utils';
 import { TagInput } from './ui/TagInput';
 import { DateTimePicker } from './ui/DateTimePicker';
@@ -24,6 +25,9 @@ import { motion } from 'framer-motion';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { AccountManager } from '@/lib/account-manager';
 import { splitAddressList } from '@/lib/email-utils';
+import { parseRecipientList } from '@/lib/mail-validation';
+import { DraftSaver, toDraftAttachments, type DraftPayload, type SaveStatus } from '@/lib/draft-autosave';
+import { useFocusTrap } from '@/hooks/useFocusTrap';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -75,6 +79,7 @@ export function ComposeModal({
 }: ComposeModalProps) {
     const { closeCompose, toggleMinimize, updateCompose, windows } = useCompose();
     const { getData, setData } = useCache();
+    const { addToQueue, isOnline } = useOffline();
     const { data: session } = useSession();
     const router = useRouter();
 
@@ -99,7 +104,7 @@ export function ComposeModal({
     const [sending, setSending] = useState(false);
     const [schedulePickerOpen, setSchedulePickerOpen] = useState(false);
     const [scheduleValue, setScheduleValue] = useState('');
-    const [draftId, setDraftId] = useState(initialDraftId);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
     const [mailGroupAliases, setMailGroupAliases] = useState<Record<string, string[]>>({});
     const [isGoogleLinked, setIsGoogleLinked] = useState(false);
     const [isGoogleMeetAvailable, setIsGoogleMeetAvailable] = useState(false);
@@ -234,48 +239,72 @@ export function ComposeModal({
 
 
 
-    const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
     const activeWindow = windows.find(w => w.id === id);
     const minimized = activeWindow?.minimized ?? initialMinimized;
 
-    // Load Signature for new emails
+    // --- Autosave de borradores (ver src/lib/draft-autosave.ts) ---
+    // Un solo guardador por composer: guardados serializados (sin duplicados), flush al cerrar/ocultar,
+    // y discard() al enviar/eliminar para que un POST tardio no resucite el borrador.
+    const senderHeadersRef = useRef(resolveSenderHeaders);
+    senderHeadersRef.current = resolveSenderHeaders;
+    const saverRef = useRef<DraftSaver | null>(null);
+    if (saverRef.current === null) {
+        saverRef.current = new DraftSaver({
+            initialDraftId,
+            getHeaders: () => senderHeadersRef.current(),
+            onStatus: (status) => setSaveStatus(status),
+            // Mantiene el draftId en el contexto: reabrir el mismo borrador desde la lista no abre un duplicado.
+            onDraftId: (draftId) => updateCompose(id, { draftId }),
+        });
+    }
+    const baselineKeyRef = useRef<string | null>(null);
+    const dirtyRef = useRef(false);
 
-
-    // Auto-save draft logic (Attachments NOT saved to draft yet - Edit: Now they are!)
     useEffect(() => {
-        // Only auto-save if there's content
-        if (toTags.length === 0 && ccTags.length === 0 && bccTags.length === 0 && !subject && !body) return;
-
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = setTimeout(async () => {
-            try {
-                const res = await fetch('/api/drafts', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...resolveSenderHeaders(),
-                    },
-                    body: JSON.stringify({
-                        id: draftId,
-                            from: effectiveSenderEmail,
-                        to: toTags.join(', '),
-                        cc: ccTags.join(', '),
-                        bcc: bccTags.join(', '),
-                        subject,
-                        body
-                    }),
-                });
-                const data = await res.json();
-                if (data.draft && !draftId) setDraftId(data.draft.id);
-            } catch (err) {
-                console.error('Failed to save draft:', err);
-            }
-        }, 2000);
-        return () => {
-            if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+        const saver = saverRef.current;
+        if (!saver) return;
+        const payload: DraftPayload = {
+            from: effectiveSenderEmail,
+            to: toTags.join(', '),
+            cc: ccTags.join(', '),
+            bcc: bccTags.join(', '),
+            subject,
+            body,
+            attachments: toDraftAttachments(attachments),
         };
-    }, [toTags, ccTags, bccTags, subject, body, draftId, effectiveSenderEmail]);
+        // Hasta la primera edicion real (el remitente se resuelve tras montar) no se guarda nada:
+        // abrir una respuesta sin escribir no debe crear un borrador.
+        const { from: _from, ...content } = payload;
+        const contentKey = JSON.stringify(content);
+        if (!dirtyRef.current) {
+            if (baselineKeyRef.current === null || baselineKeyRef.current === contentKey) {
+                baselineKeyRef.current = contentKey;
+                saver.setBaseline(payload);
+                return;
+            }
+            dirtyRef.current = true;
+        }
+        saver.schedule(payload);
+    }, [toTags, ccTags, bccTags, subject, body, attachments, effectiveSenderEmail]);
+
+    // Cerrar la pestana/ventana u ocultarla: no perder los ultimos segundos de escritura.
+    useEffect(() => {
+        const saver = saverRef.current;
+        const onHide = () => saver?.flushOnUnload();
+        const onVisibility = () => { if (document.visibilityState === 'hidden') void saver?.flush(); };
+        window.addEventListener('pagehide', onHide);
+        window.addEventListener('beforeunload', onHide);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => {
+            window.removeEventListener('pagehide', onHide);
+            window.removeEventListener('beforeunload', onHide);
+            document.removeEventListener('visibilitychange', onVisibility);
+            // Cierre de la ventana (X, Escape): guardar ahora lo pendiente. Tras enviar/eliminar el saver
+            // ya esta descartado y esto no hace nada.
+            void saver?.flush();
+            try { recognitionRef.current?.stop?.(); } catch { /* ignorado */ }
+        };
+    }, []);
 
     const syncCalendarEventsFromAttachments = async (
         currentTo: string[],
@@ -419,11 +448,23 @@ export function ComposeModal({
         return nextAttachments;
     };
 
+    /** Valida destinatarios (formato, IDN, nombres con coma) antes de tocar la red. */
+    const validateRecipients = (): boolean => {
+        const invalid = [toTags, ccTags, bccTags].flatMap((tags) => parseRecipientList(tags).invalid);
+        if (invalid.length > 0) {
+            toast.error(`Direccion no valida: ${invalid[0]}`);
+            return false;
+        }
+        return true;
+    };
+
     const handleSchedule = async (date: Date) => {
+        if (sending) return;
         if (toTags.length === 0) {
             toast.error('Agrega al menos un destinatario');
             return;
         }
+        if (!validateRecipients()) return;
 
         const plainTextBody = extractPlainTextFromHtml(body);
         if (!plainTextBody && attachments.length === 0) {
@@ -454,9 +495,10 @@ export function ComposeModal({
             });
             const result = await res.json().catch(() => null);
             if (res.ok) {
-                if (draftId) await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
+                // discard(): cancela el autosave pendiente y borra el borrador aunque haya un POST en vuelo.
+                await saverRef.current?.discard();
                 closeCompose(id);
-                // Ideally show a specific toast: "Email scheduled for ..."
+                toast.success(`Correo programado para ${date.toLocaleString()}`);
             } else {
                 throw new Error(result?.error?.message || result?.error || 'No se pudo programar el correo');
             }
@@ -468,23 +510,21 @@ export function ComposeModal({
         }
     };
 
-    const handleSend = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleSend = async (e?: React.SyntheticEvent) => {
+        e?.preventDefault();
+        if (sending || isUploading) return;
 
-        let finalBody = body;
-        let finalTo = toTags;
-        let finalCc = ccTags;
-        let finalBcc = bccTags;
-        let finalSubject = subject;
-
-        // Local expansions removed.
-        const mounts: any[] = []; // Placeholder
-        const sortedMounts: any[] = [];
+        const finalBody = body;
+        const finalTo = toTags;
+        const finalCc = ccTags;
+        const finalBcc = bccTags;
+        const finalSubject = subject;
 
         if (finalTo.length === 0) {
             toast.error('Agrega al menos un destinatario');
             return;
         }
+        if (!validateRecipients()) return;
 
         const plainTextBody = extractPlainTextFromHtml(finalBody);
         if (!plainTextBody && attachments.length === 0) {
@@ -514,7 +554,8 @@ export function ComposeModal({
             });
             const result = await res.json().catch(() => null);
             if (res.ok) {
-                if (draftId) await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
+                // discard(): cancela el autosave pendiente y borra el borrador aunque haya un POST en vuelo.
+                await saverRef.current?.discard();
                 closeCompose(id);
             } else {
                 throw new Error(result?.error?.message || result?.error || 'No se pudo enviar el correo');
@@ -528,30 +569,32 @@ export function ComposeModal({
     };
 
     const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (!e.target.files || e.target.files.length === 0) return;
+        const input = e.target;
+        const files = Array.from(input.files || []);
+        if (files.length === 0) return;
 
         setIsUploading(true);
-        const file = e.target.files[0];
-        const formData = new FormData();
-        formData.append('file', file);
-
         try {
-            const res = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!res.ok) throw new Error('Upload failed');
-
-            const data = await res.json();
-            setAttachments(prev => [...prev, data]);
-        } catch (error) {
-            console.error(error);
-            // toast.error('Failed to upload attachment'); // Add toast if available
+            for (const file of files) {
+                const formData = new FormData();
+                formData.append('file', file);
+                try {
+                    const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        throw new Error(err?.error || 'Upload failed');
+                    }
+                    const data = await res.json();
+                    setAttachments(prev => [...prev, data]);
+                } catch (error) {
+                    console.error(error);
+                    toast.error(`No se pudo adjuntar "${file.name}"${error instanceof Error && error.message ? `: ${error.message}` : ''}`);
+                }
+            }
         } finally {
             setIsUploading(false);
             // Reset input
-            e.target.value = '';
+            input.value = '';
         }
     };
 
@@ -560,24 +603,24 @@ export function ComposeModal({
     };
 
     const handleClose = () => {
+        // El guardado pendiente se vacia en el cleanup del efecto de unmount (flush).
         closeCompose(id);
     };
 
     const handleDelete = async () => {
-        // Optimistic close
+        // discard() marca el saver como descartado de forma sincrona: el flush del unmount ya no guarda nada.
+        const discarding = saverRef.current?.discard();
         closeCompose(id);
-        if (draftId) {
-            try {
-                await fetch(`/api/drafts/${draftId}`, { method: 'DELETE' });
-                // Update Sidebar Count
-                const currentCounts = await getData<any>('stats-counts');
-                if (currentCounts) {
-                    const newCount = Math.max(0, (currentCounts.drafts || 0) - 1);
-                    setData('stats-counts', { ...currentCounts, drafts: newCount }, { silent: false });
-                }
-            } catch (e) {
-                console.error('Failed to delete draft', e);
+        try {
+            await discarding;
+            // Update Sidebar Count
+            const currentCounts = await getData<any>('stats-counts');
+            if (currentCounts) {
+                const newCount = Math.max(0, (currentCounts.drafts || 0) - 1);
+                setData('stats-counts', { ...currentCounts, drafts: newCount }, { silent: false });
             }
+        } catch (e) {
+            console.error('Failed to delete draft', e);
         }
     };
 
@@ -783,6 +826,55 @@ export function ComposeModal({
         }
     };
 
+    // --- Accesibilidad: ids, dialogo, foco, Escape y Ctrl/Cmd+Enter ---
+    const dialogRef = useRef<HTMLDivElement>(null);
+    const uid = useId();
+    const fromId = `${uid}-from`;
+    const toId = `${uid}-to`;
+    const ccId = `${uid}-cc`;
+    const bccId = `${uid}-bcc`;
+    const subjectId = `${uid}-subject`;
+
+    // Ventana maximizada = comportamiento modal: el foco no escapa hasta que se cierra/restaura.
+    useFocusTrap(dialogRef, maximized && !minimized, { restoreFocus: false });
+
+    useEffect(() => {
+        if (initialMinimized) return;
+        const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const timer = window.setTimeout(() => {
+            const root = dialogRef.current;
+            if (!root || root.contains(document.activeElement)) return;
+            const target = initialTo ? root.querySelector<HTMLElement>('.ProseMirror') : document.getElementById(toId);
+            (target ?? root).focus({ preventScroll: true });
+        }, 80);
+        return () => {
+            window.clearTimeout(timer);
+            // Al cerrar, devolver el foco a donde estaba (si el elemento enfocado desaparecio con la ventana).
+            if (previous && document.contains(previous) && (!document.activeElement || document.activeElement === document.body)) {
+                previous.focus({ preventScroll: true });
+            }
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    const handleDialogKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            void handleSend();
+            return;
+        }
+        if (e.key !== 'Escape' || e.defaultPrevented) return;
+        const target = e.target as HTMLElement;
+        // Escape dentro del editor / selects / listas de sugerencias lo gestiona ese control.
+        if (target.isContentEditable || target.tagName === 'SELECT' || target.closest?.('[role="listbox"]')) return;
+        if (schedulePickerOpen) { setSchedulePickerOpen(false); return; }
+        if (popover || activeSlashComponent) { setPopover(null); setActiveSlashComponent(null); return; }
+        if (maximized) { setMaximized(false); return; }
+        handleClose();
+    };
+
+    const saveStatusText = saveStatus === 'saving' ? 'Guardando...' : saveStatus === 'saved' ? 'Borrador guardado' : saveStatus === 'error' ? 'Error al guardar' : '';
+
     const rightOffset = 24 + index * 40;
 
     const slashCommandsList: any[] = [];
@@ -802,7 +894,14 @@ export function ComposeModal({
             >
                 <div
                     className="flex items-center justify-between px-4 py-2 cursor-pointer bg-muted/50 rounded-t-lg hover:bg-muted"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Restaurar borrador: ${subject || 'Nuevo mensaje'}`}
                     onClick={() => toggleMinimize(id)}
+                    onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleMinimize(id); }
+                    }}
                 >
                     <span className="text-sm font-semibold truncate">{subject || 'New Message'}</span>
                     <div className="flex items-center">
@@ -811,6 +910,9 @@ export function ComposeModal({
                                 e.stopPropagation();
                                 handleClose();
                             }}
+                            type="button"
+                            aria-label="Cerrar borrador"
+                            title="Cerrar"
                             className="p-1 hover:bg-accent hover:text-accent-foreground rounded-sm transition-colors"
                         >
                             <X className="h-4 w-4" />
@@ -838,6 +940,12 @@ export function ComposeModal({
 
     return (
         <motion.div
+            ref={dialogRef}
+            role="dialog"
+            aria-label="Nuevo mensaje"
+            aria-modal={maximized ? true : undefined}
+            tabIndex={-1}
+            onKeyDown={handleDialogKeyDown}
             className={modalClass}
             style={modalStyle}
             initial={{ opacity: 0, y: 100, scale: 0.95 }}
@@ -868,21 +976,33 @@ export function ComposeModal({
 
             {/* Header */}
             <div className="flex items-center justify-between px-3 py-2 bg-muted select-none ">
-                <span className="text-sm font-semibold pl-1">New Message</span>
+                <div className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-sm font-semibold pl-1">New Message</span>
+                    <span role="status" aria-live="polite" className="text-xs text-muted-foreground truncate">{saveStatusText}</span>
+                </div>
                 <div className="flex items-center gap-1">
                     <button
+                        type="button"
+                        aria-label="Minimizar"
+                        title="Minimizar"
                         onClick={() => toggleMinimize(id)}
                         className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
                         <Minimize2 className="h-4 w-4" />
                     </button>
                     <button
+                        type="button"
+                        aria-label={maximized ? 'Restaurar tamano' : 'Maximizar'}
+                        title={maximized ? 'Restaurar tamano' : 'Maximizar'}
                         onClick={() => setMaximized(!maximized)}
                         className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
                         <Maximize2 className="h-4 w-4" />
                     </button>
                     <button
+                        type="button"
+                        aria-label="Cerrar (el borrador se guarda)"
+                        title="Cerrar"
                         onClick={handleClose}
                         className="p-1 hover:bg-secondary rounded-sm transition-colors text-muted-foreground"
                     >
@@ -911,10 +1031,11 @@ export function ComposeModal({
             <div className="flex flex-col flex-1 h-full overflow-hidden relative">
                 <div className="px-3 py-1 flex flex-col gap-1 bg-card">
                     <div className="flex items-center gap-2 border-b border-transparent focus-within:border-border transition-colors">
-                        <span className="text-sm font-medium text-muted-foreground w-10">From</span>
+                        <label htmlFor={fromId} className="text-sm font-medium text-muted-foreground w-10">From</label>
                         <div className="flex-1 py-1.5">
                             {canSwitchSender ? (
                                 <select
+                                    id={fromId}
                                     value={fromAddress}
                                     onChange={(event) => setFromAddress(event.target.value)}
                                     className="w-full bg-transparent text-sm text-foreground/80 outline-none"
@@ -933,10 +1054,11 @@ export function ComposeModal({
 
                     <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border transition-colors">
                         <div className="pt-2">
-                            <span className="text-sm font-medium text-muted-foreground">To</span>
+                            <label htmlFor={toId} className="text-sm font-medium text-muted-foreground">To</label>
                         </div>
                         <div className="flex-1">
                             <TagInput
+                                inputId={toId}
                                 value={toTags}
                                 onChange={actions.setTo}
                                 placeholder=""
@@ -947,6 +1069,8 @@ export function ComposeModal({
                         <div className="pt-1">
                             <button
                                 type="button"
+                                aria-expanded={showCcBcc}
+                                aria-label="Mostrar u ocultar Cc y Bcc"
                                 onClick={() => setShowCcBcc(!showCcBcc)}
                                 className="text-xs text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
                             >
@@ -958,15 +1082,15 @@ export function ComposeModal({
                     {showCcBcc && (
                         <div className="animate-in slide-in-from-top-2 duration-200 flex flex-col gap-1">
                             <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border">
-                                <span className="text-sm font-medium text-muted-foreground pt-2 w-8">Cc</span>
+                                <label htmlFor={ccId} className="text-sm font-medium text-muted-foreground pt-2 w-8">Cc</label>
                                 <div className="flex-1">
-                                    <TagInput value={ccTags} onChange={actions.setCc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
+                                    <TagInput inputId={ccId} value={ccTags} onChange={actions.setCc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
                             </div>
                             <div className="flex items-start gap-2 border-b border-transparent focus-within:border-border">
-                                <span className="text-sm font-medium text-muted-foreground pt-2 w-8">Bcc</span>
+                                <label htmlFor={bccId} className="text-sm font-medium text-muted-foreground pt-2 w-8">Bcc</label>
                                 <div className="flex-1">
-                                    <TagInput value={bccTags} onChange={actions.setBcc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
+                                    <TagInput inputId={bccId} value={bccTags} onChange={actions.setBcc} className="border-none px-0 py-1.5" suggestionEndpoint="/api/contacts/suggestions" />
                                 </div>
                             </div>
                         </div>
@@ -976,6 +1100,8 @@ export function ComposeModal({
                 <div className="px-3 py-2 bg-card">
                     <input
                         className="w-full bg-transparent text-sm font-medium outline-none placeholder:text-muted-foreground"
+                        id={subjectId}
+                        aria-label="Asunto"
                         placeholder="Subject"
                         value={subject}
                         onChange={(e) => actions.setSubject(e.target.value)}
@@ -1003,7 +1129,7 @@ export function ComposeModal({
                                 <div key={i} className="flex items-center gap-1 bg-muted/50 border border-border rounded-md px-2 py-1 text-xs max-w-[150px]">
                                     <Paperclip className="w-3 h-3 text-muted-foreground shrink-0" />
                                     <span className="truncate">{att.filename || att.name}</span>
-                                    <button onClick={() => removeAttachment(i)} className="text-muted-foreground hover:text-destructive ml-1">
+                                    <button type="button" onClick={() => removeAttachment(i)} className="text-muted-foreground hover:text-destructive ml-1" aria-label={`Quitar adjunto ${att.filename || att.name || ''}`}>
                                         <X className="w-3 h-3" />
                                     </button>
                                 </div>
@@ -1049,6 +1175,9 @@ export function ComposeModal({
                     <div className="flex items-center gap-2">
                         <div className="flex items-center rounded-full shadow-sm bg-primary text-primary-foreground transition-all hover:bg-primary/90">
                             <button
+                                type="button"
+                                aria-keyshortcuts="Control+Enter Meta+Enter"
+                                title="Enviar (Ctrl/Cmd+Enter)"
                                 onClick={handleSend}
                                 disabled={sending || toTags.length === 0 || isUploading}
                                 className={cn(
@@ -1069,7 +1198,10 @@ export function ComposeModal({
                                 <button
                                     type="button"
                                     onClick={() => setSchedulePickerOpen(o => !o)}
-                                    title="Schedule Send"
+                                    title="Programar envio"
+                                    aria-label="Programar envio"
+                                    aria-haspopup="dialog"
+                                    aria-expanded={schedulePickerOpen}
                                     className="cursor-pointer p-2 flex items-center justify-center h-full w-full rounded-r-full"
                                 >
                                     <Clock className="w-4 h-4" />
@@ -1101,18 +1233,19 @@ export function ComposeModal({
                         </div>
                         <div className="overflow-hidden flex items-center gap-2 scroll-x w-full">
                             <label className={cn(
-                                "text-muted-foreground hover:bg-secondary p-2 rounded-full cursor-pointer transition-colors relative",
+                                "text-muted-foreground hover:bg-secondary p-2 rounded-full cursor-pointer transition-colors relative focus-within:ring-2 focus-within:ring-ring",
                                 isUploading && "opacity-50 cursor-wait"
                             )}>
                                 {isUploading ? <Loader2 className="w-5 h-5 animate-spin p-0.5" /> : <Paperclip className="w-5 h-5" />}
-                                <input type="file" className="hidden" onChange={handleFileSelect} disabled={isUploading} />
+                                <input type="file" multiple className="sr-only" aria-label="Adjuntar archivos" onChange={handleFileSelect} disabled={isUploading} />
                             </label>
 
                             {/* Voice Dictation */}
                             <button
+                                type="button"
                                 onClick={() => {
                                     if (typeof window === 'undefined' || (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window))) {
-                                        alert('Voice dictation not supported in this browser.');
+                                        toast.error('El dictado por voz no es compatible con este navegador.');
                                         return;
                                     }
 
@@ -1143,7 +1276,7 @@ export function ComposeModal({
                                             }
                                         }
                                         if (finalTranscript) {
-                                            setBody((prev) => (prev || '') + ' ' + finalTranscript);
+                                            editorRef.current?.insertContent(finalTranscript + ' ');
                                         }
                                     };
 
@@ -1154,7 +1287,9 @@ export function ComposeModal({
                                     "p-2 rounded-full transition-colors relative",
                                     isListening ? "text-destructive bg-destructive/10 animate-pulse" : "text-muted-foreground hover:bg-secondary"
                                 )}
-                                title="Dictate"
+                                title="Dictar"
+                                aria-label={isListening ? 'Detener dictado' : 'Dictar'}
+                                aria-pressed={isListening}
                             >
                                 <Mic className="w-5 h-5" />
                                 {isListening && (
@@ -1173,9 +1308,11 @@ export function ComposeModal({
                     </div>
 
                     <button
+                        type="button"
                         onClick={handleDelete}
                         className="text-muted-foreground hover:bg-secondary hover:text-foreground/80 p-2 rounded-full transition-colors"
-                        title="Delete Draft"
+                        title="Descartar borrador"
+                        aria-label="Descartar borrador"
                     >
                         <Trash2 className="w-5 h-5" />
                     </button>

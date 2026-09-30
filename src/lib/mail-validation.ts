@@ -6,8 +6,12 @@
  * Controles: NIST SP 800-177r1 sec. 4, CIS v8 9.x / 16.x, ISO 27002:2022 8.26.
  */
 
+import { splitAddressList } from './email-utils';
+
 // Direccion "razonable" (RFC 5321 simplificado): sin espacios, sin CR/LF, un solo @.
-const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/;
+// El dominio debe llegar ya en ASCII (los IDN se convierten antes con domainToAsciiSafe).
+// El TLD puede ser alfabetico o punycode (xn--...).
+const EMAIL_RE = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+(?:[A-Za-z]{2,63}|xn--[A-Za-z0-9-]{1,59})$/;
 
 export const MAX_RECIPIENTS = 100;
 export const MAX_SUBJECT_LENGTH = 998;
@@ -27,9 +31,44 @@ export function sanitizeDisplayName(value: unknown): string {
     return stripControlChars(value).replace(/[<>",;\\]/g, '').slice(0, 120).trim();
 }
 
-export function isValidEmailAddress(value: unknown): boolean {
+/**
+ * Convierte un dominio (posiblemente IDN, p. ej. "bücher.de") a ASCII/punycode usando el
+ * parser WHATWG URL (Node y navegador). Devuelve null si contiene caracteres que no pueden
+ * formar parte de un nombre de host.
+ */
+export function domainToAsciiSafe(domain: string): string | null {
+    const d = String(domain ?? '').trim();
+    if (!d || d.length > 253) return null;
+    // Nada que un parser de URL pudiera reinterpretar (ruta, puerto, credenciales, espacios...).
+    if (/[\s\u0000-\u001F\u007F/\\?#@:%<>[\]()"',;]/.test(d)) return null;
+    if (d.startsWith('.') || d.endsWith('.') || d.includes('..')) return null;
+    // Sin parte no-ASCII no hay nada que convertir.
+    if (/^[\x00-\x7F]*$/.test(d)) return d.toLowerCase();
+    try {
+        const host = new URL(`http://${d}`).hostname;
+        return host && /^[\x00-\x7F]+$/.test(host) ? host.toLowerCase() : null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Normaliza una direccion "local@dominio" con dominio IDN a su forma ASCII (punycode).
+ * Devuelve null si no es valida. La parte local debe ser ASCII (sin SMTPUTF8).
+ */
+export function normalizeEmailAddressAscii(value: unknown): string | null {
     const v = String(value ?? '').trim();
-    return v.length <= 254 && EMAIL_RE.test(v);
+    if (!v || v.length > 320) return null;
+    const at = v.lastIndexOf('@');
+    if (at <= 0) return null;
+    const ascii = domainToAsciiSafe(v.slice(at + 1));
+    if (!ascii) return null;
+    const candidate = `${v.slice(0, at)}@${ascii}`;
+    return candidate.length <= 254 && EMAIL_RE.test(candidate) ? candidate : null;
+}
+
+export function isValidEmailAddress(value: unknown): boolean {
+    return normalizeEmailAddressAscii(value) !== null;
 }
 
 /** Extrae la direccion de "Nombre <a@b.com>" o "a@b.com" (sin validar). */
@@ -40,13 +79,14 @@ export function extractAddress(value: unknown): string {
 }
 
 /**
- * Convierte "a@b.com, Nombre <c@d.com>" (string, o array) en una lista de direcciones
- * validas. Devuelve { valid, invalid }.
+ * Convierte `a@b.com, "Doe, John" <c@d.com>` (string, o array de entradas) en una lista de
+ * direcciones validas. Las comas dentro de comillas o de <...> no separan destinatarios
+ * (splitAddressList). Los dominios IDN se devuelven en punycode. Devuelve { valid, invalid }.
  */
 export function parseRecipientList(value: unknown): { valid: string[]; invalid: string[] } {
     const items: string[] = Array.isArray(value)
-        ? value.map((v) => String(v ?? ''))
-        : String(value ?? '').split(',');
+        ? value.flatMap((v) => splitAddressList(String(v ?? '')))
+        : splitAddressList(String(value ?? ''));
 
     const valid: string[] = [];
     const invalid: string[] = [];
@@ -55,9 +95,9 @@ export function parseRecipientList(value: unknown): { valid: string[]; invalid: 
     for (const item of items) {
         const trimmed = item.trim();
         if (!trimmed) continue;
-        const address = extractAddress(trimmed);
-        if (!isValidEmailAddress(address)) {
-            invalid.push(trimmed.slice(0, 80));
+        const address = normalizeEmailAddressAscii(extractAddress(trimmed));
+        if (!address) {
+            invalid.push(stripControlChars(trimmed).slice(0, 80));
             continue;
         }
         const key = address.toLowerCase();

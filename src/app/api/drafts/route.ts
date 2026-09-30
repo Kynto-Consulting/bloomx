@@ -1,48 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
-
-function extractEmailAddress(value: string): string {
-    const raw = String(value || '').trim();
-    const bracketMatch = raw.match(/<([^>]+)>/);
-    return (bracketMatch?.[1] || raw).trim().toLowerCase();
-}
-
-function normalizeMailboxIdentity(email: string): string {
-    const [localPart, domain] = String(email || '').trim().toLowerCase().split('@');
-    if (!localPart || !domain) return '';
-
-    let normalizedLocal = localPart.replace(/\./g, '');
-    const plusIndex = normalizedLocal.indexOf('+');
-    if (plusIndex !== -1) {
-        normalizedLocal = normalizedLocal.substring(0, plusIndex);
-    }
-
-    return `${normalizedLocal}@${domain}`;
-}
-
-async function resolveAuthorizedSenders(userId: string, fallbackEmail: string): Promise<Set<string>> {
-    const user = await prisma.user.findUnique({
-        where: { id: userId },
-        select: {
-            email: true,
-            accounts: {
-                select: {
-                    providerAccountId: true,
-                }
-            }
-        }
-    });
-
-    const allowed = new Set<string>([
-        String(user?.email || fallbackEmail || '').trim().toLowerCase(),
-        ...((user?.accounts || [])
-            .map((account) => String(account.providerAccountId || '').trim().toLowerCase())
-            .filter((email) => email.includes('@'))),
-    ]);
-
-    return allowed;
-}
+import { extractEmailAddress, normalizeMailboxIdentity, resolveAuthorizedSenders, sanitizeDraftAttachments } from '@/lib/draft-access';
 
 // Get all drafts
 // Get all drafts for the authenticated user
@@ -88,6 +47,9 @@ export async function POST(req: NextRequest) {
                 .map(normalizeMailboxIdentity)
                 .filter(Boolean)
         );
+
+        // Solo adjuntos ya subidos y propios (o de correos del usuario, p. ej. reenvios); el resto se descarta.
+        const safeAttachments = attachments === undefined ? undefined : await sanitizeDraftAttachments(attachments, user);
 
         const requestedFrom = from ? extractEmailAddress(String(from)) : '';
         const requestedIdentity = requestedFrom ? normalizeMailboxIdentity(requestedFrom) : '';
@@ -136,19 +98,13 @@ export async function POST(req: NextRequest) {
                     },
                 });
 
-                // Handle attachments...
-                if (attachments && Array.isArray(attachments)) {
+                // Sincroniza los adjuntos (lista completa que envia el cliente).
+                if (safeAttachments) {
                     await prisma.attachment.deleteMany({ where: { draftId: id } });
 
-                    if (attachments.length > 0) {
+                    if (safeAttachments.length > 0) {
                         await prisma.attachment.createMany({
-                            data: attachments.map((att: any) => ({
-                                draftId: id,
-                                filename: att.filename,
-                                mimeType: att.mimeType || 'application/octet-stream',
-                                size: att.size || 0,
-                                key: att.key
-                            }))
+                            data: safeAttachments.map((att) => ({ draftId: id, ...att }))
                         });
                     }
                 }
@@ -171,13 +127,8 @@ export async function POST(req: NextRequest) {
                     bcc: bcc || null,
                     subject: subject || null,
                     body: draftBody || null,
-                    attachments: attachments ? {
-                        create: attachments.map((att: any) => ({
-                            filename: att.filename,
-                            mimeType: att.mimeType || 'application/octet-stream',
-                            size: att.size || 0,
-                            key: att.key
-                        }))
+                    attachments: safeAttachments && safeAttachments.length > 0 ? {
+                        create: safeAttachments
                     } : undefined
                 },
             });

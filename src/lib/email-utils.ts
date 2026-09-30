@@ -159,3 +159,50 @@ export function buildReplyAllRecipients(opts: {
     }
     return { to, cc };
 }
+
+/** Content-ID referenciados como `cid:xxx` en un HTML (src, url(...)), sin duplicados. */
+export function extractCidReferences(html?: string | null): string[] {
+    const out = new Set<string>();
+    for (const m of String(html || '').matchAll(/cid:([^\s"'<>)]+)/gi)) {
+        out.add(m[1]);
+    }
+    return Array.from(out);
+}
+
+function safeDecode(value: string): string {
+    try { return decodeURIComponent(value); } catch { return value; }
+}
+
+/**
+ * Busca el adjunto al que apunta un `cid:`. El esquema NO guarda el Content-ID (solo filename),
+ * asi que se resuelve por nombre: cid == filename, parte local del cid (antes de "@") == filename,
+ * o parte local == filename sin extension. Solo adjuntos con `key` y tipo imagen (o sin tipo).
+ * Devuelve null si no hay coincidencia unica razonable.
+ */
+export function findAttachmentForCid<T extends { filename?: string | null; mimeType?: string | null; key?: string | null }>(
+    cid: string,
+    attachments: T[] | null | undefined,
+): T | null {
+    const wanted = safeDecode(String(cid || '')).trim().toLowerCase();
+    if (!wanted) return null;
+    const local = wanted.split('@')[0];
+    const usable = (attachments || []).filter((a) => a && a.key && a.filename && (!a.mimeType || String(a.mimeType).toLowerCase().startsWith('image/')));
+
+    const strip = (name: string) => name.replace(/\.[a-z0-9]{1,5}$/i, '');
+    const rules: Array<(name: string) => boolean> = [
+        (name) => name === wanted,
+        (name) => name === local,
+        (name) => strip(name) === local || strip(name) === strip(local),
+    ];
+    for (const rule of rules) {
+        const hits = usable.filter((a) => rule(String(a.filename).toLowerCase()));
+        if (hits.length === 1) return hits[0];
+        if (hits.length > 1) return null; // ambiguo: mejor no adivinar
+    }
+    return null;
+}
+
+/** Reemplaza cada `cid:xxx` por lo que devuelva `resolve` (null = dejar sin cambios). */
+export function replaceCidReferences(html: string, resolve: (cid: string) => string | null): string {
+    return String(html || '').replace(/cid:([^\s"'<>)]+)/gi, (whole, cid: string) => resolve(cid) ?? whole);
+}
