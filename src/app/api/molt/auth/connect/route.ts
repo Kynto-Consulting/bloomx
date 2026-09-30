@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { createMoltToken } from '@/lib/molt-auth';
 import { compare } from 'bcryptjs';
 import { auditLog, getClientIp, getDummyBcryptHash, rateLimit, safeEqual } from '@/lib/security';
+import { getMfaStatus, mfaRequiredFor, verifyMfa } from '@/lib/mfa';
 
 export async function POST(req: NextRequest) {
     try {
@@ -31,6 +32,20 @@ export async function POST(req: NextRequest) {
         if (!user || !user.password || !isValid) {
             auditLog('auth.molt.failure', { email, ip });
             return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
+        }
+
+        // 2b. Segundo factor: si la cuenta tiene MFA (o el rol lo exige) la contrasena sola no basta (NIST 800-63B AAL2)
+        const mfa = await getMfaStatus(user.id);
+        if (mfaRequiredFor(user.email) && !mfa.enabled) {
+            auditLog('auth.molt.mfa_enrollment_required', { userId: user.id, ip });
+            return NextResponse.json({ error: 'MFA enrollment required. Sign in on the web app first.' }, { status: 403 });
+        }
+        if (mfa.enabled) {
+            const otp = await verifyMfa(user.id, { code: body?.otp, recoveryCode: body?.recoveryCode });
+            if (!otp.ok) {
+                auditLog('auth.molt.mfa_failed', { userId: user.id, ip });
+                return NextResponse.json({ error: 'MFA code required', mfaRequired: true }, { status: 401 });
+            }
         }
 
         // 3. Generate Tokens

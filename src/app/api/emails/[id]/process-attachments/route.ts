@@ -5,6 +5,10 @@ import { extractAttachmentsFromRawMime } from '@/lib/mime-attachments';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
+import { validateAttachment } from '@/lib/file-type';
+import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
+import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { auditLog } from '@/lib/security';
 
 // Large inbound attachments mean downloading the full raw MIME (all parts,
 // base64) and re-uploading to our own storage. Give the function room so big
@@ -237,7 +241,11 @@ export async function POST(
     const calendarBlocks = extractCalendarIcsFromRawMime(rawMime);
 
     const newAttachments: { filename: string; mimeType: string; size: number; key: string }[] = [];
+    const blockedAttachments: { filename: string; mimeType: string; size: number; reason: string }[] = [];
     const parsedInvites: ReturnType<typeof parseInviteFromIcs>[] = [];
+    // Claves ya usadas (BD + esta ejecucion): dos adjuntos con el mismo nombre ya no se sobrescriben
+    const usedKeys = new Set<string>(email.attachments.map(a => String(a.key || '').toLowerCase()));
+    const attachmentPrefix = `emails/${dateStr}/${uuid}/attachments`;
 
     // ── Process non-calendar attachments ──────────────────────────────────────
     for (const ext of extracted) {
@@ -253,13 +261,34 @@ export async function POST(
         );
         if (alreadyExists) continue;
 
-        const attKey = `emails/${dateStr}/${uuid}/attachments/${ext.filename}`;
-        const uploaded = await uploadWithRetry(attKey, ext.buffer, ext.contentType);
+        // 1) Tipo real por magic-bytes (ejecutables/HTML disfrazados) y 2) antivirus opcional (AV_SCAN_URL)
+        const verdict = validateAttachment({
+            filename: ext.filename,
+            declaredMime: ext.contentType,
+            buffer: ext.buffer,
+            direction: 'inbound',
+        });
+        let blockReason: string | null = verdict.verdict === 'blocked' ? verdict.reason : null;
+        if (!blockReason) {
+            const av = await scanBuffer(ext.buffer, ext.filename, { userId: email.userId });
+            if (avShouldBlock(av)) blockReason = av.status === 'infected' ? 'av_infected' : 'av_unavailable';
+        }
+        if (blockReason) {
+            blockedAttachments.push({ filename: ext.filename, mimeType: ext.contentType, size: ext.buffer.byteLength, reason: blockReason });
+            auditLog('attachment.blocked', { userId: email.userId, emailId, reason: blockReason, direction: 'inbound' });
+            continue;
+        }
+        if (verdict.verdict === 'sanitized') {
+            auditLog('attachment.sanitized', { userId: email.userId, emailId, reason: verdict.reason, detected: verdict.detected.mime });
+        }
+
+        const attKey = uniqueAttachmentKey(attachmentPrefix, ext.filename, usedKeys);
+        const uploaded = await uploadWithRetry(attKey, ext.buffer, verdict.storeMime);
 
         if (uploaded) {
             newAttachments.push({
                 filename: ext.filename,
-                mimeType: ext.contentType,
+                mimeType: verdict.storeMime,
                 size: ext.buffer.byteLength,
                 key: attKey,
             });
@@ -283,7 +312,7 @@ export async function POST(
 
         const filename = `invite-${i + 1}.ics`;
         const buf = Buffer.from(icsContent, 'utf8');
-        const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
+        const attKey = uniqueAttachmentKey(attachmentPrefix, filename, usedKeys);
         const uploaded = await uploadWithRetry(attKey, buf, 'text/calendar;charset=utf-8');
         if (uploaded) {
             newAttachments.push({
@@ -323,6 +352,21 @@ export async function POST(
                 data: { status: 'failed' },
             });
         }
+    }
+
+    // Adjuntos bloqueados (ejecutable / AV): se deja fila con status "failed" y key "BLOCKED" (la UI oculta las "failed"
+    // y /api/assets solo sirve attachments/* y emails/*/attachments/*, asi que no hay enlace descargable).
+    if (blockedAttachments.length > 0) {
+        await prisma.attachment.createMany({
+            data: blockedAttachments.map(b => ({
+                emailId,
+                filename: b.filename,
+                mimeType: b.mimeType,
+                size: b.size,
+                key: 'BLOCKED',
+                status: 'failed',
+            })),
+        });
     }
 
     // Create records for newly discovered attachments

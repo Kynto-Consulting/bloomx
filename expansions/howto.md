@@ -1,138 +1,165 @@
-# BloomX Expansion System Guide
+# Guía de extensiones de BloomX
 
-This guide explains how to create and integrate expansions into BloomX, covering both Client (UI) and Server (Logic) layers.
+Estado real del sistema al 2026-09-29. Una **extensión** es un directorio en `bloomx-extensions/<nombre>/` con:
 
----
+- `manifest.json`: declara la interfaz (botones, formularios, overlays), los permisos y los hooks. El frontend lo pinta con `JsonRenderer`.
+- `server.js` (opcional): lógica de servidor. Se descarga de Backblaze B2 y se ejecuta en un sandbox `node:vm` del backend (`bloomx-backend/src/lib/extensions/sandbox.ts`).
 
-## 1. Client Expansions (`ClientExpansion`)
+No existen `src/lib/expansions/server.ts`, `src/lib/expansions/core/`, flags `EXPANSION_*` ni un `ClientExpansion` para casi todo: eso pertenecía a un diseño anterior. Lo único "nativo" del cliente es `core-mail-groups` (`components/expansions/settings/MailGroupsSettings.tsx`, registrado en `lib/expansions/client/registry.ts`).
 
-Client expansions are React components that run in the user's browser. They are used for UI interactions, toolbar buttons, slash commands, and editor manipulations.
+```
+bloomx-extensions/<ext>/manifest.json + server.js
+        │  sync-extensions.mjs (operador)            ┌──────────────────────────────┐
+        ▼                                            │ bloomx (frontend)            │
+ Neon (Extension.template) + B2 (server.js) ───────► │ /api/config → useDomainConfig│
+        ▲                                            │ ExtensionLoader → JsonRenderer│
+        │                                            └───────┬──────────────────────┘
+ bloomx-backend                                              │ CALL_BACKEND / hooks
+  /api/extension/execute  (RPC)  ◄───── /api/expansions ─────┘  (proxy con JWT de sesión)
+  /api/extension/hooks    (intercepts) ◄─ /api/emails (EMAIL_PRE_SEND)
+  /api/extension/settings (credenciales por dominio)
+```
 
-### Mount Points
-- `COMPOSER_TOOLBAR`: Button in the composer footer.
-- `SLASH_COMMAND`: Triggered via `/` in the editor.
-- `COMPOSER_OVERLAY`: UI floating above the toolbar.
-- `CUSTOM_SETTINGS_TAB`: A full page in Settings.
-- `SIDEBAR_PANEL`: A persistent panel in the main sidebar.
+## 1. Contrato del handler: `handler(ctx)`
 
-### The Client Context (`ClientExpansionContext`)
-The `context` prop provides everything you need to interact with the editor:
-- **Editor**: `onInsertBody()`, `onSetBody()`, `onAppendBody()`, `onUpdateSubject()`.
-- **Recipients**: `onAddRecipient()`, `onUpdateTo()`, `onRemoveRecipient()`.
-- **Feedback**: `onToast(msg, type)`, `onShowConfetti()`.
-- **UI Actions**: `openPopover(anchor, content)`, `onClose()`.
+Todo handler recibe **un solo objeto**. La firma antigua `(payload, context)` ya no existe (el runtime nunca la soportó: `context` llegaba `undefined`). Una prueba (`bloomx-extensions/tests/contract.test.mjs`) falla si algún handler declara más de un parámetro.
 
----
+```js
+// server.js  (CommonJS o `export async function`; ambos se normalizan)
+module.exports = {
+    savePage: async (ctx) => {
+        const { subject } = ctx.args;               // parámetros de la acción
+        const key = ctx.env.NOTION_API_KEY;          // credencial del DOMINIO
+        const title = await ctx.services.ai.generate('system', 'prompt');
+        return { success: true };                    // se serializa a JSON
+    },
+};
+```
 
-## 2. Server Expansions (`Expansion`)
+| Campo de `ctx` | Origen | Notas |
+|---|---|---|
+| `args` | `CALL_BACKEND.args` (+ `formData` si la acción sale de un FORM) | Siempre los del RPC; el `context` del cliente no puede pisarlos. |
+| `env` | Permisos `ENV_READ:NOMBRE` | Credencial del dominio (cifrada en BD) o, si el operador lo autoriza, variable global (ver §5). |
+| `services.ai.generate(system, prompt, opts?)` | Plataforma | Máx. 5 llamadas por invocación. `opts.response_format = {type:'json_object'}` para JSON. |
+| `services.auth.getToken(provider)` | Runtime | Token OAuth: cuenta vinculada del usuario > `authData` del dominio > fallback controlado. Devuelve `null` si no hay. |
+| `domain` | Servidor | `{ id, name, displayName, logo, theme }`. Úsalo para marca (`domain.displayName`, `domain.theme.primaryColor`). |
+| `user` | JWT verificado | `{ id, email }`. |
+| `settings` | `ExtensionOnDomain.settings` | **Sin** claves con nombre `token/secret/password/credential…` (`stripSecrets`). |
+| `extension` | Servidor | `{ id, sourceId, name, manifest }`. |
+| Resto | Contexto del cliente | `emailContent`, `subject`, `to`, `from`, `secureData`… **No fiable**: lo manda el navegador. `auth`, `user`, `env` del cliente se descartan. |
 
-Server expansions run in the backend (Next.js API routes or Background workers). They handle data processing, AI generation, and scheduled tasks.
+Globals disponibles en el sandbox (todo lo demás no existe): `console`, `fetch` (SSRF-safe, https, máx. 20 por invocación), `URL`, `URLSearchParams`, `Buffer` (subconjunto), `crypto {randomUUID, sha256Hex, hmacSha256Hex}`, `setTimeout`, `process.env` (solo las variables autorizadas). Sin `require`, `eval` ni `new Function`.
 
-### Triggers (`ExpansionTrigger`)
-- `EMAIL_RECEIVED`: Runs when a new email is fetched.
-- `EMAIL_PRE_SEND`: Middleware before an email leaves the server.
-- `EMAIL_POST_SEND`: Cleanup or logging after sending.
-- `ORGANIZATION_CRON`: Periodic tasks (e.g. daily cleanup).
-- `API`: Custom endpoints called from the client UI.
+**Resolución de acciones**: `CALL_BACKEND.function = "searchGifs"` → `manifest.api.functions.searchGifs.handler = "search"` → `exports.search`. Si `api.functions` no la declara, se usa el nombre tal cual. `api.functions.<x>.timeout` (100–60000 ms) acota esa función; por defecto 25 s.
 
-### Internal Services (`ExpansionServices`)
-Server intercepts receive a `services` object to interact with the system securely:
-- **`services.ai`**: Generate text using optimized BloomX prompts.
-- **`services.auth`**: Get refreshed Google OAuth tokens (`getGoogleToken()`).
-- **`services.storage`**: Upload files to S3/Cloud storage.
-- **`services.user`**: Read/Write user settings and preferences.
-- **`services.email`**: Fetch emails, update labels, or move folders.
+Errores: lanza `new Error('mensaje')` (se devuelve al cliente, máx. 500 caracteres). `AUTH_REQUIRED` responde 401 y la UI puede reaccionar (p. ej. mostrar "Conectar Google").
 
-### Example Server Intercept:
-```typescript
+## 2. Manifest
+
+Se **valida al cargar** (`lib/expansions/manifest-schema.ts` en el frontend, `src/lib/extensions/manifest-schema.ts` en el backend, y `bloomx-extensions/_shared/manifest-schema.ts` es la fuente canónica; una prueba comprueba que las tres copias sean idénticas). Un manifest con **errores** no se monta en el frontend, no se publica desde `admin/extensions` (400) y `readRepositoryExtensions` lo salta. Los **avisos** (vocabulario desconocido) se cargan igual.
+
+Campos principales:
+
+```jsonc
 {
-    type: 'BACKGROUND',
-    trigger: 'EMAIL_RECEIVED',
-    execute: async (context, services) => {
-        const summary = await services.ai.generate("Summarize this:", context.emailContent);
-        await services.email.updateLabels(context.emailId, ['AI_SUMMARY']);
-        return { success: true, data: { summary } };
-    }
+  "manifestVersion": "1.0",
+  "id": "core-notion", "name": "…", "version": "1.0.0", "description": "…",
+  "status": "active",                       // "disabled": no se monta (p. ej. sealer, organizer)
+  "permissions": ["READ_EMAIL", "ENV_READ:NOTION_API_KEY", "HTTP_REQUEST"],
+  "auth": { "type": "OAUTH2", "provider": "hubspot", "scopes": [] },
+  "api": { "runtime": "nodejs", "entry": "server.js",
+           "functions": { "savePage": { "handler": "savePage", "timeout": 10000 } } },
+  "mounts": [ { "point": "EMAIL_TOOLBAR", "component": { "type": "BUTTON", "props": { … } } },
+              { "point": "OVERLAY", "id": "notion-modal", "component": { "type": "MODAL", … } },
+              { "point": "ON_RECIPIENTS_CHANGE_HANDLER", "handler": "expandGroups", "priority": "HIGH" } ],
+  "intercepts": [ { "point": "EMAIL_PRE_SEND", "handler": "scanContent", "priority": "HIGH", "onError": "block" } ]
 }
 ```
 
----
+Reglas que impone el schema: `id`/`version` válidos; `ENV_READ:` solo en MAYÚSCULAS y **nunca** variables de plataforma (`DATABASE_URL`, `B2_*`, `ADMIN_*`, `NEXT_*`, `EXTENSION_*`…); todo `CALL_BACKEND.function`, `mount.handler` e `intercept.handler` debe existir en `api.functions`; acciones desconocidas son error; los `OVERLAY` requieren `id`.
 
-## 3. Settings & Persistence
+Formas heredadas que `normalizeMount` convierte: `component: "MODAL"` con `props`/`children` a nivel del mount, y el `COMPOSER_INIT` con `config.storageKey` (firma) → componente `HEADLESS`.
 
-BloomX provides built-in sync for expansion settings.
+### Puntos de montaje que **tienen consumidor** hoy
 
-### `useExpansionSettings(id)`
-Use this hook in your client components to save/load configuration.
-```tsx
-const { settings, saveSettings, loading } = useExpansionSettings('my-expansion-id');
+| Punto | Dónde | Contexto |
+|---|---|---|
+| `EMAIL_TOOLBAR` | MailView (correo abierto) | El objeto email + `emailContent` (cuerpo o snippet) y `fromContact {email,name,firstName,lastName}` (los completa `ExtensionLoader`). |
+| `COMPOSER_TOOLBAR`, `EMAIL_FOOTER`, `COMPOSER_INIT` | ComposeModal | `subject`, `to/cc/bcc`, `emailContent` (borrador), `insertBody/appendBody/setSubject/addAttachment`. |
+| `SIDEBAR_HEADER`, `SIDEBAR_FOOTER` | Sidebar | — |
+| `CALENDAR_HEADER`, `CALENDAR_SIDEBAR(_BOTTOM)`, `CALENDAR_ADD_SOURCES`, `EVENT_LOCATION_BUILDER` | Calendario | `isGoogleLinked`, setters del formulario. |
+| `CONTACTS_HEADER`, `CONTACTS_SIDEBAR(_BOTTOM)` | Contactos | — |
+| `ON_RECIPIENTS_CHANGE_HANDLER` (también `ON_BODY/SUBJECT_CHANGE_HANDLER`) | ComposeModal y CreateEventForm | `GET /api/extensions?trigger=X` devuelve solo los handlers de las extensiones **instaladas en el dominio**, ordenados por `priority`. El handler recibe `args = {to, cc, bcc}`. |
+| `CUSTOM_SETTINGS_TAB` | Ajustes | `ExpansionUIProvider` publica las pestañas de los manifests en el registro que lee `SettingsModal` (id `ext:<extensionId>`). |
+| `PAGE` | `/extensions/<path>` | — |
+| `OVERLAY` | `OPEN_OVERLAY.targetId` | Contexto del mount que lo abre. |
 
-// settings is automatically decrypted and synced across devices
-const apiKey = settings?.apiKey;
-saveSettings({ ...settings, apiKey: 'new-key' });
-```
+**Sin consumidor (no los uses):** `slashCommands[]` y `SLASH_COMMAND` (`ComposeModal` fija `slashCommandsList = []`; requiere un ejecutor imperativo de acciones), `BEFORE_SEND_HANDLER`, `CUSTOM_ROUTE`, `backendRoutes` (no hay router `/api/ext/[id]/*`; se quitaron de giphy y hubspot: usan `CALL_BACKEND`).
 
-### `SettingsComponent`
-Register this in your `ClientExpansion` to provide a UI in the global Settings menu.
-```tsx
-export const MySettings = ({ settings, onSave, saving }) => (
-    <div>
-        <input 
-            value={settings.apiKey} 
-            onChange={e => onSave({ ...settings, apiKey: e.target.value })} 
-        />
-        {saving && <span>Saving...</span>}
-    </div>
-);
-```
+### Componentes y acciones
 
----
+Componentes: `BUTTON TEXT INPUT CARD ROW COLUMN CONDITIONAL LINK TABS MODAL HEADLESS WIZARD SELECT FORM LIST IMAGE_BUTTON FOR_EACH SWITCH CHECKBOX TOGGLE TEXTAREA BADGE DIVIDER SPACER PROGRESS SMART_REPLY_CHIPS LOADING ALERT ICON ACCORDION GRID DATA_TABLE MARKDOWN FILE_UPLOAD BLOCK REPEAT DEBUG CONDITION CASE DEFAULT SET_VAR DATE_PICKER SLIDER AVATAR TOOLTIP EMPTY_STATE IFRAME CODE_EDITOR ACCORDION_ITEM TAB_ITEM CODE_BLOCK FLEX BOX SEPARATOR`.
 
-## 4. UI Library Utilities
+Acciones: `SET_STATE MERGE_STATE MAP_ARRAY FILTER_ARRAY SET_LOADING OPEN_OVERLAY CLOSE_OVERLAY OPEN_URL NAVIGATE REFRESH DELAY CONFIRM CALL_BACKEND CALL_API TOAST COPY_TO_CLIPBOARD INSERT_CONTENT APPEND_BODY SET_SUBJECT ADD_ATTACHMENT SET_CONTEXT_VALUE NEXT_STEP PREV_STEP SECURE_SAVE SECURE_READ OAUTH_CONNECT OAUTH_DISCONNECT`.
 
-BloomX exposes premium UI utilities to keep expansions consistent:
+Comportamientos que conviene conocer:
 
-### `useExpansionUI()` (Modals)
-Trigger full-screen centered modals from anywhere.
-```tsx
-const { openModal, closeModal } = useExpansionUI();
+- **`CALL_BACKEND` y formularios**: si la acción sale de un `FORM` sin `args`, los campos llegan como `ctx.args`. Con `args` explícitos, estos ganan sobre los campos (`"name": "${formData.name}"`). El `context` que viaja va **saneado** (`toBackendContext`: sin funciones, `overlays`, `auth`, `user`, `env`).
+- **`onSuccess/onError`** heredan `value`/`formData` del evento original y añaden `result`/`error`.
+- **`WIZARD` + `NEXT_STEP/PREV_STEP`**: actúan sobre el `WIZARD` que contiene al componente. El estado (`SET_STATE`) es compartido por todo el árbol y una cadena de acciones ve los `SET_STATE` anteriores.
+- **`CALL_API`** solo admite rutas propias (`/api/...`); **`OAUTH_CONNECT.url`** solo rutas internas; **`NAVIGATE`** solo rutas internas; **`OPEN_URL`/`LINK`** solo `http(s)`, `mailto`, `tel`; **`IMAGE_BUTTON/AVATAR.src`** solo `http(s)`. `javascript:`/`data:` se bloquean.
+- **`onLoad`** corre una vez al montar (o cuando `onLoadWhen` pasa de falso a verdadero).
+- **`LIST`/`FOR_EACH`/`REPEAT`**: la plantilla se resuelve **por item** (alias `item` o `as`).
+- Los campos `defaultValue` de un `FORM` se reaplican solo a los campos que el usuario no ha tocado.
 
-openModal(
-    <div className="bg-white p-6 rounded-xl shadow-2xl">
-        <h2>Confirm Action</h2>
-        <button onClick={closeModal}>Close</button>
-    </div>
-);
-```
+### Expresiones `${…}`
 
-### `Popover` Component
-A flexible, anchored floating box.
-```tsx
-<Popover 
-    trigger={buttonRef} 
-    isOpen={true} 
-    onClose={() => setOpen(false)}
-    header="My Tool"
->
-    <div>Content here...</div>
-</Popover>
-```
+Evaluador propio sin `eval` (`lib/expansions/expressions.ts`). Soporta: rutas (`context.x`, `state.x.y`, `env.X`, alias sueltos como `item`, `result`, `value`, `formData`), literales, `!`, `&&`, `||` (primer valor no vacío; `0`/`false` cuentan), `== != === !==` (`== null` también es cierto para `''`), `< > <= >=`, `+ -`, ternario `a ? b : c`, paréntesis, `?.`, `[expr]` y filtros `| truncate:N | upper | lower | trim | capitalize | length | json | join:sep | default:x`. No hay llamadas a funciones; `__proto__`/`constructor`/`prototype` están bloqueados; un error de sintaxis da `undefined`. Una cadena que es **solo** `${…}` conserva el tipo (array, objeto…); si mezcla texto se convierte a string.
 
----
+## 3. Hooks de servidor (`intercepts`)
 
-## 5. Development Workflow
+`POST {backend}/api/extension/hooks { event, context }` ejecuta los `intercepts` de las extensiones instaladas en el dominio, por prioridad (`HIGH` → `NORMAL` → `LOW` → `MONITOR`).
 
-1. **Define Types**: Add your logic to `src/lib/expansions/types.ts` if adding new triggers.
-2. **Implement**: Create your components in `src/components/expansions/` and your server logic in `src/lib/expansions/core/`.
-3. **Register**:
-    - Add to `src/lib/expansions/server.ts` for backend triggers.
-    - Add to `src/lib/expansions/client/core-expansions.ts` for UI mount points.
-4. **Environment Controls**: Enable/Disable via `.env`: `EXPANSION_MY_ID=true`.
+| Evento | Quién lo llama | Efecto |
+|---|---|---|
+| `EMAIL_PRE_SEND` | `POST /api/emails` (frontend) con el JWT del usuario, justo antes de enviar | Handler devuelve `{ stop: true, message }` → **el correo no se envía** (HTTP 422, `code: "EXTENSION_BLOCKED"`). `{ modify: { subject?, html?, text? } }` reemplaza asunto/cuerpo (nunca destinatarios). `{ warning }` se devuelve en `warnings`. `MONITOR` se ejecuta pero no bloquea ni modifica. `onError: "block"` bloquea si el handler falla (DLP lo usa). |
+| `EMAIL_RECEIVED` | Ingest de correo entrante con `x-internal-secret` (`runEmailReceivedHooks` en `lib/expansions/server-hooks.ts`) | Sin bloqueo. **Pendiente:** llamar a `runEmailReceivedHooks({emailId,userId,domain})` desde `webhooks/resend` (ruta editada por otro equipo). |
+| `CRON` | Planificador del operador: `POST /api/extension/hooks {event:"CRON", schedule:"hourly"|"daily"}` con `x-internal-secret` (o `runCronHooks`) | Ejecuta los intercepts `point:"CRON"` con ese `schedule` en todos los dominios. Ninguna extensión actual lo usa. |
 
----
+Variables: backend `EXTENSION_HOOKS_SECRET` (o `INTERNAL_SECRET`, mismo valor en el frontend). Frontend: `EXTENSION_HOOKS_FAIL_CLOSED=true` para **no enviar** si el backend no puede evaluar los hooks (por defecto se envía y se registra el fallo), `EXTENSION_HOOKS_DISABLED=true` para desactivar.
 
-## Best Practices
-- **Isolation**: Keep expansions self-contained. Use `decryptObject` if storing sensitive keys in settings.
-- **Performance**: Use the BloomX Cache (`useCache`) for expensive operations.
-- **Stability**: Wrap complex editor insertions in `<div contenteditable="false">` blocks.
-- **Feedback**: Always use `context.onToast` to inform the user of background actions.
+Ejemplo (DLP): el hook ve `ctx.subject`, `ctx.emailContent` (HTML + texto), `ctx.attachments[].filename`, `ctx.to/cc/bcc/from`.
+
+## 4. Persistencia en el cliente
+
+- **`SECURE_SAVE` / `SECURE_READ`** (`lib/expansions/client/secure-storage.ts`): AES-256-GCM con una clave aleatoria **no extraíble** por usuario (IndexedDB) y el nombre de la clave como dato autenticado. **No caduca**. Protege contra leer `localStorage` sin la clave del navegador, **no** contra código que corra en la propia página (XSS). Sin sesión no se guarda ni se lee nada (no existe el usuario `default-user` compartido). Sin IndexedDB/WebCrypto falla (`SECURE_STORAGE_UNAVAILABLE`) en vez de guardar en claro. Es local a ese navegador.
+- **Datos que deben sincronizarse entre dispositivos** (alias de mail-groups): `useExpansionSettings(id)` → `/api/settings` (`expansionSettings`).
+
+## 5. Credenciales por dominio
+
+Cada dominio usa **sus** claves (Notion, Trello, HubSpot, Zoom, Google Meet, Giphy, Webhooks, DLP). El manifest solo declara qué variables pide (`ENV_READ:X`); el valor sale de:
+
+1. `ExtensionOnDomain.settings.credentials[X]`, cifrado con AES-256-GCM (`DATA_ENCRYPTION_KEY`). Se escribe con la API:
+   - `PUT /api/extension/settings { domainId, extensionId, credentials: { NOTION_API_KEY: "…", NOTION_DATABASE_ID: null } }` (cookie de sesión de manager, dueño del dominio). `null`/`""` borra. Solo acepta claves declaradas por el manifest. `GET ?domainId=&extensionId=` devuelve `{ keys: [{name, configured}] }`, nunca valores.
+2. Fallback al entorno global del servidor, **controlado**: las variables no sensibles (`DLP_KEYWORDS`, `DLP_DETECTORS`, `HUBSPOT_PORTAL_ID`…) siempre; las sensibles (nombre con `KEY|TOKEN|SECRET|PASSWORD|ACCOUNT_ID|CLIENT_ID|REFRESH|WEBHOOK_URL`) **solo** si el operador las lista en `EXTENSION_GLOBAL_ENV_FALLBACK` (coma, o `*`). Cada uso deja un `[EXT_SECURITY]` en el log.
+
+`/api/config` nunca devuelve `credentials` (`stripSecrets`). No hay aún pantalla en `/admin` para escribirlas: usa la API.
+
+## 6. Crear o modificar una extensión
+
+1. Crea `bloomx-extensions/<nombre>/manifest.json` y, si necesita servidor, `server.js` con `handler(ctx)`.
+2. `cd bloomx-extensions && npm test` (valida los 21 manifests, el contrato y los handlers con `node --test`). Para las plantillas de invitación: `npm run check:invite`.
+3. El operador publica con `node --env-file=.env sync-extensions.mjs` (desde `bloomx-backend`; sube `server.js` a B2 y hace upsert en Neon).
+4. El manager del dominio instala la extensión (`/api/manager/extensions/install`) y configura sus credenciales (§5).
+
+Pruebas del frontend (`npm test` en `bloomx`): evaluador de expresiones, validador de manifest, ejecutor de hooks, almacenamiento seguro, saneado de contexto/URLs y el renderer (jsdom). Backend (`npm test` en `bloomx-backend`): ejecutor de hooks y schema.
+
+## 7. Límites conocidos
+
+- `node:vm` **no es una frontera de seguridad fuerte** (sin límite de memoria/CPU del event loop). Para código de terceros hace falta `isolated-vm` o un proceso/contenedor por ejecución.
+- El dominio del RPC sale de la cabecera del proxy (`X-BloomX-Domain`), no del JWT: un usuario autenticado de un dominio podría pedir otro. Falta un claim de dominio en el JWT.
+- `Sealer` (cifrado E2E) está **deshabilitado**: no hay directorio de claves públicas por usuario y `Domain.publicKey` es un UUID, no una clave RSA; tampoco hay hook de envío en el composer.
+- `Organizer` está deshabilitado: el sandbox no puede leer el buzón.
+- `MailView` pasa solo `data.email` a `EMAIL_TOOLBAR`: `emailContent` es el `snippet` (extracto). Para dar el cuerpo completo a summarizer/translator/notion/trello basta con que MailView pase `{ ...data.email, content: data.content }` (`ExtensionLoader` ya convierte `content` a texto).
+- `appointments` y `google-sync` no tienen `server.js`: `sync-extensions.mjs` los omite.
+- `slashCommands` de calendar/translator/slash-commands no se consumen.

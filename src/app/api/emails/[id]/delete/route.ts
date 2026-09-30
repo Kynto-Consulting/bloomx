@@ -2,9 +2,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
-import { deleteFromStorage } from '@/lib/storage';
 import { canAccessEmail } from '@/lib/mailbox-access';
+import { deleteEmailsCompletely } from '@/lib/retention';
+import { auditLog, getClientIp } from '@/lib/security';
 
+// Borrado completo (ISO 27001:2022 A.8.10): HTML, texto, raw.json y todos los adjuntos del almacenamiento
+// (respetando objetos compartidos con otros destinatarios del mismo mensaje), y despues la fila.
 export async function DELETE(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -18,52 +21,25 @@ export async function DELETE(
     try {
         const { id } = await params;
 
-        // 1. Fetch Email to get keys
         const email = await prisma.email.findUnique({
             where: { id },
-            include: { attachments: true }
+            select: { id: true, userId: true },
         });
 
-        if (!email) {
+        // 404 tanto si no existe como si no es accesible (no confirmar existencia)
+        if (!email || !(await canAccessEmail(user.id, email.userId))) {
             return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 
-        if (!(await canAccessEmail(user.id, email.userId))) {
-            return NextResponse.json({ error: 'Email not found' }, { status: 404 });
-        }
-
-        // 2. Delete from B2
-        const deletions = [];
-        if (email.htmlKey) deletions.push(deleteFromStorage(email.htmlKey));
-        if (email.textKey) deletions.push(deleteFromStorage(email.textKey));
-        if (email.rawKey) deletions.push(deleteFromStorage(email.rawKey));
-
-        if (email.attachments) {
-            for (const att of email.attachments) {
-                if (att.key) deletions.push(deleteFromStorage(att.key));
-            }
-        }
-
-        // Use allSettled to ensure we delete from DB even if B2 fails
-        const results = await Promise.allSettled(deletions);
-
-        // Log failures but don't stop
-        results.forEach((result, index) => {
-            if (result.status === 'rejected') {
-                console.error(`Failed to delete storage item ${index}:`, result.reason);
-            }
+        const result = await deleteEmailsCompletely([id]);
+        auditLog('email.deleted', {
+            userId: user.id,
+            ip: getClientIp(req),
+            storageDeleted: result.storageDeleted,
+            storageFailed: result.storageFailed.length,
         });
 
-        // 3. Delete from DB (Attachments cascade delete usually, but check schema)
-        // If Attachments are separate models, they should cascade if configured, 
-        // otherwise we delete them first or rely on onDelete: Cascade.
-        // Prisma schema usually handles this if relation is configured.
-
-        await prisma.email.delete({
-            where: { id }
-        });
-
-        return NextResponse.json({ success: true });
+        return NextResponse.json({ success: true, storage: { deleted: result.storageDeleted, failed: result.storageFailed.length } });
 
     } catch (error) {
         console.error('Failed to delete email:', error);

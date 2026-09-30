@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { getCurrentUser } from "@/lib/session";
+import { buildContainsFilter, buildOperatorFilters, ftsEmailIds, parseSearchQuery } from '@/lib/rules/search';
 import { uploadToStorage, getBufferFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
+import { runEmailPreSendHooksForRequest } from '@/lib/expansions/server-hooks';
 import {
     MAX_RECIPIENTS,
     formatFromHeader,
@@ -45,7 +47,8 @@ export async function GET(req: NextRequest) {
     const folder = searchParams.get('folder') || 'inbox';
     const q = searchParams.get('q'); // Search query
     const label = searchParams.get('label');
-    const page = parseInt(searchParams.get('page') || '1');
+    const pageRaw = Number.parseInt(searchParams.get('page') || '1', 10);
+    const page = Number.isFinite(pageRaw) && pageRaw >= 1 ? Math.min(pageRaw, 10000) : 1;
     const since = searchParams.get('since'); // Date string ISO
     const accountRaw = extractEmailAddress(searchParams.get('account') || '');
     const accountNormalized = normalizeMailboxIdentity(accountRaw);
@@ -143,29 +146,33 @@ export async function GET(req: NextRequest) {
             ]
         };
 
-        if (since) {
+        // Fechas: se ignoran si son invalidas (antes provocaban 500 en Prisma).
+        const sinceDate = since ? new Date(since) : null;
+        if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
             whereObj.AND.push({
-                createdAt: { gt: new Date(since) }
+                createdAt: { gt: sinceDate }
             });
         }
 
         const until = searchParams.get('until');
-        if (until) {
+        const untilDate = until ? new Date(until) : null;
+        if (untilDate && !Number.isNaN(untilDate.getTime())) {
             whereObj.AND.push({
-                createdAt: { lt: new Date(until) }
+                createdAt: { lt: untilDate }
             });
         }
 
-        if (q) {
-            whereObj.AND.push({
-                OR: [
-                    { subject: { contains: q, mode: 'insensitive' } },
-                    { from: { contains: q, mode: 'insensitive' } },
-                    { snippet: { contains: q, mode: 'insensitive' } },
-                    { to: { contains: q, mode: 'insensitive' } },
-                    { cleanTo: { contains: q, mode: 'insensitive' } }
-                ]
-            });
+        // Busqueda: operadores (label:, from:, to:, subject:, has:attachment, is:unread|read|starred)
+        // + texto libre. El texto usa full-text de Postgres (indice GIN) con fallback a contains.
+        const parsedSearch = parseSearchQuery(q);
+        whereObj.AND.push(...buildOperatorFilters(parsedSearch));
+        if (parsedSearch.text) {
+            const ftsIds = await ftsEmailIds(prisma, mailboxUserId, parsedSearch.text);
+            if (ftsIds && ftsIds.length > 0) {
+                whereObj.AND.push({ id: { in: ftsIds } });
+            } else {
+                whereObj.AND.push(buildContainsFilter(parsedSearch.text));
+            }
         }
 
         const accountCandidates = Array.from(new Set([
@@ -196,7 +203,7 @@ export async function GET(req: NextRequest) {
         }
 
         if (label) {
-            const labelsList = label.split(',');
+            const labelsList = label.split(',').map((l) => l.trim()).filter(Boolean).slice(0, 20);
             whereObj.AND.push({
                 labels: {
                     some: {
@@ -208,7 +215,7 @@ export async function GET(req: NextRequest) {
                 },
                 folder: { notIn: ['trash', 'spam'] } // Explicitly exclude trash/spam from label views
             });
-        } else if (!q) {
+        } else if (!q?.trim()) {
             // Only filter by folder if no label is selected and not searching globally
             // (or maybe search should be within folder? Usually Gmail global search ignores folder unless specified)
             // Let's make search global (ignore folder) if q is present.
@@ -536,6 +543,17 @@ export async function POST(req: NextRequest) {
             finalText = ' ';
         }
 
+        // Hook EMAIL_PRE_SEND de las extensiones (DLP, etc.): { stop: true } cancela el envio, { modify } ajusta asunto/cuerpo.
+        const preSend = await runEmailPreSendHooksForRequest(req, sessionUser, {
+            subject, html: finalHtml, text: finalText, from: formattedFrom,
+            to: toList.valid, cc: ccList.valid, bcc: bccList.valid, attachments: processedAttachments,
+        });
+        if (preSend.stop) {
+            return NextResponse.json({ error: preSend.message, code: 'EXTENSION_BLOCKED' }, { status: 422 });
+        }
+        if (preSend.modify.html !== undefined) finalHtml = preSend.modify.html;
+        if (preSend.modify.text !== undefined) finalText = preSend.modify.text;
+
         const payload: any = {
             from: formattedFrom,
             to: toList.valid,
@@ -547,6 +565,8 @@ export async function POST(req: NextRequest) {
             attachments: resendAttachments.length > 0 ? resendAttachments : undefined
         };
 
+        if (preSend.modify.subject !== undefined) payload.subject = sanitizeSubject(preSend.modify.subject);
+
         const requestedReplyTo = extractEmailAddress(replyTo || reply_to || '');
         const replyToValid = isValidEmailAddress(requestedReplyTo);
         if (replyToValid) {
@@ -555,6 +575,17 @@ export async function POST(req: NextRequest) {
 
         if (validatedScheduledAt) {
             payload.scheduledAt = validatedScheduledAt;
+        }
+
+        // Idempotencia: un reintento con la misma Idempotency-Key devuelve el envio original.
+        const rawIdemKey = req.headers.get('idempotency-key')?.trim() || '';
+        const idemKey = /^[A-Za-z0-9_:.-]{8,128}$/.test(rawIdemKey) ? rawIdemKey : null;
+        const idemType = idemKey ? `send_idem:${user.id}:${idemKey}` : null;
+        if (idemType) {
+            const prior = await prisma.emailEvent.findFirst({ where: { type: idemType }, select: { resendEmailId: true } });
+            if (prior) {
+                return NextResponse.json({ success: true, id: prior.resendEmailId ?? undefined, duplicate: true });
+            }
         }
 
         // Send via Resend
@@ -622,6 +653,12 @@ export async function POST(req: NextRequest) {
             }
         });
 
+        if (idemType) {
+            await prisma.emailEvent
+                .create({ data: { emailId: email.id, resendEmailId: data?.id ?? null, type: idemType } })
+                .catch((e) => console.error('[POST /api/emails] idempotency record failed:', (e as Error)?.message));
+        }
+
         if (outboundInviteUids.size > 0) {
             await prisma.calendarEvent.updateMany({
                 where: {
@@ -640,7 +677,7 @@ export async function POST(req: NextRequest) {
         // Local expansions removed.
         // ----------------------------------------------------
 
-        return NextResponse.json({ success: true, id: data?.id });
+        return NextResponse.json({ success: true, id: data?.id, warnings: preSend.warnings.length > 0 ? preSend.warnings : undefined });
 
     } catch (error) {
         console.log(error);

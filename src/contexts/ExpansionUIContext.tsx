@@ -2,6 +2,8 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 import { useReAuth, type ReAuthRequirements } from '@/contexts/ReAuthContext';
+import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { syncExtensionSettingsTabs } from '@/lib/expansions/client/dynamic-settings';
 
 interface ModalOptions {
     width?: string;
@@ -42,6 +44,15 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
     const [drawerContent, setDrawerContent] = useState<ReactNode | null>(null);
     const [drawerOptions, setDrawerOptions] = useState<DrawerOptions>({});
     const { requestReAuth } = useReAuth();
+    const { extensions: domainExtensions, isLoading: domainConfigLoading } = useDomainConfig();
+
+    // Las pestanas de ajustes que declaran los manifests (CUSTOM_SETTINGS_TAB) se publican en el registro que lee SettingsModal.
+    const domainExtensionsKey = domainExtensions.map((extension: any) => `${extension.id}@${extension.template?.version || ''}`).join(',');
+    useEffect(() => {
+        if (!domainConfigLoading) syncExtensionSettingsTabs(domainExtensions);
+        // domainExtensions cambia de identidad en cada render de useDomainConfig; la clave describe su contenido
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [domainExtensionsKey, domainConfigLoading]);
 
     const openModal = useCallback((content: ReactNode, options?: ModalOptions) => {
         setModalContent(content);

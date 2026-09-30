@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { getTestPrisma } from './helpers/testdb';
 
-const { db } = await vi.hoisted(async () => ({ db: (await import('./helpers/testdb')).getTestPrisma() }));
-vi.mock('@/lib/prisma', () => ({ prisma: db }));
+vi.mock('@/lib/prisma', async () => ({ prisma: (await import('./helpers/testdb')).getTestPrisma() }));
+
+const db = getTestPrisma();
 
 import { getAccessibleMailboxUserIds, canAccessEmail } from '../mailbox-access';
 

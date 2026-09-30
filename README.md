@@ -80,8 +80,35 @@ Recommended webhook events:
 - Delivery/status events used by Resend for sent mail lifecycle updates
 
 Optional environment variables for webhook processing:
-- `WEBHOOK_SECRET`: Resend/Svix signing secret used to verify webhook signatures. If omitted, Bloomx accepts the webhook without signature verification.
+- `WEBHOOK_SECRET`: Resend/Svix signing secret used to verify webhook signatures. Required in production (the webhook answers 503 without it); in development, if omitted, the webhook is accepted without signature verification.
 - `TOP_DOMAIN`: Used when Bloomx sends the automatic undeliverable reply for unknown recipients.
+
+Inbound behavior worth knowing:
+- Recipients are resolved from `to`, `cc` and `bcc`, so a mailbox that is only in CC/BCC still receives the message.
+- The webhook is idempotent. If Resend retries a delivery (timeouts, 5xx, concurrent attempts) the already-stored copy is kept and the endpoint answers `2xx`; storage keys derive from the inbound email id, so retries overwrite instead of leaving orphans.
+
+## Build, database and maintenance scripts
+
+`npm run build` runs only `prebuild` = `db:ensure`, which applies idempotent, additive DDL (`IF NOT EXISTS`) so new tables and indexes exist after every deploy. It never modifies rows. Everything that changes data is a manual, explicit script:
+
+| Command | What it does | When to run it |
+|---|---|---|
+| `npm run db:ensure` | Applies the idempotent, additive DDL in `src/lib/db/schema.ts` (`CREATE TABLE/INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`). Also runs automatically in `predev`, `prestart` and `prebuild`. | Runs on every build; run it by hand only to apply schema changes without deploying. |
+| `npm run meet:fix -- --yes` | Patches existing Google Meet rooms so they have no waiting room (uses every user's Google refresh token). | Only once, on demand. Refuses to run without `--yes`. |
+| `npm run attachments:reprocess -- --yes` | Backfills attachments stored as `PENDING`/0-byte from the raw MIME (and regenerates `.ics` from our own events). | Only on demand, to repair old emails. Refuses to run without `--yes`. |
+| `npm run icons:generate` | Rasterizes `public/icon*.svg` into the PNG icons required by the PWA manifest (`sharp`, already bundled with Next.js). | Only when the icon SVGs change. The PNGs are committed. |
+| `npm test` | Unit tests (vitest). | CI and local. |
+
+None of the maintenance scripts runs in `build`, `dev` or `start`. `DATABASE_URL` decides which database they touch: double-check it before running them.
+
+Additive indexes (safe to re-run) are part of `db:ensure`: `Attachment(emailId)`, `Attachment(draftId)`, `Account(userId)`, `EmailEvent(emailId)`, `Email(userId, folder, createdAt DESC)`, `Email(userId, folder, read)`, `Email(userId, scheduledAt)`, `CalendarEvent(userId, startsAt)`, `CalendarEvent(calendarId, externalId)` and a partial unique index `AppointmentBooking(scheduleId, startsAt) WHERE status = 'confirmed'` (double-booking backstop; skipped with a notice if duplicates already exist).
+
+## Offline, realtime and PWA
+
+- **Service worker** (`public/sw.js`): caches only the static shell (`/_next/static/*`, icons, `/offline.html`). It never caches `/api/*`, RSC/Server Action requests, requests with `Authorization`, or HTML pages (they are per-session). A failed navigation falls back to `/offline.html`. Bump `CACHE_VERSION` to invalidate.
+- **Offline queue** (`src/contexts/OfflineContext.tsx`, logic in `src/lib/offline-queue.ts`): mutations made offline are queued and replayed sequentially, with exponential backoff, on the account that originated them (the queue stores the account, never the token). Non-retryable 4xx responses are dropped; 401/408/425/429/5xx are retried up to 8 times. Each operation carries an `Idempotency-Key` header and duplicates are collapsed. Composing/sending a message while offline queues the send.
+- **Realtime** (`/api/sse`): one connection per tab, at most 3 per user, polling backs off from 5 s to 30 s while idle, and each connection is closed cleanly after ~50 s so the browser reconnects with `Last-Event-ID` (the timestamp of the last notified email) and receives anything it missed.
+- **Public booking**: `/book/<scheduleId>/cancel/<token>` cancels an appointment from the link in the confirmation email. Tokens are HMAC-signed (`APPOINTMENT_CANCEL_SECRET`, falls back to `NEXTAUTH_SECRET`), expire when the appointment starts, and must match the token stored with the booking.
 
 ### DNS and Deliverability
 If you need to configure SPF, DKIM, DMARC, MX, and inbound webhook DNS so mail is less likely to land in spam, see [DNS_SETUP.md](./DNS_SETUP.md).

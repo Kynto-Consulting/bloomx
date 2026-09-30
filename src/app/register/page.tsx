@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, Mail, Book } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useI18n } from '@/components/I18nProvider';
 
 export default function Register() {
     const { config } = useDomainConfig();
+    const { t } = useI18n();
     const brand = {
         name: config.displayName || config.name,
         logo: config.logo,
@@ -34,7 +36,7 @@ export default function Register() {
             const json = await res.json();
 
             if (!res.ok) {
-                throw new Error(json.error || 'Something went wrong');
+                throw new Error(json.error || t('auth.register.genericError'));
             }
 
             router.push('/login?registered=true');
@@ -46,7 +48,7 @@ export default function Register() {
     };
 
     return (
-        <div className="container relative h-screen flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
+        <div className="container relative min-h-dvh flex-col items-center justify-center grid lg:max-w-none lg:grid-cols-2 lg:px-0">
             {/* Left Side - Hero */}
             <div className="relative hidden h-full flex-col bg-muted p-10 text-primary-foreground lg:flex">
                 <div
@@ -55,18 +57,13 @@ export default function Register() {
                 <div className="relative z-20 flex items-center gap-2 text-lg font-medium">
                     {brand.logo ? <img src={brand.logo} className="h-6 w-6 object-contain" alt={brand.name} /> : <Mail className="h-6 w-6" />}
                     {brand.name}
-                    <Link href="/docs" className="ml-6 text-sm font-normal text-primary-foreground/70 hover:text-primary-foreground transition-colors flex items-center gap-1 border-l border-primary-foreground/40 pl-6">
-                        <Book className="h-4 w-4" />
-                        Docs
+                    <Link href="/docs" className="ml-6 text-sm font-normal text-primary-foreground underline-offset-4 hover:underline transition-colors flex items-center gap-1 border-l border-primary-foreground/40 pl-6">
+                        <Book className="h-4 w-4" aria-hidden="true" />
+                        {t('auth.login.docs')}
                     </Link>
                 </div>
                 <div className="relative z-20 mt-auto">
-                    <blockquote className="space-y-2">
-                        <p className="text-lg">
-                            &ldquo;Bloomx completely reinvented our workflow. The inbox zero philosophy is baked into every pixel.&rdquo;
-                        </p>
-                        <footer className="text-sm">Alex Chen</footer>
-                    </blockquote>
+                    <p className="text-lg">{t('auth.register.tagline')}</p>
                 </div>
             </div>
 
@@ -79,66 +76,78 @@ export default function Register() {
                         {brand.name}
                     </div>
                     <Link href="/docs" className="flex items-center gap-1 text-sm font-medium text-muted-foreground hover:text-primary transition-colors">
-                        <Book className="h-4 w-4" />
-                        Docs
+                        <Book className="h-4 w-4" aria-hidden="true" />
+                        {t('auth.login.docs')}
                     </Link>
                 </div>
                 <div className="mx-auto flex w-full flex-col justify-center space-y-6 sm:w-[350px]">
                     <div className="flex flex-col space-y-2 text-center">
-                        <h1 className="text-2xl font-semibold tracking-tight">Create an account</h1>
+                        <h1 className="text-2xl font-semibold tracking-tight">{t('auth.register.title')}</h1>
                         <p className="text-sm text-muted-foreground">
-                            Enter your details below to create your account
+                            {t('auth.register.subtitle')}
                         </p>
                     </div>
 
                     <form onSubmit={registerUser} className="grid gap-4">
                         <div className="grid gap-2">
-                            <label className="text-sm font-medium leading-none">Full Name</label>
+                            <label htmlFor="reg-name" className="text-sm font-medium leading-none">{t('auth.register.name')}</label>
                             <input
+                                id="reg-name"
+                                name="name"
                                 type="text"
+                                autoComplete="name"
                                 required
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                placeholder="John Doe"
+                                className="flex h-9 w-full rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder={t('auth.register.namePlaceholder')}
                                 value={data.name}
                                 onChange={(e) => setData({ ...data, name: e.target.value })}
                             />
                         </div>
                         <div className="grid gap-2">
-                            <label className="text-sm font-medium leading-none">Email</label>
+                            <label htmlFor="reg-email" className="text-sm font-medium leading-none">{t('auth.register.email')}</label>
                             <input
+                                id="reg-email"
+                                name="email"
                                 type="email"
+                                autoComplete="email"
                                 required
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                placeholder="name@example.com"
+                                className="flex h-9 w-full rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder={t('auth.register.emailPlaceholder')}
                                 value={data.email}
                                 onChange={(e) => setData({ ...data, email: e.target.value })}
                             />
                         </div>
                         <div className="grid gap-2">
-                            <label className="text-sm font-medium leading-none">Password</label>
+                            <label htmlFor="reg-password" className="text-sm font-medium leading-none">{t('auth.register.password')}</label>
                             <input
+                                id="reg-password"
+                                name="password"
                                 type="password"
+                                autoComplete="new-password"
                                 required
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                                className="flex h-9 w-full rounded-md border border-input bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                                 placeholder="••••••••"
                                 value={data.password}
                                 onChange={(e) => setData({ ...data, password: e.target.value })}
                             />
                         </div>
                         <div className="grid gap-2">
-                            <label className="text-sm font-medium leading-none text-primary">Registration Key</label>
+                            <label htmlFor="reg-key" className="text-sm font-medium leading-none text-primary">{t('auth.register.registrationKey')}</label>
                             <input
-                                type="text"
+                                id="reg-key"
+                                name="registrationKey"
+                                type="password"
+                                autoComplete="off"
                                 required
-                                className="flex h-9 w-full rounded-md border border-primary/50 bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
-                                placeholder="Enter secret key..."
+                                className="flex h-9 w-full rounded-md border border-primary/50 bg-background text-foreground px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50"
+                                placeholder={t('auth.register.registrationKeyPlaceholder')}
                                 value={data.key}
                                 onChange={(e) => setData({ ...data, key: e.target.value })}
                             />
                         </div>
 
                         {error && (
-                            <div className="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-sm text-center">
+                            <div role="alert" className="p-3 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-sm text-center">
                                 {error}
                             </div>
                         )}
@@ -146,15 +155,15 @@ export default function Register() {
                         <button
                             type="submit"
                             disabled={loading}
-                            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"
+                            className="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 py-2"
                         >
-                            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Create Account'}
+                            {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" /> : t('auth.register.submit')}
                         </button>
                     </form>
 
                     <p className="px-8 text-center text-sm text-muted-foreground">
-                        <Link href="/login" className="hover:text-brand underline underline-offset-4">
-                            Already have an account? Sign In
+                        <Link href="/login" className="hover:text-foreground underline underline-offset-4">
+                            {t('auth.register.haveAccount')}
                         </Link>
                     </p>
                 </div>

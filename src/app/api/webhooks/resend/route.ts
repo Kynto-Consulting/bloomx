@@ -12,6 +12,12 @@ import { decodeRFC2047, extractFilenameFromHeaders, extensionFromMimeType, sanit
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
 import { escapeHtmlText, isValidEmailAddress, sanitizeSubject } from '@/lib/mail-validation';
 import { parseAuthenticationResults } from '@/lib/email-auth';
+import { computeInboundEffects } from '@/lib/rules/inbound';
+import { markRuleRun } from '@/lib/rules/store';
+import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { validateAttachment } from '@/lib/file-type';
+import { runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
+import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -167,29 +173,10 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     const resolvedMessageId = String(messageId || data?.message_id || '').trim();
     let { html, text } = data;
 
-    // Normalize recipient data
-    // 'to' can be string, string[], or object[] {name, email}
-    let rawRecipients: any[] = [];
-    if (Array.isArray(to)) {
-        rawRecipients = to;
-    } else if (to) {
-        rawRecipients = [to];
-    }
-
-    const recipients = rawRecipients
-        .map((recipient) => {
-            const parsed = parseMailbox(recipient);
-            if (parsed.email) {
-                return parsed.email;
-            }
-
-            if (typeof recipient === 'string') {
-                return recipient.trim().toLowerCase();
-            }
-
-            return String((recipient as any)?.email || '').trim().toLowerCase();
-        })
-        .filter(Boolean); // Clean string emails
+    // Destinatarios: to + cc + bcc. Un usuario que solo figura en CC/BCC tambien recibe el correo.
+    const inbound = collectInboundRecipients({ to, cc: rawCc, bcc: data?.bcc });
+    // Para mostrar/almacenar `to`: si el mensaje no trae `to` (solo CC/BCC) se usa el resto de destinatarios.
+    const recipients = inbound.to.length > 0 ? inbound.to : inbound.all;
 
     // Normalize all recipients for validation, but store RAW for display
     const normalizedRecipients = recipients.map(email => normalizeEmail(email));
@@ -225,7 +212,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     // Verify recipients exist in our DB
     const users = await prisma.user.findMany({
-        where: { email: { in: normalizedRecipients } }
+        where: { email: { in: inbound.lookupKeys } }
     });
 
     if (users.length === 0) {
@@ -262,8 +249,27 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     }
 
 
-    const uuid = crypto.randomUUID();
+    // Id estable por correo entrante: un reintento del webhook sobrescribe los mismos objetos
+    // de almacenamiento en vez de dejar huerfanos los del intento previo.
+    const uuid = (webhookEmailId || resolvedMessageId) ? stableStorageId(webhookEmailId || resolvedMessageId) : crypto.randomUUID();
     const dateStr = new Date().toISOString().split('T')[0];
+
+    // Reintento total: si todos los destinatarios ya tienen el correo, responder 2xx sin subir nada.
+    {
+        const messageIdCandidates = users.flatMap((u) => [
+            userScopedMessageId(resolvedMessageId, u.id, uuid),
+            ...(resolvedMessageId ? [resolvedMessageId] : []),
+        ]);
+        const delivered = await prisma.email.findMany({
+            where: { userId: { in: users.map((u) => u.id) }, messageId: { in: messageIdCandidates } },
+            select: { userId: true },
+        });
+        const deliveredUserIds = new Set(delivered.map((d) => d.userId));
+        if (users.every((u) => deliveredUserIds.has(u.id))) {
+            console.log('[webhook] Duplicate delivery ignored (already processed).');
+            return NextResponse.json({ success: true, message: 'Already processed' });
+        }
+    }
 
     // Paths for B2
     const htmlKey = `emails/${dateStr}/${uuid}/content.html`;
@@ -350,6 +356,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         parsedInvites.push(invite);
     };
 
+    const usedAttachmentKeys = new Set<string>();
     // Process attachments that came with inline content in the webhook payload (small files)
     if (attachments && Array.isArray(attachments)) {
         // Limite de cantidad de adjuntos por correo (anti zip-bomb de metadatos / agotamiento de almacenamiento).
@@ -375,12 +382,27 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                     if (ext) filename = `${filename}${ext}`;
                 }
 
-                const attKey = `emails/${dateStr}/${uuid}/attachments/${filename}`;
-                uploads.push(uploadToStorage(attKey, buffer, contentType));
+                // Validacion por contenido (magic-bytes): bloquea ejecutables y sanea HTML/SVG disfrazado.
+                const validation = validateAttachment({ filename, declaredMime: contentType, buffer, direction: 'inbound' });
+                if (validation.verdict === 'blocked') {
+                    console.warn(`[resend] Inline attachment blocked (${validation.reason})`);
+                    attachmentMetaRecords.push({
+                        filename,
+                        mimeType: 'application/octet-stream',
+                        size: att.size || buffer.length,
+                        key: 'BLOCKED',
+                        status: 'failed',
+                    });
+                    continue;
+                }
+
+                // Clave unica: dos adjuntos con el mismo nombre ya no se sobrescriben.
+                const attKey = uniqueAttachmentKey(`emails/${dateStr}/${uuid}/attachments`, filename, usedAttachmentKeys);
+                uploads.push(uploadToStorage(attKey, buffer, validation.storeMime));
 
                 attachmentMetaRecords.push({
                     filename,
-                    mimeType: contentType,
+                    mimeType: validation.storeMime,
                     size: att.size || buffer.length,
                     key: attKey,
                     status: 'ready',
@@ -440,9 +462,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         // Scoped messageId per user ensures:
         // 1) Multi-recipient emails delivered across separate Resend webhooks don't collide.
         // 2) Retrying the webhook for a user who already received the email is idempotent.
-        const userMessageId = resolvedMessageId
-            ? (resolvedMessageId.endsWith(`-${user.id}`) ? resolvedMessageId : `${resolvedMessageId}-${user.id}`)
-            : `${uuid}-${user.id}`;
+        const userMessageId = userScopedMessageId(resolvedMessageId, user.id, uuid);
 
         // Idempotency check: if this user already received this email, skip creation
         const existingEmail = await prisma.email.findFirst({
@@ -460,53 +480,24 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             continue;
         }
 
-        // Identify Labels for THIS user
-        const matchingLabels: { id: string }[] = [];
-
-        // Check Alias Suffixes (e.g. user+news@...)
-        const userEmail = user.email.toLowerCase();
-        // Determine which specific recipient address maps to this user to check alias
-        // Simple heuristic: check if any raw recipient starts with user's localpart + '+'
-        const userLocal = userEmail.split('@')[0];
-
-        for (const rawEmail of uniqueRawRecipients) {
-            // Check if this raw email belongs to this user
-            if (rawEmail.toLowerCase().startsWith(userLocal)) {
-                const match = rawEmail.match(/\+([^@]+)@/);
-                if (match) {
-                    const suffix = match[1].toLowerCase();
-                    const label = await prisma.label.findFirst({
-                        where: { userId: user.id, aliasSuffix: suffix }
-                    });
-                    if (label) matchingLabels.push({ id: label.id });
-                }
-            }
-        }
-
-        // Check Regex Filters for THIS user
-        const regexLabels = await prisma.label.findMany({
-            where: { userId: user.id, filterRegex: { not: null } }
+        // Etiquetas (alias/regex) + reglas del usuario. Tolerante a fallos: ver src/lib/rules/inbound.ts
+        const inboundEffects = await computeInboundEffects({
+            userId: user.id,
+            userEmail: user.email,
+            recipients: recipientsForUser(user.email, inbound.all),
+            from: formattedFrom,
+            to: String(toField || ''),
+            subject: String(subject || ''),
+            text: String(text || ''),
+            html: String(html || ''),
+            hasAttachment: attachmentMetaRecords.length > 0,
+            deliveryFolder,
         });
+        const uniqueLabelIds = inboundEffects.labelIds.map((id) => ({ id }));
 
-        for (const label of regexLabels) {
-            if (label.filterRegex) {
-                try {
-                    // Mitigacion ReDoS: regex acotada y entrada truncada (la regex la define el usuario,
-                    // el texto lo controla un tercero).
-                    if (label.filterRegex.length > 200) continue;
-                    const regex = new RegExp(label.filterRegex, 'i');
-                    if (regex.test(String(subject || '').slice(0, 1000)) || regex.test(String(text || '').slice(0, 20000))) {
-                        matchingLabels.push({ id: label.id });
-                    }
-                } catch (e) {
-                    console.error(`Invalid regex for label ${label.name}:`, e);
-                }
-            }
-        }
-
-        const uniqueLabelIds = Array.from(new Set(matchingLabels.map(l => l.id))).map(id => ({ id }));
-
-        const createdEmail = await prisma.email.create({
+        let createdEmail: Awaited<ReturnType<typeof prisma.email.create>>;
+        try {
+        createdEmail = await prisma.email.create({
             data: {
                 userId: user.id,
                 from: formattedFrom,
@@ -521,7 +512,9 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 textKey: text ? textKey : null,
                 rawKey: rawKey,
                 rawMimeUrl: rawMimeUrl,
-                folder: deliveryFolder,
+                folder: inboundEffects.folder,
+                ...(inboundEffects.read ? { read: true } : {}),
+                ...(inboundEffects.starred ? { starred: true } : {}),
                 attachments: {
                     create: attachmentMetaRecords.map(a => ({ ...a, emailId: undefined })),
                 },
@@ -530,6 +523,24 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 }
             }
         });
+        } catch (createError) {
+            // Carrera entre reintentos concurrentes: otro proceso ya creo el correo -> idempotente.
+            if (isUniqueViolation(createError)) {
+                console.log(`[webhook] Concurrent duplicate for user ${user.id}; already stored. Skipping.`);
+                continue;
+            }
+            throw createError;
+        }
+        void markRuleRun(createdEmail.id, user.id);
+
+        // Hook de extensiones EMAIL_RECEIVED: nunca bloquea ni hace fallar la ingesta.
+        const receivedHookContext = { emailId: createdEmail.id, userId: user.id, domain: user.email.split('@')[1] || null };
+        try {
+            after(() => { void runEmailReceivedHooks(receivedHookContext); });
+        } catch {
+            void runEmailReceivedHooks(receivedHookContext);
+        }
+
 
         // 🚀 Launch async attachment processing AFTER the webhook response is sent.
         // Using Next.js after() so this runs after the response without blocking Resend's timeout.
@@ -573,24 +584,34 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
         if (parsedInvites.length > 0) {
             for (const invite of parsedInvites) {
-                await handleInboundCalendarInvite({
-                    userId: user.id,
-                    userEmail: user.email,
-                    emailId: createdEmail.id,
-                    senderEmail: senderEmail.toLowerCase(),
-                    senderName,
-                    invite,
-                });
+                try {
+                    await handleInboundCalendarInvite({
+                        userId: user.id,
+                        userEmail: user.email,
+                        emailId: createdEmail.id,
+                        senderEmail: senderEmail.toLowerCase(),
+                        senderName,
+                        invite,
+                    });
+                } catch (inviteError) {
+                    // El correo ya esta guardado: un fallo del calendario no debe provocar reintentos 5xx.
+                    console.error('[webhook] Calendar invite handling failed:', inviteError);
+                }
             }
         }
 
         if (deliveryFolder === 'inbox') {
-            await sendNewMessagePushNotification(user.id, {
-                title: senderName || senderEmail,
-                body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
-                url: '/?folder=inbox',
-                tag: `email-${userMessageId}`,
-            });
+            // El push es opcional: si falla no debe devolver 5xx (el correo ya esta guardado).
+            try {
+                await sendNewMessagePushNotification(user.id, {
+                    title: senderName || senderEmail,
+                    body: subject || text?.substring(0, 140) || 'You received a new message in BloomX.',
+                    url: '/?folder=inbox',
+                    tag: `email-${userMessageId}`,
+                });
+            } catch (pushError) {
+                console.error('[webhook] Push notification failed:', pushError);
+            }
         }
     }
 }

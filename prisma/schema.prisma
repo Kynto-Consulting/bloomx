@@ -19,6 +19,7 @@ model User {
   expansionSettings Json? // Stores settings for all expansions { "core-signature": { ... } }
   emails    Email[]
   labels    Label[]
+  rules     Rule[]
   accounts  Account[]
   moltSessions MoltSession[]
   pushSubscriptions PushSubscription[]
@@ -45,6 +46,7 @@ model Account {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 model Email {
@@ -80,6 +82,9 @@ model Email {
   @@index([folder])
   @@index([createdAt])
   @@index([userId])
+  @@index([userId, folder, createdAt(sort: Desc)])
+  @@index([userId, folder, read])
+  @@index([userId, scheduledAt])
 }
 
 model Attachment {
@@ -94,6 +99,9 @@ model Attachment {
   draftId   String?
   draft     Draft?   @relation(fields: [draftId], references: [id], onDelete: Cascade)
   email     Email?   @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@index([emailId])
+  @@index([draftId])
 }
 
 model EmailEvent {
@@ -107,6 +115,7 @@ model EmailEvent {
 
   @@index([resendEmailId])
   @@index([type])
+  @@index([emailId])
 }
 
 model Draft {
@@ -138,6 +147,31 @@ model Label {
   emails      Email[]  @relation("EmailToLabel")
 
   @@unique([userId, name])
+  @@index([userId])
+}
+
+model Rule {
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  enabled        Boolean  @default(true)
+  priority       Int      @default(0)
+  conditions     Json     @default("{}")
+  actions        Json     @default("[]")
+  stopProcessing Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, priority])
+}
+
+// Correos ya procesados por el motor de reglas (idempotencia). Se usa via SQL crudo.
+model RuleRun {
+  emailId   String   @id
+  userId    String
+  appliedAt DateTime @default(now())
+
   @@index([userId])
 }
 
@@ -235,6 +269,8 @@ model CalendarEvent {
   @@index([startsAt])
   @@index([source])
   @@index([inviteUid])
+  @@index([userId, startsAt])
+  @@index([calendarId, externalId])
 }
 
 model CalendarAttendee {
@@ -321,4 +357,45 @@ model AppointmentBooking {
   @@index([startsAt])
   @@index([guestEmail])
   @@index([cancelToken])
+}
+
+// ---------------------------------------------------------------------------
+// Seguridad (ADITIVO, NO ejecutado). Estas tablas se usan por SQL crudo (lib/audit.ts, lib/mfa.ts,
+// lib/session-revocation.ts) y su DDL vive en src/lib/db/schema.ts (ensure-schema). Se declaran aqui solo para
+// mantener schema.prisma y schema.ts sincronizados (prisma/rule.md); sin relaciones para no alterar los modelos existentes.
+// Tampoco se declara User.tokenVersion (INTEGER NOT NULL DEFAULT 0) a proposito: si estuviera en el modelo, TODA consulta
+// a User fallaria en un despliegue donde el DDL aun no se aplico.
+// ---------------------------------------------------------------------------
+model AuditEvent {
+  id     String   @id
+  ts     DateTime @default(now())
+  event  String
+  userId String?
+  ip     String?
+  data   Json     @default("{}")
+
+  @@index([ts])
+  @@index([userId, ts])
+  @@index([event, ts])
+}
+
+model UserMfa {
+  userId         String    @id
+  secretEnc      String    @db.Text // AES-256-GCM (encryption.ts v3)
+  enabled        Boolean   @default(false)
+  lastStep       BigInt    @default(0) // ultimo paso TOTP aceptado (anti-replay)
+  recoveryHashes Json      @default("[]") // HMAC-SHA256 de los codigos de recuperacion vigentes
+  createdAt      DateTime  @default(now())
+  confirmedAt    DateTime?
+  updatedAt      DateTime  @default(now())
+}
+
+model RevokedSession {
+  jti       String   @id
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime @default(now())
+
+  @@index([expiresAt])
+  @@index([userId])
 }

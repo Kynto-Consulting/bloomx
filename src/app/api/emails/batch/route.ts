@@ -61,32 +61,10 @@ export async function DELETE(req: NextRequest) {
             include: { attachments: true }
         });
 
-        // 2. Delete from Storage
-        // We import dynamically or top-level? Top-level is fine if not circular.
-        // But let's check imports. Route doesn't have deleteFromStorage imported yet.
-        const { deleteFromStorage } = await import('@/lib/storage');
-
-        const deletions = [];
-        for (const email of emails) {
-            const e = email as any; // Cast to avoid TS issues with include inference
-            if (e.htmlKey) deletions.push(deleteFromStorage(e.htmlKey));
-            if (e.textKey) deletions.push(deleteFromStorage(e.textKey));
-            if (e.rawKey) deletions.push(deleteFromStorage(e.rawKey));
-            if (e.attachments) {
-                for (const att of e.attachments) {
-                    if (att.key) deletions.push(deleteFromStorage(att.key));
-                }
-            }
-        }
-
-        // Use allSettled 
-        await Promise.allSettled(deletions);
-
-        // 3. Delete from DB
-        const result = await prisma.email.deleteMany({
-            where: { id: { in: emails.map((e) => e.id) } }
-        });
-        return NextResponse.json({ count: result.count });
+        // 2. Borrado completo (DB + storage) respetando objetos compartidos entre correos
+        const { deleteEmailsCompletely } = await import('@/lib/retention');
+        const result = await deleteEmailsCompletely(emails.map((e) => e.id));
+        return NextResponse.json({ count: result.deleted });
     } catch (error) {
         console.error('Failed to batch delete emails:', error);
         return NextResponse.json({ error: 'Failed to delete emails' }, { status: 500 });

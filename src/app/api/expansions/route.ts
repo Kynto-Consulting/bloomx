@@ -68,17 +68,17 @@ export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         const linkedAuth = await getLinkedAuthContext(user.id);
+        const clientContext = body?.context && typeof body.context === 'object' && !Array.isArray(body.context) ? body.context : {};
+        // `auth` SOLO lo fija este servidor con las cuentas vinculadas del usuario autenticado: un `context.auth`
+        // enviado por el navegador se descarta (no puede inyectar tokens de otros proveedores/cuentas).
+        const { auth: _clientAuth, ...safeClientContext } = clientContext as Record<string, unknown>;
         const enrichedContext = Object.keys(linkedAuth).length > 0
-            ? {
-                ...(body.context || {}),
-                auth: {
-                    ...((body.context && body.context.auth) || {}),
-                    ...linkedAuth,
-                },
-            }
-            : (body.context || {});
+            ? { ...safeClientContext, auth: linkedAuth }
+            : safeClientContext;
         const payload = {
-            ...body,
+            extensionId: body?.extensionId,
+            action: body?.action,
+            params: body?.params,
             context: enrichedContext,
         };
 
