@@ -1,6 +1,6 @@
 'use client';
 
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -22,8 +22,10 @@ import {
     Type, Palette, Undo, Redo, RemoveFormatting
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useId, useMemo, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { sanitizePastedColors } from '@/lib/paste-utils';
+import { SlashMenu, slashListboxId, slashOptionId } from '@/components/SlashMenu';
+import { filterSlashCommands, parseSlashInput, slashKeyAction, type SlashCommand } from '@/lib/slash-commands';
 
 // Define fonts
 const fonts = [
@@ -52,11 +54,29 @@ interface EditorProps {
     value: string;
     onChange: (value: string) => void;
     simple?: boolean;
-    slashCommands?: any[];
+    /** Comandos "/" de las extensiones instaladas (ver lib/slash-commands.ts). */
+    slashCommands?: SlashCommand[];
     context?: any;
 }
 
-export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, simple, slashCommands = [], context }, ref) => {
+interface SlashMenuState {
+    open: boolean;
+    query: string;
+    /** Texto tras la clave (solo con comando exacto). */
+    args: string;
+    x: number;
+    y: number;
+    index: number;
+    exactMatch: boolean;
+    /** Rango absoluto del texto "/comando args" en el documento. */
+    range: { from: number; to: number };
+}
+
+const SLASH_CLOSED: SlashMenuState = { open: false, query: '', args: '', x: 0, y: 0, index: 0, exactMatch: false, range: { from: 0, to: 0 } };
+
+const NO_COMMANDS: SlashCommand[] = [];
+
+export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, simple, slashCommands = NO_COMMANDS, context }, ref) => {
     const handleImageUpload = async (file: File) => {
         if (!file.type.startsWith('image/')) return;
 
@@ -82,6 +102,51 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
     };
 
     const lastValueRef = useRef(value);
+
+    // --- Comandos "/" ---
+    const slashId = useId();
+    const [slashMenu, setSlashMenu] = useState<SlashMenuState>(SLASH_CLOSED);
+    const slashMenuRef = useRef(slashMenu);
+    slashMenuRef.current = slashMenu;
+    const slashCommandsRef = useRef(slashCommands);
+    slashCommandsRef.current = slashCommands;
+    const simpleRef = useRef(simple);
+    simpleRef.current = simple;
+    const slashApiRef = useRef<{ sync: (ed: TiptapEditor) => void; handleKey: (key: string) => boolean }>({ sync: () => { }, handleKey: () => false });
+
+    /** Abre/actualiza/cierra el menu segun el texto de la linea hasta el cursor. */
+    const syncSlashMenu = (ed: TiptapEditor) => {
+        const close = () => setSlashMenu(prev => (prev.open ? { ...prev, open: false } : prev));
+        if (simpleRef.current || slashCommandsRef.current.length === 0) return close();
+
+        const { selection } = ed.state;
+        const { $from, empty } = selection;
+        if (!empty) return close();
+
+        const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
+        const parsed = parseSlashInput(textBefore, slashCommandsRef.current);
+        if (!parsed) return close();
+
+        let x = 0;
+        let y = 0;
+        try {
+            const coords = ed.view.coordsAtPos($from.pos);
+            x = coords?.left || 0;
+            y = (coords?.bottom || 0) + 8;
+        } catch { /* sin layout (p. ej. jsdom) */ }
+
+        const from = $from.pos - $from.parentOffset + parsed.start;
+        setSlashMenu(prev => ({
+            open: true,
+            x,
+            y,
+            query: parsed.query,
+            args: parsed.args,
+            exactMatch: parsed.exactMatch,
+            range: { from, to: $from.pos },
+            index: prev.open && prev.query === parsed.query ? prev.index : 0,
+        }));
+    };
 
     const editor = useEditor({
         immediatelyRender: false,
@@ -168,6 +233,11 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                 return true;
             },
             handleKeyDown: (view, event) => {
+                // Menu "/" abierto: flechas / Enter / Tab / Escape (ver slashKeyAction)
+                if (!event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey && slashApiRef.current.handleKey(event.key)) {
+                    event.preventDefault();
+                    return true;
+                }
                 if (event.key === 'Backspace' && editor) {
                     const { selection } = view.state;
                     if (selection.empty) {
@@ -192,45 +262,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             lastValueRef.current = content;
             onChange(content);
 
-            if (simple) return;
-
-            // Slash Command Detection
-            const { state } = editor;
-            const { selection } = state;
-            const { $from, empty } = selection;
-
-            if (empty) {
-                // Get text in current line before cursor
-                const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
-                const match = textBefore.match(/(?:^|\s)\/([a-zA-Z0-9-_]*)(?:\s+(.*))?$/);
-
-                if (match) {
-                    const query = match[1];
-                    const args = match[2] || '';
-                    const exact = slashCommands.find(c => c.key === query);
-
-                    const fullMatch = match[0];
-                    const matchStartInParent = textBefore.lastIndexOf(fullMatch);
-                    const startOffset = fullMatch.startsWith(' ') ? 1 : 0;
-                    const commandStartPos = $from.pos - $from.parentOffset + matchStartInParent + startOffset;
-
-                    const coords = editor.view.coordsAtPos($from.pos);
-                    setSlashMenu(prev => ({
-                        ...prev,
-                        open: true,
-                        x: coords?.left || 0,
-                        y: (coords?.bottom || 0) + 8,
-                        query,
-                        args,
-                        exactMatch: !!exact,
-                        range: { from: commandStartPos, to: $from.pos }
-                    }));
-                } else if (slashMenu.open) {
-                    setSlashMenu(prev => ({ ...prev, open: false }));
-                }
-            } else if (slashMenu.open) {
-                setSlashMenu(prev => ({ ...prev, open: false }));
-            }
+            slashApiRef.current.sync(editor);
+        },
+        onSelectionUpdate: ({ editor }) => {
+            slashApiRef.current.sync(editor);
         },
     });
 
@@ -258,78 +293,65 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
         }
     }, [value, editor]);
 
-    // Slash Menu State
-    const [slashMenu, setSlashMenu] = useState<{
-        open: boolean;
-        query: string;
-        args: string; // Captured arguments after command
-        x: number;
-        y: number;
-        index: number;
-        exactMatch: boolean; // True if 'query' matches a command key exactly (or with space)
-        range: { from: number; to: number }; // Absolute document range of the command text
-    }>({
-        open: false, query: '', args: '', x: 0, y: 0, index: 0, exactMatch: false, range: { from: 0, to: 0 }
-    });
+    // Filtrado y comando activo (el estado del menu se declara arriba, junto a los refs)
+    const filteredCommands = useMemo(() => filterSlashCommands(slashCommands, slashMenu.query), [slashCommands, slashMenu.query]);
+    const exactCommand = slashMenu.exactMatch
+        ? slashCommands.find(c => c.key.toLowerCase() === slashMenu.query.toLowerCase())
+        : undefined;
+    const activeIndex = exactCommand
+        ? Math.max(0, filteredCommands.findIndex(c => c.key === exactCommand.key))
+        : Math.min(slashMenu.index, Math.max(0, filteredCommands.length - 1));
 
-    // The previous useEffect for updateListener is replaced by the onUpdate logic.
-    // This useEffect is now only for handling the slash menu state based on editor changes.
-    // The detection logic is now in onUpdate.
+    const closeSlashMenu = () => setSlashMenu(prev => (prev.open ? { ...prev, open: false } : prev));
 
-    const filteredCommands = slashCommands.filter(c =>
-        c.key.toLowerCase().startsWith(slashMenu.query.toLowerCase()) ||
-        c.description.toLowerCase().includes(slashMenu.query.toLowerCase())
-    );
-
-    // If we have an exact match (e.g. /giphy), we might want to ONLY show that command, 
-    // OR if we are in 'args' mode, we show the Preview for that command.
-    // Logic: If exactMatch is true, we lock to that command.
-    const activeCommand = slashMenu.exactMatch
-        ? slashCommands.find(c => c.key === slashMenu.query)
-        : filteredCommands[slashMenu.index];
-
-    const PreviewComponent = activeCommand?.Component;
-
-    const executeCommand = (cmd: any) => {
+    /** Borra el texto "/comando args" del documento y ejecuta el comando con sus argumentos. */
+    const executeCommand = (cmd: SlashCommand) => {
         if (!editor) return;
-        const { state } = editor;
-        const { selection } = state;
-
-        // Preference 1: Use the range we stored during detection
-        let from = slashMenu.range.from;
-        let to = selection.to; // to the current cursor
-
-        // Preference 2: If range seems invalid or missing, scan back in the parent
-        if (from <= 0 || from >= to) {
-            const { $from } = selection;
-            const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
-            const match = textBefore.match(/(?:^|\s)\/([a-zA-Z0-9-_]*)(?:\s+(.*))?$/);
-            if (match) {
-                const fullMatch = match[0];
-                const matchStartInParent = textBefore.lastIndexOf(fullMatch);
-                const startOffset = fullMatch.startsWith(' ') ? 1 : 0;
-                from = $from.pos - $from.parentOffset + matchStartInParent + startOffset;
-            }
-        }
-
+        const menu = slashMenuRef.current;
+        const to = editor.state.selection.to;
+        const from = menu.range.from;
         if (from > 0 && from < to) {
-            editor.chain()
-                .focus()
-                .deleteRange({ from, to })
-                .run();
+            editor.chain().focus().deleteRange({ from, to }).run();
         }
-
-        setSlashMenu(prev => ({ ...prev, open: false }));
-        // Pass args!
-        if (cmd?.execute) cmd.execute(slashMenu.args);
+        closeSlashMenu();
+        cmd.execute?.(menu.args.trim());
     };
 
-    const extendedContext = {
-        ...context,
-        onClose: () => setSlashMenu(prev => ({ ...prev, open: false })),
-        execute: () => {
-            if (activeCommand) executeCommand(activeCommand);
-        }
+    /** Tab: completa "/tr" -> "/translate " (pasa a modo argumentos). */
+    const completeCommand = (cmd: SlashCommand) => {
+        if (!editor) return;
+        const menu = slashMenuRef.current;
+        editor.chain().focus().insertContentAt({ from: menu.range.from, to: editor.state.selection.to }, `/${cmd.key} `).run();
+    };
+
+    // Los handlers de TipTap se crean una sola vez: leen siempre la ultima version de estas funciones por ref.
+    slashApiRef.current = {
+        sync: syncSlashMenu,
+        handleKey: (key: string) => {
+            const menu = slashMenuRef.current;
+            if (!menu.open) return false;
+            const commands = filterSlashCommands(slashCommandsRef.current, menu.query);
+            const exact = menu.exactMatch
+                ? slashCommandsRef.current.find(c => c.key.toLowerCase() === menu.query.toLowerCase())
+                : undefined;
+            const count = exact ? 1 : commands.length;
+            const action = slashKeyAction(key, { exactMatch: menu.exactMatch, count, index: menu.index });
+            switch (action.type) {
+                case 'move': setSlashMenu(prev => ({ ...prev, index: action.index })); return true;
+                case 'execute': {
+                    const cmd = exact ?? commands[action.index];
+                    if (cmd) executeCommand(cmd);
+                    return !!cmd;
+                }
+                case 'complete': {
+                    const cmd = commands[action.index];
+                    if (cmd) completeCommand(cmd);
+                    return !!cmd;
+                }
+                case 'close': closeSlashMenu(); return true;
+                default: return false;
+            }
+        },
     };
 
     const setLink = () => {
@@ -347,82 +369,18 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
         editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
     };
 
-    // Intercept Keys
+    // ARIA: el lector de pantalla sigue la opcion activa mientras el foco esta en el editor.
     useEffect(() => {
-        if (!editor || !slashMenu.open) return;
-        if (simple) return; // Disable slash menu key handling if simple mode
-
+        if (!editor) return;
         const dom = editor.view.dom;
-        const handler = (e: KeyboardEvent) => {
-            if (!slashMenu.open) return;
-
-            // If we are in Argument Mode (exact match), we might want to capture Enter to execute,
-            // but allow other keys (typing args).
-            // However, Arrow keys might navigate the preview UI? 
-            // For now, Slash Menu handles navigation if filtered list > 1.
-            // If exact match, list is likely length 1.
-
-            if (['ArrowDown', 'ArrowUp', 'Enter', 'Escape', 'Tab'].includes(e.key)) {
-
-                // Special Case: If PreviewComponent wants to handle keys (e.g. arrow keys in Giphy grid),
-                // we might need a way to delegate. 
-                // For simplicity: If args mode, only Enter/Escape are trapped by us. 
-                // Arrows propagate to editor (to move cursor)? No, usually arrows navigate the list.
-                // If list has 1 item (the active command), arrows do nothing?
-                // Let's keep preventing default to avoid moving cursor out of slash command range easily.
-
-                if (slashMenu.exactMatch) {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (activeCommand) executeCommand(activeCommand);
-                        return;
-                    }
-                    if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setSlashMenu(prev => ({ ...prev, open: false }));
-                        return;
-                    }
-                    // Allow arrows/typing to pass through for args editing
-                    return;
-                }
-
-                e.stopPropagation();
-                e.preventDefault();
-
-                if (e.key === 'ArrowDown') {
-                    setSlashMenu(prev => ({ ...prev, index: (prev.index + 1) % filteredCommands.length }));
-                } else if (e.key === 'ArrowUp') {
-                    setSlashMenu(prev => ({ ...prev, index: (prev.index - 1 + filteredCommands.length) % filteredCommands.length }));
-                } else if (e.key === 'Enter') {
-                    if (filteredCommands[slashMenu.index]) {
-                        executeCommand(filteredCommands[slashMenu.index]);
-                    }
-                } else if (e.key === 'Tab') {
-                    const cmd = filteredCommands[slashMenu.index];
-                    if (cmd && editor) {
-                        const { state } = editor;
-                        const { selection } = state;
-                        const { $from } = selection;
-                        const textBefore = $from.parent.textBetween(0, $from.parentOffset, '\n', '\0');
-                        const match = textBefore.match(/(?:^|\s)\/([a-zA-Z0-9-_]*)$/);
-                        if (match) {
-                            const fullMatch = match[0];
-                            const matchStartInParent = textBefore.lastIndexOf(fullMatch);
-                            const startOffset = fullMatch.startsWith(' ') ? 1 : 0;
-                            const from = $from.pos - $from.parentOffset + matchStartInParent + startOffset;
-                            editor.chain().focus().insertContentAt({ from, to: $from.pos }, '/' + cmd.key + ' ').run();
-                        }
-                    }
-                } else if (e.key === 'Escape') {
-                    setSlashMenu(prev => ({ ...prev, open: false }));
-                }
-            }
-        };
-
-        dom.addEventListener('keydown', handler, { capture: true });
-        return () => dom.removeEventListener('keydown', handler, { capture: true });
-    }, [editor, slashMenu.open, filteredCommands, slashMenu.index, slashMenu.exactMatch, activeCommand, simple]);
+        if (slashMenu.open && filteredCommands.length > 0) {
+            dom.setAttribute('aria-controls', slashListboxId(slashId));
+            dom.setAttribute('aria-activedescendant', slashOptionId(slashId, activeIndex));
+        } else {
+            dom.removeAttribute('aria-controls');
+            dom.removeAttribute('aria-activedescendant');
+        }
+    }, [editor, slashMenu.open, filteredCommands.length, activeIndex, slashId]);
 
     return (
         <div className="flex flex-col h-full border border-border rounded-md overflow-hidden bg-card relative">
@@ -448,53 +406,17 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
                     border: none !important;
                 }
             `}} />
-            {/* Slash Menu Overlay */}
+            {/* Menu de comandos "/" de las extensiones instaladas */}
             {slashMenu.open && (
-                <div
-                    className="fixed z-50 bg-card border border-border shadow-xl rounded-md w-80 max-h-[500px] flex flex-col animate-in fade-in zoom-in-95 font-sans"
-                    style={{ left: slashMenu.x, top: slashMenu.y }}
-                >
-                    {/* Header / Preview Area - Only shown if command is typed exactly */}
-                    {slashMenu.exactMatch && PreviewComponent && (
-                        <div className={cn(
-                            activeCommand.header !== false && "border-b bg-muted/50"
-                        )}>
-                            {/* Passed args and context props to component */}
-                            {/* @ts-ignore */}
-                            <PreviewComponent args={slashMenu.args} context={extendedContext} />
-                        </div>
-                    )}
-
-                    {/* Command List (Hidden if exact match? No, maybe show it to allow confirming) */}
-                    {(!slashMenu.exactMatch || filteredCommands.length > 1) && (
-                        <div className="overflow-y-auto p-1 max-h-48">
-                            {filteredCommands.length === 0 ? (
-                                <div className="px-3 py-2 text-xs text-muted-foreground">No commands found</div>
-                            ) : (
-                                filteredCommands.map((cmd, i) => (
-                                    <div
-                                        key={cmd.key}
-                                        className={cn(
-                                            "flex items-center gap-3 px-3 py-2 text-sm rounded-md transition-colors cursor-pointer",
-                                            i === slashMenu.index ? "bg-primary/10 text-primary" : "hover:bg-muted"
-                                        )}
-                                        onClick={() => executeCommand(cmd)}
-                                    >
-                                        <div className="flex items-center justify-center w-5 h-5 rounded bg-secondary/50 text-muted-foreground font-bold text-[10px]">/</div>
-                                        <div className="flex flex-col leading-tight overflow-hidden">
-                                            <span className="font-semibold text-xs truncate">
-                                                {cmd.key}
-                                                {/* @ts-ignore */}
-                                                {cmd.arguments && <span className="ml-1 text-muted-foreground font-normal opacity-75">{cmd.arguments}</span>}
-                                            </span>
-                                            <span className="text-[10px] text-muted-foreground truncate">{cmd.description}</span>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </div>
+                <SlashMenu
+                    id={slashId}
+                    commands={filteredCommands}
+                    activeIndex={activeIndex}
+                    x={slashMenu.x}
+                    y={slashMenu.y}
+                    onSelect={executeCommand}
+                    onHover={(index) => setSlashMenu(prev => ({ ...prev, index }))}
+                />
             )}
 
             <div className="flex flex-wrap items-center gap-1 p-2 border-b border-border bg-muted/50 sticky top-0 z-10">

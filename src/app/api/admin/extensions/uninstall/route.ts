@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth';
+import { auditLog, getClientIp } from '@/lib/security';
 
 export async function POST(req: Request) {
     const guard = await requireAdmin(req);
@@ -20,6 +21,16 @@ export async function POST(req: Request) {
         });
 
         const data = await response.json();
+        // Desinstalar borra authData y credenciales cifradas del dominio (lo hace el backend); aqui queda la traza.
+        auditLog('admin.extension.uninstall', {
+            userId: guard.actor.id,
+            ip: getClientIp(req),
+            domainId: typeof body?.domainId === 'string' ? body.domainId : undefined,
+            extensionId: typeof body?.extensionId === 'string' ? body.extensionId : undefined,
+            outcome: response.ok ? 'ok' : 'failed',
+            status: response.status,
+            credentialsWiped: response.ok,
+        });
         return NextResponse.json(data, { status: response.status });
     } catch (error) {
         console.error('[ADMIN_EXTENSION_UNINSTALL_PROXY]', error);
