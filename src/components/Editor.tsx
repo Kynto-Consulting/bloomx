@@ -151,7 +151,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
     const editor = useEditor({
         immediatelyRender: false,
         extensions: [
-            StarterKit,
+            // StarterKit 3.x ya trae link y underline: se desactivan para usar las versiones propias (evita 'Duplicate extension names').
+            StarterKit.configure({ link: false, underline: false }),
             Underline,
             TextStyle,
             Color,

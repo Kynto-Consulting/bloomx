@@ -80,7 +80,8 @@ Recommended webhook events:
 - Delivery/status events used by Resend for sent mail lifecycle updates
 
 Optional environment variables for webhook processing:
-- `WEBHOOK_SECRET`: Resend/Svix signing secret used to verify webhook signatures. Required in production (the webhook answers 503 without it); in development, if omitted, the webhook is accepted without signature verification.
+- `WEBHOOK_SECRET` (optional, each organizer decides): Resend/Svix signing secret (`whsec_...`) for `/api/webhooks/resend`. When set, a valid signature is required; when omitted, the webhook is accepted unsigned and a warning is logged. Recommended in production so nobody can inject inbound mail.
+- `RESEND_WEBHOOK_SECRET` (optional, same rule): signing secret of the second Resend webhook that delivers bounce/complaint events to `/api/webhooks/resend-events`.
 - `TOP_DOMAIN`: Used when Bloomx sends the automatic undeliverable reply for unknown recipients.
 
 Inbound behavior worth knowing:

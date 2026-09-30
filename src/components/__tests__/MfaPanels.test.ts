@@ -71,3 +71,18 @@ describe('MfaEnrollForm QR', () => {
         expect(container.querySelector('a')).toBeTruthy();
     });
 });
+
+describe('MfaEnrollForm: una sola peticion de setup (regresion E2E)', () => {
+    it('con StrictMode (efecto doble) solo hay UN POST /api/auth/mfa/setup', async () => {
+        const fetchMock = vi.fn(async (..._args: unknown[]) => new Response(JSON.stringify({ secret: 'JBSWY3DPEHPK3PXP', otpauthUri: OTPAUTH }), { status: 200 }));
+        vi.stubGlobal('fetch', fetchMock);
+        await act(async () => {
+            root.render(React.createElement(React.StrictMode, null, React.createElement(MfaEnrollForm, { onDone: vi.fn() })));
+        });
+        await flush();
+        await flush();
+        const setupCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/auth/mfa/setup'));
+        expect(setupCalls).toHaveLength(1);
+        expect(container.querySelector('code')!.textContent).toBe('JBSW Y3DP EHPK 3PXP');
+    });
+});

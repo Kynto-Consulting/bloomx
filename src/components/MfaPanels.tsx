@@ -104,6 +104,22 @@ export function MfaVerifyForm({
     );
 }
 
+// Cada POST /setup GENERA un secreto nuevo y sobrescribe el pendiente. Con React StrictMode (dev) el efecto corre dos veces
+// y se lanzaban 2 peticiones concurrentes: la pantalla mostraba el secreto de una y la BD guardaba el de la otra
+// ("Invalid code" siempre; hallado en E2E real). Las llamadas concurrentes comparten UNA sola peticion.
+const setupInflight = new Map<string, ReturnType<typeof postJson>>();
+function startSetup(mfaToken?: string) {
+    const key = mfaToken ?? '';
+    let p = setupInflight.get(key);
+    if (!p) {
+        p = postJson('/api/auth/mfa/setup', mfaToken ? { mfaToken } : {});
+        setupInflight.set(key, p);
+        const clear = () => { if (setupInflight.get(key) === p) setupInflight.delete(key); };
+        p.then(clear, clear);
+    }
+    return p;
+}
+
 function groupSecret(secret: string) {
     return secret.replace(/(.{4})/g, '$1 ').trim();
 }
@@ -130,7 +146,7 @@ export function MfaEnrollForm({
 
     useEffect(() => {
         let alive = true;
-        postJson('/api/auth/mfa/setup', mfaToken ? { mfaToken } : {}).then(({ ok, status, data }) => {
+        startSetup(mfaToken).then(({ ok, status, data }) => {
             if (!alive) return;
             if (ok) {
                 setSecret(data.secret);

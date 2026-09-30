@@ -7,6 +7,7 @@ import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
 import { formatDate, cn } from '@/lib/utils';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
+import { buildForwardHeaderHtml } from '@/lib/forward-header';
 import { toast } from 'sonner';
 import { fetchDeduped } from '@/lib/fetchdedupe';
 
@@ -580,7 +581,8 @@ export function MailView() {
                     forwarded: true,
                 })),
             subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
-            body: `<p></p><p>---------- Forwarded message ---------<br>From: ${targetEmail.from}<br>Date: ${formatDate(targetEmail.createdAt)}<br>Subject: ${targetEmail.subject}<br>To: ${targetEmail.to}</p><br>${content}`,
+            // Cabecera escapada (ver lib/forward-header.ts): antes "Nombre <a@b.com>" se interpretaba como etiqueta HTML.
+            body: `<p></p>${buildForwardHeaderHtml({ from: targetEmail.from, date: formatDate(targetEmail.createdAt), subject: targetEmail.subject, to: targetEmail.to })}<br>${content}`,
             minimized: false
         });
     };

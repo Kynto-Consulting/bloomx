@@ -30,10 +30,10 @@ export async function POST(req: NextRequest) {
         'svix-signature': req.headers.get('svix-signature') || '',
     };
 
-    // Falla cerrado en produccion: sin WEBHOOK_SECRET cualquiera podria inyectar correos
-    if (!process.env.WEBHOOK_SECRET && process.env.NODE_ENV === 'production') {
-        console.error('WEBHOOK_SECRET not configured; rejecting webhook');
-        return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 });
+    // La verificacion de firma es OPCIONAL y la decide cada organizador: con WEBHOOK_SECRET (el secreto whsec_
+    // del webhook de Resend) se exige firma valida; sin el, se acepta la peticion (recomendado configurarlo).
+    if (!process.env.WEBHOOK_SECRET) {
+        console.warn('[resend] WEBHOOK_SECRET not set: accepting UNSIGNED webhooks (optional; set it to require Resend signatures)');
     }
     if (process.env.WEBHOOK_SECRET) {
         const wh = new Webhook(process.env.WEBHOOK_SECRET);

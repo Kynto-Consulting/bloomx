@@ -9,7 +9,7 @@ import { applyDeliveryEvent, parseDeliveryEvent, verifyResendSignature, type Eve
  * Es independiente del webhook de correo entrante (/api/webhooks/resend, que usa WEBHOOK_SECRET): configure en
  * Resend un segundo webhook apuntando aqui, con su propio secreto en RESEND_WEBHOOK_SECRET (whsec_...).
  *
- *  - Firma Svix verificada; sin RESEND_WEBHOOK_SECRET responde 503 (fallo cerrado, tambien en desarrollo).
+ *  - Firma Svix OPCIONAL: con RESEND_WEBHOOK_SECRET se verifica; sin el se acepta (lo decide cada organizador).
  *  - Rebote PERMANENTE o queja -> recordUnsubscribe(sender, recipient, 'bounce'|'complaint') y fila de campana
  *    marcada bounced/complained. Rebote temporal / retraso -> solo se anota en la fila.
  *  - Idempotente (reentregas del mismo evento no cambian nada). Fallo de I/O -> 500 para que Resend reintente.
@@ -36,17 +36,22 @@ export async function POST(req: NextRequest) {
     const raw = await req.text();
     if (raw.length > 512_000) return NextResponse.json({ error: 'Payload too large' }, { status: 413 });
 
-    const v = verifyResendSignature(raw, {
-        id: req.headers.get('svix-id'),
-        timestamp: req.headers.get('svix-timestamp'),
-        signature: req.headers.get('svix-signature'),
-    }, process.env.RESEND_WEBHOOK_SECRET);
-    if (!v.ok) {
-        if (v.status === 503) console.error('RESEND_WEBHOOK_SECRET not configured; rejecting delivery-event webhook');
-        return NextResponse.json({ error: v.error }, { status: v.status });
+    // Firma OPCIONAL (decide cada organizador): con RESEND_WEBHOOK_SECRET se exige firma Svix valida; sin el se acepta.
+    let payload: unknown;
+    if (process.env.RESEND_WEBHOOK_SECRET) {
+        const v = verifyResendSignature(raw, {
+            id: req.headers.get('svix-id'),
+            timestamp: req.headers.get('svix-timestamp'),
+            signature: req.headers.get('svix-signature'),
+        }, process.env.RESEND_WEBHOOK_SECRET);
+        if (!v.ok) return NextResponse.json({ error: v.error }, { status: v.status });
+        payload = v.payload;
+    } else {
+        console.warn('[resend-events] RESEND_WEBHOOK_SECRET not set: accepting UNSIGNED delivery events (optional)');
+        try { payload = JSON.parse(raw); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
     }
 
-    const ev = parseDeliveryEvent(v.payload);
+    const ev = parseDeliveryEvent(payload);
     if (!ev) return NextResponse.json({ received: true, ignored: true });
 
     try {
