@@ -8,8 +8,10 @@ import { CreateEventForm } from '@/components/calendar/CreateEventForm';
 import { AddCalendarForm } from '@/components/calendar/AddCalendarForm';
 import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
 import { agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
-import { formatDate } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
+import { toast } from 'sonner';
+import { useI18n } from '@/components/I18nProvider';
+import { hourLabel, monthName, weekdayName } from '@/lib/i18n/format';
 
 type CalendarRecord = {
     id: string;
@@ -31,6 +33,12 @@ type CalendarEventRecord = {
 };
 
 export default function CalendarPage() {
+    const { t, intlLocale } = useI18n();
+    const fmtTime = (value: string | Date) =>
+        new Intl.DateTimeFormat(intlLocale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+    const fmtDayTitle = (d: Date) =>
+        new Intl.DateTimeFormat(intlLocale, { weekday: 'long', day: 'numeric', month: 'short' }).format(d);
+    const holidaysCalendarName = (code: string) => t('calendar.holidaysCalendar', { code });
     const [viewMode, setViewMode] = useState('Month');
     const [calendars, setCalendars] = useState<CalendarRecord[]>([]);
     const [events, setEvents] = useState<CalendarEventRecord[]>([]);
@@ -65,7 +73,7 @@ export default function CalendarPage() {
         openWindow({
             id: 'create-event',
             type: 'event',
-            title: 'Create Event',
+            title: t('calendar.createEvent'),
             icon: <CalendarDays className="w-4 h-4" />,
             content: (
                 <CreateEventForm
@@ -94,7 +102,7 @@ export default function CalendarPage() {
         openWindow({
             id: `event-${event.id}`,
             type: 'event',
-            title: event.calendar.isReadOnly ? 'View Event' : 'Edit Event',
+            title: event.calendar.isReadOnly ? t('calendar.viewEvent') : t('calendar.editEvent'),
             icon: <CalendarDays className="w-4 h-4" />,
             content: (
                 <CreateEventForm
@@ -141,7 +149,7 @@ export default function CalendarPage() {
         openWindow({
             id: 'add-calendar',
             type: 'event', // You can use standard floating window UI styles
-            title: 'Add Calendar',
+            title: t('calendar.addCalendar'),
             icon: <Plus className="w-4 h-4" />,
             content: (
                 <AddCalendarForm 
@@ -151,7 +159,7 @@ export default function CalendarPage() {
                     onLocalCreate={() => {
                         // TODO: Provide UI to create local calendar if not using the default one
                         // Usually you might trigger an API `/api/calendars` POST and reload
-                        alert("Local calendar creation placeholder");
+                        toast.info(t('calendar.localCreateSoon'));
                     }} 
                 />
             )
@@ -270,7 +278,7 @@ export default function CalendarPage() {
                     const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/${code}`);
                     if (res.ok) {
                         const data = await res.json();
-                        const holidayCal: CalendarRecord = { id: `holidays-${code}`, name: `Holidays (${code})`, color: '#00897B', source: 'public', isReadOnly: true };
+                        const holidayCal: CalendarRecord = { id: `holidays-${code}`, name: holidaysCalendarName(code), color: '#00897B', source: 'public', isReadOnly: true };
                         const parsed = data.map((h: any) => ({
                             id: `hol-${code}-${h.date}-${h.name}`,
                             title: h.name,
@@ -291,13 +299,14 @@ export default function CalendarPage() {
     const allCalendars = useMemo(() => {
         const holidayCals = holidayCountries.map(code => ({
             id: `holidays-${code}`, 
-            name: `Holidays (${code})`, 
-            color: '#00897B', 
+            name: holidaysCalendarName(code),
+            color: '#00897B',
             source: 'public', 
             isReadOnly: true 
         }));
         return [...calendars, ...holidayCals];
-    }, [calendars, holidayCountries]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [calendars, holidayCountries, intlLocale]);
 
     const allEvents = useMemo(() => {
         return [...events, ...holidays];
@@ -419,7 +428,7 @@ export default function CalendarPage() {
                             }}
                         >
                             <div className="truncate leading-tight">
-                                {new Date(p.ev.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {p.ev.title}
+                                {fmtTime(p.ev.startsAt)} {p.ev.title}
                             </div>
                         </div>
                     );
@@ -430,7 +439,7 @@ export default function CalendarPage() {
                         type="button"
                         onClick={(e) => {
                             e.stopPropagation();
-                            setMoreList({ title: date.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), events: eventsOnDate(date) });
+                            setMoreList({ title: fmtDayTitle(date), events: eventsOnDate(date) });
                         }}
                         className="absolute right-1 z-10 rounded bg-foreground/80 px-1.5 py-0.5 text-[11px] font-semibold text-background shadow hover:bg-foreground"
                         style={{ top: bucket * HOUR_PX + 2 }}
@@ -447,11 +456,9 @@ export default function CalendarPage() {
         const firstDay = getFirstDayOfMonth(currentYear, currentMonth);
         const days: React.ReactNode[] = [];
         
-        const headers = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
-
-        days.push(...headers.map(h => (
-            <div key={`h-${h}`} className="text-center text-[11px] font-medium text-muted-foreground py-2 border-r border-border border-b">
-                {h}
+        days.push(...[0, 1, 2, 3, 4, 5, 6].map(h => (
+            <div key={`h-${h}`} className="text-center text-[11px] font-medium text-muted-foreground py-2 border-r border-border border-b uppercase">
+                {weekdayName(h, intlLocale, 'short')}
             </div>
         )));
 
@@ -512,7 +519,7 @@ export default function CalendarPage() {
                                 className={`text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium cursor-pointer hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'text-foreground bg-success/15 border border-success/30' : ''}`}
                                 style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: safeAgendaColor(ev.calendar.color), color: agendaTextOn(ev.calendar.color) } : {}}
                             >
-                                {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} `}
+                                {!ev.calendar.id.startsWith('holidays') && `${fmtTime(ev.startsAt)} `}
                                 {ev.title}
                             </div>
                         ))}
@@ -522,25 +529,25 @@ export default function CalendarPage() {
                                 onClick={(e) => {
                                     e.stopPropagation();
                                     const d = new Date(currentYear, currentMonth, i);
-                                    setMoreList({ title: d.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }), events: dayEvents });
+                                    setMoreList({ title: fmtDayTitle(d), events: dayEvents });
                                 }}
                                 className="text-[11px] text-left px-1.5 py-0.5 rounded font-semibold text-muted-foreground hover:bg-secondary/70"
                             >
-                                +{dayEvents.length - 3} more
+                                {t('calendar.more', { n: dayEvents.length - 3 })}
                             </button>
                         )}
                         {dayGhostEvents.map((ge, idx) => (
                             <div
                                 key={`ghost-${idx}`}
-                                title={`${ge.attendeeName || ge.attendeeEmail} — ocupado`}
+                                title={t('calendar.busy', { name: ge.attendeeName || ge.attendeeEmail })}
                                 className="text-[11px] truncate px-1.5 py-0.5 rounded border border-dashed border-input bg-muted text-muted-foreground opacity-60 font-medium pointer-events-none select-none"
                             >
-                                {new Date(ge.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} {ge.attendeeName || ge.attendeeEmail.split('@')[0]}
+                                {fmtTime(ge.startsAt)} {ge.attendeeName || ge.attendeeEmail.split('@')[0]}
                             </div>
                         ))}
                         {hasGhost && (
                             <div className="text-[11px] truncate px-1.5 py-0.5 rounded shadow-sm font-medium bg-primary/10 text-primary border border-primary/20 border-dashed opacity-80 animate-pulse">
-                                {new Date(startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} New Event
+                                {fmtTime(startsAt)} {t('calendar.newEventGhost')}
                             </div>
                         )}
                     </div>
@@ -558,7 +565,8 @@ export default function CalendarPage() {
         return days;
     };
 
-    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const monthNames = Array.from({ length: 12 }, (_, m) => monthName(m, intlLocale));
+    const narrowDays = [0, 1, 2, 3, 4, 5, 6].map((d) => weekdayName(d, intlLocale, 'narrow'));
     const toggleCalendar = (id: string) => setSelectedCalendarIds(prev => prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]);
 
     const miniCalendarDays = useMemo(() => {
@@ -585,7 +593,7 @@ export default function CalendarPage() {
             <div className="p-4 py-5 px-4 z-10 w-[256px]">
                 <button onClick={() => handleOpenCreate(new Date().toISOString().slice(0, 16), new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16))} className="flex items-center justify-center gap-2 bg-primary border border-primary shadow-sm hover:bg-primary/90 hover:shadow-md transition-all rounded-md px-4 py-2.5 w-full group">
                     <Plus className="w-5 h-5 text-primary-foreground" />
-                    <span className="text-sm font-medium text-primary-foreground transition-colors">Create Event</span>
+                    <span className="text-sm font-medium text-primary-foreground transition-colors">{t('calendar.createEvent')}</span>
                 </button>
             </div>
 
@@ -593,12 +601,16 @@ export default function CalendarPage() {
                 <div className="flex items-center justify-between mb-2">
                     <span className="text-[13px] font-medium text-foreground/80">{monthNames[currentMonth]} {currentYear}</span>
                     <div className="flex gap-1">
-                        <ChevronLeft className="w-4 h-4 text-muted-foreground cursor-pointer hover:bg-muted rounded" onClick={prevMonth} />
-                        <ChevronRight className="w-4 h-4 text-muted-foreground cursor-pointer hover:bg-muted rounded" onClick={nextMonth} />
+                        <button type="button" onClick={prevMonth} aria-label={t('calendar.prevMonth')} className="text-muted-foreground hover:bg-muted rounded">
+                            <ChevronLeft className="w-4 h-4" aria-hidden="true" />
+                        </button>
+                        <button type="button" onClick={nextMonth} aria-label={t('calendar.nextMonth')} className="text-muted-foreground hover:bg-muted rounded">
+                            <ChevronRight className="w-4 h-4" aria-hidden="true" />
+                        </button>
                     </div>
                 </div>
-                <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-muted-foreground font-medium pb-2">
-                    {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
+                <div className="grid grid-cols-7 gap-1 text-center text-xs mb-1 text-muted-foreground font-medium pb-2" aria-hidden="true">
+                    {narrowDays.map((d, i) => <span key={i}>{d}</span>)}
                 </div>
                 <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
                     {miniCalendarDays.map((dateObj, i) => {
@@ -615,11 +627,11 @@ export default function CalendarPage() {
             <div className="p-4 flex-1 overflow-y-auto w-[256px] border-t border-border/60 mt-2">
                 <div className="flex items-center justify-between py-2 text-foreground/80 font-medium px-2 rounded hover:bg-muted/50">
                     <div className="flex items-center gap-2 cursor-pointer flex-1">
-                        <span className="text-sm">My calendars</span>
-                        <ChevronRight className="w-4 h-4 transform rotate-90" />
+                        <span className="text-sm">{t('calendar.myCalendars')}</span>
+                        <ChevronRight className="w-4 h-4 transform rotate-90" aria-hidden="true" />
                     </div>
-                    <button onClick={handleOpenAddCalendar} className="p-1 hover:bg-secondary rounded text-muted-foreground">
-                        <Plus className="w-4 h-4" />
+                    <button type="button" onClick={handleOpenAddCalendar} aria-label={t('calendar.addCalendar')} title={t('calendar.addCalendar')} className="p-1 hover:bg-secondary rounded text-muted-foreground">
+                        <Plus className="w-4 h-4" aria-hidden="true" />
                     </button>
                 </div>
                 <div className="pl-2 space-y-1 mt-1">
@@ -665,38 +677,39 @@ export default function CalendarPage() {
             <div className="flex-1 flex flex-col h-full overflow-hidden">
                 <header className="flex h-[64px] items-center justify-between px-4 border-b border-border">
                     <div className="flex items-center gap-4">
-                        <button onClick={() => setIsAppSidebarOpen(true)} className="p-2 -ml-2 rounded-full hover:bg-muted lg:hidden">
-                            <Menu className="w-6 h-6 text-foreground/80" />
+                        <button type="button" onClick={() => setIsAppSidebarOpen(true)} aria-label={t('common.openMenu')} className="p-2 -ml-2 rounded-full hover:bg-muted lg:hidden">
+                            <Menu className="w-6 h-6 text-foreground/80" aria-hidden="true" />
                         </button>
                         
                         <div className="flex items-center gap-2 pr-2 text-foreground/80">
                             <div className="w-9 h-9 rounded bg-primary flex items-center justify-center font-bold text-primary-foreground shadow-sm">
                                 {currentDate.getDate()}
                             </div>
-                            <span className="text-xl font-normal tracking-tight hidden sm:block text-foreground/80">Calendar</span>
+                            <span className="text-xl font-normal tracking-tight hidden sm:block text-foreground/80">{t('calendar.title')}</span>
                         </div>
 
                         <div className="hidden md:flex items-center border border-input rounded-md bg-card hover:bg-muted/50 shadow-sm overflow-hidden h-[36px]">
                             <select 
-                                value={viewMode} 
+                                value={viewMode}
+                                aria-label={t('calendar.viewLabel')}
                                 onChange={(e) => setViewMode(e.target.value)}
                                 className="text-sm font-medium text-foreground/80 bg-transparent px-3 py-1 outline-none cursor-pointer appearance-none pr-8 relative h-full"
                                 style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%234A5568" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em' }}
                             >
-                                <option value="Day">Day</option>
-                                <option value="Week">Week</option>
-                                <option value="Month">Month</option>
-                                <option value="Year">Year</option>
+                                <option value="Day">{t('calendar.views.day')}</option>
+                                <option value="Week">{t('calendar.views.week')}</option>
+                                <option value="Month">{t('calendar.views.month')}</option>
+                                <option value="Year">{t('calendar.views.year')}</option>
                             </select>
                         </div>
 
                         <button onClick={setToday} className="border border-input px-4 h-[36px] rounded-md text-sm font-medium text-foreground/80 hover:bg-muted/50 hidden md:block shadow-sm">
-                            Today
+                            {t('calendar.today')}
                         </button>
-                        
+
                         <div className="flex items-center gap-1 mx-2">
-                            <button onClick={prevMonth} className="p-2 hover:bg-muted rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-foreground/80" /></button>
-                            <button onClick={nextMonth} className="p-2 hover:bg-muted rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-foreground/80" /></button>
+                            <button type="button" onClick={prevMonth} aria-label={t('calendar.prevMonth')} className="p-2 hover:bg-muted rounded-full transition-colors"><ChevronLeft className="w-5 h-5 text-foreground/80" aria-hidden="true" /></button>
+                            <button type="button" onClick={nextMonth} aria-label={t('calendar.nextMonth')} className="p-2 hover:bg-muted rounded-full transition-colors"><ChevronRight className="w-5 h-5 text-foreground/80" aria-hidden="true" /></button>
                         </div>
                         
                         <h2 className="text-xl font-normal text-foreground/80 whitespace-nowrap">
@@ -706,8 +719,8 @@ export default function CalendarPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
-                        <button onClick={() => setIsCalSidebarOpen(true)} className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground lg:hidden">
-                            <Settings className="w-5 h-5 text-foreground/80" />
+                        <button type="button" onClick={() => setIsCalSidebarOpen(true)} aria-label={t('calendar.calendarsPanel')} className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground lg:hidden">
+                            <Settings className="w-5 h-5 text-foreground/80" aria-hidden="true" />
                         </button>
                     </div>
                 </header>
@@ -725,7 +738,7 @@ export default function CalendarPage() {
                                 <div className="grid grid-cols-[60px_1fr] border-b border-border sticky top-0 z-20 bg-background">
                                     <div className="border-r border-border bg-muted/50" />
                                     <div className="font-semibold text-center py-2 text-foreground/80 bg-muted/50 flex flex-col items-center">
-                                        <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][currentDate.getDay()]}</span>
+                                        <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{weekdayName(currentDate.getDay(), intlLocale, 'short')}</span>
                                         <span className="text-lg mt-0.5 w-8 h-8 flex items-center justify-center rounded-full bg-primary text-primary-foreground">{currentDate.getDate()}</span>
                                     </div>
                                 </div>
@@ -734,7 +747,7 @@ export default function CalendarPage() {
                                     <div className="select-none">
                                         {Array.from({ length: 24 }).map((_, i) => (
                                             <div key={i} className="text-xs text-muted-foreground text-right pr-2 border-r border-b border-border/60" style={{ height: HOUR_PX }}>
-                                                <span className="relative -top-2">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`}</span>
+                                                <span className="relative -top-2">{hourLabel(i, intlLocale)}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -760,12 +773,12 @@ export default function CalendarPage() {
                             <div className="flex-1 overflow-y-auto w-full">
                                 <div className="grid grid-cols-[60px_repeat(7,1fr)] border-b border-border sticky top-0 z-20 bg-background">
                                     <div className="border-r border-border bg-muted/50" />
-                                    {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, index) => {
+                                    {[0, 1, 2, 3, 4, 5, 6].map((d, index) => {
                                         const dateOfD = new Date(currentYear, currentMonth, currentDate.getDate() - currentDate.getDay() + index);
                                         const isToday = sameDay(dateOfD, currentDate);
                                         return (
                                             <div key={d} className="font-semibold text-center py-2 text-foreground/80 border-l border-border/60 text-sm bg-muted/50 flex flex-col items-center">
-                                                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{d}</span>
+                                                <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{weekdayName(d, intlLocale, 'short')}</span>
                                                 <span className={`text-lg mt-0.5 w-8 h-8 flex items-center justify-center rounded-full ${isToday ? 'bg-primary text-primary-foreground' : 'text-foreground/80'}`}>{dateOfD.getDate()}</span>
                                             </div>
                                         );
@@ -776,7 +789,7 @@ export default function CalendarPage() {
                                     <div className="select-none">
                                         {Array.from({ length: 24 }).map((_, i) => (
                                             <div key={i} className="text-xs text-muted-foreground text-right pr-2 border-r border-b border-border/60" style={{ height: HOUR_PX }}>
-                                                <span className="relative -top-2">{i === 0 ? '12 AM' : i < 12 ? `${i} AM` : i === 12 ? '12 PM' : `${i - 12} PM`}</span>
+                                                <span className="relative -top-2">{hourLabel(i, intlLocale)}</span>
                                             </div>
                                         ))}
                                     </div>
@@ -813,7 +826,7 @@ export default function CalendarPage() {
                                             <div key={m} className="bg-card p-4 rounded-xl border border-border shadow-sm">
                                                 <div className="font-medium text-foreground mb-2">{monthNames[m]}</div>
                                                 <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-muted-foreground mb-1">
-                                                    {['S','M','T','W','T','F','S'].map(d => <span key={d}>{d}</span>)}
+                                                    {narrowDays.map((d, i) => <span key={i}>{d}</span>)}
                                                 </div>
                                                 <div className="grid grid-cols-7 gap-y-1 text-center text-xs">
                                                     {Array.from({length: firstD}).map((_, i) => <div key={`e-${i}`} />)}
@@ -870,7 +883,7 @@ export default function CalendarPage() {
                         >
                             <div className="mb-3 flex items-center justify-between">
                                 <span className="text-sm font-semibold capitalize text-foreground/80">{moreList.title}</span>
-                                <button type="button" onClick={() => setMoreList(null)} aria-label="Close" className="rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"><span aria-hidden="true">✕</span></button>
+                                <button type="button" onClick={() => setMoreList(null)} aria-label={t('common.close')} className="rounded p-2 text-muted-foreground hover:bg-muted hover:text-foreground"><span aria-hidden="true">✕</span></button>
                             </div>
                             <div className="space-y-1.5">
                                 {moreList.events
@@ -883,7 +896,7 @@ export default function CalendarPage() {
                                             className={`cursor-pointer truncate rounded-md px-2.5 py-1.5 text-xs font-medium hover:brightness-95 ${ev.calendar.id.startsWith('holidays') ? 'bg-success/15 text-foreground border border-success/30' : ''}`}
                                             style={!ev.calendar.id.startsWith('holidays') ? { backgroundColor: safeAgendaColor(ev.calendar.color), color: agendaTextOn(ev.calendar.color) } : {}}
                                         >
-                                            {!ev.calendar.id.startsWith('holidays') && `${new Date(ev.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} `}
+                                            {!ev.calendar.id.startsWith('holidays') && `${fmtTime(ev.startsAt)} `}
                                             {ev.title}
                                         </div>
                                     ))}

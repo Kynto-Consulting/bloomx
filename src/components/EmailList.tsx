@@ -4,8 +4,12 @@ import { useState, useEffect, useRef, memo, useCallback, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Archive, Trash2, Star, Tag, MailOpen, RefreshCw } from 'lucide-react'; // Imports for icons
-import { formatDate, cn } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { Loader2, Search, Menu, Plus, User, SlidersHorizontal, ChevronDown, Check } from 'lucide-react';
+import { useI18n } from '@/components/I18nProvider';
+import { formatMailDate, pluralKey } from '@/lib/i18n/format';
+import { VirtualMailRows, type VirtualMailRowsHandle } from '@/components/VirtualMailRows';
+import { listItemAria, shouldVirtualize } from '@/lib/virtual-list';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { useCompose } from '@/contexts/ComposeContext';
@@ -44,7 +48,8 @@ const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
 // Los campos extra (to, cc, attachments, ...) viven en el index signature de ListEmail.
 type Email = ListEmail;
 
-function formatMobileDate(date: string) {
+/** Fecha + hora corta con el idioma de la interfaz (fila movil y cita de respuesta rapida). */
+function formatMobileDate(date: string, locale: string) {
     if (!date) return '';
 
     const parsed = new Date(date);
@@ -52,8 +57,7 @@ function formatMobileDate(date: string) {
         return '';
     }
 
-    // Sin locale fijo: usa el idioma del navegador.
-    return new Intl.DateTimeFormat(undefined, {
+    return new Intl.DateTimeFormat(locale, {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
@@ -61,7 +65,18 @@ function formatMobileDate(date: string) {
     }).format(parsed);
 }
 
+/** Nombre de carpeta traducido (inbox -> Bandeja de entrada); carpetas desconocidas se muestran tal cual. */
+function folderLabel(t: (key: string) => string, folder: string) {
+    const key = `sidebar.folders.${folder}`;
+    const label = t(key);
+    return label === key ? folder : label;
+}
+
+/** Marcas heredadas de versiones anteriores que guardaban texto en ingles dentro de los datos. */
+const LEGACY_NO_SUBJECT = '(No Subject)';
+
 export function EmailList() {
+    const { t, intlLocale } = useI18n();
     const searchParams = useSearchParams();
     const folder = searchParams.get('folder') || 'inbox';
     const selectedId = searchParams.get('id');
@@ -213,12 +228,12 @@ export function EmailList() {
 
     const selectedAccountLabel = useMemo(() => {
         if (!effectiveAccountFilter) {
-            return 'All accounts';
+            return t('emailList.allAccounts');
         }
 
         const selected = accountOptions.find((option) => option.value === effectiveAccountFilter);
         return selected?.label || effectiveAccountFilter;
-    }, [accountOptions, effectiveAccountFilter]);
+    }, [accountOptions, effectiveAccountFilter, t]);
 
     const mailboxTargets = useMemo(() => {
         const connectedAccounts = storedAccounts.filter((account) => {
@@ -362,13 +377,16 @@ export function EmailList() {
     // personalizado) no se re-crean, asi que no pueden capturar valores viejos.
     const groupedRef = useRef(groupedEmails);
     groupedRef.current = groupedEmails;
+    const scrollRef = useRef<HTMLDivElement | null>(null);
+    const virtualHandleRef = useRef<VirtualMailRowsHandle | null>(null);
+    const virtualizedRef = useRef(false);
     const selectedIdsRef = useRef(selectedIds);
     selectedIdsRef.current = selectedIds;
     const lastSelectedRef = useRef<string | null>(null);
     const searchParamsRef = useRef(searchParams);
     searchParamsRef.current = searchParams;
-    const latest = useRef({ folder, isOnline, addToQueue, invalidate });
-    latest.current = { folder, isOnline, addToQueue, invalidate };
+    const latest = useRef({ folder, isOnline, addToQueue, invalidate, t, intlLocale });
+    latest.current = { folder, isOnline, addToQueue, invalidate, t, intlLocale };
     const requestSeq = useRef(0);
 
     // --- Etiquetado masivo -------------------------------------------------
@@ -402,7 +420,7 @@ export function EmailList() {
         const ids = Array.from(selectedIdsRef.current);
         if (ids.length === 0) return;
         if (!latest.current.isOnline) {
-            toast.error('Sin conexión: no se puede etiquetar ahora.');
+            toast.error(latest.current.t('emailList.toast.labelOffline'));
             return;
         }
 
@@ -433,9 +451,9 @@ export function EmailList() {
 
         if (failed.length > 0) {
             setEmails((prev) => restoreEmails(prev, snapshot.filter((e) => failed.includes(e.id))));
-            toast.error(`No se pudo etiquetar ${failed.length} de ${toggleIds.length} correos.`);
+            toast.error(latest.current.t('emailList.toast.labelPartial', { failed: failed.length, total: toggleIds.length }));
         } else {
-            toast.success(mode === 'add' ? `Etiqueta "${label.name}" aplicada` : `Etiqueta "${label.name}" quitada`);
+            toast.success(latest.current.t(mode === 'add' ? 'emailList.toast.labelApplied' : 'emailList.toast.labelRemoved', { name: label.name }));
         }
         setLabelPickerOpen(false);
         void latest.current.invalidate(EMAIL_LISTS_AND_COUNTS_PATTERN);
@@ -448,7 +466,7 @@ export function EmailList() {
 
     // --- Acciones masivas: optimista + res.ok + reversion -------------------
     const handleBulkAction = useCallback(async (updates: any) => {
-        const { folder: currentFolder, isOnline: online, addToQueue: enqueue, invalidate: doInvalidate } = latest.current;
+        const { folder: currentFolder, isOnline: online, addToQueue: enqueue, invalidate: doInvalidate, t: tr } = latest.current;
         // Support explicit IDs passed in updates (for Swipe actions), otherwise use selectedIds
         const ids: string[] = updates.ids || Array.from(selectedIdsRef.current);
         if (ids.length === 0) return;
@@ -459,27 +477,30 @@ export function EmailList() {
         const permanent = isPermanentDelete(currentFolder, actualUpdates);
 
         if (currentFolder === 'drafts' && !permanent) {
-            toast.info('Esta acción no está disponible para borradores.');
+            toast.info(tr('emailList.toast.notForDrafts'));
             return;
         }
 
         // Borrado permanente (atajo, boton o swipe): siempre con confirmacion.
         if (permanent && typeof window !== 'undefined') {
-            const what = currentFolder === 'drafts' ? 'borrador(es)' : 'correo(s)';
-            if (!window.confirm(`¿Eliminar permanentemente ${ids.length} ${what}? Esta acción no se puede deshacer.`)) {
+            const confirmKey = pluralKey(currentFolder === 'drafts' ? 'emailList.confirmDeleteDrafts' : 'emailList.confirmDeleteEmails', ids.length);
+            if (!window.confirm(tr(confirmKey, { n: ids.length }))) {
                 return;
             }
         }
 
+        // `label` se muestra en la cola offline: se traduce al idioma activo al encolar.
         const request = currentFolder === 'drafts'
-            ? { url: '/api/drafts/batch', method: 'POST', body: { ids, action: 'delete' }, label: 'Delete Drafts' }
+            ? { url: '/api/drafts/batch', method: 'POST', body: { ids, action: 'delete' }, label: tr('emailList.queue.deleteDrafts') }
             : permanent
-                ? { url: '/api/emails/batch', method: 'DELETE', body: { ids }, label: 'Delete Emails Permanently' }
+                ? { url: '/api/emails/batch', method: 'DELETE', body: { ids }, label: tr('emailList.queue.deleteEmails') }
                 : {
                     url: '/api/emails/batch',
                     method: 'PATCH',
                     body: { ids, updates: actualUpdates },
-                    label: actualUpdates.folder ? `Move to ${actualUpdates.folder}` : 'Update emails',
+                    label: actualUpdates.folder
+                        ? tr('emailList.queue.moveTo', { folder: folderLabel(tr, actualUpdates.folder) })
+                        : tr('emailList.queue.update'),
                 };
 
         // Optimistic UI (con copia para poder revertir)
@@ -503,16 +524,16 @@ export function EmailList() {
                 setEmails((prev) => restoreEmails(prev, snapshot));
                 toast.error(
                     res.status >= 500
-                        ? 'El servidor falló al aplicar la acción. Inténtalo de nuevo.'
-                        : 'No se pudo aplicar la acción sobre los correos.'
+                        ? tr('emailList.toast.serverFailed')
+                        : tr('emailList.toast.actionFailed')
                 );
                 return;
             }
         } catch (err) {
             // Error de red: se conserva el cambio optimista y se reintenta desde la cola offline.
             console.error(err);
-            enqueue(request.url, request.method as any, request.body, `${request.label} (Retry)`);
-            toast.warning('Sin conexión estable: el cambio se reintentará automáticamente.');
+            enqueue(request.url, request.method as any, request.body, tr('emailList.queue.retry', { label: request.label }));
+            toast.warning(tr('emailList.toast.retryLater'));
             return;
         }
 
@@ -578,7 +599,7 @@ export function EmailList() {
                     to: draft.to || '',
                     cc: draft.cc || '',
                     bcc: draft.bcc || '',
-                    subject: draft.subject === '(No Subject)' ? '' : draft.subject,
+                    subject: draft.subject === LEGACY_NO_SUBJECT ? '' : draft.subject,
                     body: draft.originalBody || '',
                     minimized: false,
                     attachments: draft.attachments || []
@@ -600,13 +621,24 @@ export function EmailList() {
         return true;
     }, [router]);
 
-    const focusRow = useCallback((id: string) => {
+    const focusRow = useCallback((id: string, index?: number) => {
         if (typeof document === 'undefined') return;
-        requestAnimationFrame(() => {
+        // Lista virtualizada: la fila puede no estar montada; primero se desplaza hasta ella
+        // (la fila con foco queda anclada en la ventana) y se reintenta unos frames hasta que exista.
+        if (virtualizedRef.current && index !== undefined && index >= 0) {
+            virtualHandleRef.current?.scrollToIndex(index);
+        }
+        let attempts = virtualizedRef.current ? 8 : 1;
+        const tryFocus = () => {
             const el = document.getElementById(`email-row-${id}`);
-            el?.scrollIntoView({ block: 'nearest' });
-            el?.focus({ preventScroll: true });
-        });
+            if (el) {
+                el.scrollIntoView({ block: 'nearest' });
+                el.focus({ preventScroll: true });
+                return;
+            }
+            if (--attempts > 0) requestAnimationFrame(tryFocus);
+        };
+        requestAnimationFrame(tryFocus);
     }, []);
 
     const moveFocus = useCallback((delta: 1 | -1) => {
@@ -617,7 +649,7 @@ export function EmailList() {
         if (nextIndex < 0) return;
         const nextId = groups[nextIndex].id;
         setFocusedId(nextId);
-        focusRow(nextId);
+        focusRow(nextId, nextIndex);
     }, [focusRow]);
 
     const replyToFocused = useCallback(async () => {
@@ -628,11 +660,17 @@ export function EmailList() {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
             if (!data?.email) throw new Error('empty');
-            const reply = buildQuickReply(data.email, data.content || '', formatDate(data.email.createdAt));
+            const { t: tr, intlLocale: loc } = latest.current;
+            const reply = buildQuickReply(
+                data.email,
+                data.content || '',
+                formatMobileDate(data.email.createdAt, loc),
+                (date, from) => tr('emailList.quoteHeader', { date, from }),
+            );
             openCompose({ id: crypto.randomUUID(), ...reply, minimized: false });
         } catch (err) {
             console.error('Quick reply failed', err);
-            toast.error('No se pudo abrir la respuesta.');
+            toast.error(latest.current.t('emailList.toast.replyFailed'));
         }
     }, [openCompose]);
 
@@ -732,10 +770,11 @@ export function EmailList() {
                     if (data.drafts) {
                         const mapped = data.drafts.map((d: any) => ({
                             id: d.id,
-                            from: d.to ? `To: ${d.to}` : '(No Recipients)',
+                            // Sin texto en ingles dentro de los datos: la fila traduce "Para: x" / "(sin destinatarios)".
+                            from: '',
                             draftFrom: d.from,
                             cleanTo: d.to,
-                            subject: d.subject || '(No Subject)',
+                            subject: d.subject || '',
                             snippet: d.body ? d.body.replace(/<[^>]+>/g, '') : '',
                             createdAt: d.updatedAt,
                             read: true,
@@ -975,18 +1014,47 @@ export function EmailList() {
         router.push(`/?${params.toString()}`);
     }, [router, searchParams]);
 
+    // --- Virtualizacion (solo listas largas; las cortas se renderizan completas, igual que siempre) ---
+    const useVirtual = shouldVirtualize(groupedEmails.length);
+    virtualizedRef.current = useVirtual;
+    const virtualIds = useMemo(() => (useVirtual ? groupedEmails.map((g) => g.id) : []), [useVirtual, groupedEmails]);
+    const focusedIndex = useMemo(
+        () => (useVirtual && focusedId ? groupedEmails.findIndex((g) => g.id === focusedId) : -1),
+        [useVirtual, focusedId, groupedEmails]
+    );
+
+    const renderRow = (index: number, virtual: boolean) => {
+        const group = groupedEmails[index];
+        if (!group) return null;
+        const email = group.latestEmail;
+        // Labels reales (union de todo el hilo), sin badges de demostracion
+        const labels = unionLabels(group.allEmails);
+        const isSelected = group.allEmails.every(e => selectedIds.has(e.id));
+
+        return (
+            <SwipeableEmailItem
+                key={email.id}
+                email={email}
+                index={index}
+                virtual={virtual}
+                ariaPos={virtual ? listItemAria(index, groupedEmails.length, hasMore) : undefined}
+                isSelected={isSelected}
+                isFocused={focusedId === email.id}
+                onFocusRow={setFocusedId}
+                onSelect={handleSelect}
+                onSelectToggle={toggleSelection}
+                onPrefetch={prefetchEmail}
+                onSwipeAction={handleSwipe}
+                labels={labels}
+                labelsKey={labels.map(l => `${l.id}:${l.name}:${l.color || ''}`).join('|')}
+                folder={folder}
+                threadCount={group.count}
+            />
+        );
+    };
+
     return (
         <div className="flex h-full flex-col bg-background/50">
-            {/* ... Desktop Header & Search kept implicitly by Context/Code ... 
-                Wait, I am replacing a huge chunk. I should target specific lines to avoid deleting Header/Search.
-                The duplicate declaration is around line 350.
-                The render loop is around 420.
-                SwipeableEmailItem is at 511.
-                
-                I should use MULTI_REPLACE or be very careful with big replace.
-                Since I need to delete one line and modify another area, multi_replace is better.
-            */}
-
             {/* Desktop Header */}
             <div className="hidden md:flex items-center justify-between px-4 py-3 bg-background/95 backdrop-blur-sm sticky top-0 z-10  min-h-[60px]">
                 {selectedIds.size > 0 ? (
@@ -994,15 +1062,15 @@ export function EmailList() {
                         <div className="flex items-center gap-2 mr-2">
                             <input
                                 type="checkbox"
-                                aria-label="Select all emails"
+                                aria-label={t('emailList.selectAll')}
                                 className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
                                 checked={allSelected}
                                 onChange={handleSelectAll}
                             />
-                            <span className="text-sm font-medium" aria-live="polite">{selectedIds.size} selected</span>
+                            <span className="text-sm font-medium" aria-live="polite">{t('emailList.selectedCount', { n: selectedIds.size })}</span>
                         </div>
                         <div className="flex items-center gap-1 ml-auto">
-                            <button type="button" onClick={() => handleBulkAction({ starred: true })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title="Star" aria-label="Star selected">
+                            <button type="button" onClick={() => handleBulkAction({ starred: true })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title={t('emailList.bulk.star')} aria-label={t('emailList.bulk.starSelected')}>
                                 <Star className="h-4 w-4" />
                             </button>
                             <LabelBulkButton
@@ -1016,20 +1084,20 @@ export function EmailList() {
                                 buttonClassName="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground"
                                 iconClassName="h-4 w-4"
                             />
-                            <button type="button" onClick={() => handleBulkAction({ read: true })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title="Mark Read" aria-label="Mark selected as read">
+                            <button type="button" onClick={() => handleBulkAction({ read: true })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title={t('emailList.bulk.markRead')} aria-label={t('emailList.bulk.markReadSelected')}>
                                 <MailOpen className="h-4 w-4" />
                             </button>
-                            <button type="button" onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title="Archive" aria-label="Archive selected">
+                            <button type="button" onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md text-muted-foreground hover:text-foreground" title={t('emailList.bulk.archive')} aria-label={t('emailList.bulk.archiveSelected')}>
                                 <Archive className="h-4 w-4" />
                             </button>
-                            <button type="button" onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-md text-muted-foreground" title="Trash" aria-label="Move selected to trash">
+                            <button type="button" onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 hover:text-destructive rounded-md text-muted-foreground" title={t('emailList.bulk.trash')} aria-label={t('emailList.bulk.trashSelected')}>
                                 <Trash2 className="h-4 w-4" />
                             </button>
                         </div>
                     </div>
                 ) : (
                     <>
-                        <h1 className="text-xl font-bold capitalize tracking-tight">{folder}</h1>
+                        <h1 className="text-xl font-bold capitalize tracking-tight">{folderLabel(t, folder)}</h1>
                         <div className="inline-flex h-8 items-center justify-center rounded-lg bg-muted/50 p-1">
                             <button
                                 type="button"
@@ -1042,7 +1110,7 @@ export function EmailList() {
                                         : "text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                All
+                                {t('emailList.tabs.all')}
                             </button>
                             <button
                                 type="button"
@@ -1055,7 +1123,7 @@ export function EmailList() {
                                         : "text-muted-foreground hover:text-foreground"
                                 )}
                             >
-                                Unread
+                                {t('emailList.tabs.unread')}
                             </button>
                         </div>
                     </>
@@ -1068,8 +1136,8 @@ export function EmailList() {
                     <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground opacity-50" />
                     <input
                         ref={searchInputRef}
-                        aria-label="Search emails"
-                        placeholder="Search emails..."
+                        aria-label={t('emailList.search.label')}
+                        placeholder={t('emailList.search.placeholder')}
                         defaultValue={searchParams.get('q') || ''}
                         className="h-9 w-full rounded-xl border border-input bg-muted/30 pl-9 pr-3 text-sm outline-none focus:border-ring focus:ring-1 focus:ring-ring/50 transition-all placeholder:text-muted-foreground/60"
                         onKeyDown={(e) => {
@@ -1084,7 +1152,7 @@ export function EmailList() {
                     />
                     <button
                         type="button"
-                        aria-label="Advanced search filters"
+                        aria-label={t('emailList.search.advancedToggle')}
                         aria-expanded={showFilters}
                         onClick={() => setShowFilters(!showFilters)}
                         className={cn("absolute right-2 top-1.5 p-1.5 rounded-md hover:bg-background/80 transition-colors", (filterFrom || filterHasAttachment || filterSince || filterUntil) && "text-primary")}
@@ -1095,13 +1163,13 @@ export function EmailList() {
                     {/* Search Filters Popover */}
                     {showFilters && (
                         <div className="absolute top-11 right-0 w-72 bg-popover/95 backdrop-blur-md border shadow-lg rounded-xl p-4 z-50 flex flex-col gap-3">
-                            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced Search</h3>
+                            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{t('emailList.search.advancedTitle')}</h3>
 
                             <div className="space-y-1">
-                                <label className="text-xs font-medium">From</label>
+                                <label className="text-xs font-medium">{t('emailList.search.from')}</label>
                                 <input
                                     className="w-full h-8 rounded-md border bg-background px-2 text-sm"
-                                    placeholder="sender@example.com"
+                                    placeholder={t('emailList.search.fromPlaceholder')}
                                     value={filterFrom}
                                     onChange={(e) => setFilterFrom(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && applyFilters()}
@@ -1110,7 +1178,7 @@ export function EmailList() {
 
                             <div className="grid grid-cols-2 gap-2">
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium">Date (Start)</label>
+                                    <label className="text-xs font-medium">{t('emailList.search.dateStart')}</label>
                                     <input
                                         type="date"
                                         className="w-full h-8 rounded-md border bg-background px-2 text-sm"
@@ -1119,7 +1187,7 @@ export function EmailList() {
                                     />
                                 </div>
                                 <div className="space-y-1">
-                                    <label className="text-xs font-medium">Date (End)</label>
+                                    <label className="text-xs font-medium">{t('emailList.search.dateEnd')}</label>
                                     <input
                                         type="date"
                                         className="w-full h-8 rounded-md border bg-background px-2 text-sm"
@@ -1137,7 +1205,7 @@ export function EmailList() {
                                     checked={filterHasAttachment}
                                     onChange={(e) => setFilterHasAttachment(e.target.checked)}
                                 />
-                                <label htmlFor="hasAttachment" className="text-sm">Has Attachment</label>
+                                <label htmlFor="hasAttachment" className="text-sm">{t('emailList.search.hasAttachment')}</label>
                             </div>
 
                             <div className="flex justify-end gap-2 mt-1">
@@ -1157,13 +1225,13 @@ export function EmailList() {
                                     }}
                                     className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
                                 >
-                                    Clear
+                                    {t('emailList.search.clear')}
                                 </button>
                                 <button
                                     onClick={applyFilters}
                                     className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded-md shadow-sm hover:bg-primary/90"
                                 >
-                                    Search
+                                    {t('common.search')}
                                 </button>
                             </div>
                         </div>
@@ -1172,7 +1240,7 @@ export function EmailList() {
 
                 {folder !== 'drafts' && multiAccountEnabled && storedAccounts.length > 0 && (
                     <div className="mt-2 flex items-center gap-2">
-                        <label className="text-xs font-medium text-muted-foreground shrink-0">Account</label>
+                        <label className="text-xs font-medium text-muted-foreground shrink-0">{t('emailList.account')}</label>
                         <div ref={accountMenuRef} className="relative min-w-[220px] max-w-full">
                             <button
                                 type="button"
@@ -1203,7 +1271,7 @@ export function EmailList() {
                                                     : 'text-foreground hover:bg-muted'
                                             )}
                                         >
-                                            <span>All accounts</span>
+                                            <span>{t('emailList.allAccounts')}</span>
                                             {!effectiveAccountFilter && <Check className="h-4 w-4" />}
                                         </button>
 
@@ -1236,21 +1304,21 @@ export function EmailList() {
                 )}
             </div>
 
-            <div className="flex-1 overflow-y-auto px-2" onScroll={handleScroll}>
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-2" onScroll={handleScroll}>
                 {loading ? (
-                    <div className="flex items-center justify-center h-40">
+                    <div className="flex items-center justify-center h-40" role="status" aria-label={t('common.loading')}>
                         <Loader2 className="animate-spin h-6 w-6 text-primary/40" />
                     </div>
                 ) : loadError && emails.length === 0 ? (
                     <div role="alert" className="flex flex-col items-center justify-center h-64 text-center p-4 gap-3">
-                        <p className="text-sm font-medium text-foreground">No se pudieron cargar los correos</p>
-                        <p className="text-xs text-muted-foreground">Revisa tu conexión e inténtalo de nuevo.</p>
+                        <p className="text-sm font-medium text-foreground">{t('emailList.loadError.title')}</p>
+                        <p className="text-xs text-muted-foreground">{t('emailList.loadError.help')}</p>
                         <button
                             type="button"
                             onClick={() => { setLoadError(false); setLoading(true); syncEmails('refresh'); }}
                             className="inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
                         >
-                            <RefreshCw className="h-3.5 w-3.5" /> Reintentar
+                            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> {t('emailList.loadError.retry')}
                         </button>
                     </div>
                 ) : filteredEmails.length === 0 ? (
@@ -1261,46 +1329,40 @@ export function EmailList() {
                         className="flex flex-col items-center justify-center h-64 text-center p-4"
                     >
                         <div className="h-12 w-12 rounded-full bg-muted flex items-center justify-center mb-3">
-                            <Search className="h-6 w-6 text-muted-foreground/50" />
+                            <Search className="h-6 w-6 text-muted-foreground/50" aria-hidden="true" />
                         </div>
-                        <p className="text-sm font-medium text-foreground">No emails found</p>
+                        <p className="text-sm font-medium text-foreground">{t('emailList.empty.title')}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                             {searchParams.get('label')
-                                ? `No emails with label "${searchParams.get('label')}" in ${folder}`
-                                : `Your ${folder} is empty.`}
+                                ? t('emailList.empty.withLabel', { label: searchParams.get('label') || '', folder: folderLabel(t, folder).toLowerCase() })
+                                : t('emailList.empty.folder', { folder: folderLabel(t, folder).toLowerCase() })}
                         </p>
                     </motion.div>
+                ) : useVirtual ? (
+                    <div className="pb-20 md:pb-4">
+                        <VirtualMailRows
+                            scrollRef={scrollRef}
+                            ids={virtualIds}
+                            renderRow={(index) => renderRow(index, true)}
+                            pinnedIndex={focusedIndex}
+                            hasMore={hasMore}
+                            onNearEnd={() => { if (!loadingMore && !loading) void syncEmails('loadMore'); }}
+                            handleRef={virtualHandleRef}
+                            label={t('emailList.listLabel', { folder: folderLabel(t, folder) })}
+                        />
+                        {loadingMore && (
+                            <div className="py-4 flex justify-center text-muted-foreground" role="status" aria-label={t('common.loading')}>
+                                <Loader2 className="h-5 w-5 animate-spin" />
+                            </div>
+                        )}
+                    </div>
                 ) : (
-                    <div role="list" aria-label={`${folder} emails`} className="flex flex-col gap-1.5 pb-20 md:pb-4">
+                    <div role="list" aria-label={t('emailList.listLabel', { folder: folderLabel(t, folder) })} className="flex flex-col gap-1.5 pb-20 md:pb-4">
                         <AnimatePresence>
-                            {groupedEmails.map((group, index) => {
-                                const email = group.latestEmail;
-                                // Labels reales (union de todo el hilo), sin badges de demostracion
-                                const labels = unionLabels(group.allEmails);
-                                const isSelected = group.allEmails.every(e => selectedIds.has(e.id));
-
-                                return (
-                                    <SwipeableEmailItem
-                                        key={email.id}
-                                        email={email}
-                                        index={index}
-                                        isSelected={isSelected}
-                                        isFocused={focusedId === email.id}
-                                        onFocusRow={setFocusedId}
-                                        onSelect={handleSelect}
-                                        onSelectToggle={toggleSelection}
-                                        onPrefetch={prefetchEmail}
-                                        onSwipeAction={handleSwipe}
-                                        labels={labels}
-                                        labelsKey={labels.map(l => `${l.id}:${l.name}:${l.color || ''}`).join('|')}
-                                        folder={folder}
-                                        threadCount={group.count}
-                                    />
-                                );
-                            })}
+                            {groupedEmails.map((group, index) => renderRow(index, false))}
                         </AnimatePresence>
                         {loadingMore && (
-                            <div className="py-4 flex justify-center text-muted-foreground">
+                            <div className="py-4 flex justify-center text-muted-foreground" role="status" aria-label={t('common.loading')}>
                                 <Loader2 className="h-5 w-5 animate-spin" />
                             </div>
                         )}
@@ -1314,10 +1376,10 @@ export function EmailList() {
                     <div className="flex items-center justify-between gap-2 h-14 bg-background border border-border shadow-lg rounded-xl px-4 animate-in fade-in slide-in-from-top-2">
                         <div className="flex items-center gap-2">
                             <span className="font-bold text-lg">{selectedIds.size}</span>
-                            <button type="button" onClick={() => setSelectedIds(new Set())} className="text-muted-foreground text-sm">Cancel</button>
+                            <button type="button" onClick={() => setSelectedIds(new Set())} className="text-muted-foreground text-sm">{t('common.cancel')}</button>
                         </div>
                         <div className="flex items-center gap-1">
-                            <button type="button" onClick={() => handleBulkAction({ starred: true })} className="p-2 hover:bg-muted rounded-full" title="Star" aria-label="Star selected">
+                            <button type="button" onClick={() => handleBulkAction({ starred: true })} className="p-2 hover:bg-muted rounded-full" title={t('emailList.bulk.star')} aria-label={t('emailList.bulk.starSelected')}>
                                 <Star className="h-5 w-5" />
                             </button>
                             <LabelBulkButton
@@ -1331,13 +1393,13 @@ export function EmailList() {
                                 buttonClassName="p-2 hover:bg-muted rounded-full"
                                 iconClassName="h-5 w-5"
                             />
-                            <button type="button" onClick={() => handleBulkAction({ read: true })} className="p-2 hover:bg-muted rounded-full" title="Mark Read" aria-label="Mark selected as read">
+                            <button type="button" onClick={() => handleBulkAction({ read: true })} className="p-2 hover:bg-muted rounded-full" title={t('emailList.bulk.markRead')} aria-label={t('emailList.bulk.markReadSelected')}>
                                 <MailOpen className="h-5 w-5" />
                             </button>
-                            <button type="button" onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-full" title="Archive" aria-label="Archive selected">
+                            <button type="button" onClick={() => handleBulkAction({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-full" title={t('emailList.bulk.archive')} aria-label={t('emailList.bulk.archiveSelected')}>
                                 <Archive className="h-5 w-5" />
                             </button>
-                            <button type="button" onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 text-destructive rounded-full" title="Trash" aria-label="Move selected to trash">
+                            <button type="button" onClick={() => handleBulkAction({ folder: 'trash' })} className="p-2 hover:bg-destructive/10 text-destructive rounded-full" title={t('emailList.bulk.trash')} aria-label={t('emailList.bulk.trashSelected')}>
                                 <Trash2 className="h-5 w-5" />
                             </button>
                         </div>
@@ -1354,7 +1416,7 @@ export function EmailList() {
                         className="h-14 px-5 rounded-2xl bg-secondary text-secondary-foreground shadow-lg hover:shadow-xl transition-all active:scale-95 flex items-center gap-2 border border-border/10"
                     >
                         <Plus className="h-6 w-6" />
-                        <span className="font-medium text-base">Compose</span>
+                        <span className="font-medium text-base">{t('emailList.compose')}</span>
                     </button>
                 </div>
             )}
@@ -1364,8 +1426,10 @@ export function EmailList() {
 
 // Extracted Swipeable Component
 const SwipeableEmailItem = memo(function SwipeableEmailItem({
-    email, index, isSelected, isFocused, onFocusRow, onSelect, onSelectToggle, onPrefetch, onSwipeAction, labels, folder, threadCount
+    email, index, virtual = false, ariaPos, isSelected, isFocused, onFocusRow, onSelect, onSelectToggle, onPrefetch, onSwipeAction, labels, folder, threadCount
 }: any) {
+    // useI18n (contexto) re-renderiza la fila al cambiar de idioma aunque `memo` bloquee las props.
+    const { t, intlLocale } = useI18n();
     const [dragX, setDragX] = useState(0);
 
     // Threshold used to determine if action should fire
@@ -1387,8 +1451,26 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
 
     const hoverTimer = useRef<NodeJS.Timeout | null>(null);
 
+    // Remitente/destinatario mostrado: en enviados y borradores es el destinatario.
+    const legacySubject = email.subject === LEGACY_NO_SUBJECT;
+    const subjectText = !email.subject || legacySubject ? t('emailList.noSubject') : email.subject;
+    const senderText = folder === 'drafts'
+        ? (email.to ? t('emailList.toPrefix', { to: email.to }) : t('emailList.noRecipients'))
+        : folder === 'sent' && email.to
+            ? t('emailList.toPrefix', { to: email.to })
+            : email.from;
+    const ariaLabel = [
+        email.read ? '' : `${t('emailList.unread')}. `,
+        `${senderText}. ${subjectText}`,
+        threadCount > 1 ? `. ${t('emailList.threadMessages', { n: threadCount })}` : '',
+    ].join('');
+
     return (
-        <div role="listitem" className="relative overflow-hidden rounded-xl">
+        <div
+            role="listitem"
+            {...(ariaPos || {})}
+            className="relative overflow-hidden rounded-xl"
+        >
             {/* Background Layers */}
             <div
                 className="absolute inset-0 bg-success flex items-center justify-start pl-6 transition-colors"
@@ -1405,10 +1487,12 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
             <motion.div
                 id={`email-row-${email.id}`}
                 tabIndex={0}
-                aria-label={`${email.read ? '' : 'Unread. '}${folder === 'sent' && email.to ? `To ${email.to}` : email.from}. ${email.subject || '(No Subject)'}${threadCount > 1 ? `. ${threadCount} messages` : ''}`}
+                aria-label={ariaLabel}
                 aria-selected={isSelected}
                 onFocus={(e: React.FocusEvent) => { if (e.target === e.currentTarget) onFocusRow?.(email.id); }}
-                layout
+                // En la lista virtualizada las filas viven en posiciones absolutas: `layout` (proyeccion) animaria
+                // saltos falsos al medir/reposicionar, asi que se sustituye por un fundido de opacidad.
+                {...(virtual ? {} : { layout: true })}
                 drag="x"
                 dragConstraints={{ left: 0, right: 0 }} // Snap back
                 dragElastic={0.2} // Resistance
@@ -1417,10 +1501,11 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                     handleDragEnd(e, info);
                     setDragX(0); // Reset visual immediately, optimistic UI handles removal
                 }}
-                initial={{ opacity: 0, y: 10 }}
+                initial={virtual ? { opacity: 0 } : { opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0, x: 0 }} // Ensure x resets
-                exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: 'hidden' }}
-                transition={{ duration: 0.2, delay: index * 0.03 }}
+                exit={virtual ? { opacity: 0 } : { opacity: 0, height: 0, marginBottom: 0, overflow: 'hidden' }}
+                // Sin retardo escalonado por indice en la lista virtual (con miles de filas seria eterno).
+                transition={virtual ? { duration: 0.12 } : { duration: 0.2, delay: index * 0.03 }}
                 className={cn(
                     "group relative flex items-start gap-3 p-3 text-left text-sm transition-colors border border-transparent select-none cursor-pointer bg-background z-10",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -1449,7 +1534,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                     type="button"
                     role="checkbox"
                     aria-checked={isSelected}
-                    aria-label={isSelected ? 'Deselect conversation' : 'Select conversation'}
+                    aria-label={isSelected ? t('emailList.row.deselect') : t('emailList.row.select')}
                     className={cn(
                         "pt-1 shrink-0 transition-opacity focus-visible:opacity-100 focus-visible:outline-none",
                         isSelected
@@ -1469,7 +1554,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                 <button
                     type="button"
                     aria-pressed={Boolean(email.starred)}
-                    aria-label={email.starred ? 'Remove star' : 'Add star'}
+                    aria-label={email.starred ? t('emailList.row.unstar') : t('emailList.row.star')}
                     className="pt-1 shrink-0 z-20 cursor-pointer"
                     onClick={(e) => {
                         e.stopPropagation();
@@ -1486,7 +1571,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                             "text-foreground",
                             !email.read && "text-primary"
                         )}>
-                            {folder === 'sent' && email.to ? `To: ${email.to}` : email.from}
+                            {senderText}
                             {threadCount > 1 && (
                                 <span className="ml-2 inline-flex items-center justify-center bg-muted text-muted-foreground text-[10px] font-bold h-5 min-w-[20px] px-1 rounded-full border border-border/50">
                                     {threadCount}
@@ -1497,12 +1582,12 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                             "hidden sm:block text-[10px] whitespace-nowrap shrink-0",
                             "text-muted-foreground"
                         )}>
-                            {formatDate(email.createdAt)}
+                            {formatMailDate(email.createdAt, intlLocale)}
                         </div>
                     </div>
 
                     <div className="sm:hidden text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {formatMobileDate(email.createdAt)}
+                        {formatMobileDate(email.createdAt, intlLocale)}
                     </div>
 
                     <div className={cn(
@@ -1510,7 +1595,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                         "text-foreground/90",
                         !email.read && "font-bold"
                     )}>
-                        {email.subject || '(No Subject)'}
+                        {subjectText}
                     </div>
 
                     <div className={cn(
@@ -1521,7 +1606,7 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
                     </div>
 
                     {labels.length > 0 && (
-                        <ul className="flex flex-wrap items-center gap-1.5 mt-2" aria-label="Labels">
+                        <ul className="flex flex-wrap items-center gap-1.5 mt-2" aria-label={t('emailList.row.labels')}>
                             {labels.map((label: LabelRef) => (
                                 <li
                                     key={label.id}
@@ -1547,6 +1632,8 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
         prevProps.email.read !== nextProps.email.read ||
         prevProps.email.starred !== nextProps.email.starred ||
         prevProps.email.cleanTo !== nextProps.email.cleanTo ||
+        prevProps.email.to !== nextProps.email.to ||
+        prevProps.email.from !== nextProps.email.from ||
         prevProps.email.subject !== nextProps.email.subject ||
         prevProps.email.snippet !== nextProps.email.snippet ||
         prevProps.email.createdAt !== nextProps.email.createdAt ||
@@ -1559,7 +1646,13 @@ const SwipeableEmailItem = memo(function SwipeableEmailItem({
 
     const threadChanged = prevProps.threadCount !== nextProps.threadCount;
 
-    return !emailChanged && !selectionChanged && !focusChanged && !threadChanged;
+    // Posicion/tamano del conjunto (aria-posinset/setsize) y modo virtual.
+    const positionChanged =
+        prevProps.virtual !== nextProps.virtual ||
+        prevProps.ariaPos?.['aria-posinset'] !== nextProps.ariaPos?.['aria-posinset'] ||
+        prevProps.ariaPos?.['aria-setsize'] !== nextProps.ariaPos?.['aria-setsize'];
+
+    return !emailChanged && !selectionChanged && !focusChanged && !threadChanged && !positionChanged;
 });
 
 // Boton + popover del etiquetado masivo. El estado 'some' se muestra como mixto.
@@ -1576,14 +1669,15 @@ function LabelBulkButton({
     buttonClassName: string;
     iconClassName: string;
 }) {
+    const { t } = useI18n();
     return (
         <div className="relative">
             <button
                 type="button"
                 onClick={onToggle}
                 className={buttonClassName}
-                title="Label"
-                aria-label="Apply label to selected"
+                title={t('emailList.bulk.label')}
+                aria-label={t('emailList.bulk.labelSelected')}
                 aria-haspopup="menu"
                 aria-expanded={open}
             >
@@ -1594,18 +1688,18 @@ function LabelBulkButton({
                     <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden="true" />
                     <div
                         role="menu"
-                        aria-label="Labels"
+                        aria-label={t('emailList.row.labels')}
                         onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } }}
                         className="absolute right-0 top-full mt-1 z-50 w-56 max-h-64 overflow-y-auto rounded-xl border bg-popover p-1 shadow-lg"
                     >
                         {loading && labels.length === 0 && (
                             <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando…
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> {t('common.loading')}
                             </div>
                         )}
                         {!loading && labels.length === 0 && (
                             <div className="px-3 py-2 text-xs text-muted-foreground">
-                                No hay etiquetas. Crea una desde la barra lateral.
+                                {t('emailList.bulk.noLabels')}
                             </div>
                         )}
                         {labels.map((label) => {

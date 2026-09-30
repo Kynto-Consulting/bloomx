@@ -8,6 +8,8 @@ import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
 import { buildCalendarInviteHtml } from '@/lib/calendar/email-templates';
 import { toast } from 'sonner';
+import { useI18n } from '@/components/I18nProvider';
+import { pluralKey } from '@/lib/i18n/format';
 import { Video, Loader2 as SpinIcon, X as XIcon } from 'lucide-react';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -20,12 +22,12 @@ type EventAttendee = {
     invitedAt?: string | null;
 };
 
-function getResponseLabel(responseStatus?: string | null) {
+function getResponseKey(responseStatus?: string | null) {
     const normalized = String(responseStatus || '').toLowerCase();
-    if (normalized === 'accepted') return 'Yes';
-    if (normalized === 'declined') return 'No';
-    if (normalized === 'tentative') return 'Maybe';
-    return 'Pending';
+    if (normalized === 'accepted') return 'calendar.form.resp.yes';
+    if (normalized === 'declined') return 'calendar.form.resp.no';
+    if (normalized === 'tentative') return 'calendar.form.resp.maybe';
+    return 'calendar.form.resp.pending';
 }
 
 function getResponseClass(responseStatus?: string | null) {
@@ -68,6 +70,11 @@ export function CreateEventForm({
     onSaved: () => void;
     onClose?: () => void;
 }) {
+    const { t, intlLocale } = useI18n();
+    const fmtTime = (value: string) =>
+        new Intl.DateTimeFormat(intlLocale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+    const fmtFull = (value: string) =>
+        new Intl.DateTimeFormat(intlLocale, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
     const expansionUI = useOptionalExpansionUI();
     const [title, setTitle] = useState(initialTitle);
     const [location, setLocation] = useState(initialLocation);
@@ -183,7 +190,7 @@ export function CreateEventForm({
 
         return {
             calendarId: targetCalendarId,
-            title: title || 'New Event',
+            title: title || t('calendar.form.defaultTitle'),
             location,
             startsAt: startsAtIso,
             endsAt: endsAtIso,
@@ -193,7 +200,7 @@ export function CreateEventForm({
             attendees: getAttendeeList(),
             inviteUid: eventId ? undefined : inviteUidRef.current,
         };
-    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid, eventId]);
+    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid, eventId, t]);
 
     const markAttendeesAsPending = useCallback((emails: string[]) => {
         const normalizedEmails = normalizeTags(emails);
@@ -308,18 +315,18 @@ export function CreateEventForm({
             const res = await fetch('/api/calendar/conferencing/meet', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: title || 'Meeting', startsAt: toIsoIfValid(startsAt), endsAt: toIsoIfValid(endsAt) }),
+                body: JSON.stringify({ title: title || t('calendar.form.defaultMeetingTitle'), startsAt: toIsoIfValid(startsAt), endsAt: toIsoIfValid(endsAt) }),
             });
             const data = await res.json();
-            if (!res.ok || !data.meetUrl) throw new Error(data.error || 'Failed');
+            if (!res.ok || !data.meetUrl) throw new Error('meet_failed');
             setConferenceUrl(data.meetUrl);
             setLocation(data.meetUrl);
         } catch {
-            toast.error('Could not create Google Meet link');
+            toast.error(t('calendar.form.meetFailed'));
         } finally {
             setIsCreatingMeet(false);
         }
-    }, [title, startsAt, endsAt, toIsoIfValid]);
+    }, [title, startsAt, endsAt, toIsoIfValid, t]);
 
     // Shared send path: generate the .ics for the event and email it to the
     // given recipients. Used by both Save (auto-send) and the Invitar button.
@@ -339,11 +346,13 @@ export function CreateEventForm({
         const inviteAttachmentResult = await inviteAttachmentResponse.json().catch(() => null);
 
         if (!inviteAttachmentResponse.ok || !inviteAttachmentResult?.attachment) {
-            throw new Error(inviteAttachmentResult?.error || 'Failed to generate invite attachment');
+            throw new Error(t('calendar.form.inviteAttachmentFailed'));
         }
 
-        const subjectTitle = title || inviteAttachmentResult.subject || 'New Event';
-        const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString() : 'TBD';
+        // Contenido SALIENTE (asunto/texto del correo a los invitados): el HTML de invitacion es es-PE fijo,
+        // asi que el asunto y el texto plano se mantienen en espanol para no mezclar idiomas en un mismo correo.
+        const subjectTitle = title || inviteAttachmentResult.subject || 'Nuevo evento';
+        const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString('es-PE') : 'Por definir';
         const parsedStart = startsAt ? new Date(startsAt) : new Date();
         const parsedEnd = endsAt ? new Date(endsAt) : new Date(parsedStart.getTime() + 3600000);
         const html = buildCalendarInviteHtml({
@@ -358,7 +367,7 @@ export function CreateEventForm({
         const text = [
             `Te invitaron a: ${subjectTitle}`,
             '',
-            `Cuándo: ${startsAtLabel} — ${parsedEnd.toLocaleString()}`,
+            `Cuándo: ${startsAtLabel} — ${parsedEnd.toLocaleString('es-PE')}`,
             location ? `Enlace/Lugar: ${location}` : '',
             '',
             'El archivo .ics está adjunto para agregar esta invitación a tu calendario.',
@@ -378,13 +387,13 @@ export function CreateEventForm({
         const sendInvitesResult = await sendInvitesResponse.json().catch(() => null);
 
         if (!sendInvitesResponse.ok || !sendInvitesResult?.success) {
-            throw new Error(sendInvitesResult?.error || 'Failed to send invitation emails');
+            throw new Error(t('calendar.form.sendInvitesFailed'));
         }
 
         markAttendeesAsPending(cleanRecipients);
         window.dispatchEvent(new CustomEvent('bloomx:calendar-sync-complete'));
         return true;
-    }, [title, location, startsAt, endsAt, normalizeTags, markAttendeesAsPending]);
+    }, [title, location, startsAt, endsAt, normalizeTags, markAttendeesAsPending, t]);
 
     const saveEvent = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
@@ -401,7 +410,7 @@ export function CreateEventForm({
                     : null;
 
                 if (!localCalendar) {
-                    toast.error('No writable calendar found to save this event');
+                    toast.error(t('calendar.form.noWritableCalendar'));
                     setIsSaving(false);
                     return;
                 }
@@ -419,8 +428,7 @@ export function CreateEventForm({
             });
 
             if (!response.ok) {
-                const saveError = await response.json().catch(() => null);
-                throw new Error(saveError?.error || 'Failed to save event');
+                throw new Error(t('calendar.form.saveFailed'));
             }
 
             const savedEvent = await response.json().catch(() => null);
@@ -429,8 +437,7 @@ export function CreateEventForm({
             // a stale client bundle). Just surface the count the server reports.
             const invitedCount = Number(savedEvent?.invitedCount) || 0;
             if (invitedCount > 0) {
-                const suffix = invitedCount === 1 ? '' : 's';
-                toast.success(`Invitation sent to ${invitedCount} attendee${suffix}`);
+                toast.success(t(pluralKey('calendar.form.invited', invitedCount), { n: invitedCount }));
             }
 
             if (!eventId) {
@@ -441,7 +448,7 @@ export function CreateEventForm({
             onSaved();
         } catch (error: any) {
             console.error(error);
-            toast.error(error?.message || 'Failed to save event');
+            toast.error(error?.message || t('calendar.form.saveFailed'));
         } finally {
             setIsSaving(false);
         }
@@ -449,13 +456,13 @@ export function CreateEventForm({
 
     const inviteAttendees = async () => {
         if (!eventId) {
-            toast.error('Save the event before sending invitations');
+            toast.error(t('calendar.form.saveBeforeInvite'));
             return;
         }
 
         const attendeeList = getAttendeeList();
         if (attendeeList.length === 0) {
-            toast.error('Add at least one attendee');
+            toast.error(t('calendar.form.addAttendee'));
             return;
         }
 
@@ -477,31 +484,30 @@ export function CreateEventForm({
             const sent = await sendInvitations(eventId, toInvite);
 
             if (sent) {
-                const suffix = toInvite.length === 1 ? '' : 's';
-                toast.success(`Invitation sent to ${toInvite.length} attendee${suffix}`);
+                toast.success(t(pluralKey('calendar.form.invited', toInvite.length), { n: toInvite.length }));
             }
         } catch (error: any) {
             console.error(error);
-            toast.error(error?.message || 'Failed to send invitations');
+            toast.error(error?.message || t('calendar.form.inviteFailed'));
         } finally {
             setIsInviting(false);
         }
     };
 
     const deleteEvent = async () => {
-        if (!eventId || !confirm('Are you sure you want to delete this event?')) return;
+        if (!eventId || !confirm(t('calendar.form.deleteConfirm'))) return;
         setIsSaving(true);
         try {
             const res = await fetch(`/api/calendar/events/${eventId}`, { method: 'DELETE' });
             const result = await res.json().catch(() => null);
-            if (res.ok && result?.cancelledNotified > 0) {
-                const suffix = result.cancelledNotified === 1 ? '' : 's';
-                toast.success(`Event deleted · cancellation sent to ${result.cancelledNotified} guest${suffix}`);
+            if (!res.ok) throw new Error('delete_failed');
+            if (result?.cancelledNotified > 0) {
+                toast.success(t(pluralKey('calendar.form.deletedNotified', result.cancelledNotified), { n: result.cancelledNotified }));
             }
             onSaved();
         } catch (error) {
             console.error(error);
-            toast.error('Failed to delete event');
+            toast.error(t('calendar.form.deleteFailed'));
         } finally {
             setIsSaving(false);
         }
@@ -514,7 +520,7 @@ export function CreateEventForm({
                 onChange={(e) => setTitle(e.target.value)} 
                 autoFocus 
                 readOnly={isReadOnly}
-                placeholder="Add title" aria-label="Title" 
+                placeholder={t('calendar.form.titlePlaceholder')} aria-label={t('calendar.form.titleLabel')}
                 className="w-full border-b-2 border-border/60 focus:border-primary focus:outline-none pb-2 text-[22px] mb-4 placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none" 
             />
             
@@ -523,7 +529,7 @@ export function CreateEventForm({
                     <input
                         value={location}
                         onChange={(e) => setLocation(e.target.value)}
-                        placeholder="Location or meeting link" aria-label="Location or meeting link"
+                        placeholder={t('calendar.form.locationPlaceholder')} aria-label={t('calendar.form.locationPlaceholder')}
                         readOnly={isReadOnly}
                         className="w-full flex-1 border-b border-border/60 focus:border-primary focus:outline-none py-2 text-sm placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none"
                     />
@@ -533,18 +539,18 @@ export function CreateEventForm({
                             type="button"
                             onClick={createGoogleMeet}
                             disabled={isCreatingMeet}
-                            title="Add Google Meet"
+                            title={t('calendar.form.addMeet')}
                             className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-border bg-card text-muted-foreground text-xs hover:bg-muted/50 disabled:opacity-50 transition-colors"
                         >
                             {isCreatingMeet ? <SpinIcon className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
-                            {isCreatingMeet ? 'Creating…' : 'Meet'}
+                            {isCreatingMeet ? t('calendar.form.creatingMeet') : 'Meet'}
                         </button>
                     )}
                     {!isReadOnly && conferenceUrl && (
                         <button
                             type="button"
                             onClick={() => { setConferenceUrl(null); setLocation(''); }}
-                            title="Remove video meeting"
+                            title={t('calendar.form.removeMeet')}
                             className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary text-xs hover:bg-primary/15 transition-colors"
                         >
                             <Video className="h-3 w-3" />
@@ -581,14 +587,14 @@ export function CreateEventForm({
                 <div className="space-y-1">
                     {isReadOnly ? (
                         <div className="min-h-[42px] w-full border-b border-border/60 py-2 text-sm text-muted-foreground">
-                            {attendeeTags.length > 0 ? attendeeTags.join(', ') : 'No attendees'}
+                            {attendeeTags.length > 0 ? attendeeTags.join(', ') : t('calendar.form.noAttendees')}
                         </div>
                     ) : (
                         <div className="flex items-end gap-2">
                             <TagInput
                                 value={attendeeTags}
                                 onChange={handleAttendeesChange}
-                                placeholder="Invite recipients or mail groups"
+                                placeholder={t('calendar.form.attendeesPlaceholder')}
                                 className="flex-1 border-b border-border/60 px-0 py-1.5"
                                 suggestionEndpoint="/api/contacts/suggestions"
                             />
@@ -599,7 +605,7 @@ export function CreateEventForm({
                                     disabled={isSaving || isInviting || getAttendeeList().length === 0}
                                     className="mb-1 ml-2 rounded-md border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15 disabled:cursor-not-allowed disabled:opacity-60 whitespace-nowrap"
                                 >
-                                    {isInviting ? 'Enviando...' : 'Invitar'}
+                                    {isInviting ? t('calendar.form.inviting') : t('calendar.form.invite')}
                                 </button>
                             )}
                         </div>
@@ -608,7 +614,7 @@ export function CreateEventForm({
 
                 {attendeeDetails.length > 0 && (
                     <div className="space-y-2 rounded-lg border border-border bg-muted/50 p-3">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Attendee Status</p>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('calendar.form.attendeeStatus')}</p>
                         <div className="space-y-1.5">
                             {attendeeDetails
                                 .filter((attendee) => !attendee.isOrganizer)
@@ -619,7 +625,7 @@ export function CreateEventForm({
                                             {attendee.name && <p className="truncate text-xs text-muted-foreground">{attendee.email}</p>}
                                         </div>
                                         <span className={`inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium ${getResponseClass(attendee.responseStatus)}`}>
-                                            {getResponseLabel(attendee.responseStatus)}
+                                            {t(getResponseKey(attendee.responseStatus))}
                                         </span>
                                     </div>
                                 ))}
@@ -629,14 +635,14 @@ export function CreateEventForm({
 
                 {attendeeAvailability.length > 0 && (
                     <div className="rounded-lg border border-warning/30 bg-warning/5 p-3 space-y-1.5">
-                        <p className="text-xs font-medium uppercase tracking-wide text-warning">Conflictos de horario</p>
+                        <p className="text-xs font-medium uppercase tracking-wide text-warning">{t('calendar.form.conflicts')}</p>
                         {attendeeAvailability.map(a => (
                             <div key={a.email} className="flex items-start gap-2 text-sm">
                                 <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-destructive" />
                                 <div className="min-w-0">
                                     <span className="font-medium text-foreground/80">{a.name || a.email}</span>
                                     <span className="text-muted-foreground ml-1">
-                                        — {a.events.map(e => `${String(e.title || 'Evento')} (${new Date(e.startsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}–${new Date(e.endsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`).join(', ')}
+                                        — {a.events.map(e => `${String(e.title || t('calendar.form.eventFallback'))} (${fmtTime(e.startsAt)}–${fmtTime(e.endsAt)})`).join(', ')}
                                     </span>
                                 </div>
                             </div>
@@ -646,10 +652,10 @@ export function CreateEventForm({
 
                 <div className="flex gap-4">
                     <div className="flex-1 space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground">Starts</label>
+                        <label className="text-xs font-medium text-muted-foreground">{t('calendar.form.starts')}</label>
                         {isReadOnly ? (
                             <p className="text-sm py-2 text-foreground/80">
-                                {startsAt ? new Date(startsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                {startsAt ? fmtFull(startsAt) : '—'}
                             </p>
                         ) : (
                             <DateTimePicker
@@ -663,24 +669,24 @@ export function CreateEventForm({
                                         setEndsAt(`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
                                     }
                                 }}
-                                placeholder="Start date & time"
-                                ariaLabel="Starts"
+                                placeholder={t('calendar.form.startPlaceholder')}
+                                ariaLabel={t('calendar.form.starts')}
                                 className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}
                     </div>
                     <div className="flex-1 space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground">Ends</label>
+                        <label className="text-xs font-medium text-muted-foreground">{t('calendar.form.ends')}</label>
                         {isReadOnly ? (
                             <p className="text-sm py-2 text-foreground/80">
-                                {endsAt ? new Date(endsAt).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
+                                {endsAt ? fmtFull(endsAt) : '—'}
                             </p>
                         ) : (
                             <DateTimePicker
                                 value={(endsAt || '').slice(0, 16)}
                                 onChange={setEndsAt}
-                                placeholder="End date & time"
-                                ariaLabel="Ends"
+                                placeholder={t('calendar.form.endPlaceholder')}
+                                ariaLabel={t('calendar.form.ends')}
                                 className="border-border bg-muted/50 hover:bg-background"
                             />
                         )}
@@ -696,7 +702,7 @@ export function CreateEventForm({
                         disabled={isSaving}
                         className="text-destructive hover:text-destructive font-medium px-2 py-2 text-sm"
                     >
-                        Delete
+                        {t('common.delete')}
                     </button>
                 ) : <div></div>}
 
@@ -707,7 +713,7 @@ export function CreateEventForm({
                             onClick={onClose}
                             className="text-muted-foreground hover:text-foreground/80 font-medium px-4 py-2 mr-2 text-sm"
                         >
-                            {isReadOnly ? 'Close' : 'Cancel'}
+                            {isReadOnly ? t('common.close') : t('common.cancel')}
                         </button>
                     )}
                     {!isReadOnly && (
@@ -716,7 +722,7 @@ export function CreateEventForm({
                             disabled={isSaving || isInviting}
                             className="bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground rounded-md text-sm font-medium px-6 py-2 transition-colors"
                         >
-                            {isSaving ? 'Saving...' : 'Save'}
+                            {isSaving ? t('common.saving') : t('common.save')}
                         </button>
                     )}
                 </div>

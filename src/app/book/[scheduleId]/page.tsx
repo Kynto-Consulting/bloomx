@@ -8,6 +8,7 @@ import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
 import { useSurfaceColors } from '@/hooks/useSurfaceColors';
 import { agendaAccentText, agendaSoft, agendaTextOn, agendaTint, safeAgendaColor } from '@/lib/agenda-color';
+import { bookingErrorKey } from '@/lib/i18n/format';
 
 type Availability = { dayOfWeek: number; startTime: string; endTime: string; isEnabled: boolean };
 type Schedule = {
@@ -167,12 +168,13 @@ function BookingModal({
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ guestName: name, guestEmail: email, guestNotes: notes, startsAt: slot }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || t('book.failed'));
+            const data = await res.json().catch(() => null);
+            if (!res.ok || !data) throw new Error(t(bookingErrorKey(res.status)));
             setBooking(data);
             onConfirmed(data);
         } catch (err: any) {
-            setError(err.message || t('book.failed'));
+            // Errores de red (TypeError) -> mensaje generico traducido; los nuestros ya vienen traducidos.
+            setError(err instanceof TypeError ? t('common.networkError') : (err?.message || t('book.failed')));
         } finally {
             setSubmitting(false);
         }

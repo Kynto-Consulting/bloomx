@@ -18,6 +18,7 @@ import { AccountManager, StoredAccount } from '@/lib/account-manager';
 import { toast } from 'sonner';
 import { SettingsModal } from './SettingsModal';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useI18n } from '@/components/I18nProvider';
 import {
     LABELS_CACHE_KEY,
     COUNTS_CACHE_KEY,
@@ -54,6 +55,7 @@ export function Sidebar({ onClose }: SidebarProps) {
 
 function SidebarContent({ onClose }: SidebarProps) {
     const { status } = useSession();
+    const { t } = useI18n();
     const searchParams = useSearchParams();
     const pathname = usePathname();
     const currentFolder = searchParams.get('folder') || 'inbox';
@@ -183,9 +185,9 @@ function SidebarContent({ onClose }: SidebarProps) {
     };
 
     const sectionMeta: Record<SidebarSectionKey, { title: string }> = {
-        main: { title: 'Mailboxes' },
-        workspace: { title: 'Workspace' },
-        labels: { title: 'Labels' },
+        main: { title: t('sidebar.sections.mailboxes') },
+        workspace: { title: t('sidebar.sections.workspace') },
+        labels: { title: t('sidebar.sections.labels') },
     };
 
     const renderSectionHeader = (section: SidebarSectionKey, extraAction?: React.ReactNode) => {
@@ -211,8 +213,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                     onClick={() => moveSection(section, -1)}
                     disabled={index <= 0}
                     className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Move up"
-                    aria-label={`Move ${sectionMeta[section].title} up`}
+                    title={t('sidebar.moveUp')}
+                    aria-label={t('sidebar.moveSectionUp', { name: sectionMeta[section].title })}
                 >
                     <ArrowUp className="h-3 w-3" />
                 </button>
@@ -221,8 +223,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                     onClick={() => moveSection(section, 1)}
                     disabled={index >= sectionOrder.length - 1}
                     className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
-                    title="Move down"
-                    aria-label={`Move ${sectionMeta[section].title} down`}
+                    title={t('sidebar.moveDown')}
+                    aria-label={t('sidebar.moveSectionDown', { name: sectionMeta[section].title })}
                 >
                     <ArrowDown className="h-3 w-3" />
                 </button>
@@ -326,33 +328,33 @@ function SidebarContent({ onClose }: SidebarProps) {
 
                 setNewLabelName('');
                 setIsCreatingLabel(false);
-                toast.success('Label created successfully');
+                toast.success(t('sidebar.labelCreated'));
             } else {
-                toast.error('Failed to create label');
+                toast.error(t('sidebar.labelCreateFailed'));
             }
         } catch (error) {
             console.error(error);
-            toast.error('Something went wrong');
+            toast.error(t('common.unexpectedError'));
         } finally {
             setIsSubmittingLabel(false);
         }
     };
 
     const mainNav = [
-        { name: 'Inbox', icon: Inbox, id: 'inbox', count: counts.inbox },
-        { name: 'Drafts', icon: File, id: 'drafts', count: counts.drafts },
-        { name: 'Sent', icon: Send, id: 'sent', count: counts.sent },
-        { name: 'Scheduled', icon: Clock, id: 'scheduled', count: counts.scheduled || 0 },
-        { name: 'Junk', icon: ArchiveX, id: 'spam', count: counts.spam },
-        { name: 'Trash', icon: Trash2, id: 'trash', count: counts.trash },
-        { name: 'Archive', icon: Archive, id: 'archive', count: counts.archive },
+        { name: t('sidebar.folders.inbox'), icon: Inbox, id: 'inbox', count: counts.inbox },
+        { name: t('sidebar.folders.drafts'), icon: File, id: 'drafts', count: counts.drafts },
+        { name: t('sidebar.folders.sent'), icon: Send, id: 'sent', count: counts.sent },
+        { name: t('sidebar.folders.scheduled'), icon: Clock, id: 'scheduled', count: counts.scheduled || 0 },
+        { name: t('sidebar.folders.spam'), icon: ArchiveX, id: 'spam', count: counts.spam },
+        { name: t('sidebar.folders.trash'), icon: Trash2, id: 'trash', count: counts.trash },
+        { name: t('sidebar.folders.archive'), icon: Archive, id: 'archive', count: counts.archive },
     ];
 
     const workspaceNav = [
-        { name: 'Calendar', icon: CalendarDays, href: '/calendar', active: pathname === '/calendar' },
-        { name: 'Contacts', icon: Users, href: '/contacts', active: pathname === '/contacts' },
-        { name: 'Appointments', icon: Clock, href: '/appointments', active: pathname === '/appointments' },
-        { name: 'Elixir', icon: Zap, href: '/elixir', active: pathname === '/elixir' },
+        { name: t('sidebar.workspace.calendar'), icon: CalendarDays, href: '/calendar', active: pathname === '/calendar' },
+        { name: t('sidebar.workspace.contacts'), icon: Users, href: '/contacts', active: pathname === '/contacts' },
+        { name: t('sidebar.workspace.appointments'), icon: Clock, href: '/appointments', active: pathname === '/appointments' },
+        { name: t('sidebar.workspace.elixir'), icon: Zap, href: '/elixir', active: pathname === '/elixir' },
     ];
 
     const { config: domainConfig } = useDomainConfig();
@@ -379,7 +381,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </div>
                 {/* Mobile Close Button */}
                 {onClose && (
-                    <button onClick={onClose} aria-label="Close sidebar" className="md:hidden p-2 text-muted-foreground hover:text-foreground">
+                    <button onClick={onClose} aria-label={t('sidebar.close')} className="md:hidden p-2 text-muted-foreground hover:text-foreground">
                         <X className="h-5 w-5" />
                     </button>
                 )}
@@ -396,7 +398,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-[0.98]"
                 >
                     <Plus className="h-4 w-4" />
-                    <span>New Message</span>
+                    <span>{t('sidebar.newMessage')}</span>
                 </motion.button>
             </div>
 
@@ -491,8 +493,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                                         type="button"
                                         onClick={() => setIsCreatingLabel(!isCreatingLabel)}
                                         className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
-                                        title="Create Label"
-                                        aria-label="Create label"
+                                        title={t('sidebar.createLabel')}
+                                        aria-label={t('sidebar.createLabel')}
                                         aria-expanded={isCreatingLabel}
                                     >
                                         <Plus className="h-3 w-3" />
@@ -513,8 +515,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 <input
                                                     autoFocus
                                                     type="text"
-                                                    placeholder="Label name..."
-                                                    aria-label="Label name"
+                                                    placeholder={t('sidebar.labelNamePlaceholder')}
+                                                    aria-label={t('sidebar.labelName')}
                                                     value={newLabelName}
                                                     onChange={(e) => setNewLabelName(e.target.value)}
                                                     className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
@@ -523,10 +525,10 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                         if (e.key === 'Escape') setIsCreatingLabel(false);
                                                     }}
                                                 />
-                                                <button type="button" aria-label="Save label" onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
+                                                <button type="button" aria-label={t('sidebar.saveLabel')} onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
                                                     <Check className="h-3 w-3" />
                                                 </button>
-                                                <button type="button" aria-label="Cancel" onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
+                                                <button type="button" aria-label={t('common.cancel')} onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
@@ -535,7 +537,7 @@ function SidebarContent({ onClose }: SidebarProps) {
 
                                     <nav className="grid gap-0.5">
                                         {labels.length === 0 && !isCreatingLabel && (
-                                            <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">No labels</div>
+                                            <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">{t('sidebar.noLabels')}</div>
                                         )}
                                         {labels.map((label) => {
                                             const isActive = activeLabels.includes(label.name.toLowerCase());
@@ -595,6 +597,7 @@ function SidebarContent({ onClose }: SidebarProps) {
 
 function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSettings: () => void; showConnectedCount: boolean }) {
     const { data: session } = useSession();
+    const { t } = useI18n();
     const [isOpen, setIsOpen] = useState(false);
     const [accounts, setAccounts] = useState<StoredAccount[]>([]);
 
@@ -610,7 +613,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
     const handleSwitch = async (account: StoredAccount) => {
         if (account.id === session?.user?.id) return;
 
-        const toastId = toast.loading('Switching account...');
+        const toastId = toast.loading(t('sidebar.switching'));
         try {
             // Swap Cookie
             await fetch('/api/auth/set-cookie', {
@@ -622,7 +625,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
             AccountManager.setActive(account.id);
             window.location.reload();
         } catch (e) {
-            toast.error('Failed to switch', { id: toastId });
+            toast.error(t('sidebar.switchFailed'), { id: toastId });
         }
     };
 
@@ -644,7 +647,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                 // Forget other account
                 AccountManager.removeAccount(accountId);
                 setAccounts(AccountManager.getAccounts()); // Update local state
-                toast.success('Account removed');
+                toast.success(t('sidebar.accountRemoved'));
             }
         } catch (e) {
             console.error(e);
@@ -659,7 +662,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
 
     const connectedCount = accounts.length;
     const profileText = showConnectedCount
-        ? `Estas conectado a ${connectedCount} cuenta${connectedCount === 1 ? '' : 's'}`
+        ? t(connectedCount === 1 ? 'sidebar.connectedOne' : 'sidebar.connectedMany', { n: connectedCount })
         : (session.user.email || '');
 
     return (
@@ -668,14 +671,14 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                 onClick={() => setIsOpen(!isOpen)}
                 aria-haspopup="menu"
                 aria-expanded={isOpen}
-                aria-label="Account menu"
+                aria-label={t('sidebar.accountMenu')}
                 className="flex w-full items-center gap-3 hover:bg-muted/50 p-2 rounded-lg transition-colors -mx-2 text-left"
             >
                 <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-pink-500 to-violet-500 flex items-center justify-center text-white font-medium text-xs shrink-0 border border-border">
                     {(session.user.name?.[0] || session.user.email?.[0] || '?').toUpperCase()}
                 </div>
                 <div className="flex flex-col overflow-hidden flex-1">
-                    <span className="text-sm font-medium truncate">{session.user.name || 'User'}</span>
+                    <span className="text-sm font-medium truncate">{session.user.name || t('sidebar.userFallback')}</span>
                     <span className="text-xs text-muted-foreground truncate">{profileText}</span>
                 </div>
                 <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -693,7 +696,7 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                             className="absolute bottom-full left-0 w-64 mb-2 bg-popover/95 backdrop-blur-md shadow-lg rounded-xl p-2 z-50 flex flex-col gap-1 ring-1 ring-border/10"
                         >
                             <div className="px-2 py-1.5 text-xs text-muted-foreground font-semibold uppercase tracking-wider">
-                                My Accounts
+                                {t('sidebar.myAccounts')}
                             </div>
 
                             {accounts.map(acc => {
@@ -713,8 +716,8 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                                             <button
                                                 onClick={(e) => { e.stopPropagation(); handleLogout(acc.id); }}
                                                 className="p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive rounded-md opacity-0 group-hover:opacity-100 transition-all"
-                                                title="Forget account"
-                                                aria-label={`Forget account ${acc.email}`}
+                                                title={t('sidebar.forgetAccount')}
+                                                aria-label={t('sidebar.forgetAccountNamed', { email: acc.email })}
                                             >
                                                 <LogOut className="h-3.5 w-3.5" />
                                             </button>
@@ -727,17 +730,17 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
 
                             <button onClick={handleAddAccount} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium">
                                 <UserPlus className="h-4 w-4 text-muted-foreground" />
-                                Add another account
+                                {t('sidebar.addAccount')}
                             </button>
 
                             <button onClick={onOpenSettings} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium">
                                 <Settings className="h-4 w-4 text-muted-foreground" />
-                                Settings
+                                {t('sidebar.settings')}
                             </button>
 
                             <button onClick={() => handleLogout(session.user?.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-destructive/10 text-destructive text-sm font-medium">
                                 <LogOut className="h-4 w-4" />
-                                Sign out
+                                {t('sidebar.signOut')}
                             </button>
                         </motion.div>
                     </>

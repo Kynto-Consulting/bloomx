@@ -4,16 +4,10 @@ import React, { useState } from 'react';
 import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { Plus, Database, Calendar, Globe, Check } from 'lucide-react';
 import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
+import { useI18n } from '@/components/I18nProvider';
+import { regionName } from '@/lib/i18n/format';
 
-const DEFAULT_HOLIDAY_PROVIDERS = [
-    { code: 'PE', name: 'Holidays in Peru' },
-    { code: 'US', name: 'Holidays in United States' },
-    { code: 'GB', name: 'Holidays in United Kingdom' },
-    { code: 'MX', name: 'Holidays in Mexico' },
-    { code: 'ES', name: 'Holidays in Spain' },
-    { code: 'AR', name: 'Holidays in Argentina' },
-    { code: 'CO', name: 'Holidays in Colombia' },
-];
+const DEFAULT_HOLIDAY_PROVIDERS = ['PE', 'US', 'GB', 'MX', 'ES', 'AR', 'CO'];
 
 export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHolidayProvider, currentHolidayProviders = [] }: { 
     isGoogleLinked: boolean, 
@@ -22,6 +16,7 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
     currentHolidayProviders: string[]
 }) {
     const { closeWindow } = useGlobalWindow();
+    const { t, intlLocale } = useI18n();
     const [addedProviders, setAddedProviders] = useState<string[]>(currentHolidayProviders);
 
     const handleToggleProvider = (code: string) => {
@@ -37,7 +32,7 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
                 
                 <section>
                     <h3 className="text-[13px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                        Local Calendars
+                        {t('calendar.add.localTitle')}
                     </h3>
                     <div className="bg-card border border-border rounded-lg overflow-hidden">
                         <button 
@@ -52,8 +47,8 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
                                     <Database className="w-4 h-4" />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-medium text-foreground/80">Create new local calendar</p>
-                                    <p className="text-xs text-muted-foreground">Store events in your current workspace</p>
+                                    <p className="text-sm font-medium text-foreground/80">{t('calendar.add.createLocal')}</p>
+                                    <p className="text-xs text-muted-foreground">{t('calendar.add.createLocalHelp')}</p>
                                 </div>
                             </div>
                             <Plus className="w-4 h-4 text-muted-foreground" />
@@ -63,7 +58,7 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
 
                 <section>
                     <h3 className="text-[13px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                        Import from Providers
+                        {t('calendar.add.importTitle')}
                     </h3>
                     <div className="bg-card border border-border rounded-lg p-2 min-h-[60px] flex flex-col gap-2">
                         {/* 
@@ -75,22 +70,24 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
                             context={{ isGoogleLinked }} 
                         />
                         <div className="text-xs text-muted-foreground italic px-2 py-1">
-                            More providers can be added via the App Directory.
+                            {t('calendar.add.moreProviders')}
                         </div>
                     </div>
                 </section>
 
                 <section>
                     <h3 className="text-[13px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                        Regional Holidays
+                        {t('calendar.add.holidaysTitle')}
                     </h3>
                     <div className="bg-card border border-border rounded-lg overflow-hidden flex flex-col">
-                        {DEFAULT_HOLIDAY_PROVIDERS.map(p => {
-                            const isAdded = addedProviders.includes(p.code);
+                        {DEFAULT_HOLIDAY_PROVIDERS.map(code => {
+                            const isAdded = addedProviders.includes(code);
                             return (
-                                <button 
-                                    key={p.code}
-                                    onClick={() => handleToggleProvider(p.code)}
+                                <button
+                                    type="button"
+                                    aria-pressed={isAdded}
+                                    key={code}
+                                    onClick={() => handleToggleProvider(code)}
                                     className={`w-full flex items-center justify-between p-3 border-b last:border-b-0 border-border/60 transition-colors text-left ${isAdded ? 'hover:bg-muted' : 'hover:bg-muted/50'}`}
                                 >
                                     <div className="flex items-center gap-3">
@@ -98,8 +95,8 @@ export function AddCalendarForm({ isGoogleLinked, onLocalCreate, onToggleHoliday
                                             <Globe className="w-4 h-4" />
                                         </div>
                                         <div>
-                                            <p className="text-sm font-medium text-foreground/80">{p.name}</p>
-                                            <p className="text-xs text-muted-foreground">Public holidays for {p.code}</p>
+                                            <p className="text-sm font-medium text-foreground/80">{t('calendar.add.holidaysIn', { country: regionName(code, intlLocale) })}</p>
+                                            <p className="text-xs text-muted-foreground">{t('calendar.add.holidaysFor', { code })}</p>
                                         </div>
                                     </div>
                                     {isAdded ? <Check className="w-5 h-5 text-success" /> : <Plus className="w-4 h-4 text-muted-foreground" />}

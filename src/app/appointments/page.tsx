@@ -10,8 +10,10 @@ import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
 import { useSurfaceColors } from '@/hooks/useSurfaceColors';
 import { agendaAccentText, agendaSoft, agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
+import { pluralKey, weekdayName } from '@/lib/i18n/format';
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+// 0 = domingo ... 6 = sabado (los nombres salen de Intl segun el idioma activo).
+const DAYS = [0, 1, 2, 3, 4, 5, 6];
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['UTC', 'America/Lima', 'America/New_York', 'Europe/London'];
 const DURATIONS = [15, 20, 30, 45, 60, 90, 120];
 const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#16a34a', '#0891b2'];
@@ -112,7 +114,9 @@ function ScheduleForm({
 }: {
     initial?: Schedule; onSave: (data: FormState) => void; onCancel: () => void; saving: boolean; brandColor: string;
 }) {
-    const { t } = useI18n();
+    const { t, intlLocale } = useI18n();
+    const dayLong = (i: number) => weekdayName(i, intlLocale, 'long');
+    const dayShort = (i: number) => weekdayName(i, intlLocale, 'short');
     const uid = useId();
     const surface = useSurfaceColors();
     const { ref: dialogRef, titleId } = useDialog<HTMLDivElement>(true, onCancel, { disableEscape: saving });
@@ -172,15 +176,15 @@ function ScheduleForm({
                 {/* Header */}
                 <div className="px-6 pt-5 pb-3 shrink-0">
                     <div className="flex items-center justify-between mb-3">
-                        <h2 id={titleId} className="font-semibold text-base">{initial ? 'Edit schedule' : 'New schedule'}</h2>
+                        <h2 id={titleId} className="font-semibold text-base">{initial ? t('appointments.form.editTitle') : t('appointments.form.newTitle')}</h2>
                         <button type="button" onClick={onCancel} aria-label={t('common.close')} className="p-2 rounded-full hover:bg-muted text-muted-foreground">
                             <X className="h-4 w-4" aria-hidden="true" />
                         </button>
                     </div>
                     <StepDots step={step} color={accentSolid} />
                     <div className="flex justify-between mt-2">
-                        <span className={`text-xs font-medium ${step === 1 ? '' : 'text-muted-foreground'}`} style={step === 1 ? { color: accent } : undefined} aria-current={step === 1 ? 'step' : undefined}>Details</span>
-                        <span className={`text-xs font-medium ${step === 2 ? '' : 'text-muted-foreground'}`} style={step === 2 ? { color: accent } : undefined} aria-current={step === 2 ? 'step' : undefined}>Availability</span>
+                        <span className={`text-xs font-medium ${step === 1 ? '' : 'text-muted-foreground'}`} style={step === 1 ? { color: accent } : undefined} aria-current={step === 1 ? 'step' : undefined}>{t('appointments.form.stepDetails')}</span>
+                        <span className={`text-xs font-medium ${step === 2 ? '' : 'text-muted-foreground'}`} style={step === 2 ? { color: accent } : undefined} aria-current={step === 2 ? 'step' : undefined}>{t('appointments.form.stepAvailability')}</span>
                     </div>
                 </div>
 
@@ -192,29 +196,29 @@ function ScheduleForm({
                         {step === 1 ? (
                             <motion.div key="step1" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} className="space-y-4">
                                 <div className="space-y-1">
-                                    <label htmlFor={`${uid}-name`} className="text-sm font-medium">Name</label>
+                                    <label htmlFor={`${uid}-name`} className="text-sm font-medium">{t('appointments.form.name')}</label>
                                     <input id={`${uid}-name`} value={form.name} onChange={e => set('name', e.target.value)}
-                                        placeholder="30 min meeting"
+                                        placeholder={t('appointments.form.namePlaceholder')}
                                         className={inputCls}
                                         style={{ '--tw-ring-color': accent } as any} />
                                 </div>
 
                                 <div className="space-y-1">
-                                    <label htmlFor={`${uid}-desc`} className="text-sm font-medium">Description <span className="text-muted-foreground font-normal">(optional)</span></label>
+                                    <label htmlFor={`${uid}-desc`} className="text-sm font-medium">{t('appointments.form.description')} <span className="text-muted-foreground font-normal">{t('common.optional')}</span></label>
                                     <textarea id={`${uid}-desc`} value={form.description} onChange={e => set('description', e.target.value)}
-                                        rows={2} placeholder="Quick intro call, demo, etc."
+                                        rows={2} placeholder={t('appointments.form.descriptionPlaceholder')}
                                         className={`${inputCls} resize-none`} />
                                 </div>
 
                                 <div className="flex gap-3">
                                     <div className="flex-1 space-y-1">
-                                        <label htmlFor={`${uid}-duration`} className="text-sm font-medium">Duration</label>
+                                        <label htmlFor={`${uid}-duration`} className="text-sm font-medium">{t('appointments.form.duration')}</label>
                                         <select id={`${uid}-duration`} value={form.duration} onChange={e => set('duration', Number(e.target.value))} className={inputCls}>
-                                            {DURATIONS.map(d => <option key={d} value={d}>{d} min</option>)}
+                                            {DURATIONS.map(d => <option key={d} value={d}>{t('appointments.minutes', { n: d })}</option>)}
                                         </select>
                                     </div>
                                     <div className="space-y-1" role="group" aria-labelledby={`${uid}-color`}>
-                                        <span id={`${uid}-color`} className="text-sm font-medium">Color</span>
+                                        <span id={`${uid}-color`} className="text-sm font-medium">{t('appointments.form.color')}</span>
                                         <div className="flex gap-1.5 pt-1.5">
                                             {COLORS.map(c => (
                                                 <button key={c} type="button" onClick={() => set('color', c)}
@@ -229,9 +233,9 @@ function ScheduleForm({
                                 </div>
 
                                 <div className="space-y-1">
-                                    <span id={`${uid}-conf`} className="text-sm font-medium">Video conferencing</span>
+                                    <span id={`${uid}-conf`} className="text-sm font-medium">{t('appointments.form.conferencing')}</span>
                                     <div className="flex gap-2" role="group" aria-labelledby={`${uid}-conf`}>
-                                        {[{ value: '', label: 'None' }, { value: 'meet', label: 'Google Meet' }, { value: 'zoom', label: 'Zoom' }].map(opt => (
+                                        {[{ value: '', label: t('appointments.form.confNone') }, { value: 'meet', label: 'Google Meet' }, { value: 'zoom', label: 'Zoom' }].map(opt => (
                                             <button key={opt.value} type="button" onClick={() => set('conferencing', opt.value)}
                                                 aria-pressed={form.conferencing === opt.value}
                                                 className="flex-1 rounded-xl border border-transparent bg-muted px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/70"
@@ -247,26 +251,26 @@ function ScheduleForm({
                         ) : (
                             <motion.div key="step2" initial={{ opacity: 0, x: 12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -12 }} className="space-y-4">
                                 <div className="space-y-1">
-                                    <label htmlFor={`${uid}-tz`} className="text-sm font-medium">Timezone</label>
+                                    <label htmlFor={`${uid}-tz`} className="text-sm font-medium">{t('appointments.form.timezone')}</label>
                                     <select id={`${uid}-tz`} value={form.timezone} onChange={e => set('timezone', e.target.value)} className={inputCls}>
                                         {TIMEZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
                                     </select>
                                 </div>
 
                                 <div className="space-y-1">
-                                    <span className="text-sm font-medium">Weekly hours</span>
+                                    <span className="text-sm font-medium">{t('appointments.form.weeklyHours')}</span>
                                     <div className="rounded-xl bg-muted/40 divide-y divide-border overflow-hidden">
                                         {form.days.map(d => (
                                             <div key={d.dayOfWeek} className="px-3 py-2.5">
                                                 <div className="flex items-center gap-3 min-h-[28px]">
                                                     <button type="button" onClick={() => toggleDay(d.dayOfWeek)}
-                                                        aria-pressed={d.isEnabled} aria-label={DAYS[d.dayOfWeek]}
+                                                        aria-pressed={d.isEnabled} aria-label={dayLong(d.dayOfWeek)}
                                                         className="flex items-center gap-2 w-24 shrink-0 min-h-[32px]">
                                                         {d.isEnabled
                                                             ? <ToggleRight className="h-5 w-5" style={{ color: accent }} />
                                                             : <ToggleLeft className="h-5 w-5 text-muted-foreground" />}
                                                         <span className={`text-sm w-8 ${d.isEnabled ? 'font-medium' : 'text-muted-foreground'}`}>
-                                                            {DAYS[d.dayOfWeek].slice(0, 3)}
+                                                            {dayShort(d.dayOfWeek)}
                                                         </span>
                                                     </button>
 
@@ -274,11 +278,11 @@ function ScheduleForm({
                                                         <div className="flex-1 space-y-1.5">
                                                             {d.ranges.map((r, ri) => (
                                                                 <div key={ri} className="flex items-center gap-1.5">
-                                                                    <input type="time" value={r.startTime} aria-label={`${DAYS[d.dayOfWeek]} start`}
+                                                                    <input type="time" value={r.startTime} aria-label={t('appointments.form.rangeStart', { day: dayLong(d.dayOfWeek) })}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'startTime', e.target.value)}
                                                                         className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     <span className="text-muted-foreground text-xs">–</span>
-                                                                    <input type="time" value={r.endTime} aria-label={`${DAYS[d.dayOfWeek]} end`}
+                                                                    <input type="time" value={r.endTime} aria-label={t('appointments.form.rangeEnd', { day: dayLong(d.dayOfWeek) })}
                                                                         onChange={e => setRange(d.dayOfWeek, ri, 'endTime', e.target.value)}
                                                                         className="rounded-lg bg-muted/50 hover:bg-muted/80 focus:bg-background px-2 py-1.5 text-xs outline-none focus:ring-1 flex-1 transition-all" />
                                                                     {d.ranges.length > 1 && (
@@ -293,11 +297,11 @@ function ScheduleForm({
                                                             <button type="button" onClick={() => addRange(d.dayOfWeek)}
                                                                 className="flex items-center gap-1 text-xs mt-0.5 transition-colors"
                                                                 style={{ color: accent }}>
-                                                                <PlusCircle className="h-3 w-3" /> Add range
+                                                                <PlusCircle className="h-3 w-3" aria-hidden="true" /> {t('appointments.form.addRange')}
                                                             </button>
                                                         </div>
                                                     ) : (
-                                                        <span className="text-sm text-muted-foreground">Unavailable</span>
+                                                        <span className="text-sm text-muted-foreground">{t('appointments.form.unavailable')}</span>
                                                     )}
                                                 </div>
                                             </div>
@@ -313,20 +317,20 @@ function ScheduleForm({
                 <div className="border-t border-border px-6 py-4 flex justify-between gap-3 shrink-0">
                     {step === 1 ? (
                         <>
-                            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted">Cancel</button>
+                            <button type="button" onClick={onCancel} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted">{t('common.cancel')}</button>
                             <button
                                 type="button"
                                 onClick={() => setStep(2)}
                                 disabled={!form.name.trim()}
                                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
                                 style={{ backgroundColor: accentSolid, color: onAccent }}>
-                                Availability <ChevronRight className="h-4 w-4" />
+                                {t('appointments.form.stepAvailability')} <ChevronRight className="h-4 w-4" aria-hidden="true" />
                             </button>
                         </>
                     ) : (
                         <>
                             <button type="button" onClick={() => setStep(1)} className="flex items-center gap-1.5 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted">
-                                <ChevronLeft className="h-4 w-4" /> Back
+                                <ChevronLeft className="h-4 w-4" aria-hidden="true" /> {t('common.back')}
                             </button>
                             <button
                                 type="button"
@@ -334,7 +338,7 @@ function ScheduleForm({
                                 disabled={saving}
                                 className="px-4 py-2 rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
                                 style={{ backgroundColor: accentSolid, color: onAccent }}>
-                                {saving ? 'Saving…' : initial ? 'Save changes' : 'Create schedule'}
+                                {saving ? t('common.saving') : initial ? t('appointments.form.saveChanges') : t('appointments.form.create')}
                             </button>
                         </>
                     )}
@@ -388,31 +392,32 @@ export default function AppointmentsPage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             });
-            if (!res.ok) throw new Error((await res.json()).error || 'Failed');
-            toast.success(editTarget ? 'Schedule updated' : 'Schedule created');
+            if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || t('appointments.saveFailed'));
+            toast.success(editTarget ? t('appointments.updated') : t('appointments.created'));
             setShowForm(false);
             setEditTarget(null);
             void loadSchedules();
         } catch (e: any) {
-            toast.error(e.message);
+            toast.error(e.message || t('appointments.saveFailed'));
         } finally {
             setSaving(false);
         }
     };
 
     const handleDelete = async (id: string) => {
-        if (!confirm('Delete this schedule? All future bookings will be lost.')) return;
+        if (!confirm(t('appointments.deleteConfirm'))) return;
         const res = await fetch(`/api/appointments/schedules/${id}`, { method: 'DELETE' });
-        if (res.ok) { toast.success('Schedule deleted'); void loadSchedules(); }
-        else toast.error('Failed to delete');
+        if (res.ok) { toast.success(t('appointments.deleted')); void loadSchedules(); }
+        else toast.error(t('appointments.deleteFailed'));
     };
 
     const handleToggleActive = async (s: Schedule) => {
-        await fetch(`/api/appointments/schedules/${s.id}`, {
+        const res = await fetch(`/api/appointments/schedules/${s.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ isActive: !s.isActive }),
-        });
+        }).catch(() => null);
+        if (!res?.ok) toast.error(t('appointments.saveFailed'));
         void loadSchedules();
     };
 
@@ -420,7 +425,7 @@ export default function AppointmentsPage() {
         navigator.clipboard.writeText(buildBookingUrl(id));
         setCopiedId(id);
         setTimeout(() => setCopiedId(null), 2000);
-        toast.success('Link copied');
+        toast.success(t('appointments.linkCopied'));
     };
 
     const handleFixMeetRooms = async () => {
@@ -430,29 +435,29 @@ export default function AppointmentsPage() {
             const data = await res.json();
             if (!res.ok) {
                 if (data.error === 'missing_scope') {
-                    toast.error('Reconecta tu cuenta de Google para obtener el permiso de Meet.');
+                    toast.error(t('appointments.meet.missingScope'));
                 } else {
-                    toast.error(data.error || 'Error al abrir salas');
+                    toast.error(data.error || t('appointments.meet.openError'));
                 }
                 return;
             }
             if (data.total === 0) {
-                toast.info('No se encontraron salas de Meet para actualizar.');
+                toast.info(t('appointments.meet.none'));
             } else if (data.failed === 0) {
-                toast.success(`${data.patched} sala${data.patched !== 1 ? 's' : ''} abierta${data.patched !== 1 ? 's' : ''} correctamente.`);
+                toast.success(t(pluralKey('appointments.meet.opened', data.patched), { n: data.patched }));
             } else if (data.patched > 0) {
-                toast.warning(`${data.patched} de ${data.total} salas actualizadas. ${data.failed} fallaron — las salas antiguas creadas antes de reconectar requieren recrearse.`);
+                toast.warning(t('appointments.meet.partial', { patched: data.patched, total: data.total, failed: data.failed }));
             } else {
                 // All failed — check first error for diagnosis
                 const firstError = data.rooms?.find((r: any) => r.error)?.error || '';
                 const is403 = firstError.includes('403') || firstError.includes('PERMISSION_DENIED');
                 toast.error(is403
-                    ? 'Sin permiso para abrir estas salas. Son antiguas (creadas vía Calendar API). Crea nuevas citas para generar salas abiertas automáticamente.'
-                    : `No se pudo abrir ninguna sala. Error: ${firstError.slice(0, 120)}`
+                    ? t('appointments.meet.noPermission')
+                    : t('appointments.meet.allFailed', { error: firstError.slice(0, 120) })
                 );
             }
         } catch {
-            toast.error('Error al conectar con el servidor.');
+            toast.error(t('appointments.meet.serverError'));
         } finally {
             setFixingRooms(false);
         }
@@ -470,8 +475,8 @@ export default function AppointmentsPage() {
                 <div className="max-w-2xl mx-auto px-6 py-10">
                     <div className="flex items-center justify-between mb-8">
                         <div>
-                            <h1 className="text-xl font-bold">Appointment schedules</h1>
-                            <p className="text-muted-foreground text-sm mt-0.5">Share your booking link so people can schedule time with you.</p>
+                            <h1 className="text-xl font-bold">{t('appointments.title')}</h1>
+                            <p className="text-muted-foreground text-sm mt-0.5">{t('appointments.subtitle')}</p>
                         </div>
                         <div className="flex items-center gap-2">
                             {hasMeetSchedules && (
@@ -479,12 +484,12 @@ export default function AppointmentsPage() {
                                     onClick={handleFixMeetRooms}
                                     disabled={fixingRooms}
                                     className="flex items-center gap-1.5 rounded-full px-3 py-2 text-sm font-medium border hover:bg-muted transition-colors disabled:opacity-50"
-                                    title="Abrir todas las salas de Meet existentes"
+                                    title={t('appointments.fixRoomsTitle')}
                                 >
                                     {fixingRooms
-                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                        : <Video className="h-3.5 w-3.5" />}
-                                    Abrir salas
+                                        ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                                        : <Video className="h-3.5 w-3.5" aria-hidden="true" />}
+                                    {t('appointments.fixRooms')}
                                 </button>
                             )}
                             <button
@@ -492,7 +497,7 @@ export default function AppointmentsPage() {
                                 className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
                                 style={{ backgroundColor: brandColor, color: brandText }}
                             >
-                                <Plus className="h-4 w-4" /> New schedule
+                                <Plus className="h-4 w-4" aria-hidden="true" /> {t('appointments.newSchedule')}
                             </button>
                         </div>
                     </div>
@@ -504,14 +509,14 @@ export default function AppointmentsPage() {
                     ) : schedules.length === 0 ? (
                         <div className="rounded-2xl border-2 border-dashed p-12 text-center">
                             <CalendarDays className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-                            <p className="font-medium">No schedules yet</p>
-                            <p className="text-sm text-muted-foreground mt-1">Create your first scheduling page to share with others.</p>
+                            <p className="font-medium">{t('appointments.emptyTitle')}</p>
+                            <p className="text-sm text-muted-foreground mt-1">{t('appointments.emptyHelp')}</p>
                             <button
                                 onClick={() => { setEditTarget(null); setShowForm(true); }}
                                 className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90"
                                 style={{ backgroundColor: brandColor, color: brandText }}
                             >
-                                <Plus className="h-4 w-4" /> Create schedule
+                                <Plus className="h-4 w-4" aria-hidden="true" /> {t('appointments.form.create')}
                             </button>
                         </div>
                     ) : (
@@ -534,19 +539,19 @@ export default function AppointmentsPage() {
                                                 <span className="font-semibold truncate">{s.name}</span>
                                                 {!s.isActive && (
                                                     <span className="text-xs px-2 py-0.5 rounded-full bg-background text-muted-foreground border border-border">
-                                                        Inactive
+                                                        {t('appointments.inactive')}
                                                     </span>
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-3 mt-1 text-sm text-muted-foreground">
-                                                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" />{s.duration} min</span>
+                                                <span className="flex items-center gap-1"><Clock className="h-3.5 w-3.5" aria-hidden="true" />{t('appointments.minutes', { n: s.duration })}</span>
                                                 {s.conferencing && (
                                                     <span className="flex items-center gap-1">
                                                         <Video className="h-3.5 w-3.5" />
                                                         {s.conferencing === 'meet' ? 'Google Meet' : 'Zoom'}
                                                     </span>
                                                 )}
-                                                {!!s._count?.bookings && <span>{s._count.bookings} upcoming</span>}
+                                                {!!s._count?.bookings && <span>{t('appointments.upcoming', { n: s._count.bookings })}</span>}
                                             </div>
                                             <div className="mt-1.5 text-xs truncate" style={{ color: accent }}>
                                                 <a href={buildBookingUrl(s.id)} target="_blank" rel="noopener noreferrer" className="hover:underline truncate">
@@ -556,27 +561,27 @@ export default function AppointmentsPage() {
                                         </div>
                                         <div className="flex items-center gap-0.5 shrink-0">
                                             <button type="button" onClick={() => handleCopy(s.id)}
-                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Copy link" aria-label={`Copy link: ${s.name}`}>
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title={t('appointments.copyLink')} aria-label={t('appointments.copyLinkNamed', { name: s.name })}>
                                                 {copiedId === s.id ? <Check className="h-4 w-4 text-success" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
                                             </button>
                                             <a href={buildBookingUrl(s.id)} target="_blank" rel="noopener noreferrer"
-                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Open" aria-label={`Open: ${s.name}`}>
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title={t('appointments.open')} aria-label={t('appointments.openNamed', { name: s.name })}>
                                                 <ExternalLink className="h-4 w-4" aria-hidden="true" />
                                             </a>
                                             <button type="button" onClick={() => handleToggleActive(s)}
                                                 role="switch" aria-checked={s.isActive}
                                                 className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors"
-                                                title={s.isActive ? 'Deactivate' : 'Activate'} aria-label={`${s.isActive ? 'Deactivate' : 'Activate'}: ${s.name}`}>
+                                                title={s.isActive ? t('appointments.deactivate') : t('appointments.activate')} aria-label={t(s.isActive ? 'appointments.deactivateNamed' : 'appointments.activateNamed', { name: s.name })}>
                                                 {s.isActive
                                                     ? <ToggleRight className="h-4 w-4" style={{ color: accent }} aria-hidden="true" />
                                                     : <ToggleLeft className="h-4 w-4" aria-hidden="true" />}
                                             </button>
                                             <button type="button" onClick={() => { setEditTarget(s); setShowForm(true); }}
-                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title="Edit" aria-label={`Edit: ${s.name}`}>
+                                                className="p-2.5 rounded-lg hover:bg-background text-muted-foreground transition-colors" title={t('appointments.edit')} aria-label={t('appointments.editNamed', { name: s.name })}>
                                                 <Pencil className="h-4 w-4" aria-hidden="true" />
                                             </button>
                                             <button type="button" onClick={() => handleDelete(s.id)}
-                                                className="p-2.5 rounded-lg hover:bg-background text-destructive transition-colors" title="Delete" aria-label={`Delete: ${s.name}`}>
+                                                className="p-2.5 rounded-lg hover:bg-background text-destructive transition-colors" title={t('common.delete')} aria-label={t('appointments.deleteNamed', { name: s.name })}>
                                                 <Trash2 className="h-4 w-4" aria-hidden="true" />
                                             </button>
                                         </div>

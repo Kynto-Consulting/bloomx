@@ -24,6 +24,17 @@ export interface ExtractedAttachment {
     contentType: string;
     buffer: Buffer;
     isCalendar: boolean;
+    /** Cabecera Content-ID de la parte (sin angulos), p. ej. la que referencia `<img src="cid:...">`. */
+    contentId?: string;
+}
+
+/** Content-ID de las cabeceras de una parte MIME (tolera cabecera plegada y angulos), o undefined. */
+export function extractContentIdFromHeaders(headersRaw: string): string | undefined {
+    // Anclado a inicio de linea (flag m) por la misma razon que Content-Type; admite continuacion plegada.
+    const m = headersRaw.match(/^Content-ID:[ \t]*((?:[^\r\n]|\r?\n[ \t]+[^\r\n]*)+)/im);
+    if (!m) return undefined;
+    const value = m[1].replace(/\r?\n[ \t]+/g, '').replace(/[<>\s]/g, '');
+    return value && value.length <= 255 ? value : undefined;
 }
 
 function decodeQuotedPrintable(input: string): string {
@@ -103,7 +114,8 @@ function parsePart(part: string, indexHint: number): ExtractedAttachment | null 
     const buffer = decodeBody(headersRaw, bodyRaw);
     if (!buffer || buffer.length === 0) return null;
 
-    return { filename, contentType, buffer, isCalendar };
+    const contentId = extractContentIdFromHeaders(headersRaw);
+    return { filename, contentType, buffer, isCalendar, ...(contentId ? { contentId } : {}) };
 }
 
 /**
