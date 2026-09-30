@@ -253,10 +253,10 @@ function SidebarContent({ onClose }: SidebarProps) {
                     type="button"
                     onClick={() => toggleSection(section)}
                     aria-expanded={!isCollapsed}
-                    className="flex flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                    className="flex min-w-0 flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 >
-                    {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-                    <span>{sectionMeta[section].title}</span>
+                    {isCollapsed ? <ChevronDown className="h-3.5 w-3.5 shrink-0" /> : <ChevronUp className="h-3.5 w-3.5 shrink-0" />}
+                    <span className="truncate">{sectionMeta[section].title}</span>
                 </button>
 
                 {extraAction}
@@ -564,7 +564,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                         <div key={section} className="mt-5">
                             {renderSectionHeader(
                                 'labels',
-                                <div className="flex items-center gap-1">
+                                <div className="flex shrink-0 items-center gap-0.5">
                                     <ExtensionLoader mountPoint="SIDEBAR_HEADER" />
                                     <button
                                         type="button"

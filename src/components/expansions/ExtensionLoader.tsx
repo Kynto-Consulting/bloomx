@@ -142,6 +142,8 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
                 initialState={mount.initialState}
                 context={{
                     ...context,
+                    // Encabezados de seccion de la barra lateral: poco espacio, los botones van solo con icono (tooltip con el nombre).
+                    ...(mountPoint === 'SIDEBAR_HEADER' ? { toolbarButtonMode: 'compact', toolbarMeta: { label: mount.component?.props?.label, extensionIcon: mount.extensionIcon } } : null),
                     extensionId: mount.extensionId,
                     overlays: mount.overlays,
                 }}

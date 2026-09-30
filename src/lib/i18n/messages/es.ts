@@ -1017,6 +1017,11 @@ const es = {
         thread: { label: 'Mensajes de la conversación', expandAll: 'Expandir todo', collapseAll: 'Contraer todo', hideDuplicates: 'Ocultar historial repetido', hideDuplicatesHint: 'Pliega el texto citado que ya aparece en otros mensajes de la conversación. Sigue disponible con el botón «…».' },
         message: { aria: 'Mensaje de {name}, {date}', new: 'Nuevo', clickToExpand: 'Pulsa para ver el mensaje' },
         recipients: { from: 'De', to: 'Para', cc: 'Cc', bcc: 'Cco', date: 'Fecha', show: 'Mostrar detalles', hide: 'Ocultar detalles' },
+        transport: {
+            replyTo: 'Responder a', mailedBy: 'Enviado por', signedBy: 'Firmado por', encryption: 'Cifrado', provider: 'Proveedor',
+            origin: 'Servidor de origen', receivedBy: 'Recibido por', messageId: 'ID del mensaje', authentication: 'Autenticación',
+            encrypted: 'Cifrado en tránsito (TLS)', encryptedWith: 'Cifrado en tránsito ({tls})', notEncrypted: 'Sin cifrado en tránsito', unknown: 'Sin datos',
+        },
         quote: { show: 'Mostrar texto citado', hide: 'Ocultar texto citado', unmatched: 'El texto citado no coincide con otros mensajes de esta conversación (puede estar incompleta), por eso se muestra completo.' },
         body: { title: 'Contenido del correo', loading: 'Cargando el mensaje…', failed: 'No se pudo mostrar el contenido de este mensaje.', retry: 'Reintentar', viewText: 'Ver texto plano', viewHtml: 'Ver formato original', empty: 'Este mensaje no tiene contenido para mostrar.' },
         images: {

@@ -193,7 +193,7 @@ function ThreadMessageInner({
                         {wasUnread && <span className="shrink-0 rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold text-primary-foreground">{t('mailView.message.new')}</span>}
                     </span>
                     {!expanded && <span className="truncate text-xs text-muted-foreground">{email.snippet || t('mailView.message.clickToExpand')}</span>}
-                    {expanded && !details && (
+                    {expanded && (
                         <span className="truncate text-xs text-muted-foreground">
                             {t('mailView.recipients.to')}: {toSummary.shown.join(', ')}{toSummary.extra > 0 ? ` +${toSummary.extra}` : ''}
                         </span>
@@ -229,6 +229,31 @@ function ThreadMessageInner({
                                 {email.bcc ? (<><dt className="font-medium text-muted-foreground">{t('mailView.recipients.bcc')}</dt><dd className="min-w-0 break-words">{splitAddressList(email.bcc).join(', ')}</dd></>) : null}
                                 <dt className="font-medium text-muted-foreground">{t('mailView.recipients.date')}</dt>
                                 <dd>{fullDate}</dd>
+                                {email.replyTo ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.replyTo')}</dt><dd className="min-w-0 break-words">{email.replyTo}</dd></>) : null}
+                                {item.transport?.mailedBy ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.mailedBy')}</dt><dd className="min-w-0 break-words">{item.transport.mailedBy}</dd></>) : null}
+                                {item.transport?.signedBy ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.signedBy')}</dt><dd className="min-w-0 break-words">{item.transport.signedBy}</dd></>) : null}
+                                {item.transport?.provider ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.provider')}</dt><dd className="min-w-0 break-words">{item.transport.provider}</dd></>) : null}
+                                {item.transport && item.transport.encrypted !== null ? (
+                                    <>
+                                        <dt className="font-medium text-muted-foreground">{t('mailView.transport.encryption')}</dt>
+                                        <dd className={cn('min-w-0 break-words', item.transport.encrypted ? 'text-success' : 'text-warning')}>
+                                            {item.transport.encrypted
+                                                ? (item.transport.tlsVersion
+                                                    ? t('mailView.transport.encryptedWith', { tls: [item.transport.tlsVersion, item.transport.cipher].filter(Boolean).join(' · ') })
+                                                    : t('mailView.transport.encrypted'))
+                                                : t('mailView.transport.notEncrypted')}
+                                        </dd>
+                                    </>
+                                ) : null}
+                                {item.transport?.originServer ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.origin')}</dt><dd className="min-w-0 break-words">{item.transport.originServer}</dd></>) : null}
+                                {item.transport?.receivedBy ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.receivedBy')}</dt><dd className="min-w-0 break-words">{item.transport.receivedBy}</dd></>) : null}
+                                {item.authentication ? (
+                                    <>
+                                        <dt className="font-medium text-muted-foreground">{t('mailView.transport.authentication')}</dt>
+                                        <dd className="min-w-0 break-words">SPF {t(VERDICT_KEYS[item.authentication.spf])} · DKIM {t(VERDICT_KEYS[item.authentication.dkim])} · DMARC {t(VERDICT_KEYS[item.authentication.dmarc])}</dd>
+                                    </>
+                                ) : null}
+                                {item.transport?.messageId ? (<><dt className="font-medium text-muted-foreground">{t('mailView.transport.messageId')}</dt><dd className="min-w-0 break-all text-[11px] text-muted-foreground">{item.transport.messageId}</dd></>) : null}
                             </dl>
                         )}
                         {item.authentication && <div className="mt-2"><AuthBadge auth={item.authentication} /></div>}

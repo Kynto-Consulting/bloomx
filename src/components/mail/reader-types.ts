@@ -1,4 +1,4 @@
-import type { EmailAuthentication } from '@/lib/email-auth';
+import type { EmailAuthentication, TransportDetails } from '@/lib/email-auth';
 
 export interface InvitePreview {
     attachmentId: string;
@@ -48,5 +48,6 @@ export interface EmailDetails {
     invitePreview?: InvitePreview | null;
     inviteResponse?: InviteResponse | null;
     authentication?: EmailAuthentication | null;
+    transport?: TransportDetails | null;
     thread?: EmailDetails[];
 }

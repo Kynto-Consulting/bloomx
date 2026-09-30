@@ -1008,6 +1008,11 @@ const en: Messages = {
         thread: { label: 'Conversation messages', expandAll: 'Expand all', collapseAll: 'Collapse all', hideDuplicates: 'Hide repeated history', hideDuplicatesHint: 'Collapses quoted text that already appears in other messages of the conversation. Still available with the "…" button.' },
         message: { aria: 'Message from {name}, {date}', new: 'New', clickToExpand: 'Click to read the message' },
         recipients: { from: 'From', to: 'To', cc: 'Cc', bcc: 'Bcc', date: 'Date', show: 'Show details', hide: 'Hide details' },
+        transport: {
+            replyTo: 'Reply-to', mailedBy: 'Mailed by', signedBy: 'Signed by', encryption: 'Encryption', provider: 'Provider',
+            origin: 'Origin server', receivedBy: 'Received by', messageId: 'Message ID', authentication: 'Authentication',
+            encrypted: 'Encrypted in transit (TLS)', encryptedWith: 'Encrypted in transit ({tls})', notEncrypted: 'Not encrypted in transit', unknown: 'No data',
+        },
         quote: { show: 'Show quoted text', hide: 'Hide quoted text', unmatched: 'The quoted text does not match other messages in this conversation (it may be incomplete), so it is shown in full.' },
         body: { title: 'Email content', loading: 'Loading message…', failed: 'This message could not be displayed.', retry: 'Retry', viewText: 'View plain text', viewHtml: 'View original formatting', empty: 'This message has no content to display.' },
         images: {

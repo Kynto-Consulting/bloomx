@@ -8,7 +8,7 @@ import { loadStoredThreadHeaders, loadThreadMemberIds } from '@/lib/thread-store
 import { normalizeSubject as normalizeSubjectShared } from '@/lib/threading';
 import { canAccessEmail, getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
 import { escapeHtmlText } from '@/lib/mail-validation';
-import { parseAuthenticationResults } from '@/lib/email-auth';
+import { parseAuthenticationResults, parseTransportDetails } from '@/lib/email-auth';
 import { buildEmailOpenedContext, fireLifecycleHook, shouldFireOnce } from '@/lib/expansions/server-hooks';
 import { moveEmailsTracked, restoreEmailsToPrevious } from '@/lib/mail-store';
 import { afterLabelsAdded, afterLabelsRemoved } from '@/lib/labels/behavior';
@@ -111,16 +111,20 @@ async function buildInvitePreview(email: any) {
  * guardada en el payload crudo (sin migracion de esquema). null si no hay datos o es un correo enviado.
  */
 async function resolveAuthentication(email: any) {
+    const empty = { authentication: null, transport: null };
     try {
         const rawKey = String(email?.rawKey || '').trim();
-        if (!rawKey) return null;
+        if (!rawKey) return empty;
         const rawPayload = await getFromStorage(rawKey);
-        if (!rawPayload) return null;
+        if (!rawPayload) return empty;
         const parsed = JSON.parse(rawPayload);
         const dataNode = parsed?.data || parsed;
-        return parseAuthenticationResults(dataNode?.headers);
+        return {
+            authentication: parseAuthenticationResults(dataNode?.headers),
+            transport: parseTransportDetails(dataNode?.headers),
+        };
     } catch {
-        return null;
+        return empty;
     }
 }
 
@@ -136,7 +140,7 @@ async function buildEmailPayload(email: any, content: string, signedAttachments:
             attachments: signedAttachments,
         },
         content,
-        authentication: await resolveAuthentication(email),
+        ...(await resolveAuthentication(email)),
         invitePreview,
         inviteResponse,
     };
