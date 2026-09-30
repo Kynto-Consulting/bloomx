@@ -65,6 +65,8 @@ export class PstRangeReader {
 
     /** Semantica de fs.readSync: devuelve los bytes leidos (menos que `length` solo al final del archivo). */
     readSync(buffer: Buffer, length: number, position: number): number {
+        // Envenenado: tras un fallo, cualquier lectura posterior del mismo intento falla (evita seguir con datos a medias)
+        if (this.missing !== null) throw new PstNeedChunk(this.missing);
         const size = this.source.size;
         if (!Number.isFinite(position) || position < 0 || position >= size || length <= 0) return 0;
         const end = Math.min(size, position + length);

@@ -96,7 +96,7 @@ describe('emlx (Apple Mail)', () => {
         expect(looksLikeEmlx(Buffer.from('123\nzzzz'), 'a.emlx')).toBe(true);
         expect(looksLikeEmlx(Buffer.from('123\nzzzz'), 'a.txt')).toBe(false);
         expect(looksLikeEmlx(Buffer.from(RFC), '')).toBe(false);
-        expect(detectFormat(emlx(RFC, plist(1)), 'a.emlx').format).toBe('unknown');
+        expect(detectFormat(emlx(RFC, plist(1)), 'a.emlx').format).toBe('emlx');
     });
 });
 

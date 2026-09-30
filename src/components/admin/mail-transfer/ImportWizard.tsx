@@ -350,6 +350,8 @@ export function ImportWizard({ mode, config, resumeJobId, onJobChange }: { mode:
                             <ErrorState message={jobErrorText(t, job.lastError) ?? t('admin.console.transfer.errors.generic')} />
                             <div className="mt-3"><button type="button" className={btnOutline} onClick={reset}>{t('admin.console.transfer.import.newImport')}</button></div>
                         </>
+                    ) : job?.status === 'uploaded' && job.summary?.passwordRequired ? (
+                        <ZipPasswordForm base={base} job={job} onDone={() => void refresh()} />
                     ) : (
                         <>
                             <p aria-live="polite" className="flex items-center gap-2 text-sm text-foreground"><Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />{analysisLabel}</p>
@@ -565,6 +567,42 @@ function ImportProgress({ job, done, onReset, base }: { job: JobPublic; done: bo
                 </div>
             )}
         </div>
+    );
+}
+
+/** ZIP con entradas cifradas: pide la contrasena (solo viaja en esta peticion; el servidor la cifra y la borra al terminar). */
+function ZipPasswordForm({ base, job, onDone }: { base: string; job: JobPublic; onDone: () => void }) {
+    const { t } = useI18n();
+    const id = React.useId();
+    const [pw, setPw] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const [err, setErr] = React.useState<string | null>(null);
+    const send = async (body: { password?: string; skipEncrypted?: boolean }) => {
+        setBusy(true);
+        setErr(null);
+        try {
+            await adminFetch(`${base}/jobs/${job.id}/zip-password`, { method: 'POST', body });
+            setPw('');
+            onDone();
+        } catch (e) {
+            setErr(errorText(t, e));
+        } finally {
+            setBusy(false);
+        }
+    };
+    return (
+        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); if (pw) void send({ password: pw }); }}>
+            <h3 className="text-sm font-semibold text-foreground">{t('admin.console.transfer.import.zipPasswordTitle')}</h3>
+            <p className="text-sm text-muted-foreground">{t('admin.console.transfer.import.zipPasswordBody', { count: Number(job.summary?.encryptedEntries ?? 0) })}</p>
+            <Field label={t('admin.console.transfer.import.zipPasswordLabel')} htmlFor={`${id}-zpw`}>
+                <input id={`${id}-zpw`} type="password" autoComplete="off" className={inputClass} value={pw} onChange={(e) => setPw(e.target.value)} />
+            </Field>
+            {err && <ErrorState message={err} />}
+            <div className="flex flex-wrap gap-2">
+                <button type="submit" className={btnPrimary} disabled={busy || !pw}>{t('admin.console.transfer.import.zipPasswordSubmit')}</button>
+                <button type="button" className={btnOutline} disabled={busy} onClick={() => void send({ skipEncrypted: true })}>{t('admin.console.transfer.import.zipPasswordSkip')}</button>
+            </div>
+        </form>
     );
 }
 

@@ -17,7 +17,7 @@ export interface TransferLimits {
     lockMs: number;
     /** Mensajes por tick (tope duro). */
     maxItemsPerTick: number;
-    /** PST: tamano maximo (se copia a disco temporal para leerlo). */
+    /** PST: tamano maximo. Se lee por rangos (cache LRU de trozos de 4 MiB), sin copiarlo a disco: el tope es de tiempo, no de /tmp. */
     maxPstBytes: number;
     /** Horas hasta que caduca un paquete exportado. */
     exportTtlHours: number;
@@ -37,7 +37,7 @@ export function transferLimits(): TransferLimits {
         budgetMs: intEnv('MAIL_TRANSFER_BUDGET_MS', 45_000, 2_000, 280_000),
         lockMs: intEnv('MAIL_TRANSFER_LOCK_MS', 90_000, 5_000, 600_000),
         maxItemsPerTick: intEnv('MAIL_TRANSFER_MAX_ITEMS_PER_TICK', 2_000, 1, 50_000),
-        maxPstBytes: intEnv('MAIL_TRANSFER_PST_MAX_MB', 400) * 1024 * 1024,
+        maxPstBytes: intEnv('MAIL_TRANSFER_PST_MAX_MB', 2048) * 1024 * 1024,
         exportTtlHours: intEnv('MAIL_TRANSFER_EXPORT_TTL_HOURS', 24, 1, 168),
         maxMailboxesPerExport: intEnv('MAIL_TRANSFER_MAX_EXPORT_MAILBOXES', 2_000, 1, 20_000),
         maxCreatePerCall: intEnv('MAIL_TRANSFER_MAX_CREATE_PER_CALL', 50, 1, 200),

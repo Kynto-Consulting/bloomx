@@ -68,7 +68,7 @@ export async function getConfig(c: HCtx) {
             exportTtlHours: c.limits.exportTtlHours,
             maxCreatePerCall: c.limits.maxCreatePerCall,
         },
-        formats: { import: ['mbox', 'eml', 'zip', 'gzip', 'tar', 'pst'], export: ['mbox', 'eml'] },
+        formats: { import: ['mbox', 'eml', 'emlx', 'msg', 'olm', 'zip', 'gzip', 'tar', 'pst', 'vcf', 'ics', 'filters'], export: ['mbox', 'eml'] },
         reauth: { recent: recent.ok, method: recent.method ?? null, expiresAt: recent.expiresAt ?? null, mfaEnrolled, canUsePassword: c.actor.kind === 'manager' || !!c.actor.localUserId, windowSeconds: REAUTH_TTL_MS / 1000 },
     };
 }

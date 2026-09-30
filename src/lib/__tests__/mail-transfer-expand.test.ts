@@ -1,4 +1,7 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
+
+// Los datos se generan y comprimen en el test: con la maquina cargada 5 s se quedan cortos
+vi.setConfig({ testTimeout: 120_000 });
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';

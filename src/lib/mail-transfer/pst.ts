@@ -188,9 +188,9 @@ export function collectFolders(root: any): FolderRef[] {
 
 type Step =
     | { k: 'end' }
-    | { k: 'folderEnd' }
-    | { k: 'skip'; next: number }
-    | { k: 'msg'; next: number; raw: Buffer; date: Date; from: string };
+    | { k: 'folderEnd'; fi: number }
+    | { k: 'skip'; fi: number; next: number }
+    | { k: 'msg'; fi: number; next: number; raw: Buffer; date: Date; from: string };
 
 /** Devuelve el conversor para `EngineDeps.pstConvert`. */
 export function makePstConverter(limits: { maxPstBytes: number; maxMessageBytes: number }, hooks: { onReader?: (r: PstRangeReader) => void; readerOpts?: ConstructorParameters<typeof PstRangeReader>[1] } = {}): NonNullable<EngineDeps['pstConvert']> {
@@ -214,15 +214,17 @@ export function makePstConverter(limits: { maxPstBytes: number; maxMessageBytes:
             pst = new RangePst(reader);
             folders = collectFolders(pst.getRootFolder());
         };
-        // Relocaliza la carpeta por clave si el orden cambio entre ticks (idempotente).
-        const relocate = () => {
+        // Relocaliza la carpeta por clave si el orden cambio entre ticks. PURA: un intento fallido (trozo ausente) no debe alterar el cursor.
+        const locate = () => {
             const fs_ = folders!;
-            if (cur.fk && fs_[cur.fi]?.key !== cur.fk) {
+            let fi = cur.fi;
+            let mi = cur.mi;
+            if (cur.fk && fs_[fi]?.key !== cur.fk) {
                 const j = fs_.findIndex((f) => f.key === cur.fk);
-                if (j >= 0) cur.fi = j;
-                else { cur.mi = 0; } // carpeta desaparecida: se empieza la que ocupe ese indice
+                if (j >= 0) fi = j;
+                else mi = 0; // carpeta desaparecida: se empieza la que ocupe ese indice
             }
-            if (cur.fi < fs_.length) cur.fk = fs_[cur.fi].key;
+            return { fi, mi };
         };
 
         try {
@@ -238,24 +240,24 @@ export function makePstConverter(limits: { maxPstBytes: number; maxMessageBytes:
         let did = 0;
         const step = (): Step => {
             ensureOpen();
-            relocate();
+            const { fi, mi } = locate();
             const fl = folders!;
-            if (cur.fi >= fl.length) return { k: 'end' };
-            const { folder, path: fpath } = fl[cur.fi];
-            folder.moveChildCursorTo(cur.mi);
+            if (fi >= fl.length) return { k: 'end' };
+            const { folder, path: fpath } = fl[fi];
+            folder.moveChildCursorTo(mi);
             let child: any;
-            try { child = folder.getNextChild(); } catch { return { k: 'folderEnd' }; }
-            if (child === null || child === undefined) return { k: 'folderEnd' };
+            try { child = folder.getNextChild(); } catch { return { k: 'folderEnd', fi }; }
+            if (child === null || child === undefined) return { k: 'folderEnd', fi };
             // getNextChild puede saltar hijos ilegibles internamente: el cursor real es su indice interno
             const inner = Number(folder.currentEmailIndex);
-            const next = Number.isFinite(inner) && inner > cur.mi ? inner : cur.mi + 1;
-            if (!(child instanceof PSTMessage) || !/^IPM\.(Note|Schedule|Post)/i.test(String(child.messageClass || 'IPM.Note'))) return { k: 'skip', next };
+            const next = Number.isFinite(inner) && inner > mi ? inner : mi + 1;
+            if (!(child instanceof PSTMessage) || !/^IPM.(Note|Schedule|Post)/i.test(String(child.messageClass || 'IPM.Note'))) return { k: 'skip', fi, next };
             try {
                 const m = pstMessageToMime(child, fpath, limits.maxMessageBytes);
-                if (m.raw.length > limits.maxMessageBytes) return { k: 'skip', next };
-                return { k: 'msg', next, raw: m.raw, date: m.date, from: m.from };
+                if (m.raw.length > limits.maxMessageBytes) return { k: 'skip', fi, next };
+                return { k: 'msg', fi, next, raw: m.raw, date: m.date, from: m.from };
             } catch {
-                return { k: 'skip', next };
+                return { k: 'skip', fi, next };
             }
         };
         try {
@@ -269,8 +271,10 @@ export function makePstConverter(limits: { maxPstBytes: number; maxMessageBytes:
                     throw e;
                 }
                 if (r.k === 'end') { done = true; break; }
-                if (r.k === 'folderEnd') { cur.fi++; cur.mi = 0; cur.fk = undefined; continue; }
+                if (r.k === 'folderEnd') { cur.fi = r.fi + 1; cur.mi = 0; cur.fk = undefined; continue; }
                 did++;
+                cur.fi = r.fi;
+                cur.fk = folders![r.fi].key;
                 if (r.k === 'skip') { cur.skipped++; cur.mi = r.next; continue; }
                 await w.write(mboxRecord(mboxFromLine(r.date, r.from), r.raw));
                 cur.converted++;

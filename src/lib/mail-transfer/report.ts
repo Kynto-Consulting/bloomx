@@ -8,6 +8,8 @@ const REASONS: Record<string, { es: string; en: string }> = {
     no_mailbox: { es: 'Sin buzon de destino (descartado o no asignado)', en: 'No destination mailbox (discarded or unmapped)' },
     user_not_found: { es: 'El buzon de destino no existe', en: 'The destination mailbox does not exist' },
     storage_failed: { es: 'Error al guardar el contenido', en: 'Failed to store the content' },
+    filter_unmapped: { es: 'Filtro de Gmail no convertible (ver detalle)', en: 'Gmail filter could not be converted (see detail)' },
+    no_items: { es: 'El archivo no contenia elementos importables', en: 'The file contained nothing importable' },
     db_failed: { es: 'Error al guardar el mensaje', en: 'Failed to save the message' },
 };
 

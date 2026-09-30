@@ -67,6 +67,8 @@ export interface Agg {
     dateMin: string | null;
     dateMax: string | null;
     bytes: number;
+    /** Archivos de datos personales encontrados (contactos, calendario, filtros). */
+    pim?: { contacts: number; calendar: number; filters: number };
 }
 
 export const emptyAgg = (): Agg => ({ messages: 0, oversize: 0, unparsable: 0, notMail: 0, mailboxes: {}, mailboxOverflow: 0, unknown: 0, folders: {}, labels: {}, dateMin: null, dateMax: null, bytes: 0 });
@@ -279,7 +281,12 @@ async function analysisTick(job: JobRow, deps: EngineDeps): Promise<TickResult> 
     });
     for await (const w of walker) {
         agg.bytes += w.size;
-        if (w.oversize) {
+        if (w.pim) {
+            agg.pim ||= { contacts: 0, calendar: 0, filters: 0 };
+            agg.pim[w.pim]++;
+        } else if (w.unparsable) {
+            agg.unparsable++;
+        } else if (w.oversize) {
             agg.oversize++;
         } else {
             const ph = parseHeadersOnly(w.raw);
@@ -320,6 +327,8 @@ async function analysisTick(job: JobRow, deps: EngineDeps): Promise<TickResult> 
         messages: agg.messages,
         oversize: agg.oversize,
         notMail: agg.notMail,
+        unparsable: agg.unparsable,
+        pim: agg.pim ?? { contacts: 0, calendar: 0, filters: 0 },
         unknownMailbox: agg.unknown,
         mailboxes: mailboxes.slice(0, 500),
         mailboxOverflow: agg.mailboxOverflow + Math.max(0, mailboxes.length - 500),
@@ -401,13 +410,20 @@ async function importTick(job: JobRow, deps: EngineDeps): Promise<TickResult> {
     let processed = 0;
     let finished = true;
     let canceled = false;
-    const walker = walkMessages(archive, pos, { maxMessageBytes: deps.limits.maxMessageBytes });
+    const walker = walkMessages(archive, pos, { maxMessageBytes: deps.limits.maxMessageBytes, maxAttachments: deps.limits.maxAttachmentsPerMessage });
+    // Con un unico buzon detectado, los contactos/calendario/filtros (sin buzon en la ruta) van a ese buzon
+    const detectedList = Array.isArray((job.summary as any)?.mailboxes) ? ((job.summary as any).mailboxes as Array<{ address: string }>) : [];
+    const soleMailbox = detectedList.length === 1 ? detectedList[0].address : null;
     for await (const w of walker) {
         processed++;
         const record = (status: 'imported' | 'duplicate' | 'skipped' | 'error', mailbox: string, extra: { error?: string; messageId?: string | null; emailId?: string | null; folder?: string | null } = {}) =>
             itemStore.record({ jobId: job.id, mailbox, sourceKey: w.sourceKey, status, bytes: w.size, ...extra });
 
-        if (w.oversize) {
+        if (w.pim) {
+            await importPim(w, job, opts, soleMailbox, getUser, deps, record);
+        } else if (w.unparsable) {
+            await record('error', '', { error: 'parse_failed' });
+        } else if (w.oversize) {
             await record('error', '', { error: 'too_large' });
         } else {
             let parsed;
@@ -492,6 +508,49 @@ async function importTick(job: JobRow, deps: EngineDeps): Promise<TickResult> {
     });
     if (opts.notifyUsers && deps.notify) await deps.notify(job, [...touched]).catch(() => undefined);
     return { ran: true, status: 'done', more: false, processed };
+}
+
+type RecordFn = (status: 'imported' | 'duplicate' | 'skipped' | 'error', mailbox: string, extra?: { error?: string; messageId?: string | null; emailId?: string | null; folder?: string | null }) => Promise<boolean>;
+
+/** Contactos (.vcf), calendario (.ics) y filtros de Gmail (mailFilters.xml) hacia el buzon de destino. Idempotente. */
+async function importPim(
+    w: WalkedMessage, job: JobRow, opts: ImportOptions, soleMailbox: string | null,
+    getUser: (email: string) => Promise<{ id: string; email: string } | null>, deps: EngineDeps, record: RecordFn,
+): Promise<void> {
+    const kind = w.pim!;
+    const folder = kind;
+    if (w.oversize) { await record('error', '', { error: 'too_large', folder }); return; }
+    const detected = w.pathMailbox ?? soleMailbox;
+    let exists = false;
+    if (detected) exists = !!(await getUser(detected));
+    const target = resolveTarget(detected, opts, () => exists);
+    if (!target) { await record('skipped', detected ?? '', { error: 'no_mailbox', folder }); return; }
+    const user = await getUser(target);
+    if (!user) { await record('error', target, { error: 'user_not_found', folder }); return; }
+    const pim = await import('./pim');
+    try {
+        if (kind === 'contacts') {
+            const r = await pim.importContacts(user.id, pim.parseVcf(w.raw).contacts);
+            await record(r.created > 0 ? 'imported' : r.existing > 0 ? 'duplicate' : 'error', target, { folder, messageId: `contacts: +${r.created} =${r.existing} invalid:${r.invalid}`, error: r.created + r.existing === 0 ? 'no_items' : undefined });
+        } else if (kind === 'calendar') {
+            const parsed = pim.parseIcsCalendar(w.raw);
+            const r = await pim.importEvents(user.id, parsed.events, { calendarName: parsed.calendarName ?? undefined });
+            await record(r.created > 0 ? 'imported' : r.existing > 0 ? 'duplicate' : 'error', target, { folder, messageId: `events: +${r.created} =${r.existing} rrule-expanded:${r.expandedFromRrule}`, error: r.created + r.existing === 0 ? 'no_items' : undefined });
+        } else {
+            const parsed = pim.parseGmailFilters(w.raw);
+            const r = await pim.importFilters(user.id, parsed.filters);
+            await record(r.created > 0 ? 'imported' : r.skippedExisting > 0 ? 'duplicate' : 'error', target, { folder, messageId: `filters: +${r.created} =${r.skippedExisting} unmapped:${r.unmapped.length}`, error: r.created + r.skippedExisting === 0 && r.unmapped.length === 0 ? 'no_items' : undefined });
+            // Filtros que no se pudieron convertir: una fila por filtro en el informe (con el motivo)
+            for (let i = 0; i < Math.min(r.unmapped.length, 500); i++) {
+                const u = r.unmapped[i];
+                await itemStore.record({ jobId: job.id, mailbox: target, sourceKey: `${w.sourceKey}:u${i}`, status: 'skipped', error: 'filter_unmapped', messageId: `${u.name}: ${u.reasons.join('; ')}`, folder, bytes: 0 });
+            }
+        }
+    } catch (e) {
+        void deps;
+        console.error('[mail-transfer] pim import failed:', e instanceof Error ? e.message.slice(0, 200) : 'error');
+        await record('error', target, { error: 'db_failed', folder });
+    }
 }
 
 async function persistProgress(job: JobRow, cursor: Record<string, any>, pos: Cursor, touched: Set<string>): Promise<void> {
