@@ -69,7 +69,7 @@ describe('deleteEmailsCompletely contra Postgres + almacenamiento simulado', () 
 
         const r1 = await deleteEmailsCompletely([ea.id]);
         expect(r1.deleted).toBe(1);
-        expect(r1.storageKept).toBe(3);
+        expect(r1.storageKept).toBe(4); // html, raw.json, raw.eml (derivada de rawKey, exista o no) y el adjunto
         expect(store.size).toBe(3);
         expect(await prisma.email.count({ where: { id: eb.id } })).toBe(1);
         expect(await prisma.attachment.count({ where: { emailId: eb.id } })).toBe(1);

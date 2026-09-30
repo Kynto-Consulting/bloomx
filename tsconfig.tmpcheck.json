@@ -1,5 +1,0 @@
-{
-  "extends": "./tsconfig.json",
-  "compilerOptions": { "incremental": false },
-  "exclude": ["node_modules", "src/lib/mail-transfer/**", "src/components/admin/mail-transfer/**", "src/app/api/admin/mail-transfer/**", "src/app/api/mail-transfer/**", "src/app/api/cron/mail-transfer/**", "src/lib/__tests__/mail-transfer-*", "src/components/settings/MyMailboxTransfer.tsx"]
-}

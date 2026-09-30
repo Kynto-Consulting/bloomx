@@ -50,6 +50,8 @@ REGISTRATION_KEY="<key for user sign-up>"     # in production sign-up is closed 
 ADMIN_EMAILS="admin@your-domain.com"          # admins must enable TOTP MFA
 ```
 
+**Prisma client (`prisma generate`) / Cliente de Prisma.** `npm install` already runs it through the `postinstall` script (`"postinstall": "prisma generate"`), so a normal install or deploy needs nothing else. Run `npx prisma generate` by hand only after editing `prisma/schema.prisma` **without** reinstalling. Do not run it while `next dev`, the E2E stack or a test run is alive: on Windows the query-engine DLL is locked and the command fails with `EPERM` (stop those processes first). The mailbox SQL (sender-order function and index, millisecond `createdAt` trigger) does **not** depend on the generated client: it is applied by `npm run db:ensure` (`src/lib/db/mail-sql.ts`, additive and idempotent).
+
 All variables (required vs optional, defaults) are in `/docs/env-variables` and `.env.example`. Notes that commonly trip people up / Notas frecuentes:
 
 - **Do NOT configure** `INTERNAL_SECRET`, `EXTENSION_HOOKS_SECRET` or `FRONTEND_INTERNAL_URL`, and do not share `NEXTAUTH_SECRET` with the backend.

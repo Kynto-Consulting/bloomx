@@ -9,7 +9,7 @@ import { useCache } from '@/contexts/CacheContext';
 import { shouldSidebarRefresh } from '@/lib/mail-list';
 import { formatStorage, parseQuotaView, quotaFillClass, quotaNoticeKey, quotaTextClass, type QuotaView } from '@/lib/mail-quota-view';
 
-const POLL_MS = 5 * 60_000;
+const POLL_MS = 60_000;
 
 /**
  * Uso de almacenamiento del buzon: barra accesible (role="progressbar") con "X de Y", colores de estado por tokens

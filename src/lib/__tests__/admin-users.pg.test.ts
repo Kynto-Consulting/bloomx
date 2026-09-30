@@ -82,7 +82,7 @@ describe('listUsers contra Postgres', () => {
         expect(rows[1]).toMatchObject({ disabled: true, googleLinked: false, storageBytes: 500, sessions: 0, avatar: false, lastLoginAt: null });
         expect(rows[3]).toMatchObject({ mfaEnabled: false });
         expect(JSON.stringify(rows)).not.toMatch(/password|secret|token/i);
-        expect(Object.keys(a).sort()).toEqual(['avatar', 'createdAt', 'disabled', 'email', 'googleLinked', 'id', 'isAdmin', 'lastLoginAt', 'mfaEnabled', 'name', 'sessions', 'storageBytes'].sort());
+        expect(Object.keys(a).sort()).toEqual(['avatar', 'createdAt', 'disabled', 'email', 'googleLinked', 'id', 'isAdmin', 'lastLoginAt', 'mfaEnabled', 'name', 'quotaMb', 'quotaSource', 'sessions', 'storageBytes'].sort());
     });
 
     it('rol admin = ADMIN_EMAILS (sin distinguir mayusculas); filtro role', async () => {

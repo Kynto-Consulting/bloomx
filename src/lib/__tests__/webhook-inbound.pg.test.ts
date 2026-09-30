@@ -64,6 +64,8 @@ describe('webhook resend email.received contra Postgres', () => {
             to: [a.email, b.email],
             attachments: [{ filename: 'nota.txt', content_type: 'text/plain', content: 'contenido de prueba' }],
         });
+        // Los adjuntos de borradores (Draft) tambien tienen emailId nulo y otros tests comparten la base: se compara antes/despues.
+        const orphansBefore = await prisma.attachment.count({ where: { emailId: null, draftId: null, filename: 'nota.txt' } });
         const results = await Promise.all(Array.from({ length: 4 }, () => deliver(p)));
         expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
         for (const u of [a, b]) {
@@ -71,8 +73,8 @@ describe('webhook resend email.received contra Postgres', () => {
             expect(rows).toHaveLength(1);
             expect(rows[0].attachments).toHaveLength(1); // el intento perdedor no deja adjuntos huerfanos (create anidado atomico)
         }
-        const orphanAtts = await prisma.attachment.count({ where: { emailId: null, filename: 'nota.txt' } });
-        expect(orphanAtts).toBe(0);
+        const orphanAtts = await prisma.attachment.count({ where: { emailId: null, draftId: null, filename: 'nota.txt' } });
+        expect(orphanAtts - orphansBefore).toBe(0);
     });
 
     it('un destinatario que ya lo tenia no bloquea la entrega al que falta (reintento parcial)', async () => {

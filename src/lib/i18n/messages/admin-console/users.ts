@@ -42,7 +42,7 @@ export const usersEs = {
         user: 'usuario',
         domain: 'dominio',
         env: 'entorno',
-        none: '',
+        none: '—',
     },
     badge: {
         active: 'Activo',
@@ -324,7 +324,7 @@ export const usersEn: DeepString<typeof usersEs> = {
         user: 'user',
         domain: 'domain',
         env: 'environment',
-        none: '',
+        none: '—',
     },
     badge: {
         active: 'Active',

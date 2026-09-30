@@ -322,7 +322,7 @@ export const accountEs = {
             discard: 'Descartar',
             updated: 'Última modificación: {date} por {by}',
             neverUpdated: 'Sin cambios guardados: se usa el valor del entorno (o sin límite).',
-            note: 'Los usuarios ven el cambio en su barra lateral en menos de un minuto.',
+            note: 'El cambio se aplica en todas las instancias en menos de 5 segundos; la barra lateral de cada usuario lo muestra en su siguiente actualización.',
             errors: {
                 integer: 'Escribe un número entero de MB.',
                 range: 'El valor máximo es {max} MB.',
@@ -709,7 +709,7 @@ export const accountEn: DeepString<typeof accountEs> = {
             discard: 'Discard',
             updated: 'Last modified: {date} by {by}',
             neverUpdated: 'No saved changes: the environment value (or no limit) is used.',
-            note: 'Users see the change in their sidebar within a minute.',
+            note: 'The change applies on every instance in under 5 seconds; the sidebar meter shows it on its next refresh.',
             errors: {
                 integer: 'Enter a whole number of MB.',
                 range: 'The maximum value is {max} MB.',

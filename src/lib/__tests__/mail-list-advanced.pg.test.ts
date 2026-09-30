@@ -139,6 +139,7 @@ describe('orden por remitente: nombre visible o direccion, sin acentos ni mayusc
         const plan = await prisma.$transaction(async (tx) => {
             await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
             await tx.$executeRawUnsafe('SET LOCAL enable_bitmapscan = off');
+            await tx.$executeRawUnsafe('SET LOCAL enable_sort = off');
             const rows = (await tx.$queryRawUnsafe(
                 `EXPLAIN SELECT e."id" FROM "Email" e WHERE e."userId" = $1 AND e."folder" = 'inbox'
                  ORDER BY (bloomx_sender_key(e."from") COLLATE "C") ASC, e."createdAt" DESC, e."id" DESC LIMIT 21`, user.id,
