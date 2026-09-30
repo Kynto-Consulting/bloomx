@@ -42,7 +42,7 @@ export function useAppSidebar(): AppSidebarApi {
 
 function Skeleton({ initialWidth }: { initialWidth: number | null }) {
     return (
-        <div className="flex h-screen w-full overflow-hidden bg-background">
+        <div data-app-shell="" className="app-viewport flex w-full overflow-hidden bg-background">
             <aside aria-hidden="true" className="hidden h-full shrink-0 border-r border-sidebar-border bg-sidebar md:block" style={{ width: sidebarCssWidth(initialWidth) }} />
             <div className="flex min-w-0 flex-1 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" aria-hidden="true" /></div>
         </div>
@@ -114,7 +114,7 @@ export function AppShell({ children, initialSidebarWidth = null }: { children: R
 
     return (
         <AppSidebarContext.Provider value={api}>
-            <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+            <div data-app-shell="" className="app-viewport flex w-full overflow-hidden bg-background text-foreground">
                 {mode === 'full' && (
                     <aside data-app-sidebar="" style={{ width }} className="h-full shrink-0 overflow-hidden bg-sidebar">
                         {sidebarEl}
@@ -122,7 +122,7 @@ export function AppShell({ children, initialSidebarWidth = null }: { children: R
                 )}
                 {mode === 'full' && <SidebarResizer width={width} min={min} max={max} viewportWidth={vw} onResize={setWidth} onReset={resetWidth} />}
                 {mode === 'rail' && <Rail onOpen={openDrawer} open={drawerOpen} />}
-                <div data-app-content="" className="h-full min-w-0 flex-1 overflow-hidden">{children}</div>
+                <div data-app-content="" className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">{children}</div>
             </div>
             <Drawer open={drawerOpen && mode !== 'full'} onClose={closeDrawer} label={t('emailList.mobile.openMenu')} side="left" className="w-[80%] max-w-[300px] bg-sidebar text-sidebar-foreground">
                 <Sidebar onClose={closeDrawer} />

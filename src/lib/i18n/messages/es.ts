@@ -141,8 +141,8 @@ const es = {
             contrast: { label: 'Alto contraste', description: 'Blanco y negro con bordes marcados (accesibilidad AAA).' },
         },
         mailModes: {
-            paper: { label: 'Papel claro', description: 'El correo se muestra tal cual, sobre fondo blanco. Es la opción más fiel y legible.' },
-            invert: { label: 'Oscurecer correo', description: 'Invierte los colores del correo (las imágenes se conservan). Puede alterar diseños de marca.' },
+            paper: { label: 'Papel claro', description: 'El correo se muestra tal cual, sobre fondo blanco.' },
+            invert: { label: 'Oscurecer correo', description: 'Invierte los colores del correo (las imágenes se conservan). Puede alterar diseños de marca. Opción predeterminada.' },
         },
     },
     admin: {
@@ -1023,7 +1023,7 @@ const es = {
             encrypted: 'Cifrado en tránsito (TLS)', encryptedWith: 'Cifrado en tránsito ({tls})', notEncrypted: 'Sin cifrado en tránsito', unknown: 'Sin datos',
         },
         quote: { show: 'Mostrar texto citado', hide: 'Ocultar texto citado', unmatched: 'El texto citado no coincide con otros mensajes de esta conversación (puede estar incompleta), por eso se muestra completo.' },
-        body: { title: 'Contenido del correo', loading: 'Cargando el mensaje…', failed: 'No se pudo mostrar el contenido de este mensaje.', retry: 'Reintentar', viewText: 'Ver texto plano', viewHtml: 'Ver formato original', empty: 'Este mensaje no tiene contenido para mostrar.' },
+        body: { title: 'Contenido del correo', loading: 'Cargando el mensaje…', failed: 'No se pudo mostrar el contenido de este mensaje.', retry: 'Reintentar', viewText: 'Ver texto plano', viewHtml: 'Ver formato original', empty: 'Este mensaje no tiene contenido para mostrar.', onlyAttachmentOne: 'Este mensaje no tiene texto; solo contiene {n} adjunto.', onlyAttachmentMany: 'Este mensaje no tiene texto; solo contiene {n} adjuntos.', authReport: 'Informe automático de autenticación del dominio (DMARC / TLS-RPT).' },
         images: {
             blocked: 'Se bloquearon las imágenes remotas para proteger tu privacidad (pueden avisar al remitente de que abriste el correo).',
             load: 'Cargar imágenes remotas',

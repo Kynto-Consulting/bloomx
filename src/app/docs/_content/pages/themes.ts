@@ -149,7 +149,7 @@ const es: Block[] = [
     { t: 'code', lang: 'bash', title: 'Override en desarrollo', code: localEnv },
     { t: 'code', lang: 'bash', title: 'Verificación', code: localCmds },
     { t: 'h2', id: 'catalogue', text: 'Temas genéricos' },
-    { t: 'p', text: 'Sin configuración de empresa hay 8 temas: `light`, `dark`, `midnight`, `amoled`, `ocean`, `forest`, `rose` y `contrast` (alto contraste), más **Sistema**. La preferencia se guarda en cookie, `localStorage` y en la cuenta. El correo entrante tiene además su propia opción de modo (papel claro u oscurecer, `mailDarkMode`).' },
+    { t: 'p', text: 'Sin configuración de empresa hay 8 temas: `light`, `dark`, `midnight`, `amoled`, `ocean`, `forest`, `rose` y `contrast` (alto contraste), más **Sistema**. La preferencia se guarda en cookie, `localStorage` y en la cuenta. El correo entrante tiene además su propia opción de modo (oscurecer, por defecto, o papel claro; `mailDarkMode`).' },
     { t: 'h2', id: 'limits', text: 'Límites conocidos' },
     { t: 'ul', items: [
         'Solo `overlay` admite alfa; el resto de colores se rechaza si trae alfa distinto de `ff`.',
@@ -229,7 +229,7 @@ const en: Block[] = [
     { t: 'code', lang: 'bash', title: 'Override in development', code: localEnv.replace('# .env.local (solo desarrollo; se ignora en producción). Una línea, JSON válido.', '# .env.local (development only; ignored in production). One line, valid JSON.') },
     { t: 'code', lang: 'bash', title: 'Verification', code: localCmds.replace('# contraste AA de los 8 temas y de los 12 ejemplos de empresa', '# AA contrast of the 8 themes and the 12 company examples').replace('# tabla en Markdown', '# Markdown table') },
     { t: 'h2', id: 'catalogue', text: 'Generic themes' },
-    { t: 'p', text: 'Without company configuration there are 8 themes: `light`, `dark`, `midnight`, `amoled`, `ocean`, `forest`, `rose` and `contrast` (high contrast), plus **System**. The preference is stored in a cookie, `localStorage` and the account. Inbound mail also has its own mode option (paper light or darken, `mailDarkMode`).' },
+    { t: 'p', text: 'Without company configuration there are 8 themes: `light`, `dark`, `midnight`, `amoled`, `ocean`, `forest`, `rose` and `contrast` (high contrast), plus **System**. The preference is stored in a cookie, `localStorage` and the account. Inbound mail also has its own mode option (darken, the default, or paper light; `mailDarkMode`).' },
     { t: 'h2', id: 'limits', text: 'Known limits' },
     { t: 'ul', items: [
         'Only `overlay` accepts alpha; other colours are rejected if they carry an alpha other than `ff`.',

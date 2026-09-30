@@ -439,9 +439,11 @@ export const MAIL_DARK_STORAGE_KEY = 'bloomx:mail-dark:v1';
 export const APPEARANCE_SETTINGS_KEY = 'core-appearance';
 
 export type MailDarkMode = 'paper' | 'invert';
+/** Modo por defecto para quien no tiene preferencia guardada (quien ya eligio conserva su eleccion). */
+export const DEFAULT_MAIL_DARK_MODE: MailDarkMode = 'invert';
 export const MAIL_DARK_MODES: readonly { id: MailDarkMode; label: string; description: string }[] = [
-    { id: 'paper', label: 'Papel claro', description: 'El correo se muestra tal cual, sobre fondo blanco. Es la opcion mas fiel y legible.' },
-    { id: 'invert', label: 'Oscurecer correo', description: 'Invierte los colores del correo (las imagenes se conservan). Puede alterar diseños de marca.' },
+    { id: 'paper', label: 'Papel claro', description: 'El correo se muestra tal cual, sobre fondo blanco.' },
+    { id: 'invert', label: 'Oscurecer correo', description: 'Invierte los colores del correo (las imagenes se conservan). Puede alterar diseños de marca. Opcion predeterminada.' },
 ];
 export function isMailDarkMode(value: unknown): value is MailDarkMode {
     return value === 'paper' || value === 'invert';

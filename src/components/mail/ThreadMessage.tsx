@@ -14,7 +14,8 @@ import { summarizeRecipients } from '@/lib/mail-view-state';
 import {
     allowForEmail, allowForSender, hasRemoteImages, isRemoteImagesAllowed, type RemoteImagePolicy,
 } from '@/lib/remote-images';
-import { JoinMeetingButton, MeetingLocationLine } from '@/components/MeetingJoin';
+import { InviteCard } from './InviteCard';
+import { isLegacyEmptyPlaceholder, looksLikeAuthReport } from '@/lib/mail-empty-body';
 import type { JoinLinkResult } from '@/lib/calendar/join-link';
 import { Avatar } from './ui';
 import { AttachmentList } from './AttachmentList';
@@ -139,7 +140,9 @@ function ThreadMessageInner({
     const unmatchedNote = Boolean(split) && hideDuplicates === true && dedupe?.status === 'unmatched';
     const shownHtml = split && !showQuoted ? split.main : cleanHtml;
     // Regla de oro: nunca un area en blanco. Si el HTML no tiene nada visible se muestra el extracto o un aviso.
-    const emptyBody = useMemo(() => expanded && !htmlHasVisibleContent(cleanHtml), [expanded, cleanHtml]);
+    const emptyBody = useMemo(() => expanded && (!htmlHasVisibleContent(cleanHtml) || isLegacyEmptyPlaceholder(item.content)), [expanded, cleanHtml, item.content]);
+    const realAttachments = Array.isArray(email.attachments) ? email.attachments : [];
+    const authReport = emptyBody && looksLikeAuthReport(email.subject, realAttachments);
     const bodyLabels = useMemo(() => ({
         title: t('mailView.body.title'), loading: t('mailView.body.loading'), failed: t('mailView.body.failed'),
         retry: t('mailView.body.retry'), viewText: t('mailView.body.viewText'), viewHtml: t('mailView.body.viewHtml'),
@@ -262,30 +265,16 @@ function ThreadMessageInner({
                     <SpamReaderNotices id={email.id} from={email.from} folder={email.folder} spam={spam} onNotSpam={onNotSpam} />
 
                     {invite && (
-                        <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-foreground">
-                            <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
-                                <div className="space-y-2">
-                                    <div className="flex items-center gap-2 font-medium"><CalendarDays className="h-4 w-4" aria-hidden="true" /><span>{t('mailView.invite.detected')}</span></div>
-                                    <div className="text-base font-semibold">{invite.title}</div>
-                                    {invite.startsAt && (
-                                        <div className="flex items-center gap-2">
-                                            <Clock className="h-4 w-4" aria-hidden="true" />
-                                            <span>{fmtInvite(invite.startsAt)}{invite.endsAt ? ` - ${fmtInvite(invite.endsAt)}` : ''}</span>
-                                        </div>
-                                    )}
-                                    <MeetingLocationLine link={joinLink} location={invite.location} />
-                                    <div className="flex flex-wrap gap-2 pt-1">
-                                        <button type="button" disabled={inviteBusy} onClick={() => onInvite(email.id, 'accepted')} className="inline-flex min-h-9 items-center rounded-full border border-success/45 bg-card px-3 py-2 text-sm font-medium text-success transition-colors hover:bg-success/10 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('mailView.invite.accept')}</button>
-                                        <button type="button" disabled={inviteBusy} onClick={() => onInvite(email.id, 'tentative')} className="inline-flex min-h-9 items-center rounded-full border border-warning/45 bg-card px-3 py-2 text-sm font-medium text-warning transition-colors hover:bg-warning/10 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('mailView.invite.maybe')}</button>
-                                        <button type="button" disabled={inviteBusy} onClick={() => onInvite(email.id, 'declined')} className="inline-flex min-h-9 items-center rounded-full border border-destructive/45 bg-card px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('mailView.invite.decline')}</button>
-                                        <JoinMeetingButton link={joinLink} />
-                                    </div>
-                                </div>
-                                <button type="button" disabled={calendarBusy} onClick={() => onAddToCalendar(email.id, invite)} className="inline-flex min-h-9 items-center gap-2 rounded-full border border-primary/30 bg-card px-3 py-2 text-sm font-medium transition-colors hover:bg-primary/15 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                                    <CalendarDays className="h-4 w-4" aria-hidden="true" /> {t('mailView.invite.addToCalendar')}
-                                </button>
-                            </div>
-                        </div>
+                        <InviteCard
+                            invite={invite}
+                            response={item.inviteResponse}
+                            joinLink={joinLink}
+                            whenText={invite.startsAt ? `${fmtInvite(invite.startsAt)}${invite.endsAt ? ` - ${fmtInvite(invite.endsAt)}` : ''}` : ''}
+                            busy={inviteBusy}
+                            calendarBusy={calendarBusy}
+                            onRespond={(r) => onInvite(email.id, r)}
+                            onAddToCalendar={() => onAddToCalendar(email.id, invite)}
+                        />
                     )}
 
                     {remoteBlocked && (
@@ -298,9 +287,14 @@ function ThreadMessageInner({
                     )}
 
                     {emptyBody ? (
-                        <p data-mail-empty className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
-                            {email.snippet && email.snippet !== '(No content)' ? email.snippet : t('mailView.body.empty')}
-                        </p>
+                        <div data-mail-empty className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-4 text-sm text-foreground">
+                            <p>
+                                {realAttachments.length > 0
+                                    ? t(realAttachments.length === 1 ? 'mailView.body.onlyAttachmentOne' : 'mailView.body.onlyAttachmentMany', { n: realAttachments.length })
+                                    : (email.snippet && email.snippet !== '(No content)' ? email.snippet : t('mailView.body.empty'))}
+                            </p>
+                            {authReport && <p data-mail-auth-report className="mt-1 text-xs text-muted-foreground">{t('mailView.body.authReport')}</p>}
+                        </div>
                     ) : (
                         <SafeIframe html={cidResolved.html} blockRemoteImages={!remoteAllowed} trustedImageSources={cidResolved.sources} labels={bodyLabels} linkGuard={spam.linkGuard} onGuardedLink={spam.onGuardedLink} />
                     )}
@@ -323,7 +317,13 @@ function ThreadMessageInner({
                         </button>
                     )}
 
-                    <AttachmentList attachments={email.attachments || []} confirmDownload={spam.confirmDownload} />
+                    {emptyBody && realAttachments.length > 0 ? (
+                        <div data-mail-empty-attachments className="mt-3 rounded-xl border border-primary/40 bg-card p-2">
+                            <AttachmentList attachments={realAttachments} confirmDownload={spam.confirmDownload} />
+                        </div>
+                    ) : (
+                        <AttachmentList attachments={realAttachments} confirmDownload={spam.confirmDownload} />
+                    )}
 
                     {index > 0 && (
                         <div className="mt-6 flex flex-wrap gap-2">

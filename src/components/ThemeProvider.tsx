@@ -16,6 +16,7 @@ import {
     getAvailableThemeIds,
     getTheme,
     getThemePolicy,
+    DEFAULT_MAIL_DARK_MODE,
     isMailDarkMode,
     isThemePreference,
     resolvePreference,
@@ -83,7 +84,7 @@ const ThemeContext = createContext<ThemeContextValue>({
     setPreference: () => { },
     mailDarkMode: 'paper',
     setMailDarkMode: () => { },
-    getAppearance: () => ({ theme: 'system', mailDarkMode: 'paper', updatedAt: 0 }),
+    getAppearance: () => ({ theme: 'system', mailDarkMode: DEFAULT_MAIL_DARK_MODE, updatedAt: 0 }),
 });
 
 export const useTheme = () => useContext(ThemeContext);
@@ -171,10 +172,10 @@ export function ThemeProvider({ children, initialThemeConfig = null, brandName }
 
     const [preference, setPreferenceState] = useState<ThemePreference>('system');
     const [resolvedId, setResolvedId] = useState<string>(DEFAULT_LIGHT_THEME);
-    const [mailDarkMode, setMailDarkModeState] = useState<MailDarkMode>('paper');
+    const [mailDarkMode, setMailDarkModeState] = useState<MailDarkMode>(DEFAULT_MAIL_DARK_MODE);
 
     const prefRef = useRef<ThemePreference>('system');
-    const mailRef = useRef<MailDarkMode>('paper');
+    const mailRef = useRef<MailDarkMode>(DEFAULT_MAIL_DARK_MODE);
     const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const serverLoadedFor = useRef<string | null>(null);
 

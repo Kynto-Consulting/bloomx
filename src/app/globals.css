@@ -156,6 +156,21 @@
   }
 }
 
+/*
+ * Altura del shell de la app: 100vh (fallback) y 100dvh. 100vh en movil/ventanas con barras dinamicas es MAYOR que el
+ * area visible (franja vacia + scroll del body) y, con ventanas cambiantes, deja hueco; dvh sigue al viewport real.
+ * Mientras el shell esta montado html/body no scrollean (cada panel gestiona su propio scroll).
+ */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+}
+html:has([data-app-shell]),
+html:has([data-app-shell]) body {
+  height: 100%;
+  overflow: hidden;
+}
+
 /* Transicion suave al cambiar de tema (solo mientras <html> tiene .theme-transition). */
 .theme-transition,
 .theme-transition *,

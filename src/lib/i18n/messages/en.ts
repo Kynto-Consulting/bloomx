@@ -132,8 +132,8 @@ const en: Messages = {
             contrast: { label: 'High contrast', description: 'Black and white with strong borders (AAA accessibility).' },
         },
         mailModes: {
-            paper: { label: 'Light paper', description: 'The email is shown as is, on a white background. The most faithful and legible option.' },
-            invert: { label: 'Darken email', description: 'Inverts the email colors (images are preserved). May alter brand designs.' },
+            paper: { label: 'Light paper', description: 'The email is shown as is, on a white background.' },
+            invert: { label: 'Darken email', description: 'Inverts the email colors (images are preserved). May alter brand designs. Default option.' },
         },
     },
     admin: {
@@ -1014,7 +1014,7 @@ const en: Messages = {
             encrypted: 'Encrypted in transit (TLS)', encryptedWith: 'Encrypted in transit ({tls})', notEncrypted: 'Not encrypted in transit', unknown: 'No data',
         },
         quote: { show: 'Show quoted text', hide: 'Hide quoted text', unmatched: 'The quoted text does not match other messages in this conversation (it may be incomplete), so it is shown in full.' },
-        body: { title: 'Email content', loading: 'Loading message…', failed: 'This message could not be displayed.', retry: 'Retry', viewText: 'View plain text', viewHtml: 'View original formatting', empty: 'This message has no content to display.' },
+        body: { title: 'Email content', loading: 'Loading message…', failed: 'This message could not be displayed.', retry: 'Retry', viewText: 'View plain text', viewHtml: 'View original formatting', empty: 'This message has no content to display.', onlyAttachmentOne: 'This message has no text; it only contains {n} attachment.', onlyAttachmentMany: 'This message has no text; it only contains {n} attachments.', authReport: 'Automated domain authentication report (DMARC / TLS-RPT).' },
         images: {
             blocked: 'Remote images were blocked to protect your privacy (they can tell the sender you opened the email).',
             load: 'Load remote images',

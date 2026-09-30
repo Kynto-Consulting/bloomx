@@ -53,7 +53,7 @@ export function JoinMeetingButton({ link }: { link: JoinLinkResult }) {
             target="_blank"
             rel="noopener noreferrer"
             aria-label={t('mailMeeting.joinAria', { provider: link.providerName })}
-            className="inline-flex items-center gap-2 rounded-full border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            className="inline-flex min-h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-card"
         >
             <MeetingProviderIcon provider={link.provider} className="h-4 w-4 shrink-0" />
             {t('mailMeeting.join', { provider: link.providerName })}

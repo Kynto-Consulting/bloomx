@@ -122,7 +122,7 @@ const IFRAME_SCRIPT = `
 
 /**
  * Tema del correo derivado de los tokens del tema activo (ver `@/lib/mail-theme`): papel, texto,
- * enlaces (--link), citas, tipografia y avisos. 'paper' (defecto) o 'invert' (invert + hue-rotate con colores
+ * enlaces (--link), citas, tipografia y avisos. 'invert' (defecto) o 'paper' (invert + hue-rotate con colores
  * pre-invertidos e imagenes re-invertidas). Solo se concatenan colores calculados por nosotros.
  */
 function buildThemeCss(scheme: 'light' | 'dark', invertMode: boolean): string {

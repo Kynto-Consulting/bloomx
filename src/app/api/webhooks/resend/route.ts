@@ -26,6 +26,7 @@ import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableS
 import { assignThread, headersOfInbound } from '@/lib/thread-store';
 import { threadInfoFromRecord } from '@/lib/thread-headers';
 import { subjectLooksLikeReply } from '@/lib/threading';
+import { EMPTY_BODY_MARKER_HTML } from '@/lib/mail-empty-body';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -368,7 +369,7 @@ async function handleEmailReceived(data: any, rawPayload: string) {
     if (!html && !text) {
         console.warn('[resend] Email body was still unavailable after Resend API fallback.');
         // Fallback for missing content if fetch also failed
-        const placeholder = '<div style="padding: 20px; text-align: center; color: #666; background: #f9f9f9; border-radius: 8px;"><p><strong>Content Unavailable</strong></p><p>The email provider did not include the message body.</p></div>';
+        const placeholder = EMPTY_BODY_MARKER_HTML;
         uploads.push(uploadToStorage(htmlKey, placeholder, 'text/html'));
     } else {
         if (html) {
