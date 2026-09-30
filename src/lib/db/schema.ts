@@ -210,6 +210,9 @@ const TABLES: TableSpec[] = [
             { name: 'status', definition: "TEXT NOT NULL DEFAULT 'ready'" },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'draftId', definition: 'TEXT' },
+            // Content-ID (sin angulos) de imagenes inline; resuelve `cid:` antes que el nombre de archivo. Aditivo y nulo por defecto.
+            // Se escribe por SQL best-effort (lib/attachment-content-id.ts): la ingesta no falla si la columna aun no existe.
+            { name: 'contentId', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Attachment_pkey', statement: 'ALTER TABLE "Attachment" ADD CONSTRAINT "Attachment_pkey" PRIMARY KEY ("id")' },
@@ -247,6 +250,14 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "EmailEvent_resendEmailId_idx" ON "EmailEvent" ("resendEmailId")',
             'CREATE INDEX IF NOT EXISTS "EmailEvent_emailId_idx" ON "EmailEvent" ("emailId")',
             'CREATE INDEX IF NOT EXISTS "EmailEvent_type_idx" ON "EmailEvent" ("type")',
+            // Idempotencia atomica de POST /api/emails: una sola fila por (usuario, Idempotency-Key). Ver lib/send-idempotency.ts.
+            `DO $$
+            BEGIN
+                CREATE UNIQUE INDEX IF NOT EXISTS "EmailEvent_send_idem_key" ON "EmailEvent" ("type") WHERE "type" LIKE 'send_idem:%';
+            EXCEPTION
+                WHEN unique_violation THEN
+                    RAISE NOTICE 'EmailEvent: hay claves send_idem duplicadas; indice unico parcial omitido.';
+            END $$`,
         ],
     },
     {
@@ -797,11 +808,154 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "RevokedSession_userId_idx" ON "RevokedSession" ("userId")',
         ],
     },
+    {
+        name: 'ElixirTemplate',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ElixirTemplate" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "name" TEXT NOT NULL,
+            "subject" TEXT NOT NULL DEFAULT '',
+            "body" TEXT NOT NULL DEFAULT '',
+            "senderConfig" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'name', definition: 'TEXT NOT NULL' },
+            { name: 'subject', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'body', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'senderConfig', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ElixirTemplate_pkey', statement: 'ALTER TABLE "ElixirTemplate" ADD CONSTRAINT "ElixirTemplate_pkey" PRIMARY KEY ("id")' },
+            { name: 'ElixirTemplate_userId_fkey', statement: 'ALTER TABLE "ElixirTemplate" ADD CONSTRAINT "ElixirTemplate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE UNIQUE INDEX IF NOT EXISTS "ElixirTemplate_userId_name_key" ON "ElixirTemplate" ("userId", "name")',
+            'CREATE INDEX IF NOT EXISTS "ElixirTemplate_userId_updatedAt_idx" ON "ElixirTemplate" ("userId", "updatedAt")',
+        ],
+    },
+    {
+        name: 'ElixirCampaign',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ElixirCampaign" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "name" TEXT NOT NULL DEFAULT '',
+            "status" TEXT NOT NULL DEFAULT 'draft',
+            "subject" TEXT NOT NULL,
+            "template" TEXT NOT NULL,
+            "senderConfig" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "options" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "total" INTEGER NOT NULL DEFAULT 0,
+            "lockedUntil" TIMESTAMPTZ,
+            "lastError" TEXT,
+            "startedAt" TIMESTAMPTZ,
+            "finishedAt" TIMESTAMPTZ,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'name', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'draft'" },
+            { name: 'subject', definition: 'TEXT NOT NULL' },
+            { name: 'template', definition: 'TEXT NOT NULL' },
+            { name: 'senderConfig', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'options', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'total', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'lockedUntil', definition: 'TIMESTAMPTZ' },
+            { name: 'lastError', definition: 'TEXT' },
+            { name: 'startedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'finishedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ElixirCampaign_pkey', statement: 'ALTER TABLE "ElixirCampaign" ADD CONSTRAINT "ElixirCampaign_pkey" PRIMARY KEY ("id")' },
+            { name: 'ElixirCampaign_userId_fkey', statement: 'ALTER TABLE "ElixirCampaign" ADD CONSTRAINT "ElixirCampaign_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "ElixirCampaign_userId_createdAt_idx" ON "ElixirCampaign" ("userId", "createdAt")',
+            'CREATE INDEX IF NOT EXISTS "ElixirCampaign_status_idx" ON "ElixirCampaign" ("status")',
+        ],
+    },
+    {
+        name: 'ElixirCampaignRow',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ElixirCampaignRow" (
+            "campaignId" TEXT NOT NULL,
+            "idx" INTEGER NOT NULL,
+            "email" TEXT NOT NULL DEFAULT '',
+            "recipient" TEXT,
+            "data" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "status" TEXT NOT NULL DEFAULT 'pending',
+            "attempts" INTEGER NOT NULL DEFAULT 0,
+            "nextAttemptAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "message" TEXT,
+            "code" TEXT,
+            "resendEmailId" TEXT,
+            "sentAt" TIMESTAMPTZ,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'campaignId', definition: 'TEXT NOT NULL' },
+            { name: 'idx', definition: 'INTEGER NOT NULL' },
+            { name: 'email', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'recipient', definition: 'TEXT' },
+            { name: 'data', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'pending'" },
+            { name: 'attempts', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'nextAttemptAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'message', definition: 'TEXT' },
+            { name: 'code', definition: 'TEXT' },
+            { name: 'resendEmailId', definition: 'TEXT' },
+            { name: 'sentAt', definition: 'TIMESTAMPTZ' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ElixirCampaignRow_pkey', statement: 'ALTER TABLE "ElixirCampaignRow" ADD CONSTRAINT "ElixirCampaignRow_pkey" PRIMARY KEY ("campaignId", "idx")' },
+            { name: 'ElixirCampaignRow_campaignId_fkey', statement: 'ALTER TABLE "ElixirCampaignRow" ADD CONSTRAINT "ElixirCampaignRow_campaignId_fkey" FOREIGN KEY ("campaignId") REFERENCES "ElixirCampaign"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            // Idempotencia por (campana, destinatario): "recipient" es NULL en filas no enviables (invalidas/duplicadas).
+            'CREATE UNIQUE INDEX IF NOT EXISTS "ElixirCampaignRow_campaignId_recipient_key" ON "ElixirCampaignRow" ("campaignId", "recipient")',
+            'CREATE INDEX IF NOT EXISTS "ElixirCampaignRow_campaignId_status_nextAttemptAt_idx" ON "ElixirCampaignRow" ("campaignId", "status", "nextAttemptAt")',
+            'CREATE INDEX IF NOT EXISTS "ElixirCampaignRow_resendEmailId_idx" ON "ElixirCampaignRow" ("resendEmailId")',
+            'CREATE INDEX IF NOT EXISTS "ElixirCampaignRow_sentAt_idx" ON "ElixirCampaignRow" ("sentAt")',
+        ],
+    },
 ];
 
 let ensureSchemaPromise: Promise<void> | null = null;
 
-async function ensureConstraint(pool: Pool, tableName: string, constraint: ConstraintSpec) {
+type Queryable = Pick<Pool, 'query'>;
+
+// Clave del candado consultivo que serializa el DDL entre instancias (varios arranques serverless / build + runtime).
+// Sin el, dos CREATE TABLE IF NOT EXISTS simultaneos fallan con 23505 en pg_type_typname_nsp_index (verificado en
+// Postgres real, ver src/lib/__tests__/schema.pg.test.ts). Es un candado de TRANSACCION: funciona tambien tras el
+// pooler de Neon (pgbouncer en modo transaccion), donde los candados de sesion no son fiables.
+const DDL_LOCK_KEY = 7_262_016_001;
+
+async function withDdlLock(pool: Pool, fn: (q: Queryable) => Promise<void>) {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock($1)', [DDL_LOCK_KEY]);
+        await fn(client);
+        await client.query('COMMIT');
+    } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
+async function ensureConstraint(pool: Queryable, tableName: string, constraint: ConstraintSpec) {
     await pool.query(`
         DO $$
         BEGIN
@@ -827,7 +981,7 @@ async function ensureConstraint(pool: Pool, tableName: string, constraint: Const
     `);
 }
 
-async function ensureTable(pool: Pool, table: TableSpec) {
+async function ensureTable(pool: Queryable, table: TableSpec) {
     await pool.query(table.createStatement);
 
     for (const column of table.columns) {
@@ -845,7 +999,7 @@ async function ensureTable(pool: Pool, table: TableSpec) {
     }
 }
 
-async function cleanupLegacyEmailAccountField(pool: Pool) {
+async function cleanupLegacyEmailAccountField(pool: Queryable) {
     // Remove legacy artifacts from previous mailbox-account implementation.
     await pool.query('DROP INDEX IF EXISTS "Email_accountEmail_idx"');
     await pool.query('ALTER TABLE "Email" DROP COLUMN IF EXISTS "accountEmail"');
@@ -855,10 +1009,11 @@ export async function ensureDatabaseSchema() {
     if (!ensureSchemaPromise) {
         ensureSchemaPromise = (async () => {
             const pool = getDbPool();
+            // Una transaccion por tabla (no una gigante): el candado se retiene poco tiempo y un fallo deja las demas intactas.
             for (const table of TABLES) {
-                await ensureTable(pool, table);
+                await withDdlLock(pool, (q) => ensureTable(q, table));
             }
-            await cleanupLegacyEmailAccountField(pool);
+            await withDdlLock(pool, (q) => cleanupLegacyEmailAccountField(q));
         })().catch((error) => {
             ensureSchemaPromise = null;
             throw error;
