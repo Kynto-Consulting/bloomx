@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarDays, ChevronLeft, ChevronRight, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/components/I18nProvider';
 
 export interface DateTimePickerProps {
     value: string;           // YYYY-MM-DDTHH:mm  or ''
@@ -15,11 +16,23 @@ export interface DateTimePickerProps {
     dateOnly?: boolean;
     /** Nombre accesible del campo (p. ej. "Starts"); se combina con el valor mostrado. */
     ariaLabel?: string;
+    /** id del boton disparador (para que un <label htmlFor> lo enfoque). */
+    id?: string;
+    /** Marca el campo como invalido (borde de error). */
+    invalid?: boolean;
 }
 
-const MONTHS = ['January','February','March','April','May','June',
-    'July','August','September','October','November','December'];
-const DAYS_SHORT = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+/** Nombres de mes / dia en el idioma de la app (Intl); domingo primero, igual que la rejilla. */
+function monthName(index: number, locale: string): string {
+    try { return new Intl.DateTimeFormat(locale, { month: 'long' }).format(new Date(2021, index, 1)); } catch { return String(index + 1); }
+}
+function weekdayShort(index: number, locale: string): string {
+    try { return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(new Date(2021, 7, 1 + index)); } catch { return String(index); }
+}
+const PICKER_TEXT = {
+    es: { date: 'Seleccionar fecha', dateTime: 'Seleccionar fecha y hora', dateLabel: 'Seleccionar fecha', dateTimeLabel: 'Seleccionar fecha y hora', prev: 'Mes anterior', next: 'Mes siguiente' },
+    en: { date: 'Select date', dateTime: 'Select date & time', dateLabel: 'Select date', dateTimeLabel: 'Select date and time', prev: 'Previous month', next: 'Next month' },
+} as const;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -34,13 +47,13 @@ function parseValue(v: string): { date: string; time: string } {
     return { date, time: rest.slice(0, 5) };
 }
 
-function formatDisplay(v: string, dateOnly?: boolean): string {
+function formatDisplay(v: string, dateOnly?: boolean, locale?: string): string {
     if (!v) return '';
     const d = new Date(v.includes('T') ? v : `${v}T00:00`);
     if (isNaN(d.getTime())) return v;
     return dateOnly
-        ? d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-        : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+        ? d.toLocaleDateString(locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+        : d.toLocaleString(locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // 15-min quick picks
@@ -54,8 +67,10 @@ function buildTimes(): string[] {
 const QUICK_TIMES = buildTimes();
 
 export function DateTimePicker({
-    value, onChange, placeholder, disabled, className, minDate, dateOnly, ariaLabel,
+    value, onChange, placeholder, disabled, className, minDate, dateOnly, ariaLabel, id, invalid,
 }: DateTimePickerProps) {
+    const { locale: appLocale, intlLocale } = useI18n();
+    const txt = PICKER_TEXT[appLocale === 'en' ? 'en' : 'es'];
     const triggerRef = useRef<HTMLButtonElement>(null);
     const dropdownRef = useRef<HTMLDivElement>(null);
     const timeListRef = useRef<HTMLDivElement>(null);
@@ -186,8 +201,8 @@ export function DateTimePicker({
 
     // Displayed text uses localValue so it updates immediately on interaction
     const displayText = localValue
-        ? formatDisplay(localValue, dateOnly)
-        : (placeholder ?? (dateOnly ? 'Select date' : 'Select date & time'));
+        ? formatDisplay(localValue, dateOnly, intlLocale)
+        : (placeholder ?? (dateOnly ? txt.date : txt.dateTime));
 
     // Calendar grid
     const firstDow = new Date(calYear, calMonth, 1).getDay();
@@ -202,7 +217,7 @@ export function DateTimePicker({
         <div
             ref={dropdownRef}
             role="dialog"
-            aria-label={dateOnly ? 'Select date' : 'Select date and time'}
+            aria-label={dateOnly ? txt.dateLabel : txt.dateTimeLabel}
             style={{
                 position: 'fixed',
                 top: pos.top,
@@ -218,17 +233,17 @@ export function DateTimePicker({
                 {/* Calendar */}
                 <div className={cn('flex-1 p-3', !dateOnly && 'border-r border-border')}>
                     <div className="flex items-center justify-between mb-2">
-                        <button type="button" onClick={prevMonth} aria-label="Previous month" className="p-2 rounded hover:bg-accent transition-colors">
+                        <button type="button" onClick={prevMonth} aria-label={txt.prev} className="p-2 rounded hover:bg-accent transition-colors">
                             <ChevronLeft className="h-4 w-4" />
                         </button>
-                        <span className="text-sm font-semibold">{MONTHS[calMonth]} {calYear}</span>
-                        <button type="button" onClick={nextMonth} aria-label="Next month" className="p-2 rounded hover:bg-accent transition-colors">
+                        <span className="text-sm font-semibold">{monthName(calMonth, intlLocale)} {calYear}</span>
+                        <button type="button" onClick={nextMonth} aria-label={txt.next} className="p-2 rounded hover:bg-accent transition-colors">
                             <ChevronRight className="h-4 w-4" />
                         </button>
                     </div>
                     <div className="grid grid-cols-7 mb-1">
-                        {DAYS_SHORT.map(d => (
-                            <div key={d} className="text-center text-[11px] font-medium text-muted-foreground py-1">{d}</div>
+                        {Array.from({ length: 7 }, (_, i) => weekdayShort(i, intlLocale)).map((d, i) => (
+                            <div key={i} className="text-center text-[11px] font-medium text-muted-foreground py-1">{d.slice(0, 2)}</div>
                         ))}
                     </div>
                     <div className="grid grid-cols-7 gap-y-0.5">
@@ -243,7 +258,7 @@ export function DateTimePicker({
                                     key={key}
                                     type="button"
                                     disabled={isPast}
-                                    aria-label={date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                                    aria-label={date.toLocaleDateString(intlLocale, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                                     aria-pressed={isSelected}
                                     aria-current={isToday ? 'date' : undefined}
                                     onClick={() => handleDayClick(date)}
@@ -315,7 +330,9 @@ export function DateTimePicker({
         <>
             <button
                 ref={triggerRef}
+                id={id}
                 type="button"
+                aria-invalid={invalid ? true : undefined}
                 disabled={disabled}
                 aria-haspopup="dialog"
                 aria-expanded={open}
@@ -324,6 +341,7 @@ export function DateTimePicker({
                 className={cn(
                     'flex items-center gap-2 text-left text-sm px-3 py-2 rounded-lg border border-input bg-background hover:bg-accent transition-colors w-full min-h-[38px]',
                     !value && 'text-muted-foreground',
+                    invalid && 'border-destructive',
                     disabled && 'opacity-50 cursor-not-allowed',
                     className,
                 )}

@@ -90,7 +90,7 @@ describe('Layout', () => {
     it('Grid usa la escala responsiva y el limite de altura', async () => {
         await mount(<Grid columns={3} maxHeight="sm">x</Grid>);
         const g = q('.grid')!;
-        expect(g.className).toContain('sm:grid-cols-2');
+        expect(g.className).toContain('grid-cols-2 sm:grid-cols-3');
         expect(g.className).toContain('max-h-40');
     });
 });

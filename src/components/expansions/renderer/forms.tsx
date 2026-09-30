@@ -5,12 +5,14 @@ import { toast } from 'sonner';
 import { coerceProps } from '@/lib/expansions/ui-schema';
 import { fieldRules, validateFields, validateValue, type FieldRules } from '@/lib/expansions/form-rules';
 import {
-    CheckboxField, ColorPickerField, ContactPickerField, DatePickerField, FileInputField, RadioGroupField, SelectField, SliderField,
+    CheckboxField, ColorPickerField, ContactPickerField, DatePickerField, DateTimeField, FileInputField, RadioGroupField, SelectField, SliderField,
     TagInputField, TextArea, TextInput, TimePickerField, ToggleField, type ContactSuggestion,
 } from '../kit/Fields';
 import { FormShell, type FormStatus } from '../kit/Data';
 import { useKitStrings } from '../kit/strings';
 import { ExtensionLoader } from '../ExtensionLoader';
+import { EventLocationField } from './EventLocationField';
+import { browserTimeZone, isEndAfterStart, nextEndAfterStartChange, timeZoneOptions, zonedLocalToDate } from '@/lib/expansions/client/datetime';
 import { getPath } from './state';
 import type { NodeEnv } from './nodes';
 
@@ -107,7 +109,8 @@ export function FieldNode({ type, raw, r, env }: { type: string; raw: Record<str
 
     switch (type) {
         case 'INPUT':
-            return <TextInput {...common} type={r.type} value={value} defaultValue={managed ? undefined : r.defaultValue} onChange={change} placeholder={text(r.placeholder)} maxLength={r.maxLength} min={r.min} max={r.max} step={r.step} autoFocus={r.autoFocus} />;
+            if (r.type === 'datetime-local') return <DateTimeField {...common} value={value} defaultValue={managed ? undefined : r.defaultValue} onChange={change} placeholder={text(r.placeholder)} />;
+            return <TextInput {...common} type={r.type} value={value} defaultValue={managed ? undefined : r.defaultValue} onChange={change} placeholder={text(r.placeholder)} maxLength={r.maxLength} min={r.min} max={r.max} step={r.step} autoFocus={r.autoFocus} onEnter={!formName && raw.onSubmit ? () => { void env.run(raw.onSubmit, null, { value }); } : undefined} />;
         case 'TEXTAREA':
             return <TextArea {...common} value={value} defaultValue={managed ? undefined : r.defaultValue} onChange={change} placeholder={text(r.placeholder)} rows={r.rows} maxLength={r.maxLength} mono={r.mono} />;
         case 'SELECT':
@@ -182,7 +185,7 @@ function buildDefaults(fields: any[]): Record<string, any> {
     for (const field of fields) {
         if (!field || typeof field !== 'object' || !field.name) continue;
         const kind = String(field.type || 'text');
-        defaults[field.name] = field.defaultValue ?? (kind === 'checkbox' || kind === 'toggle' || kind === 'switch' ? false : kind === 'tags' || kind === 'contacts' ? [] : '');
+        defaults[field.name] = field.defaultValue ?? (kind === 'timezone' ? browserTimeZone() : undefined) ?? (kind === 'checkbox' || kind === 'toggle' || kind === 'switch' ? false : kind === 'tags' || kind === 'contacts' ? [] : '');
     }
     return defaults;
 }
@@ -195,8 +198,9 @@ export function fieldToNode(field: Record<string, any>): { type: string; props: 
     const { type: _omit, ...rest } = field;
     const map: Record<string, string> = {
         textarea: 'TEXTAREA', richtext: 'TEXTAREA', select: 'SELECT', checkbox: 'CHECKBOX', toggle: 'TOGGLE', switch: 'TOGGLE', radio: 'RADIO_GROUP',
-        slider: 'SLIDER', range: 'SLIDER', date: 'DATE_PICKER', time: 'TIME_PICKER', color: 'COLOR_PICKER', tags: 'TAG_INPUT', contacts: 'CONTACT_PICKER', file: 'FILE_INPUT',
+        timezone: 'SELECT', slider: 'SLIDER', range: 'SLIDER', date: 'DATE_PICKER', time: 'TIME_PICKER', color: 'COLOR_PICKER', tags: 'TAG_INPUT', contacts: 'CONTACT_PICKER', file: 'FILE_INPUT',
     };
+    if (kind === 'timezone') return { type: 'SELECT', props: { ...rest, options: timeZoneOptions(typeof field.defaultValue === 'string' ? field.defaultValue : undefined) } };
     if (map[kind]) return { type: map[kind], props: rest };
     return { type: 'INPUT', props: { ...rest, type: INPUT_TYPES.has(kind) ? kind : 'text' } };
 }
@@ -237,6 +241,11 @@ export function FormNode({ raw, r, env, children }: { raw: Record<string, any>; 
     const setValue = useCallback((fieldName: string, value: any) => {
         touchedRef.current.add(fieldName);
         const next = { ...valuesRef.current, [fieldName]: value };
+        // Inicio -> fin: si el fin falta o ya no es posterior, se mueve a inicio + 1 h (igual que el calendario).
+        if (fieldName === 'startsAt' && 'endsAt' in next) {
+            const advanced = nextEndAfterStartChange(value, next.endsAt);
+            if (advanced) { next.endsAt = advanced; touchedRef.current.add('endsAt'); }
+        }
         valuesRef.current = next;
         setValues(next);
         setErrors((prev) => {
@@ -265,14 +274,15 @@ export function FormNode({ raw, r, env, children }: { raw: Record<string, any>; 
         return () => { metaRef.current.delete(fieldName); };
     }, []);
 
-    const timeZone = typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
+    // Zona de las horas del formulario: la del campo `timeZone` si existe; si no, la del navegador.
+    const timeZone = (typeof values.timeZone === 'string' && values.timeZone) || browserTimeZone();
 
     const buildSubmission = (): Record<string, any> => {
         const submission: Record<string, any> = { ...valuesRef.current, timeZone, timezone: timeZone, submittedAt: new Date().toISOString() };
         for (const field of fields) {
             if (field?.type !== 'datetime-local' || !field?.name) continue;
             const raw = String(valuesRef.current[field.name] ?? '').trim();
-            const parsed = raw ? new Date(raw) : null;
+            const parsed = raw ? zonedLocalToDate(raw, timeZone) : null;
             if (!raw || !parsed || Number.isNaN(parsed.getTime())) continue;
             submission[field.name] = parsed.toISOString();
             submission[`${field.name}Local`] = raw;
@@ -285,6 +295,8 @@ export function FormNode({ raw, r, env, children }: { raw: Record<string, any>; 
         const all = valuesRef.current;
         const list = Array.from(metaRef.current.entries()).map(([fieldName, meta]) => ({ name: fieldName, label: meta.label, rules: meta.rules, type: meta.type }));
         const found = validateFields(list, all, strings);
+        // Fin posterior al inicio (campos startsAt / endsAt): el mismo aviso en el campo del fin.
+        if (!found.endsAt && metaRef.current.has('endsAt') && !isEndAfterStart(all.startsAt, all.endsAt)) found.endsAt = strings.endBeforeStart;
         if (Object.keys(found).length > 0) {
             setErrors(found);
             setStatus('idle');
@@ -344,6 +356,10 @@ export function FormNode({ raw, r, env, children }: { raw: Record<string, any>; 
                         const props = coerceProps(node.type, node.props);
                         const control = <FieldNode key={`f-${index}`} type={node.type} raw={node.props} r={props} env={env} />;
                         if (!field.mountPoint) return control;
+                        if (field.mountPoint === 'EVENT_LOCATION_BUILDER') {
+                            const recipients = [env.context?.to, env.context?.cc].flatMap((list) => (Array.isArray(list) ? list : [])).filter((e): e is string => typeof e === 'string');
+                            return <EventLocationField key={`f-${index}`} control={control} fieldName={String(field.name || 'location')} values={values} setValue={setValue} recipients={recipients} />;
+                        }
                         const mount = <ExtensionLoader mountPoint={field.mountPoint} context={buildMountContext(field)} />;
                         return field.mountInline
                             ? <div key={`f-${index}`} className="flex items-end gap-2"><div className="min-w-0 flex-1">{control}</div><div className="shrink-0">{mount}</div></div>

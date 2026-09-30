@@ -9,8 +9,9 @@
  * Validacion: si se pasan `rules`/`required`, el campo valida al perder el foco (form-rules.ts); `error` externo manda.
  */
 import * as React from 'react';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, Search, X } from 'lucide-react';
 import { SIZES } from '@/lib/expansions/ui-schema';
+import { DateTimePicker } from '@/components/ui/DateTimePicker';
 import { fieldRules, isValidEmail, validateValue, type FieldRules } from '@/lib/expansions/form-rules';
 import {
     CHECK_CLASS, ERROR_TEXT_CLASS, FIELD_CLASS, FIELD_SIZE_CLASS, FOCUS_RING_CLASS, HELPER_CLASS, LABEL_CLASS, MENU_ITEM_CLASS, POPOVER_CLASS,
@@ -142,6 +143,8 @@ export interface TextInputProps extends CommonFieldProps {
     max?: number | string;
     step?: number;
     autoFocus?: boolean;
+    /** Enter en el campo (fuera de un formulario): p. ej. lanzar una busqueda. */
+    onEnter?: () => void;
 }
 
 export function TextInput(props: TextInputProps) {
@@ -164,15 +167,55 @@ export function TextInput(props: TextInputProps) {
     const label = text(props.label);
     return (
         <Field label={label} helperText={props.helperText} error={error} required={props.required} fallbackLabel={text(props.placeholder) ?? text(props.name)}>
-            {(a) => (
+            {(a) => {
+                const control = (
                 <input
                     id={a.id} name={text(props.name)} type={type} value={cur}
                     placeholder={text(props.placeholder)} disabled={props.disabled === true} readOnly={props.readOnly === true} autoFocus={props.autoFocus === true}
                     maxLength={!isNumber && !isDateTime ? finite(props.maxLength) : undefined}
                     min={isNumber ? finite(props.min) : isDateTime ? onlyIf(DATETIME_RE)(props.min) || undefined : undefined} max={isNumber ? finite(props.max) : isDateTime ? onlyIf(DATETIME_RE)(props.max) || undefined : undefined} step={isNumber || isDateTime ? finite(props.step) : undefined}
                     aria-label={a.ariaLabel} aria-describedby={a.describedBy} aria-invalid={a.invalid ? true : undefined} aria-required={a.required ? true : undefined}
-                    className={`${FIELD_CLASS} ${FIELD_SIZE_CLASS[sizeOf(props.size)]}`}
+                    className={`${FIELD_CLASS} ${FIELD_SIZE_CLASS[sizeOf(props.size)]} ${type === 'search' ? 'ps-9' : ''}`}
                     onChange={(e) => emit(e.target.value)} onBlur={touch}
+                    onKeyDown={props.onEnter ? (e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); props.onEnter?.(); } } : undefined}
+                />
+                );
+                // Busqueda: lupa decorativa dentro del campo.
+                return type === 'search' ? (
+                    <div className="relative w-full">
+                        <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                        {control}
+                    </div>
+                ) : control;
+            }}
+        </Field>
+    );
+}
+
+// ------------------------------------------------------------------ DateTimeField
+export interface DateTimeFieldProps extends CommonFieldProps {
+    value?: string | null;
+    defaultValue?: string;
+    onChange?: (value: string) => void;
+    placeholder?: string;
+}
+
+/** Fecha y hora con el MISMO selector que el calendario (valor AAAA-MM-DDTHH:mm, sin zona). */
+export function DateTimeField(props: DateTimeFieldProps) {
+    const [cur, setCur] = useControllable<string>(props.value, props.defaultValue ?? '', props.onChange, (v) => onlyIf(DATETIME_RE)(v));
+    const { error, touch } = useFieldError(cur, { ...props, type: 'datetime-local' });
+    return (
+        <Field label={props.label} helperText={props.helperText} error={error} required={props.required} fallbackLabel={text(props.placeholder) ?? text(props.name)}>
+            {(a) => (
+                <DateTimePicker
+                    id={a.id}
+                    value={cur.slice(0, 16)}
+                    onChange={(v) => { if (props.readOnly) return; setCur(v); touch(); }}
+                    placeholder={text(props.placeholder)}
+                    disabled={props.disabled === true || props.readOnly === true}
+                    invalid={a.invalid}
+                    ariaLabel={text(props.label) ?? text(props.placeholder) ?? text(props.name)}
+                    className="h-10 border-input bg-background"
                 />
             )}
         </Field>

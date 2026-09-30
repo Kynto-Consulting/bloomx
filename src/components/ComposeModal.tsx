@@ -36,6 +36,8 @@ import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { buildSealedEmailBody, createSealedLink, validateSealOptions } from '@/lib/sealed/client';
 import { sealedMessages } from '@/lib/sealed/messages';
 import { useI18n } from '@/components/I18nProvider';
+import { useDictation } from '@/hooks/useDictation';
+import { dictationMessages, issueMessage } from '@/lib/dictation/dictation';
 import { emitComposeOpened } from '@/lib/expansions/client/emit-event';
 
 function extractPlainTextFromHtml(value: string) {
@@ -171,9 +173,9 @@ export function ComposeModal({
         beforeSendHandlers.current.push(handler);
     };
 
-    // Voice Dictation State
-    const [isListening, setIsListening] = useState(false);
-    const recognitionRef = useRef<any>(null);
+    // Voice Dictation (Web Speech API): el texto final se inserta en el cursor del editor; el provisional se ve en el rotulo.
+    const dictMsg = dictationMessages(uiLocale);
+    const dictation = useDictation({ locale: uiLocale, onText: (html) => editorRef.current?.insertContent(html) });
 
     // Resize state (Desktop)
     const [dimensions, setDimensions] = useState({ width: 500, height: 550 });
@@ -355,7 +357,6 @@ export function ComposeModal({
             // Cierre de la ventana (X, Escape): guardar ahora lo pendiente. Tras enviar/eliminar el saver
             // ya esta descartado y esto no hace nada.
             void saver?.flush();
-            try { recognitionRef.current?.stop?.(); } catch { /* ignorado */ }
         };
     }, []);
 
@@ -627,6 +628,7 @@ export function ComposeModal({
     const handleSend = async (e?: React.SyntheticEvent) => {
         e?.preventDefault();
         if (sending || isUploading) return;
+        dictation.stop();
 
         const finalBody = body;
         const finalTo = toTags;
@@ -891,6 +893,7 @@ export function ComposeModal({
         isGoogleLinked,
         isGoogleMeetAvailable,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        locale: uiLocale,
         ...actions,
         toast: (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
             if (type === 'success') toast.success(msg);
@@ -947,6 +950,11 @@ export function ComposeModal({
     // --- Accesibilidad: ids, dialogo, foco, Escape y Ctrl/Cmd+Enter ---
     const dialogRef = useRef<HTMLDivElement>(null);
     const uid = useId();
+    // Rotulo vivo del dictado: texto provisional, estado o error (role=status para lectores de pantalla).
+    const dictationCaption = dictation.issue
+        ? issueMessage(dictation.issue, dictMsg)
+        : dictation.status === 'starting' ? dictMsg.starting
+        : dictation.status === 'listening' ? (dictation.interim || dictMsg.listening) : '';
     const fromId = `${uid}-from`;
     const toId = `${uid}-to`;
     const ccId = `${uid}-cc`;
@@ -1410,6 +1418,24 @@ export function ComposeModal({
                     </div>
                 )}
 
+                {dictationCaption && (
+                    <div
+                        id={`${uid}-dictation`}
+                        role="status"
+                        aria-live="polite"
+                        className={cn(
+                            'flex items-start gap-2 px-4 py-2 text-xs border-t border-border',
+                            dictation.issue ? 'bg-destructive/10 text-destructive' : 'bg-muted/40 text-muted-foreground',
+                        )}
+                    >
+                        {dictation.status === 'listening' && !dictation.issue && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-destructive animate-pulse" aria-hidden="true" />}
+                        <span className={cn('min-w-0 flex-1 break-words', dictation.interim && !dictation.issue && 'italic text-foreground')}>{dictationCaption}</span>
+                        {dictation.issue && (
+                            <button type="button" onClick={dictation.clearIssue} className="shrink-0 rounded p-0.5 hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={uiLocale === 'en' ? 'Dismiss' : 'Cerrar aviso'}><X className="h-3.5 w-3.5" aria-hidden="true" /></button>
+                        )}
+                    </div>
+                )}
+
                 {/* Footer / Send Button */}
                 <div className="flex items-center justify-between p-3 bg-muted/50 relative">
                     <div className="flex items-center gap-2">
@@ -1483,57 +1509,21 @@ export function ComposeModal({
                             {/* Voice Dictation */}
                             <button
                                 type="button"
-                                onClick={() => {
-                                    if (typeof window === 'undefined' || (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window))) {
-                                        toast.error('El dictado por voz no es compatible con este navegador.');
-                                        return;
-                                    }
-
-                                    if (isListening) {
-                                        recognitionRef.current?.stop();
-                                        setIsListening(false);
-                                        return;
-                                    }
-
-                                    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-                                    const recognition = new SpeechRecognition();
-                                    recognition.continuous = true;
-                                    recognition.interimResults = true;
-
-                                    recognition.onstart = () => setIsListening(true);
-                                    recognition.onend = () => setIsListening(false);
-                                    recognition.onerror = (e: any) => {
-                                        console.error(e);
-                                        setIsListening(false);
-                                    };
-
-                                    recognition.onresult = (event: any) => {
-                                        let finalTranscript = '';
-                                        // @ts-ignore
-                                        for (let i = event.resultIndex; i < event.results.length; ++i) {
-                                            if (event.results[i].isFinal) {
-                                                finalTranscript += event.results[i][0].transcript;
-                                            }
-                                        }
-                                        if (finalTranscript) {
-                                            editorRef.current?.insertContent(finalTranscript + ' ');
-                                        }
-                                    };
-
-                                    recognitionRef.current = recognition;
-                                    recognition.start();
-                                }}
+                                onClick={dictation.toggle}
+                                disabled={!dictation.supported}
                                 className={cn(
-                                    "p-2 rounded-full transition-colors relative",
-                                    isListening ? "text-destructive bg-destructive/10 animate-pulse" : "text-muted-foreground hover:bg-secondary"
+                                    'p-2 rounded-full transition-colors relative focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                    dictation.listening ? 'text-destructive bg-destructive/10' : 'text-muted-foreground hover:bg-secondary',
+                                    !dictation.supported && 'opacity-50 cursor-not-allowed hover:bg-transparent',
                                 )}
-                                title="Dictar"
-                                aria-label={isListening ? 'Detener dictado' : 'Dictar'}
-                                aria-pressed={isListening}
+                                title={!dictation.supported ? dictMsg.unsupportedTooltip : dictation.listening ? dictMsg.stop : dictMsg.start}
+                                aria-label={dictation.listening ? dictMsg.stop : dictMsg.start}
+                                aria-pressed={dictation.listening}
+                                aria-describedby={dictationCaption ? `${uid}-dictation` : undefined}
                             >
-                                <Mic className="w-5 h-5" />
-                                {isListening && (
-                                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                                {dictation.status === 'starting' ? <Loader2 className="w-5 h-5 animate-spin" aria-hidden="true" /> : <Mic className="w-5 h-5" aria-hidden="true" />}
+                                {dictation.status === 'listening' && (
+                                    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5" aria-hidden="true">
                                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-destructive/70 opacity-75"></span>
                                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-destructive"></span>
                                     </span>

@@ -136,10 +136,11 @@ function ImageButton({ r, raw, env }: { r: Record<string, any>; raw: Record<stri
         <button
             type="button"
             onClick={() => { if (raw.onClick) void env.run(raw.onClick, null); }}
-            className={`block w-full overflow-hidden rounded-md transition-opacity hover:opacity-80 ${FOCUS_RING_CLASS}`}
+            aria-label={text(r.alt) || undefined}
+            className={`block aspect-square w-full overflow-hidden rounded-md border border-border bg-muted transition hover:border-ring hover:opacity-90 ${FOCUS_RING_CLASS}`}
         >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={text(r.alt) ?? ''} className="h-auto w-full object-cover" />
+            <img src={src} alt={text(r.alt) ?? ''} loading="lazy" decoding="async" className="h-full w-full object-cover" />
         </button>
     );
 }

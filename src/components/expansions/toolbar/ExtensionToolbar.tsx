@@ -48,12 +48,41 @@ const MENU_WIDTH = 320;
 
 const numeric = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : fallback);
 
+/**
+ * Un BUTTON con `menuOptions` (o un MENU con `items`) en una barra no puede desplegar su propio menu (la barra recorta lo que
+ * sobresale) ni se vera como el resto: cada opcion pasa a ser una accion normal de la barra (icono, tooltip, fila del menu
+ * "Extensiones"). El resto de mounts se devuelve igual.
+ */
+export function expandMenuMounts(mounts: ToolbarMount[]): ToolbarMount[] {
+    return mounts.flatMap((mount) => {
+        const component = mount.component;
+        const props = component?.props ?? {};
+        const options: any[] | null = component?.type === 'BUTTON' && Array.isArray(props.menuOptions) ? props.menuOptions
+            : component?.type === 'MENU' && Array.isArray(props.items) ? props.items : null;
+        const usable = (options ?? []).filter((o) => o && typeof o === 'object' && !o.separator && o.onClick && typeof o.label === 'string' && o.label);
+        if (!options || usable.length === 0) return [mount];
+        return usable.map((option, i): ToolbarMount => ({
+            ...mount,
+            id: `${mount.id ?? 'menu'}-opt${i}`,
+            component: {
+                type: 'BUTTON',
+                props: {
+                    label: option.label,
+                    icon: typeof option.icon === 'string' && option.icon ? option.icon : props.icon,
+                    onClick: option.onClick,
+                    ...(typeof option.description === 'string' ? { toolbar: { description: option.description } } : {}),
+                },
+            },
+        }));
+    });
+}
+
 /** Convierte los mounts en acciones anclables (BUTTON/ICON_BUTTON) y en piezas "a medida" (cualquier otro tipo), que se pintan tal cual. */
 export function buildToolbarItems(mountPoint: string, mounts: ToolbarMount[]): { items: Array<ToolbarItem & { mount: ToolbarMount }>; custom: ToolbarMount[] } {
     const items: Array<ToolbarItem & { mount: ToolbarMount }> = [];
     const custom: ToolbarMount[] = [];
     const seen = new Set<string>();
-    mounts.forEach((mount, index) => {
+    expandMenuMounts(mounts).forEach((mount, index) => {
         const type = mount.component?.type;
         const props = mount.component?.props ?? {};
         if (!ACTION_TYPES.has(type)) { if (mount.component) custom.push(mount); return; }

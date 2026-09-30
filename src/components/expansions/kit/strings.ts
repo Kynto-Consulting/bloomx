@@ -15,7 +15,7 @@ const ES = {
     chooseFiles: 'Elegir archivos', fileTooLarge: 'El archivo supera el limite', stepOf: 'Paso', sortedAsc: 'orden ascendente', sortedDesc: 'orden descendente', sortBy: 'Ordenar por',
     minLength: 'Minimo {n} caracteres', maxLength: 'Maximo {n} caracteres', min: 'Debe ser al menos {n}', max: 'Debe ser como maximo {n}', minItems: 'Elige al menos {n}', maxItems: 'Elige como maximo {n}',
     pattern: 'El formato no es valido', email: 'Escribe un correo valido', url: 'Escribe una URL valida', invalidTag: 'Valor no valido', saved: 'Guardado', error: 'No se pudo completar',
-    extensions: 'Extensiones', manageExtensions: 'Gestionar extensiones', pinToBar: 'Anclar a la barra', unpinFromBar: 'Quitar de la barra', searchActions: 'Buscar acciones', noActions: 'No hay acciones', pinKeyHint: 'P: anclar o quitar', actionsCount: '{n} acciones',
+    endBeforeStart: 'El fin debe ser posterior al inicio', extensions: 'Extensiones', manageExtensions: 'Gestionar extensiones', pinToBar: 'Anclar a la barra', unpinFromBar: 'Quitar de la barra', searchActions: 'Buscar acciones', noActions: 'No hay acciones', pinKeyHint: 'P: anclar o quitar', actionsCount: '{n} acciones',
     extensionError: 'Esta extension no se pudo mostrar', extensionErrorHelp: 'El resto de la aplicacion sigue funcionando. Avisa al autor de la extension.', details: 'Detalles', errors: 'errores',
 };
 export type KitStrings = typeof ES;
@@ -28,7 +28,7 @@ const EN: KitStrings = {
     chooseFiles: 'Choose files', fileTooLarge: 'The file exceeds the limit', stepOf: 'Step', sortedAsc: 'sorted ascending', sortedDesc: 'sorted descending', sortBy: 'Sort by',
     minLength: 'At least {n} characters', maxLength: 'At most {n} characters', min: 'Must be at least {n}', max: 'Must be at most {n}', minItems: 'Choose at least {n}', maxItems: 'Choose at most {n}',
     pattern: 'The format is not valid', email: 'Enter a valid email', url: 'Enter a valid URL', invalidTag: 'Invalid value', saved: 'Saved', error: 'Could not complete',
-    extensions: 'Extensions', manageExtensions: 'Manage extensions', pinToBar: 'Pin to the bar', unpinFromBar: 'Remove from the bar', searchActions: 'Search actions', noActions: 'No actions', pinKeyHint: 'P: pin or unpin', actionsCount: '{n} actions',
+    endBeforeStart: 'The end must be after the start', extensions: 'Extensions', manageExtensions: 'Manage extensions', pinToBar: 'Pin to the bar', unpinFromBar: 'Remove from the bar', searchActions: 'Search actions', noActions: 'No actions', pinKeyHint: 'P: pin or unpin', actionsCount: '{n} actions',
     extensionError: 'This extension could not be displayed', extensionErrorHelp: 'The rest of the app keeps working. Let the extension author know.', details: 'Details', errors: 'errors',
 };
 

@@ -47,6 +47,8 @@ export function Row({ gap, align, justify, wrap, padding, children }: RowProps) 
         ALIGN_CLASS[pick<Align>(align, ALIGNS, 'center')],
         justify === undefined ? '' : JUSTIFY_CLASS[pick<Justify>(justify, JUSTIFIES, 'start')],
         wrap === true ? 'flex-wrap' : '', 'min-w-0',
+        // Un campo de texto/selector dentro de una fila ocupa el espacio sobrante; los botones conservan su tamano.
+        '[&>*:has(input:not([type=checkbox],[type=radio],[type=range]),textarea,select)]:min-w-0 [&>*:has(input:not([type=checkbox],[type=radio],[type=range]),textarea,select)]:flex-1 [&>button]:shrink-0',
     ].filter(Boolean).join(' ');
     return <div className={cls}>{children}</div>;
 }

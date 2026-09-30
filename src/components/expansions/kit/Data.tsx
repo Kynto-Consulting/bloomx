@@ -468,7 +468,8 @@ export function FormShell(props: FormShellProps) {
                     <KitIcon name="CircleCheck" size="md" className="mt-0.5 text-success" /><span>{str(props.successMessage, strings.saved)}</span>
                 </div>
             )}
-            <div className="flex flex-wrap items-center gap-2">
+            {/* Acciones al final; row-reverse deja el boton principal a la derecha sin cambiar el orden de tabulacion. */}
+            <div className="flex flex-row-reverse flex-wrap items-center justify-start gap-2 border-t border-border pt-4">
                 <button type="submit" disabled={loading} aria-busy={loading || undefined} className={buttonClasses({ variant: 'solid', tone: 'primary' })}>
                     {loading && <KitIcon name="LoaderCircle" size="sm" className="motion-safe:animate-spin" />}
                     {str(props.submitLabel, strings.submit)}

@@ -377,6 +377,7 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
             type: S.en(["text", "email", "password", "number", "search", "tel", "url", "datetime-local"], "Tipo de entrada.", { def: "text" }),
             maxLength: S.num("Longitud maxima.", { min: 0, max: 100000 }), min: S.num("Minimo (number)."), max: S.num("Maximo (number)."), step: S.num("Paso (number)."),
             autoFocus: S.bool("Enfoca al montar."), multiline: S.bool("Obsoleto: usa TEXTAREA."), rows: S.num("Obsoleto: usa TEXTAREA.", { min: 1, max: 40 }),
+            onSubmit: S.action("Accion al pulsar Enter en el campo (p. ej. una busqueda) fuera de un FORM."),
         },
     },
     TEXTAREA: {
