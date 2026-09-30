@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { setSessionCookie } from "@/lib/session";
+import { signPendingJWT } from "@/lib/jwt";
+import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
 import { auditLog, getClientIp, getDummyBcryptHash, rateLimit, rateLimitReset } from "@/lib/security";
 
 const NO_STORE = { "Cache-Control": "no-store" };
@@ -51,6 +53,26 @@ export async function POST(req: NextRequest) {
         }
 
         rateLimitReset(acctKey);
+
+        // Segundo factor (NIST 800-63B AAL2, CIS 6.3-6.5). No se emite cookie hasta verificarlo.
+        // Obligatorio para administradores (ADMIN_EMAILS); opcional para el resto si lo activaron.
+        const mfaRequired = mfaRequiredFor(user.email);
+        const mfa = await getMfaStatus(user.id);
+        if (mfaRequired && !mfa.available) {
+            // Fail-closed: no se puede exigir MFA sin su almacen (falta migrar el esquema)
+            auditLog("auth.login.mfa_unavailable", { userId: user.id, ip });
+            return NextResponse.json({ error: "Service temporarily unavailable" }, { status: 503, headers: NO_STORE });
+        }
+        if (mfa.available && (mfa.enabled || mfaRequired)) {
+            const mfaToken = await signPendingJWT("mfa", { sub: user.id }, 300);
+            auditLog("auth.login.mfa_challenge", { userId: user.id, ip, enroll: !mfa.enabled });
+            return NextResponse.json(
+                mfa.enabled
+                    ? { mfaRequired: true, mfaToken }
+                    : { mfaEnrollRequired: true, mfaToken },
+                { headers: NO_STORE }
+            );
+        }
 
         // Create Session
         const token = await setSessionCookie({

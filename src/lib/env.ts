@@ -34,6 +34,22 @@ const envSchema = z.object({
     GOOGLE_CLIENT_SECRET: z.string().optional(),
     NEXTAUTH_SECRET: z.string().min(1, "NEXTAUTH_SECRET is required"),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+
+    // --- Seguridad (todas opcionales; los modulos las leen de process.env en tiempo de uso) ---
+    // Claves: DATA_ENCRYPTION_KEY (+ _ID, DATA_ENCRYPTION_KEYS_PREVIOUS) para cifrado en reposo (lib/encryption.ts);
+    // ASSET_SIGNING_KEY para URLs firmadas (lib/asset-url.ts); MOLT_SIGNING_KEY para tokens molt.
+    DATA_ENCRYPTION_KEY: z.string().optional(),
+    DATA_ENCRYPTION_KEY_ID: z.string().optional(),
+    DATA_ENCRYPTION_KEYS_PREVIOUS: z.string().optional(),
+    ASSET_SIGNING_KEY: z.string().optional(),
+    // Sesion: SESSION_TTL_SECONDS (24h por defecto, inactividad) y SESSION_ABSOLUTE_MAX_SECONDS (14d).
+    SESSION_TTL_SECONDS: z.string().optional(),
+    SESSION_ABSOLUTE_MAX_SECONDS: z.string().optional(),
+    // Administradores (lista de emails separada por comas): MFA obligatorio (lib/mfa.ts, lib/admin-auth.ts).
+    ADMIN_EMAILS: z.string().optional(),
+    // Antivirus opcional (lib/av-hook.ts) y retencion (lib/retention.ts).
+    AV_SCAN_URL: z.string().optional(),
+    CRON_SECRET: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

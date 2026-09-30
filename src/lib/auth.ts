@@ -5,9 +5,12 @@ import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { auditLog, getDummyBcryptHash, rateLimit } from "@/lib/security";
+import { getSessionTtlSeconds } from "@/lib/jwt";
+import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
 
 export const authOptions: NextAuthOptions = {
-    adapter: PrismaAdapter(prisma),
+    // `prisma` lleva la extension de cifrado de tokens OAuth (lib/account-tokens.ts): el tipo ya no es PrismaClient puro.
+    adapter: PrismaAdapter(prisma as any),
     providers: [
         GoogleProvider({
             clientId: process.env.GOOGLE_CLIENT_ID || "",
@@ -52,6 +55,14 @@ export const authOptions: NextAuthOptions = {
                     return null;
                 }
 
+                // Este proveedor solo valida la contrasena: no puede saltarse el segundo factor. Las cuentas con MFA
+                // (activo u obligatorio) deben iniciar sesion por /api/auth/login + /api/auth/mfa/verify.
+                const mfa = await getMfaStatus(user.id).catch(() => null);
+                if (mfaRequiredFor(user.email) || !mfa || mfa.enabled) {
+                    auditLog("auth.nextauth.mfa_blocked", { userId: user.id, ip });
+                    return null;
+                }
+
                 auditLog("auth.nextauth.success", { userId: user.id, ip });
 
                 return {
@@ -65,7 +76,7 @@ export const authOptions: NextAuthOptions = {
     ],
     session: {
         strategy: "jwt",
-        maxAge: 30 * 24 * 60 * 60,
+        maxAge: getSessionTtlSeconds(),
     },
     pages: {
         signIn: "/login",

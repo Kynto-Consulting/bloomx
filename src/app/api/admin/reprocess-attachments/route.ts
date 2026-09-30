@@ -3,6 +3,11 @@ import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { getFromStorage, uploadToStorage } from '@/lib/storage';
 import { extractAttachmentsFromRawMime } from '@/lib/mime-attachments';
+import { validateAttachment } from '@/lib/file-type';
+import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
+import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { isAdminUserSession } from '@/lib/admin-auth';
+import { auditLog } from '@/lib/security';
 
 // Non-calendar attachment extraction, backed by the shared, robust MIME parser.
 function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
@@ -26,7 +31,7 @@ interface ProcessResult {
 }
 
 async function processEmail(
-    email: { id: string; rawKey: string | null; subject: string | null },
+    email: { id: string; userId?: string; rawKey: string | null; subject: string | null },
     dryRun: boolean,
 ): Promise<ProcessResult> {
     const base = { emailId: email.id, subject: email.subject, attachmentsAdded: 0 };
@@ -97,6 +102,8 @@ async function processEmail(
     const existing = await prisma.attachment.findMany({ where: { emailId: email.id } });
     const pendingRows = existing.filter(a => a.key === 'PENDING' || a.status === 'pending' || a.status === 'failed' || a.size === 0);
     const matchedIds = new Set<string>();
+    // Claves unicas: dos adjuntos con el mismo nombre ya no se sobrescriben
+    const usedKeys = new Set<string>(existing.map(a => String(a.key || '').toLowerCase()));
 
     // 5. Upload, then update matching PENDING rows or create new ones (skip writes in dryRun).
     let added = 0;
@@ -105,7 +112,19 @@ async function processEmail(
         if (existing.some(a => a.status === 'ready' && a.key !== 'PENDING' && a.filename.toLowerCase() === ext.filename.toLowerCase())) {
             continue;
         }
-        const attKey = `emails/${dateStr}/${uuid}/attachments/${ext.filename}`;
+        // Tipo real (magic-bytes) + antivirus opcional; lo bloqueado no se sube ni se rellena
+        const verdict = validateAttachment({ filename: ext.filename, declaredMime: ext.contentType, buffer: ext.buffer, direction: 'inbound' });
+        let blockReason: string | null = verdict.verdict === 'blocked' ? verdict.reason : null;
+        if (!blockReason && !dryRun) {
+            const av = await scanBuffer(ext.buffer, ext.filename, { userId: email.userId });
+            if (avShouldBlock(av)) blockReason = av.status === 'infected' ? 'av_infected' : 'av_unavailable';
+        }
+        if (blockReason) {
+            auditLog('attachment.blocked', { userId: email.userId, emailId: email.id, reason: blockReason, direction: 'inbound', source: 'reprocess' });
+            continue;
+        }
+        ext.contentType = verdict.storeMime;
+        const attKey = uniqueAttachmentKey(`emails/${dateStr}/${uuid}/attachments`, ext.filename, usedKeys);
 
         // Prefer to fill a PENDING row: exact filename, else same mime-type, else any leftover.
         const match =
@@ -158,9 +177,12 @@ export async function POST(req: NextRequest) {
     // rows yet, OR have at least one stuck `PENDING` placeholder (large-file async path
     // that never resolved). Pass force=true to also re-examine already-checked emails.
     const force = Boolean(body?.force ?? false);
+    // Autorizacion: un usuario normal solo reprocesa SUS correos (antes `emailIds` permitia tocar los de cualquiera).
+    // Un administrador (ADMIN_EMAILS + MFA) puede reprocesar cualquier id.
+    const isAdmin = await isAdminUserSession();
     const emails = await prisma.email.findMany({
         where: {
-            ...(emailIds ? { id: { in: emailIds } } : { userId: user.id }),
+            ...(emailIds && isAdmin ? { id: { in: emailIds } } : emailIds ? { id: { in: emailIds }, userId: user.id } : { userId: user.id }),
             rawKey: { not: null },
             folder: { in: ['inbox', 'spam'] },
             ...(since ? { createdAt: { gte: since } } : {}),
@@ -169,7 +191,7 @@ export async function POST(req: NextRequest) {
                 { attachments: { some: { key: 'PENDING' } } },
             ],
         },
-        select: { id: true, rawKey: true, subject: true },
+        select: { id: true, userId: true, rawKey: true, subject: true },
         orderBy: { createdAt: 'desc' },
         take: limit,
     });

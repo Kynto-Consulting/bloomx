@@ -1,7 +1,18 @@
 
 import { NextResponse } from "next/server";
 import { NextRequest } from "next/server";
-import { verifyJWT, COOKIE_NAME } from "@/lib/jwt";
+import { verifyJWT, isSessionPayload, renewSessionIfNeeded, COOKIE_NAME } from "@/lib/jwt";
+
+// Rutas de /api/auth que SI cambian estado con la cookie de sesion y por tanto necesitan la defensa CSRF por Origin.
+// El resto de /api/auth (NextAuth, callbacks OAuth de terceros) queda exento.
+const CSRF_ENFORCED_AUTH_PREFIXES = [
+    '/api/auth/login',
+    '/api/auth/logout',
+    '/api/auth/set-cookie',
+    '/api/auth/refresh',
+    '/api/auth/mfa',
+    '/api/auth/unlink',
+];
 
 // Rutas que legitimamente reciben POST cross-origin (webhooks, clientes externos, reservas publicas embebibles)
 const CSRF_EXEMPT_PREFIXES = [
@@ -22,7 +33,7 @@ function isCrossOriginStateChange(req: NextRequest): boolean {
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return false;
     const { pathname } = req.nextUrl;
     if (!pathname.startsWith('/api/')) return false;
-    if (CSRF_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p) && !(p === '/api/auth' && (pathname === '/api/auth/login' || pathname === '/api/auth/logout' || pathname === '/api/auth/set-cookie')))) return false;
+    if (CSRF_EXEMPT_PREFIXES.some((p) => pathname.startsWith(p) && !(p === '/api/auth' && CSRF_ENFORCED_AUTH_PREFIXES.some((e) => pathname.startsWith(e))))) return false;
     if (req.headers.get('authorization')?.startsWith('Bearer ')) return false; // no depende de cookie ambiente
     const origin = req.headers.get('origin');
     if (!origin) return false; // clientes no-navegador
@@ -42,6 +53,14 @@ export async function middleware(req: NextRequest) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    // /api/admin/*: el middleware no valida el rol (cada ruta usa requireAdmin de @/lib/admin-auth), pero como defensa en
+    // profundidad exige al menos una cookie de sesion (usuario o manager) salvo el login. NIST AC-3 / CIS 6.8.
+    if (pathname.startsWith('/api/admin') && pathname !== '/api/admin/login') {
+        const hasCred = req.cookies.get(COOKIE_NAME)?.value || req.cookies.get('auth_session')?.value ||
+            req.headers.get('authorization')?.startsWith('Bearer ');
+        if (!hasCred) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     // 1. Define public paths (login, register, api auth routes, static files)
 
     //if path is just "/" 
@@ -54,6 +73,9 @@ export async function middleware(req: NextRequest) {
         pathname === '/icon.svg' ||
         pathname.startsWith('/tumiai.svg') ||
         pathname === '/icon-maskable.svg' ||
+        pathname === '/offline.html' ||
+        pathname === '/apple-touch-icon.png' ||
+        /^\/icon-(192|512|maskable-512)\.png$/.test(pathname) ||
         pathname.startsWith('/api/register') || // Allow register API
         pathname.startsWith('/api/auth') || // Allow all auth routes
         pathname.startsWith('/api/cron') || // Allow cron routes
@@ -89,14 +111,29 @@ export async function middleware(req: NextRequest) {
 
         const payload = await verifyJWT(token);
 
-        if (!payload) {
+        // Solo tokens de SESION (no molt_access ni el paso intermedio de MFA). La revocacion (jti/tokenVersion)
+        // requiere BD y se comprueba en las rutas via getSessionCookie/getCurrentUser (Edge no accede a Prisma).
+        if (!isSessionPayload(payload)) {
             throw new Error("Invalid token");
         }
 
-        // console.log("[MIDDLEWARE] Valid token:", payload.email);
-
-        // 3. Authorized
-        return NextResponse.next();
+        // 3. Authorized (+ renovacion deslizante de la cookie: SESSION_TTL_SECONDS por inactividad, tope absoluto)
+        const res = NextResponse.next();
+        try {
+            const renewed = await renewSessionIfNeeded(payload);
+            if (renewed) {
+                res.cookies.set(COOKIE_NAME, renewed.token, {
+                    httpOnly: true,
+                    secure: process.env.NODE_ENV === 'production',
+                    sameSite: 'lax',
+                    path: '/',
+                    maxAge: renewed.ttl,
+                });
+            }
+        } catch {
+            // La renovacion es best-effort: nunca debe tumbar la peticion
+        }
+        return res;
 
     } catch (error) {
         // Sin volcar el error completo ni tokens al log

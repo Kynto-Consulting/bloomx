@@ -1,9 +1,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getCurrentUser } from '@/lib/session';
+import { createOAuthState, setOAuthStateCookie } from '@/lib/oauth-state';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
     const { provider } = await params;
-    const { searchParams } = new URL(req.url);
     const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/${provider}`;
 
     let authUrl = '';
@@ -47,6 +48,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
         return NextResponse.json({ error: `Missing configuration for ${provider}` }, { status: 500 });
     }
 
+    // Vincular una integracion requiere sesion: se exige ya al iniciar (no solo al volver del proveedor).
+    const user = await getCurrentUser();
+    if (!user) {
+        return NextResponse.redirect(new URL('/login?error=LoginRequired', req.url));
+    }
+
     // Common params
     const queryParams = new URLSearchParams({
         client_id: clientId,
@@ -56,5 +63,12 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
         ...extraParams
     });
 
-    return NextResponse.redirect(`${authUrl}?${queryParams.toString()}`);
+    // `state` anti-CSRF (nonce en cookie HttpOnly, patron de Google). Trello no admite `state` en su flujo de token.
+    const wantsState = provider !== 'trello';
+    const oauth = wantsState ? createOAuthState(provider, user.id) : null;
+    if (oauth) queryParams.set('state', oauth.state);
+
+    const res = NextResponse.redirect(`${authUrl}?${queryParams.toString()}`);
+    if (oauth) setOAuthStateCookie(res, provider, oauth.nonce);
+    return res;
 }

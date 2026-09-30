@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { clearOAuthStateCookie, verifyOAuthState } from '@/lib/oauth-state';
+import { auditLog, getClientIp } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -13,7 +15,20 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Missing parameters or configuration' }, { status: 400 });
     }
 
-    // 1. Exchange Code for Token
+    // 1. Sesion y `state` (anti-CSRF) ANTES de canjear el codigo
+    const user = await getCurrentUser();
+    if (!user) {
+        return NextResponse.redirect(new URL('/login?error=LoginRequired', req.url));
+    }
+    const st = verifyOAuthState(req, 'slack', user.id);
+    if (!st.ok) {
+        auditLog('auth.oauth.state_mismatch', { provider: 'slack', reason: st.reason, userId: user.id, ip: getClientIp(req) });
+        const bad = NextResponse.redirect(new URL('/settings?error=InvalidState', req.url));
+        clearOAuthStateCookie(bad, 'slack');
+        return bad;
+    }
+
+    // 2. Exchange Code for Token
     const form = new URLSearchParams();
     form.append('client_id', clientId);
     form.append('client_secret', clientSecret);
@@ -28,16 +43,13 @@ export async function GET(req: NextRequest) {
 
     const data = await tokenRes.json();
     if (!data.ok) {
-        return NextResponse.json(data, { status: 400 });
+        // No se reenvia la respuesta del proveedor al navegador
+        const fail = NextResponse.redirect(new URL('/settings?error=OAuthFailed', req.url));
+        clearOAuthStateCookie(fail, 'slack');
+        return fail;
     }
 
-    // 2. Get Current User
-    const user = await getCurrentUser();
-    if (!user) {
-        return NextResponse.redirect(new URL('/login?error=LoginRequired', req.url));
-    }
-
-    // 3. Store Tokens
+    // 3. Store Tokens (se cifran en reposo en la capa de acceso: lib/account-tokens.ts)
     // Slack returns 'access_token' (bot) and optional 'authed_user' token
     // We primarily want the bot token for the expansion
     await prisma.account.upsert({
@@ -67,5 +79,8 @@ export async function GET(req: NextRequest) {
         }
     });
 
-    return NextResponse.redirect(new URL('/settings', req.url));
+    auditLog('auth.oauth.linked', { provider: 'slack', userId: user.id, ip: getClientIp(req) });
+    const ok = NextResponse.redirect(new URL('/settings', req.url));
+    clearOAuthStateCookie(ok, 'slack');
+    return ok;
 }

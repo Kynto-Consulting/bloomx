@@ -1,13 +1,18 @@
 import { SignJWT, jwtVerify } from 'jose';
 import { prisma } from '@/lib/prisma';
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes } from 'crypto';
 
+// Clave PROPIA para los tokens molt (derivada de NEXTAUTH_SECRET con separacion de dominio). Antes se firmaban con el
+// mismo secreto que la sesion de usuario, de modo que un molt_access valido tambien lo era como JWT de sesion.
+// (jwt.ts ademas rechaza cualquier token con claim `type`.) NIST SC-12 / IA-5, ISO 27001:2022 A.8.24.
 function getMoltSecret(): Uint8Array {
-    const secret = process.env.NEXTAUTH_SECRET;
-    if (!secret && process.env.NODE_ENV === 'production') {
-        throw new Error('NEXTAUTH_SECRET is required in production');
+    const dedicated = process.env.MOLT_SIGNING_KEY;
+    const base = process.env.NEXTAUTH_SECRET;
+    if (!dedicated && !base && process.env.NODE_ENV === 'production') {
+        throw new Error('NEXTAUTH_SECRET (or MOLT_SIGNING_KEY) is required in production');
     }
-    return new TextEncoder().encode(secret || 'dev-secret-key-123');
+    if (dedicated) return new TextEncoder().encode(dedicated);
+    return new Uint8Array(createHmac('sha256', base || 'dev-secret-key-123').update('bloomx:molt-access:v1').digest());
 }
 // Los refresh tokens caducan si no se usan en 7 dias (NIST 800-63B 7.2 reautenticacion)
 const REFRESH_IDLE_GRACE_MS = 7 * 24 * 60 * 60 * 1000;

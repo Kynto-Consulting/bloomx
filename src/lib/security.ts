@@ -58,21 +58,8 @@ export function rateLimitReset(key: string) {
 // ---------------------------------------------------------------------------
 // Auditoria con datos redactados (nunca registrar contrasenas/tokens/emails completos)
 // ---------------------------------------------------------------------------
-export function maskEmail(email: unknown): string {
-    const s = String(email ?? "");
-    const at = s.indexOf("@");
-    if (at < 1) return "***";
-    return `${s[0]}***${s.slice(at)}`;
-}
-
-export function auditLog(event: string, data: Record<string, unknown> = {}) {
-    const safe: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data)) {
-        if (/pass|token|secret|authorization|cookie|key/i.test(k)) continue;
-        safe[k] = k.toLowerCase().includes("email") ? maskEmail(v) : v;
-    }
-    console.log(JSON.stringify({ type: "audit", event, ts: new Date().toISOString(), ...safe }));
-}
+// La implementacion (redaccion + persistencia en "AuditEvent" con fallback a stdout) vive en ./audit.
+export { maskEmail, auditLog } from "./audit";
 
 // ---------------------------------------------------------------------------
 // Politica de contrasenas (NIST 800-63B: longitud sobre complejidad, sin reglas de composicion)

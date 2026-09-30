@@ -1,19 +1,45 @@
-
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { isActiveContentType } from '@/lib/mail-validation';
+import { getObjectStream } from '@/lib/storage';
+import { getCurrentUser } from '@/lib/session';
+import { prisma } from '@/lib/prisma';
+import { canAccessEmail } from '@/lib/mailbox-access';
+import { auditLog, getClientIp } from '@/lib/security';
+import {
+    decideAssetAccess,
+    isInboundAttachmentKey,
+    isUploadKey,
+    normalizeDownloadName,
+    resolveUnsignedPolicy,
+    verifyAssetSignature,
+} from '@/lib/asset-url';
 
-const s3Client = new S3Client({
-    region: process.env.B2_REGION,
-    endpoint: process.env.B2_ENDPOINT,
-    credentials: {
-        accessKeyId: process.env.B2_ACCESS_KEY!,
-        secretAccessKey: process.env.B2_SECRET_KEY!,
-    },
-    forcePathStyle: true,
-});
+export const runtime = 'nodejs';
 
-const BUCKET = process.env.B2_BUCKET!;
+/**
+ * Proxy de adjuntos. Acceso (NIST AC-3, ISO 27001:2022 A.5.15):
+ *  1) URL firmada (HMAC + caducidad, lib/asset-url.ts)  -> permitido (enlaces para terceros: correos enviados)
+ *  2) sesion del propietario del objeto                  -> permitido aunque la firma haya caducado
+ *  3) sin firma                                          -> segun ASSET_UNSIGNED_INBOUND / ASSET_UNSIGNED_UPLOADS
+ * Ademas, allowlist de prefijos: nunca se sirven raw.json, content.html/txt, secure/*.msg ni enviados.
+ */
+async function isOwner(key: string): Promise<boolean> {
+    const user = await getCurrentUser().catch(() => null);
+    if (!user) return false;
+    if (isUploadKey(key)) {
+        const segment = key.split('/')[1] || '';
+        return segment.toLowerCase() === String(user.email).toLowerCase() || segment === user.id;
+    }
+    if (isInboundAttachmentKey(key)) {
+        const att = await prisma.attachment.findFirst({
+            where: { key },
+            select: { email: { select: { userId: true } }, draft: { select: { from: true } } },
+        });
+        if (att?.email?.userId) return canAccessEmail(user.id, att.email.userId);
+        if (att?.draft?.from) return String(att.draft.from).toLowerCase().includes(String(user.email).toLowerCase());
+    }
+    return false;
+}
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ key: string[] }> }) {
     // 1. Reconstruct Key from catch-all
@@ -25,84 +51,65 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ key:
         return NextResponse.json({ error: 'Key not provided' }, { status: 400 });
     }
 
-    // Allowlist de prefijos servibles publicamente. Esta ruta es publica (los adjuntos se
-    // referencian desde correos enviados y desde el proveedor), por lo que NUNCA debe exponer
-    // payloads crudos (raw.json), cuerpos (content.html/txt), correos enviados ni secure/*.msg.
-    const isUploadKey = key.startsWith('attachments/');
-    const isInboundAttachmentKey = /^emails\/[^/]+\/[^/]+\/attachments\/[^/]+$/.test(key);
+    const inbound = isInboundAttachmentKey(key);
     if (
         key.length > 1024 ||
         key.includes('..') ||
         key.includes('\\') ||
         key.includes('\0') ||
-        !(isUploadKey || isInboundAttachmentKey)
+        !(isUploadKey(key) || inbound)
     ) {
         return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
 
+    // 2. Autorizacion
+    const sig = verifyAssetSignature(
+        key,
+        req.nextUrl.searchParams.get('exp'),
+        req.nextUrl.searchParams.get('sig'),
+    );
+    // La consulta de propiedad solo se hace si la firma no basta (evita BD en el camino caliente)
+    const needOwner = sig !== 'ok';
+    const owner = needOwner ? await isOwner(key) : false;
+    const decision = decideAssetAccess({ sig, isOwner: owner, policy: resolveUnsignedPolicy(key) });
+    if (!decision.allow) {
+        auditLog('assets.denied', { reason: decision.reason, ip: getClientIp(req), prefix: key.split('/')[0] });
+        // 404 y no 403: no confirmar la existencia de claves
+        return NextResponse.json({ error: 'File not found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
+    if (decision.reason === 'legacy_unsigned') {
+        // Trazabilidad de la transicion: cuando esto llegue a ~0 se puede fijar ASSET_UNSIGNED_UPLOADS=owner|deny
+        auditLog('assets.legacy_unsigned', { ip: getClientIp(req), prefix: key.split('/')[0] });
+    }
+
     try {
-        const command = new GetObjectCommand({
-            Bucket: BUCKET,
-            Key: key,
-            Range: req.headers.get('range') || undefined,
-        });
+        const obj = await getObjectStream(key, req.headers.get('range'));
+        if (!obj) {
+            return NextResponse.json({ error: 'File not found' }, { status: 404 });
+        }
 
-        // 2. Fetch from S3
-        const response = await s3Client.send(command);
-
-        // 3. Stream to Client
-        // We need to convert the ReadableStream from SDK to a Web Response
         const headers = new Headers();
         // Contenido activo (html/svg/xml/js) jamas se sirve con su tipo original: evita XSS almacenado.
-        const storedType = response.ContentType || 'application/octet-stream';
+        const storedType = obj.contentType || 'application/octet-stream';
         headers.set('Content-Type', isActiveContentType(storedType) ? 'application/octet-stream' : storedType);
         headers.set('X-Content-Type-Options', 'nosniff');
         headers.set('Content-Security-Policy', "default-src 'none'; sandbox");
         headers.set('Referrer-Policy', 'no-referrer');
         headers.set('Cross-Origin-Resource-Policy', 'cross-origin'); // se incrusta en correos enviados
-        // Adjuntos de correos recibidos son privados: no cachear en caches compartidas.
-        headers.set(
-            'Cache-Control',
-            isInboundAttachmentKey ? 'private, max-age=3600' : 'public, max-age=31536000, immutable',
-        );
+        // Ya no es publico/immutable: la URL es una credencial temporal, no debe vivir en caches compartidas.
+        headers.set('Cache-Control', 'private, max-age=3600');
 
         let filename = req.nextUrl.searchParams.get('filename') || key.split('/').pop() || 'download';
-        // Normalize filename to prevent Outlook/Acrobat decoding errors
-        filename = filename.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9.\-_]/g, '_');
-        
+        filename = normalizeDownloadName(filename).slice(0, 200) || 'download';
         headers.set('Content-Disposition', `attachment; filename="${filename}"`);
 
-        if (response.ContentLength) {
-            headers.set('Content-Length', response.ContentLength.toString());
-        }
+        if (obj.contentLength !== undefined) headers.set('Content-Length', String(obj.contentLength));
+        headers.set('Accept-Ranges', 'bytes');
+        if (obj.contentRange) headers.set('Content-Range', obj.contentRange);
 
-        // Transform the Body (which is a Node stream or Web stream depending on runtime)
-        // In Next.js App Router (Node runtime), response.Body is a generic stream.
-        // We can pass it directly to NextResponse if it's compatible, or read it.
-
-        // Stream directly instead of buffering in memory
-        const stream = response.Body?.transformToWebStream();
-
-        if (!stream) {
-            return NextResponse.json({ error: 'Empty file' }, { status: 404 });
-        }
-
-        const status = response.$metadata?.httpStatusCode || 200;
-        if (response.ContentRange) {
-            headers.set('Content-Range', response.ContentRange);
-            headers.set('Accept-Ranges', 'bytes');
-        }
-
-        return new NextResponse(stream, {
-            status,
-            headers,
-        });
-
+        return new NextResponse(obj.body, { status: obj.status, headers });
     } catch (error: any) {
-        console.error(`Error proxying asset ${key}:`, error);
-        if (error.name === 'NoSuchKey') {
-            return NextResponse.json({ error: 'File not found' }, { status: 404 });
-        }
+        console.error(`Error proxying asset:`, error?.name || 'unknown');
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

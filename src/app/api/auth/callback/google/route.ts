@@ -1,18 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, setSessionCookie } from "@/lib/session";
+import { getCurrentUser, getSessionCookie, setSessionCookie } from "@/lib/session";
+import { mfaRequiredFor } from "@/lib/mfa";
 import { patchAllUserMeetRooms } from "@/lib/google/meet";
 import { auditLog, getClientIp, isSafeRelativePath, safeEqual } from "@/lib/security";
 
+// La app no tiene /dashboard (solo /admin/dashboard): tras conectar Google se vuelve a la bandeja.
+const DEFAULT_RETURN_TO = '/';
+
 function decodeState(state: string | null): { returnTo: string; nonce: string | null } {
-    const fallback = { returnTo: '/dashboard', nonce: null as string | null };
+    const fallback = { returnTo: DEFAULT_RETURN_TO, nonce: null as string | null };
     if (!state) return fallback;
 
     try {
         const decoded = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
         return {
-            returnTo: isSafeRelativePath(decoded?.returnTo) ? decoded.returnTo : '/dashboard',
+            returnTo: isSafeRelativePath(decoded?.returnTo) ? decoded.returnTo : DEFAULT_RETURN_TO,
             nonce: typeof decoded?.nonce === 'string' ? decoded.nonce : null,
         };
     } catch {
@@ -99,6 +103,18 @@ export async function GET(req: NextRequest) {
             where: { email: profile.email },
         });
 
+        // Registro por Google solo si se habilita explicitamente en produccion (el registro por formulario exige REGISTRATION_KEY).
+        if (!user && process.env.NODE_ENV === 'production' && process.env.GOOGLE_ALLOW_SIGNUP !== 'true') {
+            auditLog('auth.google.signup_blocked', { email: profile.email, ip: getClientIp(req) });
+            return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=SignupDisabled`);
+        }
+
+        // Inicio de sesion (no vinculacion) de una cuenta que EXIGE MFA (p. ej. admin): Google no sustituye al segundo factor.
+        if (!currentUser && user && mfaRequiredFor(user.email)) {
+            auditLog('auth.google.mfa_required_blocked', { userId: user.id, ip: getClientIp(req) });
+            return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=MfaRequiredUsePassword`);
+        }
+
         if (!user) {
             user = await prisma.user.create({
                 data: {
@@ -140,11 +156,12 @@ export async function GET(req: NextRequest) {
         });
 
         // 5. Create Session
-        await setSessionCookie({
-            sub: user.id,
-            email: user.email,
-            name: user.name,
-        });
+        // Al vincular con sesion ya iniciada se conserva el claim mfa de esa sesion.
+        const currentSession = currentUser ? await getSessionCookie() : null;
+        await setSessionCookie(
+            { sub: user.id, email: user.email, name: user.name },
+            { mfa: currentSession?.mfa === true && currentSession.sub === user.id }
+        );
 
         // Patch existing Meet rooms in the background after reconnect.
         // Only fires if the new token has the meetings.space.created scope.

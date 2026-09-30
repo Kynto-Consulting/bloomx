@@ -1,25 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/lib/auth';
+import { getCurrentUser } from '@/lib/session';
+import { auditLog, getClientIp } from '@/lib/security';
 
 export async function DELETE(req: NextRequest) {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
+    // La sesion real es el JWT propio (lib/session.ts), no una sesion de NextAuth: antes esta ruta siempre daba 401.
+    const user = await getCurrentUser();
+    if (!user) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     try {
-        const user = await prisma.user.findUnique({
-            where: { email: session.user.email },
-            select: { id: true }
-        });
-
-        if (!user) {
-            return NextResponse.json({ error: 'User not found' }, { status: 404 });
-        }
-
-        // @ts-ignore
         await prisma.account.deleteMany({
             where: {
                 userId: user.id,
@@ -27,6 +18,7 @@ export async function DELETE(req: NextRequest) {
             }
         });
 
+        auditLog('auth.oauth.unlinked', { provider: 'google', userId: user.id, ip: getClientIp(req) });
         return NextResponse.json({ success: true, message: 'Google account unlinked' });
     } catch (error) {
         console.error('Unlink Error:', error);

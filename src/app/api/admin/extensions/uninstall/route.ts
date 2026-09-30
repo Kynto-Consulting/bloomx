@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import { verifyManagerSession } from '@/lib/manager-auth';
+import { requireAdmin } from '@/lib/admin-auth';
 
 export async function POST(req: Request) {
-    const manager = await verifyManagerSession(req as any);
-    if (!manager) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const guard = await requireAdmin(req);
+    if (!guard.ok) return guard.response;
 
     try {
         const body = await req.json();

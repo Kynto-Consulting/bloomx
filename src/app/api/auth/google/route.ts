@@ -6,7 +6,8 @@ const OAUTH_STATE_COOKIE = "bloomx_oauth_state";
 
 function resolveSafeReturnTo(returnTo: string | null) {
     if (!isSafeRelativePath(returnTo)) {
-        return '/dashboard';
+        // La app no tiene /dashboard: sin returnTo valido se vuelve a la bandeja de entrada.
+        return '/';
     }
 
     return returnTo;

@@ -1,18 +1,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyManagerSession } from "@/lib/manager-auth";
+import { requireAdmin } from "@/lib/admin-auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { auditLog, BCRYPT_COST, validateNewPassword } from "@/lib/security";
 
 // GET: List all users
 export async function GET(req: NextRequest) {
-    const manager = await verifyManagerSession(req);
-
-    if (!manager) {
-        console.warn("[ADMIN_USERS_GET] Unauthorized Manager access attempt");
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const guard = await requireAdmin(req);
+    if (!guard.ok) return guard.response;
 
     try {
         const users = await prisma.user.findMany({
@@ -35,11 +31,8 @@ export async function GET(req: NextRequest) {
 
 // POST: Create a new user
 export async function POST(req: NextRequest) {
-    const manager = await verifyManagerSession(req);
-
-    if (!manager) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const guard = await requireAdmin(req);
+    if (!guard.ok) return guard.response;
 
     try {
         const { email, name, password } = await req.json();
@@ -71,7 +64,7 @@ export async function POST(req: NextRequest) {
             },
         });
 
-        auditLog("admin.user.created", { userId: newUser.id, email: newUser.email, managerId: (manager as any)?.id });
+        auditLog("admin.user.created", { userId: newUser.id, email: newUser.email, managerId: (guard.actor as any)?.id });
         return NextResponse.json({
             success: true,
             user: { id: newUser.id, email: newUser.email, name: newUser.name },

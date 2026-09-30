@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { clearOAuthStateCookie, verifyOAuthState } from '@/lib/oauth-state';
+import { auditLog, getClientIp } from '@/lib/security';
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -13,7 +15,20 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Missing parameters or configuration' }, { status: 400 });
     }
 
-    // 1. Exchange Code for Token
+    // 1. Sesion y `state` (anti-CSRF) ANTES de canjear el codigo. La integracion se vincula a un usuario ya autenticado.
+    const user = await getCurrentUser();
+    if (!user) {
+        return NextResponse.redirect(new URL('/login?error=LoginRequired', req.url));
+    }
+    const st = verifyOAuthState(req, 'zoom', user.id);
+    if (!st.ok) {
+        auditLog('auth.oauth.state_mismatch', { provider: 'zoom', reason: st.reason, userId: user.id, ip: getClientIp(req) });
+        const bad = NextResponse.redirect(new URL('/settings?error=InvalidState', req.url));
+        clearOAuthStateCookie(bad, 'zoom');
+        return bad;
+    }
+
+    // 2. Exchange Code for Token
     const tokenRes = await fetch('https://zoom.us/oauth/token', {
         method: 'POST',
         headers: {
@@ -29,26 +44,17 @@ export async function GET(req: NextRequest) {
 
     const tokens = await tokenRes.json();
     if (!tokenRes.ok) {
-        return NextResponse.json(tokens, { status: tokenRes.status });
+        const fail = NextResponse.redirect(new URL('/settings?error=OAuthFailed', req.url));
+        clearOAuthStateCookie(fail, 'zoom');
+        return fail;
     }
 
-    // 2. Get Current User
-    const user = await getCurrentUser();
-    if (!user) {
-        // If generic login, finding creating user via Zoom email is needed.
-        // But for expansions, we assume user is already logged in?
-        // User request implies "expansions", so typically user is logged in and linking account.
-        // If this is for LOGGING IN via Zoom, logic is different.
-        // Given "mas cosas como zoom", it sounds like integration.
-        return NextResponse.redirect(new URL('/login?error=LoginRequired', req.url));
-    }
-
-    // 3. Store Tokens
+    // 3. Store Tokens (cifrados en reposo por la capa de acceso: lib/account-tokens.ts)
     await prisma.account.upsert({
         where: {
             provider_providerAccountId: {
                 provider: 'zoom',
-                providerAccountId: user.id // Using User ID as placeholder? No, accounts table usually holds provider's user ID. 
+                providerAccountId: user.id // Using User ID as placeholder? No, accounts table usually holds provider's user ID.
                 // But we don't fetch Zoom Profile here. We should!
             }
         },
@@ -72,5 +78,8 @@ export async function GET(req: NextRequest) {
         }
     });
 
-    return NextResponse.redirect(new URL('/settings', req.url));
+    auditLog('auth.oauth.linked', { provider: 'zoom', userId: user.id, ip: getClientIp(req) });
+    const ok = NextResponse.redirect(new URL('/settings', req.url));
+    clearOAuthStateCookie(ok, 'zoom');
+    return ok;
 }
