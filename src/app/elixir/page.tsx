@@ -3,7 +3,12 @@
 import { useState, useCallback, useRef, useMemo, useEffect, lazy, Suspense } from 'react';
 const LiquidEditor = lazy(() => import('@/components/elixir/LiquidEditor').then(m => ({ default: m.LiquidEditor })));
 import { useDomainConfig } from '@/hooks/useDomainConfig';
-import { renderTemplate } from '@/lib/liquid';
+import { renderLiquid, systemDateVars } from '@/lib/liquid';
+import { variableExpression } from '@/lib/liquid-catalog';
+import { parseCsv, decodeCsvBytes } from '@/lib/elixir-csv';
+import { parseXlsx } from '@/lib/elixir-xlsx';
+import { runCampaign, preflight, fetchBatchFromApi, type CampaignState, type RowResult } from '@/lib/elixir-client';
+import type { LiquidEditorHandle } from '@/components/elixir/LiquidEditor';
 import { Sidebar as AppSidebar } from '@/components/Sidebar';
 import {
     Upload, FileSpreadsheet, Mail, Send, Eye, ChevronDown, ChevronUp,
@@ -44,12 +49,10 @@ type SenderConfig = {
     bcc: string;
 };
 
-type SendResult = {
-    email: string;
-    row: Row;
-    status: 'sent' | 'error' | 'skipped';
-    message?: string;
-};
+type SendResult = RowResult;
+
+const CAMPAIGN_KEY = 'elixir:campaign:v1';
+const PREVIEW_UNSUB_URL = 'https://example.com/unsubscribe';
 
 type FolderEntry = { name: string; handle: FileSystemFileHandle };
 
@@ -69,50 +72,31 @@ function detectColumnType(rows: Row[], col: string): ColumnType {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CSV Parser
+// Utilidades de render y campana
 // ─────────────────────────────────────────────────────────────────────────────
 
-function parseCSV(text: string): { headers: string[]; rows: Row[] } {
-    const lines: string[] = [];
-    let current = '';
-    let inQuote = false;
-    for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
-        if (ch === '"') {
-            if (inQuote && text[i + 1] === '"') { current += '"'; i++; }
-            else { inQuote = !inQuote; }
-        } else if ((ch === '\n' || ch === '\r') && !inQuote) {
-            if (ch === '\r' && text[i + 1] === '\n') i++;
-            lines.push(current); current = '';
-        } else { current += ch; }
-    }
-    if (current) lines.push(current);
-
-    const splitLine = (line: string): string[] => {
-        const fields: string[] = []; let f = ''; let q = false;
-        for (let i = 0; i < line.length; i++) {
-            const c = line[i];
-            if (c === '"') { if (q && line[i + 1] === '"') { f += '"'; i++; } else { q = !q; } }
-            else if (c === ',' && !q) { fields.push(f.trim()); f = ''; }
-            else { f += c; }
-        }
-        fields.push(f.trim());
-        return fields;
-    };
-
-    const nonEmpty = lines.filter(l => l.trim());
-    if (nonEmpty.length === 0) return { headers: [], rows: [] };
-    const headers = splitLine(nonEmpty[0]).map(h => h.replace(/^"|"$/g, '').trim());
-    const rows = nonEmpty.slice(1).map(line => {
-        const vals = splitLine(line);
-        const row: Row = {};
-        headers.forEach((h, i) => { row[h] = (vals[i] ?? '').replace(/^"|"$/g, '').trim(); });
-        return row;
-    });
-    return { headers, rows };
+/** Render seguro para vista previa: nunca devuelve la plantilla cruda; expone el error. */
+function safeRender(src: string, data: Record<string, string>, opts: { autoescape?: boolean; timezone: string }): { text: string; error?: string } {
+    const res = renderLiquid(src, data, { autoescape: opts.autoescape, strictVariables: true, timezone: opts.timezone, locale: 'es' });
+    return res.ok ? { text: res.output } : { text: '', error: res.error.message };
 }
 
+/** Huella de la campana (asunto, cuerpo, columna, remitente y destinatarios) para poder reanudarla. */
+function fingerprint(parts: string[]): string {
+    const str = parts.join('\u0001');
+    let h1 = 0x811c9dc5, h2 = 5381;
+    for (let i = 0; i < str.length; i++) {
+        const c = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ c, 16777619) >>> 0;
+        h2 = (Math.imul(h2, 33) ^ c) >>> 0;
+    }
+    return `${h1.toString(16)}-${h2.toString(16)}-${str.length}`;
+}
 
+function newCampaignId(): string {
+    try { if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID(); } catch { /* sin crypto */ }
+    return `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Filter logic
@@ -229,6 +213,7 @@ const SYSTEM_VAR_KEYS = [
     { key: 'current_day',  label: 'Día semana',       desc: 'miércoles' },
     { key: 'current_month',label: 'Mes actual',       desc: 'enero' },
     { key: 'current_year', label: 'Año actual',       desc: '2025' },
+    { key: 'unsubscribe_url', label: 'Enlace de baja', desc: 'URL firmada por destinatario' },
 ];
 
 export default function ElixirPage() {
@@ -264,9 +249,14 @@ export default function ElixirPage() {
     const [templateHtml, setTemplateHtml] = useState<string>(DEFAULT_TEMPLATE);
     const [previewRowIndex, setPreviewRowIndex] = useState(0);
 
-    // Send state
-    const [sending, setSending] = useState(false);
-    const [results, setResults] = useState<SendResult[]>([]);
+    // Send state (envio por lotes, reanudable)
+    const [campaign, setCampaign] = useState<CampaignState | null>(null);
+    const sending = campaign?.status === 'running';
+    const abortRef = useRef<{ aborted: boolean }>({ aborted: false });
+    const runRef = useRef<{ id: string; fp: string; payload: Record<string, unknown>; rows: Row[] } | null>(null);
+    const timezone = useMemo(() => {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+    }, []);
 
     // Import/export
     const importTemplateRef = useRef<HTMLInputElement>(null);
@@ -291,9 +281,20 @@ export default function ElixirPage() {
         try {
             if (file.name.endsWith('.json')) {
                 const bundle = JSON.parse(text);
-                if (bundle.template) setTemplateHtml(bundle.template);
-                if (bundle.subject) setSubject(bundle.subject);
-                if (bundle.senderConfig) setSenderConfig(bundle.senderConfig);
+                const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
+                const tpl = str(bundle?.template, 500_000);
+                const subj = str(bundle?.subject, 2_000);
+                if (tpl !== undefined) setTemplateHtml(tpl);
+                if (subj !== undefined) setSubject(subj);
+                if (bundle?.senderConfig && typeof bundle.senderConfig === 'object') {
+                    const sc = bundle.senderConfig as Record<string, unknown>;
+                    setSenderConfig({
+                        fromName: str(sc.fromName, 300) ?? '',
+                        fromEmail: str(sc.fromEmail, 500) ?? '',
+                        cc: str(sc.cc, 2_000) ?? '',
+                        bcc: str(sc.bcc, 2_000) ?? '',
+                    });
+                }
                 toast.success('Campaña importada desde JSON');
             } else {
                 // .liquid or .html — treat as raw template
@@ -324,37 +325,35 @@ export default function ElixirPage() {
 
     const loadFile = useCallback(async (file: File) => {
         setFileName(file.name);
-        setResults([]);
+        setCampaign(null);
         try {
-            let h: string[] = [];
-            let r: Row[] = [];
-            if (file.name.match(/\.csv$/i) || file.type === 'text/csv') {
-                const text = await file.text();
-                ({ headers: h, rows: r } = parseCSV(text));
+            if (file.size > 15 * 1024 * 1024) { toast.error('El archivo supera los 15 MB'); return; }
+            let table;
+            if (/\.(csv|txt)$/i.test(file.name) || file.type === 'text/csv') {
+                table = parseCsv(decodeCsvBytes(new Uint8Array(await file.arrayBuffer())));
+            } else if (/\.xlsx$/i.test(file.name)) {
+                table = await parseXlsx(await file.arrayBuffer());
+            } else if (/\.xls$/i.test(file.name)) {
+                toast.error('Los .xls antiguos no se admiten. Guarde el archivo como .xlsx o CSV.');
+                return;
             } else {
-                const XLSX = await import('xlsx');
-                const buffer = await file.arrayBuffer();
-                const wb = XLSX.read(buffer, { type: 'array' });
-                const ws = wb.Sheets[wb.SheetNames[0]];
-                const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
-                if (data.length === 0) { toast.error('El archivo Excel está vacío'); return; }
-                h = (data[0] as any[]).map(String);
-                r = data.slice(1).map(rowArr => {
-                    const row: Row = {};
-                    h.forEach((col, i) => { row[col] = String((rowArr as any[])[i] ?? ''); });
-                    return row;
-                });
+                toast.error('Formato no soportado. Use CSV o XLSX.');
+                return;
             }
+            const { headers: h, rows: r } = table;
+            if (h.length === 0) { toast.error('El archivo está vacío'); return; }
             setHeaders(h);
             setAllRows(r);
             setFilters([]);
+            setPreviewRowIndex(0);
             // detect column types
             const types: Record<string, ColumnType> = {};
             h.forEach(col => { types[col] = detectColumnType(r, col); });
             setColumnTypes(types);
             toast.success(`${r.length} filas cargadas`);
+            table.warnings.forEach(w => toast.info(w));
         } catch (e) {
-            toast.error('Error al leer el archivo');
+            toast.error(e instanceof Error && e.message ? e.message : 'Error al leer el archivo');
             console.error(e);
         }
     }, []);
@@ -366,7 +365,7 @@ export default function ElixirPage() {
         if (!hasFSA) { fileInputRef.current?.click(); return; }
         try {
             const [fh] = await (window as any).showOpenFilePicker({
-                types: [{ description: 'CSV o Excel', accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'], 'application/vnd.ms-excel': ['.xls'] } }],
+                types: [{ description: 'CSV o Excel (.xlsx)', accept: { 'text/csv': ['.csv'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'] } }],
                 multiple: false,
             });
             await loadFile(await fh.getFile());
@@ -381,13 +380,13 @@ export default function ElixirPage() {
             const dir = await (window as any).showDirectoryPicker({ mode: 'read' });
             const entries: FolderEntry[] = [];
             for await (const [name, handle] of dir.entries()) {
-                if (handle.kind === 'file' && /\.(csv|xlsx|xls)$/i.test(name))
+                if (handle.kind === 'file' && /\.(csv|xlsx)$/i.test(name))
                     entries.push({ name, handle });
             }
             entries.sort((a, b) => a.name.localeCompare(b.name));
             setFolderFiles(entries);
             setFolderName(dir.name);
-            if (entries.length === 0) toast.info('Sin archivos CSV/Excel en la carpeta');
+            if (entries.length === 0) toast.info('Sin archivos CSV/XLSX en la carpeta');
             else toast.success(`${entries.length} archivos en "${dir.name}"`);
         } catch (e: any) { if (e?.name !== 'AbortError') toast.error('Error al acceder a la carpeta'); }
     }, []);
@@ -438,52 +437,129 @@ export default function ElixirPage() {
 
     // ── Send ──────────────────────────────────────────────────────────────
 
-    const handleSend = async () => {
-        if (validRecipients.length === 0) { toast.error('No hay destinatarios válidos'); return; }
-        if (!subject.trim()) { toast.error('Asunto vacío'); return; }
-        setSending(true);
-        setResults([]);
-        setActiveTab('send');
-        try {
-            const res = await fetch('/api/elixir/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    rows: validRecipients,
-                    template: templateHtml,
-                    subject,
-                    recipientColumn,
-                    senderConfig,
-                    systemVars,
-                }),
-            });
-            const data = await res.json();
-            if (!res.ok) { toast.error(data.error || 'Error al enviar'); return; }
-            setResults(data.results || []);
-            const sent = (data.results as SendResult[]).filter(r => r.status === 'sent').length;
-            const failed = (data.results as SendResult[]).filter(r => r.status === 'error').length;
-            toast.success(`${sent} enviados${failed > 0 ? `, ${failed} fallidos` : ''}`);
-        } catch { toast.error('Error de red al enviar'); }
-        finally { setSending(false); }
+    const persistCampaign = (id: string, fp: string, results: Record<number, RowResult>) => {
+        try { localStorage.setItem(CAMPAIGN_KEY, JSON.stringify({ id, fp, results, savedAt: Date.now() })); } catch { /* almacenamiento no disponible */ }
     };
 
-    // System vars — built from domain config + current date
-    const systemVars = useMemo(() => {
-        const now = new Date();
-        return {
-            brand_name:    domainConfig.displayName || domainConfig.name || '',
-            brand_color:   domainConfig.theme?.primaryColor || '',
-            brand_logo:    domainConfig.logo || '',
-            current_date:  now.toLocaleDateString('es-PE', { year: 'numeric', month: 'long', day: 'numeric' }),
-            current_day:   now.toLocaleDateString('es-PE', { weekday: 'long' }),
-            current_month: now.toLocaleDateString('es-PE', { month: 'long' }),
-            current_year:  String(now.getFullYear()),
-        };
-    }, [domainConfig]);
+    /** Ejecuta (o reanuda) una campana por lotes. `initial` = resultados previos que NO se reenvian. */
+    const startRun = async (
+        id: string, fp: string, payload: Record<string, unknown>, initial: Record<number, RowResult>,
+        rows: Row[], retryErrors = false,
+    ) => {
+        abortRef.current = { aborted: false };
+        runRef.current = { id, fp, payload, rows };
+        setActiveTab('send');
+        const st = await runCampaign({
+            rows, initial, retryErrors, batchSize: 25,
+            buildBody: items => ({ ...payload, campaignId: id, items }),
+            fetchBatch: fetchBatchFromApi(),
+            signal: abortRef.current,
+            onProgress: s => { setCampaign(s); persistCampaign(id, fp, s.results); },
+        });
+        setCampaign(st);
+        persistCampaign(id, fp, st.results);
+        if (st.status === 'done') {
+            toast.success(`${st.sent} enviados${st.errors ? `, ${st.errors} fallidos` : ''}${st.unsubscribed ? `, ${st.unsubscribed} dados de baja` : ''}`);
+        } else if (st.status === 'paused') toast.warning(st.message || 'Envío en pausa. Puede reanudarlo.');
+        else if (st.status === 'failed') toast.error(st.message || 'Error al enviar');
+        else if (st.status === 'cancelled') toast.info(`Envío cancelado (${st.processed}/${st.total} procesados)`);
+    };
 
-    const previewRow = useMemo(() => ({ ...systemVars, ...(filteredRows[previewRowIndex] || {}) }), [systemVars, filteredRows, previewRowIndex]);
-    const previewSubject = renderTemplate(subject, previewRow);
-    const previewHtml = renderTemplate(templateHtml, previewRow);
+    const handleSend = async () => {
+        if (sending) return;
+        if (validRecipients.length === 0) { toast.error('No hay destinatarios válidos'); return; }
+        if (!subject.trim()) { toast.error('Asunto vacío'); return; }
+        if (!templateHtml.trim()) { toast.error('La plantilla está vacía'); return; }
+
+        const payload: Record<string, unknown> = {
+            template: templateHtml, subject, recipientColumn, senderConfig, systemVars, timezone,
+            autoescape: true, strictVariables: true, unsubscribeFooter: true,
+        };
+        const rows = validRecipients;
+        const fp = fingerprint([subject, templateHtml, recipientColumn, JSON.stringify(senderConfig), rows.map(r => r[recipientColumn]).join('\n')]);
+
+        // ¿Hay una campana interrumpida con exactamente estos datos? -> ofrecer reanudar (sin duplicar).
+        try {
+            const raw = localStorage.getItem(CAMPAIGN_KEY);
+            if (raw) {
+                const saved = JSON.parse(raw) as { id?: string; fp?: string; results?: Record<number, RowResult> };
+                const done = Object.keys(saved.results ?? {}).length;
+                if (saved.fp === fp && saved.id && done > 0 && done < rows.length &&
+                    window.confirm(`Hay una campaña interrumpida con estos mismos datos (${done}/${rows.length} ya procesados).\n\nAceptar: reanudar sin reenviar lo ya enviado.\nCancelar: empezar una campaña nueva.`)) {
+                    await startRun(saved.id, fp, payload, saved.results ?? {}, rows);
+                    return;
+                }
+            }
+        } catch { /* localStorage no disponible o corrupto */ }
+
+        // Pre-vuelo con el MISMO motor y opciones que el servidor.
+        const pf = preflight(rows, {
+            subject: { source: subject },
+            body: { source: templateHtml, autoescape: true },
+            fromName: { source: senderConfig.fromName },
+            fromEmail: { source: senderConfig.fromEmail },
+            cc: { source: senderConfig.cc },
+            bcc: { source: senderConfig.bcc },
+        }, systemVars, { strictVariables: true, timezone, locale: 'es' });
+        if (pf.compileError) {
+            toast.error(`Error en ${pf.compileError.field}: ${pf.compileError.message}`);
+            setActiveTab('template');
+            return;
+        }
+        if (pf.issueCount > 0) {
+            const first = pf.issues[0];
+            if (!window.confirm(`${pf.issueCount} problema(s) de plantilla. Ejemplo: fila ${first.index + 1} (${first.field}): ${first.message}\n\nEsas filas se marcarán como error y NO se enviarán. ¿Continuar con el resto?`)) return;
+        }
+        if (!window.confirm(`¿Enviar la campaña a ${rows.length} destinatarios?\n\nSe omitirán emails inválidos, duplicados y direcciones dadas de baja. Si la plantilla no incluye {{ unsubscribe_url }}, se añadirá un enlace de baja al final.`)) return;
+
+        await startRun(newCampaignId(), fp, payload, {}, rows);
+    };
+
+    const handleResume = () => {
+        const r = runRef.current;
+        if (!r || !campaign || sending) return;
+        void startRun(r.id, r.fp, r.payload, campaign.results, r.rows);
+    };
+    const handleRetryErrors = () => {
+        const r = runRef.current;
+        if (!r || !campaign || sending) return;
+        // Id nuevo: Resend puede repetir la respuesta (error) de una clave de idempotencia ya usada.
+        const base = r.id.split('-r')[0];
+        void startRun(`${base}-r${Date.now().toString(36)}`, r.fp, r.payload, campaign.results, r.rows, true);
+    };
+    const handleCancel = () => { abortRef.current.aborted = true; };
+
+    useEffect(() => {
+        if (!sending) return;
+        const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+        window.addEventListener('beforeunload', h);
+        return () => window.removeEventListener('beforeunload', h);
+    }, [sending]);
+
+    // System vars: marca + fechas (misma funcion que usa el servidor -> vista previa y envio coinciden)
+    const systemVars = useMemo(() => ({
+        brand_name:    domainConfig.displayName || domainConfig.name || '',
+        brand_color:   domainConfig.theme?.primaryColor || '',
+        brand_logo:    domainConfig.logo || '',
+        ...systemDateVars(new Date(), timezone, 'es'),
+    }), [domainConfig, timezone]);
+
+    // El indice de la vista previa nunca debe quedar fuera de rango al cambiar filtros/archivo.
+    useEffect(() => {
+        setPreviewRowIndex(i => Math.max(0, Math.min(i, filteredRows.length - 1)));
+    }, [filteredRows.length]);
+
+    const previewRow = useMemo(
+        () => ({ ...systemVars, ...(filteredRows[previewRowIndex] || {}), unsubscribe_url: PREVIEW_UNSUB_URL }),
+        [systemVars, filteredRows, previewRowIndex],
+    );
+    const previewSubjectR = useMemo(() => safeRender(subject, previewRow, { timezone }), [subject, previewRow, timezone]);
+    const previewHtmlR = useMemo(() => safeRender(templateHtml, previewRow, { autoescape: true, timezone }), [templateHtml, previewRow, timezone]);
+    const previewError = previewHtmlR.error ? `Plantilla: ${previewHtmlR.error}` : previewSubjectR.error ? `Asunto: ${previewSubjectR.error}` : undefined;
+    const renderHeader = useCallback((src: string) => {
+        const r = safeRender(src, previewRow, { timezone });
+        return r.error ? `⚠ ${r.error}` : r.text;
+    }, [previewRow, timezone]);
 
     return (
         <div className="flex h-screen bg-background overflow-hidden">
@@ -558,8 +634,8 @@ export default function ElixirPage() {
                             )}>
                             <tab.icon className="h-4 w-4" />
                             {tab.label}
-                            {tab.id === 'send' && results.length > 0 && (
-                                <span className="ml-1 text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{results.length}</span>
+                            {tab.id === 'send' && campaign && campaign.processed > 0 && (
+                                <span className="ml-1 text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{campaign.processed}</span>
                             )}
                         </button>
                     ))}
@@ -592,7 +668,8 @@ export default function ElixirPage() {
                             headers={headers} filteredRows={filteredRows}
                             subject={subject} templateHtml={templateHtml}
                             previewRowIndex={previewRowIndex}
-                            previewSubject={previewSubject} previewHtml={previewHtml}
+                            previewSubject={previewSubjectR.text} previewHtml={previewHtmlR.text}
+                            previewError={previewError} renderHeader={renderHeader}
                             senderConfig={senderConfig}
                             systemVarKeys={SYSTEM_VAR_KEYS}
                             importTemplateRef={importTemplateRef}
@@ -607,7 +684,7 @@ export default function ElixirPage() {
                         />
                     )}
                     {activeTab === 'send' && (
-                        <SendTab results={results} sending={sending} validRecipients={validRecipients} />
+                        <SendTab campaign={campaign} onResume={handleResume} onCancel={handleCancel} onRetryErrors={handleRetryErrors} />
                     )}
                 </div>
             </div>
@@ -678,7 +755,7 @@ function DataTab({
                             </>
                         }
                     </div>
-                    <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={onFileChange} />
+                    <input ref={fileInputRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={onFileChange} />
 
                     {/* Folder picker button */}
                     <button
@@ -925,7 +1002,7 @@ function FilterRow({
 
 function TemplateTab({
     headers, filteredRows, subject, templateHtml, previewRowIndex,
-    previewSubject, previewHtml, senderConfig, systemVarKeys, importTemplateRef,
+    previewSubject, previewHtml, previewError, renderHeader, senderConfig, systemVarKeys, importTemplateRef,
     onSenderConfigChange, onSubjectChange, onTemplateChange, onPreviewRowChange,
     onExportLiquid, onExportBundle, onImportClick, onImportFile,
 }: {
@@ -936,6 +1013,8 @@ function TemplateTab({
     previewRowIndex: number;
     previewSubject: string;
     previewHtml: string;
+    previewError?: string;
+    renderHeader: (src: string) => string;
     senderConfig: SenderConfig;
     systemVarKeys: typeof SYSTEM_VAR_KEYS;
     importTemplateRef: React.RefObject<HTMLInputElement | null>;
@@ -954,7 +1033,13 @@ function TemplateTab({
     const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
     const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
 
-    const insertVar = (varName: string) => onTemplateChange(templateHtml + `{{${varName}}}`);
+    const editorRef = useRef<LiquidEditorHandle>(null);
+    /** Inserta `{{ variable }}` en la posicion del cursor del editor (no al final). */
+    const insertVar = (varName: string, isSystem = false) => {
+        const snippetText = `{{ ${isSystem ? varName : variableExpression(varName)} }}`;
+        if (editorRef.current) editorRef.current.insertAtCursor(snippetText);
+        else onTemplateChange(templateHtml + snippetText); // editor aun cargando
+    };
     const sc = senderConfig;
     const set = (k: keyof SenderConfig) => (v: string) => onSenderConfigChange({ ...sc, [k]: v });
 
@@ -1094,7 +1179,7 @@ function TemplateTab({
                             <p className="text-[10px] text-muted-foreground mb-1 font-semibold uppercase tracking-wider">Columnas del archivo</p>
                             <div className="flex flex-wrap gap-1.5">
                                 {headers.map(h => (
-                                    <button key={h} onClick={() => insertVar(h)}
+                                    <button key={h} type="button" onClick={() => insertVar(h)}
                                         className="text-xs bg-primary/8 text-primary border border-primary/25 px-2 py-0.5 rounded-full hover:bg-primary/15 transition-colors font-mono">
                                         {`{{${h}}}`}
                                     </button>
@@ -1106,7 +1191,7 @@ function TemplateTab({
                         <p className="text-[10px] text-muted-foreground mb-1 font-semibold uppercase tracking-wider">Variables del sistema</p>
                         <div className="flex flex-wrap gap-1.5">
                             {systemVarKeys.map(v => (
-                                <button key={v.key} onClick={() => insertVar(v.key)} title={v.label}
+                                <button key={v.key} type="button" onClick={() => insertVar(v.key, true)} title={v.label}
                                     className="text-xs bg-warning/10 text-warning border border-warning/30 px-2 py-0.5 rounded-full hover:bg-warning/15 transition-colors font-mono">
                                     {`{{${v.key}}}`}
                                 </button>
@@ -1118,7 +1203,7 @@ function TemplateTab({
                 {/* Syntax reference */}
                 <details className="border-b border-border shrink-0 bg-warning/6 group">
                     <summary className="px-4 py-2 text-xs text-warning font-semibold cursor-pointer select-none flex items-center gap-1">
-                        <span>Referencia sintaxis Liquid (Ample Market)</span>
+                        <span>Referencia de sintaxis Liquid</span>
                         <ChevronDown className="h-3 w-3 group-open:rotate-180 transition-transform ml-auto" />
                     </summary>
                     <div className="px-4 pb-3 grid grid-cols-2 gap-x-6 gap-y-0.5 text-[11px] text-warning font-mono leading-relaxed">
@@ -1188,6 +1273,14 @@ function TemplateTab({
                         <span>{`{% capture x %}texto {{campo}}{% endcapture %}`}</span>
                         <span>{`{% increment ctr %} / {% decrement ctr %}`}</span>
                         <span>{`{% cycle "odd", "even" %}`}</span>
+
+                        <span className="col-span-2 text-[10px] font-bold text-warning mt-1.5 uppercase tracking-wider">Seguridad y envío</span>
+                        <span className="col-span-2">{`{{campo}}`} se escapa como HTML automáticamente; use {`{{ campo | raw }}`} solo con HTML de confianza.</span>
+                        <span className="col-span-2">Una variable inexistente o un error de sintaxis marca la fila como error: nunca se envía texto sin renderizar.</span>
+                        <span className="col-span-2">{`{{ unsubscribe_url }}`} = enlace de baja firmado. Sin él se añade un pie de baja automático.</span>
+                        <span className="col-span-2">Columnas con símbolos: {`{{ row["Precio (S/.)"] }}`}. Con espacios: {`{{ Nombre completo }}`}.</span>
+                        <span className="col-span-2">Fechas YYYY-MM-DD y DD/MM/YYYY sin desfase de zona horaria. Formatos: %-d %j %A %B %Z…</span>
+                        <span className="col-span-2">Vacío, "false", "nil" y "null" cuentan como falso en if/unless/default.</span>
                     </div>
                 </details>
 
@@ -1203,36 +1296,25 @@ function TemplateTab({
                     />
                 )}
 
-                {/* Liquid Code Editor (CodeMirror 6) */}
-                {isEditorFullscreen ? (
-                    <div className="fixed inset-0 z-50 bg-background flex flex-col">
+                {/* Liquid Code Editor (CodeMirror 6): UNA sola instancia; pantalla completa solo cambia el contenedor
+                    (asi no se pierde el historial de deshacer ni el estado al alternar). */}
+                <div className={isEditorFullscreen ? 'fixed inset-0 z-50 bg-background flex flex-col' : 'flex-1 min-h-0 overflow-hidden'}>
+                    <Suspense fallback={
+                        <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
+                            Cargando editor...
+                        </div>
+                    }>
                         <LiquidEditor
+                            ref={editorRef}
                             value={templateHtml}
                             onChange={onTemplateChange}
                             variables={headers}
-                            className="flex-1 min-h-0"
-                            isFullscreen={true}
-                            onToggleFullscreen={() => setIsEditorFullscreen(false)}
+                            className={isEditorFullscreen ? 'flex-1 min-h-0' : 'h-full'}
+                            isFullscreen={isEditorFullscreen}
+                            onToggleFullscreen={() => setIsEditorFullscreen(v => !v)}
                         />
-                    </div>
-                ) : (
-                    <div className="flex-1 min-h-0 overflow-hidden">
-                        <Suspense fallback={
-                            <div className="flex items-center justify-center h-full text-xs text-muted-foreground">
-                                Cargando editor...
-                            </div>
-                        }>
-                            <LiquidEditor
-                                value={templateHtml}
-                                onChange={onTemplateChange}
-                                variables={headers}
-                                className="h-full"
-                                isFullscreen={false}
-                                onToggleFullscreen={() => setIsEditorFullscreen(true)}
-                            />
-                        </Suspense>
-                    </div>
-                )}
+                    </Suspense>
+                </div>
             </div>
 
             {/* Preview side */}
@@ -1276,25 +1358,25 @@ function TemplateTab({
                                         {senderConfig.fromName && (
                                             <div className="flex px-4 py-2 gap-2">
                                                 <span className="text-muted-foreground w-20 shrink-0">De (nombre):</span>
-                                                <span className="font-medium">{renderTemplate(senderConfig.fromName, filteredRows[previewRowIndex] || {})}</span>
+                                                <span className="font-medium">{renderHeader(senderConfig.fromName)}</span>
                                             </div>
                                         )}
                                         {senderConfig.fromEmail && (
                                             <div className="flex px-4 py-2 gap-2">
                                                 <span className="text-muted-foreground w-20 shrink-0">De (email):</span>
-                                                <span className="font-mono">{renderTemplate(senderConfig.fromEmail, filteredRows[previewRowIndex] || {})}</span>
+                                                <span className="font-mono">{renderHeader(senderConfig.fromEmail)}</span>
                                             </div>
                                         )}
                                         {senderConfig.cc && (
                                             <div className="flex px-4 py-2 gap-2">
                                                 <span className="text-muted-foreground w-20 shrink-0">CC:</span>
-                                                <span className="font-mono">{renderTemplate(senderConfig.cc, filteredRows[previewRowIndex] || {})}</span>
+                                                <span className="font-mono">{renderHeader(senderConfig.cc)}</span>
                                             </div>
                                         )}
                                         {senderConfig.bcc && (
                                             <div className="flex px-4 py-2 gap-2">
                                                 <span className="text-muted-foreground w-20 shrink-0">BCC:</span>
-                                                <span className="font-mono">{renderTemplate(senderConfig.bcc, filteredRows[previewRowIndex] || {})}</span>
+                                                <span className="font-mono">{renderHeader(senderConfig.bcc)}</span>
                                             </div>
                                         )}
                                     </div>
@@ -1309,8 +1391,20 @@ function TemplateTab({
                                         <span className="truncate">{previewSubject || '(sin asunto)'}</span>
                                     </div>
                                 </div>
-                                <div className="p-4 text-sm"><SafeIframe html={previewHtml} /></div>
+                                {previewError
+                                    ? (
+                                        <div role="alert" className="p-4 text-xs text-destructive bg-destructive/10 border-t border-destructive/30">
+                                            <p className="font-semibold mb-1">La plantilla tiene un error y no se enviaría:</p>
+                                            <p className="font-mono break-words">{previewError}</p>
+                                        </div>
+                                    )
+                                    : <div className="p-4 text-sm"><SafeIframe html={previewHtml} /></div>}
                             </div>
+                            {!/\bunsubscribe_url\b/.test(templateHtml) && (
+                                <p className="text-[11px] text-muted-foreground px-1">
+                                    Al enviar se añadirá al final un enlace de baja firmado (o use <code className="font-mono">{'{{ unsubscribe_url }}'}</code> para colocarlo usted).
+                                </p>
+                            )}
 
                             {/* Row values */}
                             {headers.length > 0 && (
@@ -1340,27 +1434,21 @@ function TemplateTab({
 // SendTab
 // ─────────────────────────────────────────────────────────────────────────────
 
-function SendTab({ results, sending, validRecipients }: {
-    results: SendResult[];
-    sending: boolean;
-    validRecipients: Row[];
+function SendTab({ campaign, onResume, onCancel, onRetryErrors }: {
+    campaign: CampaignState | null;
+    onResume: () => void;
+    onCancel: () => void;
+    onRetryErrors: () => void;
 }) {
-    const sent = results.filter(r => r.status === 'sent').length;
-    const failed = results.filter(r => r.status === 'error').length;
+    const [statusFilter, setStatusFilter] = useState<'all' | RowResult['status']>('all');
+    const list = useMemo(() => {
+        if (!campaign) return [] as RowResult[];
+        return Object.values(campaign.results)
+            .filter(r => statusFilter === 'all' || r.status === statusFilter)
+            .sort((a, b) => a.index - b.index);
+    }, [campaign, statusFilter]);
 
-    if (sending) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full gap-4">
-                <motion.div animate={{ rotate: 360 }} transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}>
-                    <Zap className="h-10 w-10 text-primary" />
-                </motion.div>
-                <p className="text-sm font-medium">Enviando campaña...</p>
-                <p className="text-xs text-muted-foreground">{validRecipients.length} destinatarios</p>
-            </div>
-        );
-    }
-
-    if (results.length === 0) {
+    if (!campaign) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                 <Send className="h-10 w-10 mb-3 opacity-30" />
@@ -1370,48 +1458,99 @@ function SendTab({ results, sending, validRecipients }: {
         );
     }
 
+    const { total, processed, sent, errors, skipped, unsubscribed, status } = campaign;
+    const pct = total ? Math.round((processed / total) * 100) : 0;
+    const running = status === 'running';
+    const resumable = (status === 'paused' || status === 'failed' || status === 'cancelled') && processed < total;
+    const MAX_ROWS = 500;
+
+    const downloadReport = () => {
+        const esc = (v: string) => {
+            const safe = /^[=+\-@\t\r]/.test(v) ? `'${v}` : v; // evita inyeccion de formulas al abrir en Excel
+            return `"${safe.replace(/"/g, '""')}"`;
+        };
+        const all = Object.values(campaign.results).sort((a, b) => a.index - b.index);
+        const csv = ['fila,email,estado,mensaje', ...all.map(r => [r.index + 1, esc(r.email), r.status, esc(r.message || '')].join(','))].join('\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' }));
+        a.download = 'elixir-resultados.csv';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    };
+
+    const statusBadge = (st: RowResult['status']) => cn(
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium",
+        st === 'sent' ? "bg-success/15 text-success" : st === 'error' ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground",
+    );
+    const statusLabel = (st: RowResult['status']) => st === 'sent' ? 'Enviado' : st === 'error' ? 'Error' : st === 'unsubscribed' ? 'Baja' : 'Omitido';
+
     return (
         <div className="flex flex-col h-full min-h-0">
-            <div className="flex gap-4 p-4 border-b border-border shrink-0">
-                <div className="flex items-center gap-2 bg-success/10 border border-success/30 rounded-lg px-4 py-3">
-                    <CheckCircle className="h-5 w-5 text-success" />
-                    <div>
-                        <p className="text-lg font-bold text-success">{sent}</p>
-                        <p className="text-xs text-success">Enviados</p>
-                    </div>
-                </div>
-                {failed > 0 && (
-                    <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3">
-                        <AlertCircle className="h-5 w-5 text-destructive" />
-                        <div>
-                            <p className="text-lg font-bold text-destructive">{failed}</p>
-                            <p className="text-xs text-destructive">Fallidos</p>
+            <div className="p-4 border-b border-border shrink-0 space-y-3">
+                <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="font-medium">
+                                {running ? 'Enviando campaña…' : status === 'done' ? 'Campaña completada' : status === 'cancelled' ? 'Campaña cancelada' : status === 'paused' ? 'Campaña en pausa' : 'Campaña detenida'}
+                            </span>
+                            <span className="text-muted-foreground tabular-nums">{processed} / {total} · {pct}%</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-muted overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+                            <div className={cn("h-full transition-all", status === 'failed' ? "bg-destructive" : "bg-primary")} style={{ width: `${pct}%` }} />
                         </div>
                     </div>
+                    {running && (
+                        <button onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium">Cancelar</button>
+                    )}
+                    {resumable && (
+                        <button onClick={onResume} className="text-xs px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 font-medium">Reanudar</button>
+                    )}
+                    {!running && errors > 0 && (
+                        <button onClick={onRetryErrors} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium">Reintentar fallidos</button>
+                    )}
+                    <button onClick={downloadReport} className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium flex items-center gap-1.5">
+                        <Download className="h-3.5 w-3.5" />Informe
+                    </button>
+                </div>
+                {campaign.message && (status === 'paused' || status === 'failed') && (
+                    <p role="alert" className="text-xs text-warning bg-warning/10 border border-warning/30 rounded-lg px-3 py-2">{campaign.message}</p>
                 )}
+                <div className="flex flex-wrap gap-2 text-xs">
+                    {([
+                        ['all', `Todos ${processed}`],
+                        ['sent', `Enviados ${sent}`],
+                        ['error', `Fallidos ${errors}`],
+                        ['skipped', `Omitidos ${skipped}`],
+                        ['unsubscribed', `Bajas ${unsubscribed}`],
+                    ] as const).map(([k, label]) => (
+                        <button key={k} onClick={() => setStatusFilter(k)}
+                            className={cn("px-2.5 py-1 rounded-full border transition-colors",
+                                statusFilter === k ? "bg-primary/10 border-primary/40 text-primary font-medium" : "border-border text-muted-foreground hover:bg-muted")}>
+                            {label}
+                        </button>
+                    ))}
+                </div>
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
                 <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-muted/80 backdrop-blur">
                         <tr>
+                            <th className="px-4 py-2 text-left font-semibold text-muted-foreground border-b border-border">#</th>
                             <th className="px-4 py-2 text-left font-semibold text-muted-foreground border-b border-border">Email</th>
                             <th className="px-4 py-2 text-left font-semibold text-muted-foreground border-b border-border">Estado</th>
                             <th className="px-4 py-2 text-left font-semibold text-muted-foreground border-b border-border">Mensaje</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {results.map((r, i) => (
-                            <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
+                        {list.slice(0, MAX_ROWS).map(r => (
+                            <tr key={r.index} className="border-b border-border/50 hover:bg-muted/20">
+                                <td className="px-4 py-2 text-muted-foreground tabular-nums">{r.index + 1}</td>
                                 <td className="px-4 py-2 font-mono">{r.email}</td>
                                 <td className="px-4 py-2">
-                                    <span className={cn(
-                                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium",
-                                        r.status === 'sent' ? "bg-success/15 text-success" :
-                                            r.status === 'error' ? "bg-destructive/15 text-destructive" : "bg-muted text-muted-foreground"
-                                    )}>
+                                    <span className={statusBadge(r.status)}>
                                         {r.status === 'sent' && <CheckCircle className="h-3 w-3" />}
                                         {r.status === 'error' && <AlertCircle className="h-3 w-3" />}
-                                        {r.status === 'sent' ? 'Enviado' : r.status === 'error' ? 'Error' : 'Omitido'}
+                                        {statusLabel(r.status)}
                                     </span>
                                 </td>
                                 <td className="px-4 py-2 text-muted-foreground">{r.message || '—'}</td>
@@ -1419,6 +1558,9 @@ function SendTab({ results, sending, validRecipients }: {
                         ))}
                     </tbody>
                 </table>
+                {list.length > MAX_ROWS && (
+                    <p className="text-xs text-muted-foreground text-center py-3">Mostrando {MAX_ROWS} de {list.length}. Descargue el informe para ver todas.</p>
+                )}
             </div>
         </div>
     );

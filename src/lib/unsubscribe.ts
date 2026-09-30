@@ -63,17 +63,21 @@ export function buildUnsubscribeHeaders(senderUserId: string, recipientEmail: st
     };
 }
 
-export async function recordUnsubscribe(sender: string, recipient: string): Promise<void> {
+export type SuppressionReason = 'unsubscribe' | 'bounce' | 'complaint';
+
+/** Registra una baja/supresion (idempotente). El email se normaliza a minusculas. */
+export async function recordUnsubscribe(sender: string, recipient: string, reason: SuppressionReason = 'unsubscribe'): Promise<void> {
+    const rcpt = recipient.trim().toLowerCase();
     const existing = await prisma.emailEvent.findFirst({
         where: {
             type: SUPPRESSION_EVENT,
-            AND: [{ data: { path: ['sender'], equals: sender } }, { data: { path: ['recipient'], equals: recipient } }],
+            AND: [{ data: { path: ['sender'], equals: sender } }, { data: { path: ['recipient'], equals: rcpt } }],
         },
         select: { id: true },
     });
     if (existing) return;
     await prisma.emailEvent.create({
-        data: { type: SUPPRESSION_EVENT, data: { sender, recipient } },
+        data: { type: SUPPRESSION_EVENT, data: { sender, recipient: rcpt, reason } },
     });
 }
 
@@ -90,4 +94,43 @@ export async function getSuppressedRecipients(sender: string): Promise<Set<strin
         if (typeof r === 'string') out.add(r.toLowerCase());
     }
     return out;
+}
+
+export async function isSuppressed(sender: string, recipient: string): Promise<boolean> {
+    const found = await prisma.emailEvent.findFirst({
+        where: {
+            type: SUPPRESSION_EVENT,
+            AND: [{ data: { path: ['sender'], equals: sender } }, { data: { path: ['recipient'], equals: recipient.trim().toLowerCase() } }],
+        },
+        select: { id: true },
+    });
+    return !!found;
+}
+
+/**
+ * Punto unico para respetar la lista de supresion en CUALQUIER envio (masivo o individual):
+ * separa los destinatarios permitidos de los dados de baja. Si la consulta falla, NO se bloquea el envio
+ * individual pero se informa en `error` para que el llamador decida (Elixir la trata como fallo cerrado).
+ */
+export async function filterSuppressed(sender: string, recipients: string[]): Promise<{ allowed: string[]; suppressed: string[]; error?: string }> {
+    try {
+        const set = await getSuppressedRecipients(sender);
+        const allowed: string[] = [];
+        const suppressed: string[] = [];
+        for (const r of recipients) {
+            const addr = (r.match(/<([^<>]+)>\s*$/)?.[1] || r).trim().toLowerCase();
+            (set.has(addr) ? suppressed : allowed).push(r);
+        }
+        return { allowed, suppressed };
+    } catch {
+        return { allowed: recipients, suppressed: [], error: 'suppression_lookup_failed' };
+    }
+}
+
+/** URL absoluta (http/https) utilizable en un enlace del cuerpo; null si no hay base publica configurada. */
+export function buildAbsoluteUnsubscribeUrl(senderUserId: string, recipientEmail: string): string | null {
+    const token = createUnsubscribeToken(senderUserId, recipientEmail);
+    if (!token) return null;
+    const url = buildUnsubscribeUrl(token);
+    return /^https?:\/\//.test(url) ? url : null;
 }

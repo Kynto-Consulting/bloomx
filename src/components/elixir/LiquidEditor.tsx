@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Search as SearchIcon, Maximize2, Minimize2 } from 'lucide-react';
 import { search, searchKeymap, openSearchPanel } from '@codemirror/search';
+import { linter, lintGutter, forceLinting, type Diagnostic } from '@codemirror/lint';
 
 // ─── CodeMirror 6 imports ───────────────────────────────────────────────────
 import {
@@ -23,214 +24,38 @@ import {
 } from '@codemirror/autocomplete';
 import { html } from '@codemirror/lang-html';
 import {
-    syntaxHighlighting, defaultHighlightStyle, bracketMatching,
+    syntaxHighlighting, HighlightStyle, bracketMatching,
     indentOnInput, foldGutter, foldKeymap,
 } from '@codemirror/language';
+import { tags as t } from '@lezer/highlight';
+import { useTheme } from '@/components/ThemeProvider';
+import { validateTemplate } from '@/lib/liquid';
+import {
+    FILTER_CATALOG, TAG_CATALOG, SYSTEM_VARIABLES, FORLOOP_PROPS, CONDITION_OPERATORS, BUILTIN_VARIABLE_NAMES,
+    variableExpression, extractDefinedVariables,
+} from '@/lib/liquid-catalog';
 
-// ─── Liquid filter catalog ──────────────────────────────────────────────────
+// ─── Catalogos (fuente unica en src/lib/liquid-catalog.ts, verificada contra el motor en los tests) ───
 
-const LIQUID_FILTERS: Completion[] = [
-    // String
-    { label: 'upcase',           detail: '→ "HELLO"',             type: 'function', boost: 10 },
-    { label: 'downcase',         detail: '→ "hello"',             type: 'function', boost: 10 },
-    { label: 'capitalize',       detail: '→ "Hello"',             type: 'function', boost: 10 },
-    { label: 'strip',            detail: 'Remove whitespace',     type: 'function' },
-    { label: 'lstrip',           detail: 'Remove leading ws',     type: 'function' },
-    { label: 'rstrip',           detail: 'Remove trailing ws',    type: 'function' },
-    { label: 'strip_html',       detail: 'Remove HTML tags',      type: 'function' },
-    { label: 'strip_newlines',   detail: 'Remove newlines',       type: 'function' },
-    { label: 'newline_to_br',    detail: '\\n → <br>',            type: 'function' },
-    { label: 'escape',           detail: 'HTML escape',           type: 'function' },
-    { label: 'escape_once',      detail: 'HTML escape (safe)',    type: 'function' },
-    { label: 'url_encode',       detail: 'URL encode',            type: 'function' },
-    { label: 'url_decode',       detail: 'URL decode',            type: 'function' },
-    { label: 'base64_encode',    detail: 'Base64 encode',         type: 'function' },
-    { label: 'base64_decode',    detail: 'Base64 decode',         type: 'function' },
-    { label: 'size',             detail: 'Length (str or array)', type: 'function' },
-    { label: 'first',            detail: 'First char / item',     type: 'function' },
-    { label: 'last',             detail: 'Last char / item',      type: 'function' },
-    { label: 'reverse',          detail: 'Reverse string/array',  type: 'function' },
-    // Truncate
-    { label: 'truncate: 50',                   detail: 'Truncate chars',        type: 'function', apply: 'truncate: 50' },
-    { label: 'truncate: 50, "…"',              detail: 'Truncate w/ ellipsis',  type: 'function', apply: 'truncate: 50, "…"' },
-    { label: 'truncatewords: 10',              detail: 'Truncate words',        type: 'function', apply: 'truncatewords: 10' },
-    // Replace / remove
-    { label: 'replace: "old", "new"',     detail: 'Replace all',           type: 'function', apply: 'replace: "old", "new"' },
-    { label: 'replace_first: "o", "n"',   detail: 'Replace first match',   type: 'function', apply: 'replace_first: "old", "new"' },
-    { label: 'replace_last: "o", "n"',    detail: 'Replace last match',    type: 'function', apply: 'replace_last: "old", "new"' },
-    { label: 'remove: "text"',            detail: 'Remove all occurrences', type: 'function', apply: 'remove: "text"' },
-    { label: 'remove_first: "text"',      detail: 'Remove first match',    type: 'function', apply: 'remove_first: "text"' },
-    { label: 'prepend: "text"',           detail: 'Add before value',      type: 'function', apply: 'prepend: ""', boost: 5 },
-    { label: 'append: "text"',            detail: 'Add after value',       type: 'function', apply: 'append: ""', boost: 5 },
-    { label: 'slice: 0, 5',              detail: 'Slice string/array',    type: 'function', apply: 'slice: 0, 5' },
-    // Default
-    { label: 'default: "text"',           detail: 'Fallback if empty',     type: 'function', apply: 'default: ""', boost: 20 },
-    // Array
-    { label: 'split: ","',    detail: 'String → array',       type: 'function', apply: 'split: ","', boost: 12 },
-    { label: 'join: ", "',    detail: 'Array → string',       type: 'function', apply: 'join: ", "', boost: 10 },
-    { label: 'sort',          detail: 'Sort array',           type: 'function' },
-    { label: 'sort_natural',  detail: 'Case-insensitive sort', type: 'function' },
-    { label: 'uniq',          detail: 'Remove duplicates',    type: 'function' },
-    { label: 'compact',       detail: 'Remove blanks',        type: 'function' },
-    { label: 'flatten',       detail: 'Flatten nested array', type: 'function' },
-    { label: 'sum',           detail: 'Sum array numbers',    type: 'function' },
-    { label: 'min',           detail: 'Min of array',         type: 'function' },
-    { label: 'max',           detail: 'Max of array',         type: 'function' },
-    // Numeric
-    { label: 'plus: 1',        detail: 'Add',                 type: 'function', apply: 'plus: 1' },
-    { label: 'minus: 1',       detail: 'Subtract',            type: 'function', apply: 'minus: 1' },
-    { label: 'times: 2',       detail: 'Multiply',            type: 'function', apply: 'times: 2' },
-    { label: 'divided_by: 2',  detail: 'Divide',              type: 'function', apply: 'divided_by: 2' },
-    { label: 'modulo: 2',      detail: 'Modulo',              type: 'function', apply: 'modulo: 2' },
-    { label: 'abs',            detail: 'Absolute value',      type: 'function' },
-    { label: 'ceil',           detail: 'Round up',            type: 'function' },
-    { label: 'floor',          detail: 'Round down',          type: 'function' },
-    { label: 'round',          detail: 'Round',               type: 'function' },
-    { label: 'round: 2',       detail: 'Round N decimals',    type: 'function', apply: 'round: 2' },
-    { label: 'at_least: 0',    detail: 'Clamp minimum',       type: 'function', apply: 'at_least: 0' },
-    { label: 'at_most: 100',   detail: 'Clamp maximum',       type: 'function', apply: 'at_most: 100' },
-    // Date
-    { label: 'date: "%B %d, %Y"',  detail: 'January 15, 2024',     type: 'function', apply: 'date: "%B %d, %Y"', boost: 8 },
-    { label: 'date: "%d/%m/%Y"',   detail: '15/01/2024',           type: 'function', apply: 'date: "%d/%m/%Y"' },
-    { label: 'date: "%Y-%m-%d"',   detail: '2024-01-15',           type: 'function', apply: 'date: "%Y-%m-%d"' },
-    { label: 'date: "%H:%M"',      detail: '14:30',                type: 'function', apply: 'date: "%H:%M"' },
-    { label: 'date: "%A, %B %e"',  detail: 'Monday, January 5',    type: 'function', apply: 'date: "%A, %B %e"' },
-];
+const LIQUID_FILTERS: Completion[] = FILTER_CATALOG.map(f => ({
+    label: f.name,
+    detail: f.detail,
+    type: 'function',
+    apply: f.apply,
+    boost: f.boost,
+}));
 
-// ─── Liquid tag snippets ─────────────────────────────────────────────────────
+const LIQUID_TAG_SNIPPETS: Completion[] = TAG_CATALOG.map(t => ({
+    label: t.label,
+    detail: t.detail,
+    type: 'keyword',
+    boost: t.boost,
+    info: t.info,
+    apply: snippet(t.snippet),
+}));
 
-const LIQUID_TAG_SNIPPETS: Completion[] = [
-    {
-        label: 'if',
-        detail: '{% if %}...{% endif %}',
-        type: 'keyword',
-        boost: 20,
-        apply: snippet('{% if #{condition} %}\n  #{}\n{% endif %}'),
-        info: 'Conditional block',
-    },
-    {
-        label: 'if/else',
-        detail: '{% if %}...{% else %}...{% endif %}',
-        type: 'keyword',
-        boost: 18,
-        apply: snippet('{% if #{condition} %}\n  #{if_content}\n{% else %}\n  #{else_content}\n{% endif %}'),
-    },
-    {
-        label: 'if/elsif',
-        detail: '{% if %}...{% elsif %}...{% endif %}',
-        type: 'keyword',
-        boost: 15,
-        apply: snippet('{% if #{cond1} %}\n  #{}\n{% elsif #{cond2} %}\n  #{}\n{% else %}\n  #{}\n{% endif %}'),
-    },
-    {
-        label: 'unless',
-        detail: '{% unless %}...{% endunless %}',
-        type: 'keyword',
-        boost: 12,
-        apply: snippet('{% unless #{condition} %}\n  #{}\n{% endunless %}'),
-    },
-    {
-        label: 'for',
-        detail: '{% for item in array %}...{% endfor %}',
-        type: 'keyword',
-        boost: 17,
-        apply: snippet('{% for #{item} in #{array} %}\n  {{ #{item} }}\n{% endfor %}'),
-        info: 'Loop over array. Use split filter to create arrays from strings.',
-    },
-    {
-        label: 'for/else',
-        detail: '{% for %}...{% else %}...{% endfor %}',
-        type: 'keyword',
-        boost: 14,
-        apply: snippet('{% for #{item} in #{array} %}\n  {{ #{item} }}\n{% else %}\n  #{empty_message}\n{% endfor %}'),
-    },
-    {
-        label: 'for (range)',
-        detail: '{% for i in (1..N) %}',
-        type: 'keyword',
-        boost: 13,
-        apply: snippet('{% for #{i} in (#{1}..#{10}) %}\n  {{ #{i} }}\n{% endfor %}'),
-    },
-    {
-        label: 'for (limit/offset)',
-        detail: '{% for item in array limit:N offset:M %}',
-        type: 'keyword',
-        boost: 11,
-        apply: snippet('{% for #{item} in #{array} limit:#{5} offset:#{0} %}\n  {{ #{item} }}\n{% endfor %}'),
-    },
-    {
-        label: 'case/when',
-        detail: '{% case %}{% when %}...{% endcase %}',
-        type: 'keyword',
-        boost: 16,
-        apply: snippet('{% case #{variable} %}\n{% when "#{value1}" %}\n  #{}\n{% when "#{value2}" %}\n  #{}\n{% else %}\n  #{}\n{% endcase %}'),
-        info: 'Switch-like conditional',
-    },
-    {
-        label: 'assign',
-        detail: '{% assign var = value %}',
-        type: 'keyword',
-        boost: 10,
-        apply: snippet('{% assign #{name} = #{value} %}'),
-    },
-    {
-        label: 'assign (split)',
-        detail: '{% assign arr = field | split: "," %}',
-        type: 'keyword',
-        boost: 9,
-        apply: snippet('{% assign #{items} = #{field} | split: "#{,}" %}'),
-    },
-    {
-        label: 'capture',
-        detail: '{% capture %}...{% endcapture %}',
-        type: 'keyword',
-        apply: snippet('{% capture #{name} %}\n  #{}\n{% endcapture %}'),
-    },
-    {
-        label: 'cycle',
-        detail: '{% cycle "a", "b", "c" %}',
-        type: 'keyword',
-        apply: snippet('{% cycle "#{odd}", "#{even}" %}'),
-        info: 'Cycles through values on each call. Typically inside a for loop.',
-    },
-    {
-        label: 'increment',
-        detail: '{% increment counter %}',
-        type: 'keyword',
-        apply: snippet('{% increment #{counter} %}'),
-        info: 'Outputs counter (starts at 0) and increments. Independent from assign.',
-    },
-    {
-        label: 'decrement',
-        detail: '{% decrement counter %}',
-        type: 'keyword',
-        apply: snippet('{% decrement #{counter} %}'),
-    },
-    {
-        label: 'comment',
-        detail: '{% comment %}...{% endcomment %}',
-        type: 'keyword',
-        apply: snippet('{%- comment -%}\n  #{}\n{%- endcomment -%}'),
-    },
-    {
-        label: 'raw',
-        detail: '{% raw %}...{% endraw %} (escape Liquid)',
-        type: 'keyword',
-        apply: snippet('{% raw %}\n  #{}\n{% endraw %}'),
-    },
-    {
-        label: 'break',
-        detail: '{% break %} — exit for loop early',
-        type: 'keyword',
-        apply: '{% break %}',
-    },
-    {
-        label: 'continue',
-        detail: '{% continue %} — skip to next iteration',
-        type: 'keyword',
-        apply: '{% continue %}',
-    },
-];
+const OPERATOR_OPTIONS: Completion[] = CONDITION_OPERATORS.map(o => ({ label: o, type: 'keyword', apply: `${o} ` }));
+const FORLOOP_OPTIONS: Completion[] = FORLOOP_PROPS.map(p => ({ label: p, type: 'property' }));
 
 // ─── Liquid syntax highlight plugin ─────────────────────────────────────────
 
@@ -277,152 +102,154 @@ function buildDecorations(view: EditorView): DecorationSet {
 
 // ─── Autocomplete source ─────────────────────────────────────────────────────
 
-function makeLiquidCompletions(getVariables: () => string[]) {
+interface VarSources {
+    columns: string[];
+    system: string[];
+}
+
+function variableOptions(src: VarSources, doc: string): Completion[] {
+    const opts: Completion[] = [];
+    const seen = new Set<string>();
+    const add = (name: string, detail: string, boost: number, apply?: string) => {
+        if (seen.has(name)) return;
+        seen.add(name);
+        opts.push({ label: name, type: 'variable', detail, boost, apply: apply ?? name });
+    };
+    for (const c of src.columns) add(c, 'columna', 15, variableExpression(c));
+    for (const d of extractDefinedVariables(doc)) add(d, 'plantilla', 13);
+    for (const s of src.system) {
+        const doc2 = SYSTEM_VARIABLES.find(v => v.name === s);
+        add(s, doc2?.detail ?? 'sistema', 8);
+    }
+    add('forloop', 'dentro de un for', 6);
+    add('row', 'fila completa: row["Columna (x)"]', 2);
+    return opts;
+}
+
+function makeLiquidCompletions(getSources: () => VarSources) {
     return function liquidCompletions(context: CompletionContext): CompletionResult | null {
         const { state, pos } = context;
         const line = state.doc.lineAt(pos);
         const before = line.text.slice(0, pos - line.from);
+        const doc = state.doc.toString();
 
-        // ── Context: inside {{ ... | (after pipe) → filter completions ──────
-        // e.g.  "{{ nombre | " or "{{ nombre | up"
-        const afterPipe = before.match(/\{\{-?\s*[\w\s.]+\|\s*([\w_]*)$/);
+        // Propiedades de forloop:  {{ forloop.  /  {% if forloop.
+        const forloop = before.match(/(?:\{\{-?|\{%-?)[^}%]*\bforloop\.(\w*)$/);
+        if (forloop) return { from: pos - forloop[1].length, options: FORLOOP_OPTIONS, validFor: /^\w*$/ };
+
+        // Filtros: tras CUALQUIER "|" dentro de {{ }} o de assign/echo, tambien en cadenas (a | upcase | tr...)
+        const afterPipe = before.match(/(?:\{\{-?|\{%-?\s*(?:assign|echo)\b)[^}%]*\|\s*(\w*)$/);
         if (afterPipe) {
             const typed = afterPipe[1];
+            return { from: pos - typed.length, options: LIQUID_FILTERS, validFor: /^\w*$/ };
+        }
+
+        // Operadores de comparacion tras "{% if variable "
+        const afterOperand = before.match(/\{%-?\s*(?:if|unless|elsif)\s+(?:[^%]*?\s)?[\p{L}\p{N}_.\]"]+\s+(\w*)$/u);
+        if (afterOperand && !/\b(contains|and|or|==|!=|<|>)\s+\w*$/.test(before)) {
+            const typed = afterOperand[1];
+            return { from: pos - typed.length, options: OPERATOR_OPTIONS, validFor: /^\w*$/ };
+        }
+
+        // Variables tras {{ o en {% if / unless / elsif / case / when / for ... in / assign x = / echo
+        const varCtx =
+            before.match(/\{\{-?\s*([\p{L}\p{N}_.]*)$/u) ||
+            before.match(/\{%-?\s*(?:if|unless|elsif|case|when|echo)\s+(?:.*?\b(?:and|or|contains|==|!=|<=|>=|<|>)\s+|)([\p{L}\p{N}_.]*)$/u) ||
+            before.match(/\{%-?\s*for\s+\w+\s+in\s+([\p{L}\p{N}_.]*)$/u) ||
+            before.match(/\{%-?\s*assign\s+[\p{L}\p{N}_-]+\s*=\s*([\p{L}\p{N}_.]*)$/u);
+        if (varCtx) {
+            const typed = varCtx[1];
             return {
                 from: pos - typed.length,
-                options: LIQUID_FILTERS,
-                validFor: /^[\w_]*$/,
+                options: variableOptions(getSources(), doc),
+                validFor: /^[\p{L}\p{N}_.]*$/u,
             };
         }
 
-        // ── Context: inside {{ (variable expression start) ───────────────────
-        // e.g.  "{{ no" or "{{no"
-        const afterDblBrace = before.match(/\{\{-?\s*([\w.]*)$/);
-        if (afterDblBrace) {
-            const typed = afterDblBrace[1];
-            const variables = getVariables();
-            const varOptions: Completion[] = variables.map(v => ({
-                label: v,
-                type: 'variable',
-                boost: 15,
-                apply: (view, _c, from2, to2) => {
-                    // Insert: varname | default: "" }}
-                    view.dispatch({
-                        changes: { from: from2, to: to2, insert: `${v} }}` },
-                        selection: { anchor: from2 + v.length + 4 },
-                    });
-                },
-                info: `Column: ${v}`,
-            }));
-
-            // Also offer "varname | filter" variants for common combos
-            const quickOptions: Completion[] = variables.flatMap(v => [
-                {
-                    label: `${v} | default: ""`,
-                    type: 'variable',
-                    boost: 12,
-                    apply: (view: EditorView, _c: Completion, from2: number, to2: number) => {
-                        view.dispatch({ changes: { from: from2, to: to2, insert: `${v} | default: "" }}` }, selection: { anchor: from2 + v.length + 13 } });
-                    },
-                } as Completion,
-                {
-                    label: `${v} | upcase`,
-                    type: 'variable',
-                    boost: 5,
-                    apply: (view: EditorView, _c: Completion, from2: number, to2: number) => {
-                        view.dispatch({ changes: { from: from2, to: to2, insert: `${v} | upcase }}` } });
-                    },
-                } as Completion,
-            ]);
-
-            return {
-                from: pos - typed.length,
-                options: [...varOptions, ...quickOptions],
-                validFor: /^[\w. |]*$/,
-            };
-        }
-
-        // ── Context: inside {% (tag) ─────────────────────────────────────────
-        const afterTagBrace = before.match(/\{%-?\s*([\w]*)$/);
+        // Tags tras {%
+        const afterTagBrace = before.match(/\{%-?\s*(\w*)$/);
         if (afterTagBrace) {
             const typed = afterTagBrace[1];
-            return {
-                from: pos - typed.length,
-                options: LIQUID_TAG_SNIPPETS,
-                validFor: /^[\w]*$/,
-            };
-        }
-
-        // ── Context: inside {% if | unless condition → suggest variables ──────
-        const afterIfCond = before.match(/\{%-?\s*(?:if|unless|elsif)\s+([\w.]*)$/);
-        if (afterIfCond) {
-            const typed = afterIfCond[1];
-            const variables = getVariables();
-            const condOptions: Completion[] = variables.flatMap(v => [
-                { label: v,                           type: 'variable', boost: 15 } as Completion,
-                { label: `${v} == ""`,                type: 'variable', boost: 10, apply: `${v} == ""` } as Completion,
-                { label: `${v} != ""`,                type: 'variable', boost: 9,  apply: `${v} != ""` } as Completion,
-                { label: `${v} contains ""`,          type: 'variable', boost: 8,  apply: `${v} contains ""` } as Completion,
-                { label: `${v} > 0`,                  type: 'variable', boost: 6,  apply: `${v} > 0` } as Completion,
-            ]);
-            return {
-                from: pos - typed.length,
-                options: condOptions,
-                validFor: /^[\w.!= <>"']*$/,
-            };
-        }
-
-        // ── Context: inside {% assign varname = → suggest variables ───────────
-        const afterAssignEq = before.match(/\{%-?\s*assign\s+\w+\s*=\s*([\w.]*)$/);
-        if (afterAssignEq) {
-            const typed = afterAssignEq[1];
-            const variables = getVariables();
-            return {
-                from: pos - typed.length,
-                options: variables.map(v => ({ label: v, type: 'variable' } as Completion)),
-                validFor: /^[\w.]*$/,
-            };
+            return { from: pos - typed.length, options: LIQUID_TAG_SNIPPETS, validFor: /^\w*$/ };
         }
 
         return null;
     };
 }
 
-// ─── Auto-pair {{ and {% ─────────────────────────────────────────────────────
+// ─── Auto-pair {{ y {% ────────────────────────────────────────────────────────
 
+/**
+ * closeBrackets ya inserta "}" al teclear "{". Al teclear el segundo "{" (o "%") completamos hasta
+ * `{{ | }}` / `{% | %}` reutilizando ese "}" para no dejar llaves de mas.
+ */
 function makeLiquidPairs(): Extension {
-    return keymap.of([
-        {
-            key: '{',
-            run(view) {
-                const { from, to } = view.state.selection.main;
-                const charBefore = view.state.doc.sliceString(Math.max(0, from - 1), from);
-                if (charBefore === '{') {
-                    // Second { typed → insert space + closing }}
-                    view.dispatch({
-                        changes: { from, to, insert: '  }}' },
-                        selection: { anchor: from + 1 },
-                    });
-                    return true;
-                }
-                if (charBefore === '%') {
-                    // {% typed → insert space + %}
-                    view.dispatch({
-                        changes: { from, to, insert: '  %}' },
-                        selection: { anchor: from + 1 },
-                    });
-                    return true;
-                }
-                return false;
-            },
-        },
-    ]);
+    return EditorView.inputHandler.of((view, from, to, text) => {
+        if (text !== '{' && text !== '%') return false;
+        if (from !== to) return false;
+        const doc = view.state.doc;
+        const charBefore = doc.sliceString(Math.max(0, from - 1), from);
+        if (charBefore !== '{') return false;
+        const charAfter = doc.sliceString(from, from + 1);
+        const open = text === '{' ? '{' : '%';
+        const close = text === '{' ? '}' : '%';
+        // Con "}" autocerrado: "{|}" -> "{{ | }}" ; sin el: "{|" -> "{{ | }}"
+        const insert = charAfter === '}' ? `${open}  ${close}` : `${open}  ${close}}`;
+        view.dispatch({
+            changes: { from, to, insert },
+            selection: { anchor: from + 2 },
+            userEvent: 'input.type',
+        });
+        return true;
+    });
+}
+
+// ─── Lint ────────────────────────────────────────────────────────────────────
+
+function makeLiquidLinter(getKnown: () => string[] | undefined, onStatus: (errors: number, warnings: number) => void) {
+    return linter((view: EditorView): Diagnostic[] => {
+        const src = view.state.doc.toString();
+        const found = validateTemplate(src, { knownVariables: getKnown() });
+        const len = src.length;
+        onStatus(found.filter(d => d.severity === 'error').length, found.filter(d => d.severity === 'warning').length);
+        return found.map(d => ({
+            from: Math.min(d.from, len),
+            to: Math.min(Math.max(d.to, d.from + 1), len),
+            severity: d.severity,
+            message: d.message,
+            source: 'liquid',
+        }));
+    }, { delay: 250 });
 }
 
 // ─── Theme ───────────────────────────────────────────────────────────────────
 
-const liquidTheme = EditorView.theme({
+/**
+ * Resaltado de sintaxis basado en TOKENS del tema (no en colores fijos): asi se lee en claro y en
+ * cualquier tema oscuro. defaultHighlightStyle usa azules/verdes oscuros pensados para fondo blanco y
+ * quedaba ilegible en oscuro. Todos estos tokens cumplen AA sobre `background` (npm run check:themes).
+ */
+const liquidHighlight = HighlightStyle.define([
+    { tag: [t.tagName, t.standard(t.tagName)], color: 'var(--color-info)' },
+    { tag: [t.attributeName, t.propertyName], color: 'var(--color-brand-accent)' },
+    { tag: [t.attributeValue, t.string], color: 'var(--color-success)' },
+    { tag: [t.number, t.bool, t.atom, t.null], color: 'var(--color-warning)' },
+    { tag: [t.keyword, t.operatorKeyword, t.controlKeyword], color: 'var(--color-destructive)' },
+    { tag: [t.comment, t.blockComment, t.lineComment], color: 'var(--color-muted-foreground)', fontStyle: 'italic' },
+    { tag: [t.angleBracket, t.bracket, t.punctuation, t.separator, t.operator], color: 'var(--color-muted-foreground)' },
+    { tag: [t.processingInstruction, t.documentMeta, t.meta], color: 'var(--color-muted-foreground)' },
+    { tag: [t.heading, t.strong], fontWeight: '700' },
+    { tag: t.emphasis, fontStyle: 'italic' },
+    { tag: t.link, color: 'var(--color-primary)', textDecoration: 'underline' },
+    { tag: t.invalid, color: 'var(--color-destructive)', textDecoration: 'underline wavy' },
+]);
+
+/** `dark` le dice a CodeMirror que estilos base usar (seleccion, cursor, paneles...). */
+function buildLiquidTheme(dark: boolean): Extension {
+  return EditorView.theme({
     '&': {
+        backgroundColor: 'var(--color-background)',
+        color: 'var(--color-foreground)',
         height: '100%',
         fontSize: '12.5px',
         fontFamily: '"Fira Code", "JetBrains Mono", ui-monospace, monospace',
@@ -493,27 +320,79 @@ const liquidTheme = EditorView.theme({
         fontSize: '12px',
         color: 'var(--color-popover-foreground)',
     },
-});
+    '.cm-diagnostic': { padding: '3px 6px 3px 8px', fontSize: '12px' },
+    '.cm-diagnostic-error': { borderLeft: '4px solid var(--color-destructive)' },
+    '.cm-diagnostic-warning': { borderLeft: '4px solid var(--color-warning)' },
+    '.cm-lintRange-error': { backgroundImage: 'none', textDecoration: 'underline wavy var(--color-destructive)', textUnderlineOffset: '3px' },
+    '.cm-lintRange-warning': { backgroundImage: 'none', textDecoration: 'underline wavy var(--color-warning)', textUnderlineOffset: '3px' },
+    '&.cm-focused': { outline: '2px solid var(--color-ring)', outlineOffset: '-2px' },
+    '.cm-matchingBracket': { backgroundColor: 'color-mix(in srgb, var(--color-primary) 25%, transparent)', outline: '1px solid var(--color-input)' },
+    '.cm-nonmatchingBracket': { color: 'var(--color-destructive)' },
+    '.cm-foldPlaceholder': { backgroundColor: 'var(--color-muted)', border: '1px solid var(--color-border)', color: 'var(--color-muted-foreground)' },
+    '.cm-searchMatch': { backgroundColor: 'color-mix(in srgb, var(--color-warning) 30%, transparent)' },
+    '.cm-searchMatch.cm-searchMatch-selected': { backgroundColor: 'color-mix(in srgb, var(--color-warning) 55%, transparent)' },
+  }, { dark });
+}
 
 // ─── Editor Component ─────────────────────────────────────────────────────────
+
+export interface LiquidEditorHandle {
+    /** Inserta texto en la posicion del cursor (reemplaza la seleccion) y devuelve el foco al editor. */
+    insertAtCursor: (text: string) => void;
+    focus: () => void;
+}
 
 export interface LiquidEditorProps {
     value: string;
     onChange: (value: string) => void;
+    /** Columnas del archivo. */
     variables: string[];
+    /** Variables de sistema disponibles (default: catalogo). */
+    systemVariables?: string[];
     className?: string;
     isFullscreen?: boolean;
     onToggleFullscreen?: () => void;
+    /** Notifica (errores, advertencias) del lint en vivo. */
+    onLintStatus?: (errors: number, warnings: number) => void;
 }
 
-export function LiquidEditor({ value, onChange, variables, className, isFullscreen, onToggleFullscreen }: LiquidEditorProps) {
+const DEFAULT_SYSTEM_VARS = SYSTEM_VARIABLES.map(v => v.name);
+
+export const LiquidEditor = forwardRef<LiquidEditorHandle, LiquidEditorProps>(function LiquidEditor(
+    { value, onChange, variables, systemVariables, className, isFullscreen, onToggleFullscreen, onLintStatus }, ref,
+) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<EditorView | null>(null);
     const lastValueRef = useRef<string>(value);
-    const getVariables = useCallback(() => variables, [variables]);
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
+    const onLintStatusRef = useRef(onLintStatus);
+    onLintStatusRef.current = onLintStatus;
+    // Refs "vivas": el editor se monta una sola vez, pero siempre lee los ultimos valores.
+    const sourcesRef = useRef<VarSources>({ columns: variables, system: systemVariables ?? DEFAULT_SYSTEM_VARS });
+    sourcesRef.current = { columns: variables, system: systemVariables ?? DEFAULT_SYSTEM_VARS };
     const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
+    const [lint, setLint] = useState({ errors: 0, warnings: 0 });
+    const { scheme } = useTheme();
+    const themeCompartment = useRef(new Compartment());
+    const schemeRef = useRef(scheme);
+    schemeRef.current = scheme;
+
+    useImperativeHandle(ref, () => ({
+        insertAtCursor(text: string) {
+            const view = viewRef.current;
+            if (!view) return;
+            const { from, to } = view.state.selection.main;
+            view.dispatch({
+                changes: { from, to, insert: text },
+                selection: { anchor: from + text.length },
+                scrollIntoView: true,
+                userEvent: 'input.paste',
+            });
+            view.focus();
+        },
+        focus() { viewRef.current?.focus(); },
+    }), []);
 
     useEffect(() => {
         if (!containerRef.current) return;
@@ -521,11 +400,12 @@ export function LiquidEditor({ value, onChange, variables, className, isFullscre
         const extensions: Extension[] = [
             // Language
             html(),
-            syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+            syntaxHighlighting(liquidHighlight),
 
             // Editor features
             lineNumbers(),
             foldGutter(),
+            lintGutter(),
             drawSelection(),
             dropCursor(),
             highlightActiveLine(),
@@ -536,16 +416,23 @@ export function LiquidEditor({ value, onChange, variables, className, isFullscre
             indentOnInput(),
             history(),
 
-            // Liquid-specific
+            // Liquid-specific (antes de closeBrackets para que el input handler tenga prioridad)
             liquidHighlightPlugin,
             makeLiquidPairs(),
+            makeLiquidLinter(
+                () => [...sourcesRef.current.columns, ...sourcesRef.current.system, ...BUILTIN_VARIABLE_NAMES],
+                (errors, warnings) => {
+                    setLint(prev => (prev.errors === errors && prev.warnings === warnings ? prev : { errors, warnings }));
+                    onLintStatusRef.current?.(errors, warnings);
+                },
+            ),
 
             // Autocomplete
             closeBrackets(),
             autocompletion({
-                override: [makeLiquidCompletions(() => getVariables())],
+                override: [makeLiquidCompletions(() => sourcesRef.current)],
                 activateOnTyping: true,
-                maxRenderedOptions: 20,
+                maxRenderedOptions: 30,
             }),
 
             // Search
@@ -562,8 +449,8 @@ export function LiquidEditor({ value, onChange, variables, className, isFullscre
                 indentWithTab,
             ]),
 
-            // Theme
-            liquidTheme,
+            // Theme (compartment: se reconfigura al cambiar entre tema claro y oscuro sin recrear el editor)
+            themeCompartment.current.of(buildLiquidTheme(schemeRef.current === 'dark')),
 
             // Update listener
             EditorView.updateListener.of((update) => {
@@ -599,23 +486,42 @@ export function LiquidEditor({ value, onChange, variables, className, isFullscre
         if (!view) return;
         const current = view.state.doc.toString();
         if (value !== current && value !== lastValueRef.current) {
-            // External update
-            view.dispatch({
-                changes: { from: 0, to: current.length, insert: value },
-            });
+            view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
             lastValueRef.current = value;
         }
     }, [value]);
 
-    // Sync variables for autocomplete (no remount needed — closure reads latest via getVariables)
-    // Already handled via useCallback ref pattern above.
+    // Si cambian las columnas, revalidar (variables desconocidas) sin tocar el documento.
+    const columnsKey = variables.join('\u0000');
+    useEffect(() => {
+        if (viewRef.current) forceLinting(viewRef.current);
+    }, [columnsKey]);
+
+    // Tema claro/oscuro real
+    useEffect(() => {
+        const view = viewRef.current;
+        if (!view) return;
+        view.dispatch({ effects: themeCompartment.current.reconfigure(buildLiquidTheme(scheme === 'dark')) });
+    }, [scheme]);
 
     return (
         <div className={`flex flex-col ${className ?? ''}`} style={{ height: '100%', minHeight: 0 }}>
             {/* Editor toolbar */}
-            <div className="flex items-center gap-1 px-2 py-1 border-b border-border bg-muted/30 shrink-0">
-                <span className="text-[10px] text-muted-foreground font-mono select-none">
+            <div className="flex items-center gap-2 px-2 py-1 border-b border-border bg-muted/30 shrink-0">
+                <span className="text-[11px] text-muted-foreground font-mono select-none">
                     Ln {cursorPos.line}, Col {cursorPos.col}
+                </span>
+                <span
+                    role="status"
+                    aria-live="polite"
+                    className={`text-[11px] select-none ${lint.errors ? 'text-destructive font-semibold' : lint.warnings ? 'text-warning' : 'text-success'}`}
+                    title="Validación de sintaxis Liquid en vivo"
+                >
+                    {lint.errors
+                        ? `${lint.errors} error${lint.errors > 1 ? 'es' : ''} de sintaxis`
+                        : lint.warnings
+                            ? `${lint.warnings} advertencia${lint.warnings > 1 ? 's' : ''}`
+                            : 'Sintaxis correcta'}
                 </span>
                 <div className="ml-auto flex items-center gap-0.5">
                     <button
@@ -647,4 +553,4 @@ export function LiquidEditor({ value, onChange, variables, className, isFullscre
             />
         </div>
     );
-}
+});
