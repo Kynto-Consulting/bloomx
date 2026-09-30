@@ -45,6 +45,16 @@ const nextConfig = {
             { source: '/:path*', headers: securityHeaders },
             // Las respuestas de autenticacion nunca deben cachearse
             { source: '/api/auth/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
+            // Mensajes sellados: la clave viaja en el #fragmento; jamas debe salir en un Referer ni cachearse.
+            {
+                source: '/secure/:path*',
+                headers: [
+                    { key: 'Referrer-Policy', value: 'no-referrer' },
+                    { key: 'Cache-Control', value: 'no-store' },
+                    { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+                ],
+            },
+            { source: '/api/secure-message/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }, { key: 'Referrer-Policy', value: 'no-referrer' }] },
         ];
     },
 };

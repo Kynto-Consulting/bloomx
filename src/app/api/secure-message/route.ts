@@ -1,62 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { uploadToStorage } from '@/lib/storage';
 import { rateLimit } from '@/lib/security';
-import { stripControlChars } from '@/lib/mail-validation';
-import { encrypt } from '@/lib/encryption';
-import { v4 as uuidv4 } from 'uuid';
+import { createSealedSchema, effectiveTtlDays } from '@/lib/sealed/schema';
+import { createSealed, defaultDeps } from '@/lib/sealed/store';
+
+/**
+ * Crea un mensaje SELLADO. El navegador del remitente ya cifro el contenido con AES-256-GCM (WebCrypto) y la clave
+ * viaja solo en el fragmento `#k=` del enlace: este endpoint recibe unicamente {iv, ct, salt?, iter?, pw}, nunca la clave
+ * ni el texto en claro. Ver src/lib/sealed/crypto.ts para el protocolo.
+ *
+ * Requiere sesion (solo usuarios de la instancia pueden crear). Abrir el mensaje: /api/secure-message/[id].
+ * SECURE_MESSAGE_ENABLED=false lo desactiva (p. ej. si la politica de DLP exige inspeccionar el cuerpo saliente).
+ */
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+const NO_STORE = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
+const MAX_BODY_CHARS = 1_100_000;
 
 export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
-    if (!user?.email) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: NO_STORE });
+    if (String(process.env.SECURE_MESSAGE_ENABLED || 'true').toLowerCase() === 'false') {
+        return NextResponse.json({ error: 'Sealed messages are disabled' }, { status: 403, headers: NO_STORE });
     }
 
+    const rl = rateLimit(`secure-msg:${user.email}`, 30, 60 * 60 * 1000);
+    if (!rl.ok) {
+        return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(rl.retryAfter) } });
+    }
+
+    const declared = Number(req.headers.get('content-length') || 0);
+    if (declared > MAX_BODY_CHARS) return NextResponse.json({ error: 'Content too large' }, { status: 413, headers: NO_STORE });
+    const raw = await req.text();
+    if (raw.length > MAX_BODY_CHARS) return NextResponse.json({ error: 'Content too large' }, { status: 413, headers: NO_STORE });
+
+    let json: unknown = null;
+    try { json = JSON.parse(raw); } catch { json = null; }
+
+    // El formato anterior (texto en claro en el servidor) ya no se acepta: el servidor no debe ver el contenido.
+    if (json && typeof json === 'object' && typeof (json as any).content === 'string') {
+        return NextResponse.json({ error: 'Plaintext secure messages are no longer accepted; upgrade the client (sealed v1)' }, { status: 400, headers: NO_STORE });
+    }
+
+    const parsed = createSealedSchema.safeParse(json);
+    if (!parsed.success) return NextResponse.json({ error: 'Invalid sealed message' }, { status: 400, headers: NO_STORE });
+
     try {
-        const rl = rateLimit(`secure-msg:${user.email}`, 30, 60 * 60 * 1000);
-        if (!rl.ok) {
-            return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { 'Retry-After': String(rl.retryAfter) } });
-        }
-
-        const body = await req.json();
-        const content = typeof body?.content === 'string' ? body.content : '';
-        const subject = typeof body?.subject === 'string' ? stripControlChars(body.subject).slice(0, 300) : '';
-
-        if (!content.trim()) {
-            return NextResponse.json({ error: 'Content is required' }, { status: 400 });
-        }
-        if (content.length > 1_000_000) {
-            return NextResponse.json({ error: 'Content too large' }, { status: 413 });
-        }
-
-        // 1. Generate ID and secure payload (con caducidad)
-        const id = uuidv4();
-        const ttlDays = Number.parseInt(process.env.SECURE_MESSAGE_TTL_DAYS || '30', 10) || 30;
-        const payload = JSON.stringify({
-            subject,
-            content,
+        const deps = await defaultDeps();
+        const { id, expiresAt } = await createSealed(deps, {
+            envelope: parsed.data.envelope as any,
             sender: user.email,
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString(),
+            ttlDays: effectiveTtlDays(parsed.data.ttlDays),
+            maxViews: parsed.data.maxViews ?? null,
         });
-
-        // 2. Encrypt locally before storage (Double encryption, why not?)
-        // Actually encryption.ts uses a server key. Storage might be public/private.
-        // Let's encrypt it so even if storage is leaked, it's safe without the app key.
-        const encryptedPayload = encrypt(payload);
-
-        // 3. Upload
-        // We assume 'bloomx-secure' bucket or prefix
-        await uploadToStorage(`secure/${id}.msg`, encryptedPayload, 'text/plain');
-
-        // 4. Construct URL
-        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://bloomx.arubik.dev';
-        const viewUrl = `${baseUrl}/secure/${id}`;
-
-        return NextResponse.json({ success: true, viewUrl });
-
-    } catch (e) {
-        console.error('Secure Message Error', e);
-        return NextResponse.json({ error: 'Failed' }, { status: 500 });
+        const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://bloomx.arubik.dev').replace(/\/+$/, '');
+        return NextResponse.json({ success: true, id, viewUrl: `${baseUrl}/secure/${id}`, expiresAt }, { headers: NO_STORE });
+    } catch (e: any) {
+        console.error('Secure Message Error', String(e?.message || 'error').slice(0, 120));
+        return NextResponse.json({ error: 'Failed' }, { status: 500, headers: NO_STORE });
     }
 }
