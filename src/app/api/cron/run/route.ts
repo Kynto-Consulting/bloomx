@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { sendPushNotification } from '@/lib/notifications/web-push';
 import { decryptObject, encryptObject } from '@/lib/encryption';
+import { createHash, timingSafeEqual } from 'crypto';
+import { applyRulesToEmails, isMissingRelation, loadRules } from '@/lib/rules/store';
 
 const FULL_CRON_INTERVAL_MS = 60 * 60 * 1000;
 const EVENT_REMINDER_INTERVAL_MS = 5 * 60 * 1000;
@@ -86,60 +88,157 @@ async function runEventReminders(userId: string, settings: any, now: Date) {
     };
 }
 
-export async function POST(req: NextRequest) {
+const RULE_CATCHUP_WINDOW_DAYS = 2;
+const RULE_CATCHUP_BATCH = 200;
+const MAX_USERS_PER_RUN = 50;
+
+function sha(v: string) {
+    return createHash('sha256').update(v).digest();
+}
+
+/** null = sin cabecera Bearer; true/false = valida o no contra CRON_SECRET. */
+function checkCronSecret(req: NextRequest): boolean | null {
+    const header = req.headers.get('authorization') || '';
+    if (!header.startsWith('Bearer ')) return null;
+    const secret = process.env.CRON_SECRET;
+    if (!secret) return false; // sin secreto configurado no existe modo global
+    return timingSafeEqual(sha(header.slice(7).trim()), sha(secret));
+}
+
+/**
+ * Reglas "de recuperacion": aplica las reglas activas a correos recientes de la bandeja que
+ * aun no fueron procesados (tabla RuleRun). Idempotente: cada correo se procesa una sola vez.
+ * Tolera que las tablas Rule/RuleRun no existan todavia.
+ */
+async function runRuleCatchUp(userId: string) {
+    try {
+        const rules = await loadRules(userId, true);
+        if (rules.length === 0) return { processed: 0, changed: 0 };
+
+        const since = new Date(Date.now() - RULE_CATCHUP_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+        const pending: Array<{ id: string }> = await prisma.$queryRaw`
+            SELECT e."id" FROM "Email" e
+            LEFT JOIN "RuleRun" r ON r."emailId" = e."id"
+            WHERE e."userId" = ${userId} AND e."folder" = 'inbox' AND e."createdAt" > ${since} AND r."emailId" IS NULL
+            ORDER BY e."createdAt" DESC LIMIT ${RULE_CATCHUP_BATCH}`;
+        if (pending.length === 0) return { processed: 0, changed: 0 };
+
+        const emails = await prisma.email.findMany({
+            where: { id: { in: pending.map((p) => p.id) }, userId },
+            select: {
+                id: true, from: true, to: true, subject: true, snippet: true, folder: true, read: true, starred: true,
+                labels: { select: { id: true, name: true } },
+                _count: { select: { attachments: true } },
+            },
+        });
+        return await applyRulesToEmails(userId, rules, emails.map((e) => ({ ...e, _attachments: e._count.attachments })));
+    } catch (e) {
+        if (!isMissingRelation(e)) console.error('[Cron] rule catch-up failed:', (e as any)?.message);
+        return { processed: 0, changed: 0, error: true };
+    }
+}
+
+async function runForUser(userId: string, rawSettings: any, now: Date) {
+    const settings: any = decryptObject(rawSettings || {});
+    const reminders = await runEventReminders(userId, settings, now);
+    const rules = await runRuleCatchUp(userId);
+
+    const lastRun = settings.lastCronRun ? new Date(settings.lastCronRun) : new Date(0);
+    const fullDue = now.getTime() - lastRun.getTime() >= FULL_CRON_INTERVAL_MS;
+
+    if (reminders.nextSettings || fullDue) {
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                expansionSettings: encryptObject({
+                    ...(reminders.nextSettings || settings),
+                    ...(fullDue ? { lastCronRun: now.toISOString() } : {}),
+                }),
+            },
+        });
+    }
+    return { reminders, rules, fullRun: fullDue };
+}
+
+async function runGlobal(now: Date) {
+    // Usuarios con reglas activas o eventos proximos (tolerante a tablas ausentes).
+    const ids = new Set<string>();
+    try {
+        const rows: Array<{ userId: string }> = await prisma.$queryRaw`SELECT DISTINCT "userId" FROM "Rule" WHERE "enabled" = TRUE LIMIT ${MAX_USERS_PER_RUN}`;
+        rows.forEach((r) => ids.add(r.userId));
+    } catch (e) {
+        if (!isMissingRelation(e)) console.error('[Cron] list rule users failed:', (e as any)?.message);
+    }
+    try {
+        const events = await prisma.calendarEvent.findMany({
+            where: {
+                startsAt: { gte: now, lte: new Date(now.getTime() + EVENT_LOOKAHEAD_MINUTES * 60 * 1000) },
+                status: { not: 'cancelled' },
+            },
+            select: { userId: true },
+            distinct: ['userId'],
+            take: MAX_USERS_PER_RUN,
+        });
+        events.forEach((e) => ids.add(e.userId));
+    } catch (e) {
+        console.error('[Cron] list reminder users failed:', (e as any)?.message);
+    }
+
+    const users = await prisma.user.findMany({
+        where: { id: { in: Array.from(ids).slice(0, MAX_USERS_PER_RUN) } },
+        select: { id: true, expansionSettings: true },
+    });
+    const results: Record<string, unknown> = {};
+    for (const u of users) {
+        try {
+            results[u.id] = await runForUser(u.id, u.expansionSettings, now);
+        } catch (e) {
+            console.error('[Cron] user run failed:', (e as any)?.message);
+            results[u.id] = { error: true };
+        }
+    }
+    return { users: users.length, results };
+}
+
+/**
+ * Modos:
+ *  - Bearer CRON_SECRET (Vercel Cron envia GET con este header): ejecuta para todos los usuarios afectados.
+ *  - Sesion (CronTrigger del navegador): ejecuta solo para el usuario autenticado.
+ *  - Bearer invalido, o sin sesion: 401.
+ * Idempotente: recordatorios con registro por evento, reglas con RuleRun, y debounce por usuario.
+ */
+async function handle(req: NextRequest, allowSession: boolean) {
+    const now = new Date();
+    const secretOk = checkCronSecret(req);
+    if (secretOk === true) {
+        return NextResponse.json({ success: true, mode: 'global', ...(await runGlobal(now)) });
+    }
+    if (secretOk === false) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    if (!allowSession) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const user = await getCurrentUser();
     if (!user?.email) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-
-    // 1. Check Rate Limiting / Debounce via User Settings
     const dbUser = await prisma.user.findUnique({
         where: { email: user.email },
-        select: { id: true, expansionSettings: true }
+        select: { id: true, expansionSettings: true },
     });
-
     if (!dbUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-    const settings: any = decryptObject(dbUser.expansionSettings || {});
-    const lastRun = settings.lastCronRun ? new Date(settings.lastCronRun) : new Date(0);
-    const now = new Date();
+    const result = await runForUser(dbUser.id, dbUser.expansionSettings, now);
+    return NextResponse.json({ success: true, mode: 'user', results: [], ...result });
+}
 
-    const reminderResult = await runEventReminders(dbUser.id, settings, now);
+export async function POST(req: NextRequest) {
+    return handle(req, true);
+}
 
-    if (now.getTime() - lastRun.getTime() < FULL_CRON_INTERVAL_MS) {
-        if (!reminderResult.nextSettings) {
-            return NextResponse.json({ skipped: true, reason: 'Too soon', reminders: reminderResult });
-        }
-
-        await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                expansionSettings: encryptObject(reminderResult.nextSettings),
-            }
-        });
-
-        return NextResponse.json({ success: true, skipped: true, reason: 'Too soon', reminders: reminderResult });
-    }
-
-    // 2. Execute Crons
-
-    // 2. Execute Crons
-    // Local expansions removed.
-    console.log(`[Cron] Local expansions removed. Updates via backend.`);
-
-    // Placeholder results
-    // const results = [];
-
-    // 3. Update Last Run
-    await prisma.user.update({
-        where: { id: user.id },
-        data: {
-            expansionSettings: encryptObject({
-                ...(reminderResult.nextSettings || settings),
-                lastCronRun: now.toISOString()
-            })
-        }
-    });
-
-    return NextResponse.json({ success: true, results: [], reminders: reminderResult });
+// Vercel Cron invoca con GET: solo se acepta con Bearer CRON_SECRET.
+export async function GET(req: NextRequest) {
+    return handle(req, false);
 }
