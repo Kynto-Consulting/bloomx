@@ -75,13 +75,17 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>(
         const previouslyFocused = document.activeElement as HTMLElement | null;
         if (!optsRef.current.allowScroll) lockScroll();
 
-        // Foco inicial tras el primer pintado (el contenido puede montarse un tick despues).
-        const raf = window.requestAnimationFrame(() => {
+        // Foco inicial: inmediato si ya hay destino (evita que las teclas pulsadas justo tras abrir se pierdan en el
+        // <body> y que dependa de requestAnimationFrame, que no corre en pestanas ocultas); si el contenido aun no
+        // esta montado, se reintenta tras el primer pintado (y como ultimo recurso el propio panel).
+        const focusInitial = (final: boolean) => {
             const root = ref.current;
             if (!root || root.contains(document.activeElement)) return;
-            const target = optsRef.current.initialFocus?.() ?? getFocusable(root)[0] ?? root;
-            target.focus({ preventScroll: true });
-        });
+            const target = optsRef.current.initialFocus?.() ?? getFocusable(root)[0] ?? (final ? root : null);
+            target?.focus({ preventScroll: true });
+        };
+        focusInitial(false);
+        const raf = window.requestAnimationFrame(() => focusInitial(true));
 
         const onKeyDown = (e: KeyboardEvent) => {
             if (stack[stack.length - 1] !== token) return;

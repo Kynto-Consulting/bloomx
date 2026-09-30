@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
-import { getClientIp, rateLimitAsync } from "@/lib/security";
+import { auditLog, getClientIp, rateLimitAsync } from "@/lib/security";
+import { verifyManagerCookieOwnsInstance } from "@/lib/manager-auth";
 
 export async function POST(req: Request) {
     try {
@@ -36,6 +37,18 @@ export async function POST(req: Request) {
 
         // Extract Set-Cookie header from backend response
         const setCookieHeader = res.headers.get('set-cookie');
+
+        // El backend es compartido y el alta de managers es abierta: solo el DUENO del dominio de esta instancia obtiene
+        // sesion de administracion aqui. A un manager ajeno no se le reenvia la cookie (requireAdmin tambien lo rechazaria).
+        const issued = /(?:^|[,;\s])auth_session=([^;,\s]+)/.exec(setCookieHeader || '')?.[1];
+        const own = await verifyManagerCookieOwnsInstance(issued);
+        if (!own.ok) {
+            auditLog("admin.access_denied", { reason: `login_manager_${own.reason}`, ip: getClientIp(req), path: "/api/admin/login" });
+            return NextResponse.json(
+                { error: "Forbidden: this account does not manage this domain" },
+                { status: own.reason === 'backend_unavailable' ? 503 : 403, headers: { "Cache-Control": "no-store" } },
+            );
+        }
 
         // Create response and forward the cookie
         const response = NextResponse.json(data);

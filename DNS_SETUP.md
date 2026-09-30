@@ -108,10 +108,11 @@ Qué hacer:
 - publica exactamente los registros `MX` que Resend te muestre
 - configura el webhook de recepción hacia Bloomx
 
-Endpoint de Bloomx:
+Endpoints de Bloomx (se registran en Resend como **dos webhooks distintos**):
 
 ```txt
-https://tu-dominio-publico/api/webhooks/resend
+https://tu-dominio-publico/api/webhooks/resend          # correo entrante (email.received) y estados de entrega
+https://tu-dominio-publico/api/webhooks/resend-events   # rebotes y quejas (email.bounced, email.complained, email.delivery_delayed)
 ```
 
 Variables relacionadas:
@@ -119,9 +120,15 @@ Variables relacionadas:
 ```env
 TOP_DOMAIN="example.com"
 RESEND_API_KEY="re_..."
-WEBHOOK_SECRET="whsec_..."
 NEXT_PUBLIC_APP_URL="https://app.example.com"
+# OPCIONALES (cada organizador decide). Con ellas se exige firma Svix valida; sin ellas el webhook se acepta sin firma
+# y solo se escribe un aviso en el log. Se recomienda definirlas en produccion.
+WEBHOOK_SECRET="whsec_..."           # /api/webhooks/resend
+RESEND_WEBHOOK_SECRET="whsec_..."    # /api/webhooks/resend-events
 ```
+
+Cada webhook de Resend tiene su propio secreto `whsec_...`: copia el de cada uno en su variable.
+Sin el segundo webhook, los rebotes y quejas **no** alimentan la lista de supresion de Elixir.
 
 ## 7. Alinea el dominio visible del remitente
 
@@ -214,6 +221,8 @@ max_age: 86400
 TXT _smtp._tls  v=TLSRPTv1; rua=mailto:tlsrpt@tudominio.com
 ```
 
+Bloomx **no sirve** `/.well-known/mta-sts.txt` ni ninguna ruta MTA-STS/TLS-RPT: el archivo de política debe alojarlo quien gestione tu DNS/web (por ejemplo un host estático en `mta-sts.tudominio.com`). La única ruta `/.well-known` de BloomX es `bloomx-backend-key.json` del backend (clave pública de firma) y no tiene relación con esto.
+
 Si no puedes alojar el archivo de política en `mta-sts.tudominio.com`, omite MTA-STS (un `id` publicado sin política accesible causa fallos de entrega en algunos emisores). TLS-RPT sí puede publicarse siempre.
 
 ## 14. Otros registros recomendados
@@ -240,5 +249,6 @@ Gmail y Yahoo exigen a remitentes de volumen (más de 5000 correos al día) SPF,
 - Los envíos masivos de Elixir incluyen `List-Unsubscribe` y `List-Unsubscribe-Post: List-Unsubscribe=One-Click` y omiten a quienes ya se dieron de baja.
 - Requisitos: `NEXT_PUBLIC_APP_URL` con `https://` público y un secreto (`UNSUBSCRIBE_SECRET`, o `NEXTAUTH_SECRET` como respaldo). Sin estos, la cabecera no se añade.
 - Endpoint público de baja: `https://tu-dominio-publico/api/webhooks/unsubscribe`.
-- Variables de operación relacionadas: `MAX_SENDS_PER_HOUR` (por defecto 200, envíos normales), `MAX_BULK_ROWS` (por defecto 500 filas por solicitud), `WEBHOOK_SECRET` (`INTERNAL_SECRET` ya no es necesario: se deriva de `NEXTAUTH_SECRET`).
+- Variables de operación relacionadas: `MAX_SENDS_PER_HOUR` (por defecto 200, envíos normales por hora y usuario), `ELIXIR_BATCH_MAX` (filas por petición, por defecto 50, tope 100), `ELIXIR_MAX_ROWS_PER_HOUR` (cuota por hora, por defecto 5000; `MAX_BULK_ROWS` es un alias antiguo con el mismo significado), `ELIXIR_MAX_CAMPAIGN_ROWS` (filas por campaña, por defecto 20000), `WEBHOOK_SECRET` y `RESEND_WEBHOOK_SECRET` (opcionales). `INTERNAL_SECRET` ya no es necesario: la clave interna se deriva de `NEXTAUTH_SECRET`.
+- Los rebotes permanentes y las quejas llegan por `/api/webhooks/resend-events` y se añaden a la lista de supresión; la lista de Elixir los omite en envíos posteriores.
 - Calienta el dominio: sube el volumen de forma gradual durante 2 a 4 semanas.

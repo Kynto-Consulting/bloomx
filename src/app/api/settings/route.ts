@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 
 import { encryptObject, decryptObject } from '@/lib/encryption';
+import { invalidateDisabledCache } from '@/lib/expansions/user-disabled';
 
 export async function GET(req: NextRequest) {
     const currentUser = await getCurrentUser();
@@ -76,6 +77,8 @@ export async function POST(req: NextRequest) {
             where: { email: currentUser.email },
             data
         });
+        // Las preferencias de extensiones (system:extension-prefs) alimentan `disabledExtensions` de los hooks: se descarta la cache.
+        if (expansionSettings !== undefined) invalidateDisabledCache();
 
         return NextResponse.json({ success: true, ...data });
     } catch (error) {

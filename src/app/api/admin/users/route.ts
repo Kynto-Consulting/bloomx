@@ -1,77 +1,38 @@
+import { z } from 'zod';
+import { adminRoute, audit, json, parseBody, parseQuery } from '@/lib/admin/http';
+import { pageMeta, parsePaging } from '@/lib/admin/paging';
+import { createUserAccount } from '@/lib/admin/user-create';
+import { listUsers, userFiltersSchema } from '@/lib/admin/users-store';
 
-import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/admin-auth";
-import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { auditLog, BCRYPT_COST, validateNewPassword } from "@/lib/security";
+// GET: lista paginada con filtros (la logica SQL vive en users-store.ts). Nunca devuelve password ni tokens.
+export const GET = adminRoute({ scope: 'users.list' }, async ({ req }) => {
+    const filters = parseQuery(req, userFiltersSchema);
+    const paging = parsePaging(new URL(req.url).searchParams, { defaultSize: 25, maxSize: 100 });
+    const { rows, total } = await listUsers(filters, { limit: paging.pageSize, offset: paging.offset });
+    return { users: rows, page: pageMeta(paging, total) };
+});
 
-// GET: List all users
-export async function GET(req: NextRequest) {
-    const guard = await requireAdmin(req);
-    if (!guard.ok) return guard.response;
+const createSchema = z.object({
+    email: z.string().trim().min(3).max(254).regex(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+    name: z.string().trim().max(200).optional(),
+    password: z.string().max(1024).optional(),
+    mustChangePassword: z.boolean().optional(),
+});
 
-    try {
-        const users = await prisma.user.findMany({
-            select: {
-                id: true,
-                name: true,
-                email: true,
-                createdAt: true,
-                avatar: true,
-            },
-            orderBy: { createdAt: "desc" },
-        });
+// POST: crear usuario. Si no llega contrasena se genera una temporal que se devuelve UNA sola vez.
+export const POST = adminRoute({ scope: 'users.create', write: true }, async (ctx) => {
+    const body = await parseBody(ctx.req, createSchema);
+    // Misma logica que la creacion de buzones faltantes al importar correo (lib/admin/user-create.ts).
+    const created = await createUserAccount({ email: body.email, name: body.name, password: body.password, mustChangePassword: body.mustChangePassword });
 
-        return NextResponse.json(users);
-    } catch (error) {
-        console.error("[ADMIN_USERS_GET]", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-    }
-}
-
-// POST: Create a new user
-export async function POST(req: NextRequest) {
-    const guard = await requireAdmin(req);
-    if (!guard.ok) return guard.response;
-
-    try {
-        const { email, name, password } = await req.json();
-
-        if (!email || !password) {
-            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-        }
-
-        const passwordError = validateNewPassword(password, email);
-        if (passwordError) {
-            return NextResponse.json({ error: passwordError }, { status: 400 });
-        }
-
-        const existingUser = await prisma.user.findUnique({
-            where: { email },
-        });
-
-        if (existingUser) {
-            return NextResponse.json({ error: "User already exists" }, { status: 409 });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
-
-        const newUser = await prisma.user.create({
-            data: {
-                email,
-                name,
-                password: hashedPassword,
-            },
-        });
-
-        auditLog("admin.user.created", { userId: newUser.id, email: newUser.email, managerId: (guard.actor as any)?.id });
-        return NextResponse.json({
+    audit(ctx, 'users.created', { targetUserId: created.user.id, email: created.user.email, generatedPassword: created.generatedPassword, mustChangePassword: created.mustChangePassword });
+    return json(
+        {
             success: true,
-            user: { id: newUser.id, email: newUser.email, name: newUser.name },
-        });
-
-    } catch (error) {
-        console.error("[ADMIN_USERS_POST]", error);
-        return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
-    }
-}
+            user: created.user,
+            mustChangePassword: created.mustChangePassword,
+            ...(created.temporaryPassword ? { temporaryPassword: created.temporaryPassword } : {}),
+        },
+        { status: 201 },
+    );
+});

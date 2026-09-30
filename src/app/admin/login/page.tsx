@@ -52,7 +52,7 @@ function AdminLoginForm() {
                 // But for "Reskinning to Domber" / SaaS, bloomx might BE the domain.
                 // Let's assume we proceed.
 
-                router.push('/admin/dashboard');
+                router.push('/admin');
             }
         } catch (e) {
             setError(t('common.unexpectedError'));

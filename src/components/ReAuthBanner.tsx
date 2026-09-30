@@ -31,7 +31,7 @@ const PROVIDER_META: Record<string, { label: string; color: string; logo: React.
     },
     slack: {
         label: 'Slack',
-        color: 'bg-purple-50 border border-purple-200',
+        color: 'bg-chip border border-border',
         logo: (
             <svg viewBox="0 0 24 24" className="w-4 h-4" aria-hidden>
                 <path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52z" />
@@ -92,7 +92,7 @@ function ReAuthCard({ request, onReconnect, onDismiss }: {
                 </div>
 
                 {/* Reason */}
-                <p className="text-sm text-foreground/80 leading-snug">
+                <p className="text-sm text-foreground leading-snug">
                     {request.reason}
                 </p>
 

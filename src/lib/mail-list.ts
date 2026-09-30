@@ -1,10 +1,14 @@
 // Logica pura de la lista de correo (sin React ni DOM) para poder probarla con vitest.
+import { ACCENT_FROM, ACCENT_TO } from '@/lib/db/mail-sql';
 
 export interface LabelRef {
     id: string;
     name: string;
     color?: string | null;
+    /** No leidos (sin contar papelera ni spam). */
     count?: number;
+    /** Total de correos con la etiqueta (sin contar papelera ni spam). */
+    total?: number;
 }
 
 export interface ListEmail {
@@ -88,6 +92,7 @@ export function normalizeLabelList(raw: unknown): LabelRef[] {
             name,
             color: item.color ?? null,
             count: typeof item.count === 'number' ? item.count : 0,
+            ...(typeof item.total === 'number' ? { total: item.total } : {}),
         });
     }
     return out;
@@ -241,6 +246,86 @@ export function mergeEmailLists<T extends ListEmail>(...lists: T[][]): T[] {
     const byKey = new Map<string, T>();
     lists.flat().forEach((email) => byKey.set(getEmailMergeKey(email), email));
     return Array.from(byKey.values()).sort((a, b) => time(b) - time(a));
+}
+
+/** Orden de la lista que se pide al servidor (espejo de MailSortKey en mail-query). */
+export type ListSort = 'newest' | 'oldest' | 'sender';
+
+const FOLD = (() => {
+    const map = new Map<string, string>();
+    const from = Array.from(ACCENT_FROM);
+    Array.from(ACCENT_TO).forEach((to, i) => map.set(from[i], to));
+    return map;
+})();
+
+/**
+ * Clave de orden por remitente: espejo en JS de `bloomx_sender_key` (SQL, db/mail-sql.ts): nombre visible (sin comillas ni <direccion>) o,
+ * si no hay, la direccion; en minusculas y sin acentos. El servidor ordena por esta clave con colacion "C" (bytes).
+ */
+export function senderSortKey(from: string | null | undefined): string {
+    const raw = String(from || '');
+    const display = raw.replace(/<[^>]*>/g, '').replace(/^[\s"'<>]+|[\s"'<>]+$/g, '');
+    const address = (raw.match(/<([^>]*)>/)?.[1] ?? '').trim();
+    const base = display || address || raw.trim();
+    return Array.from(base.toLowerCase()).map((ch) => FOLD.get(ch) ?? ch).join('');
+}
+
+const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
+/** Comparador de correos equivalente al orden del servidor (solo para mezclar peticiones de sesiones distintas). */
+export function compareEmailsBy(sort: ListSort): (a: ListEmail, b: ListEmail) => number {
+    if (sort === 'oldest') return (a, b) => time(a) - time(b) || cmp(a.id, b.id);
+    if (sort === 'sender') return (a, b) => cmp(senderSortKey(a.from), senderSortKey(b.from)) || time(b) - time(a) || cmp(b.id, a.id);
+    return (a, b) => time(b) - time(a) || cmp(b.id, a.id);
+}
+
+// ---------------------------------------------------------------------------
+// Varias cuentas: peticiones agrupadas
+// ---------------------------------------------------------------------------
+
+/** Una peticion al servidor: sesion por cookie (token null) o Bearer, y opcionalmente la UNION de buzones accesibles por esa sesion. */
+export interface RequestGroup {
+    key: string;
+    token: string | null;
+    mailboxes: string[] | null;
+}
+
+/**
+ * Agrupa las cuentas a consultar. Las cuentas que la sesion actual puede leer (getAccessibleMailboxUserIds -> /api/mailboxes) van
+ * en UNA peticion con `mailboxes=<ids>`: el servidor ordena, pagina y cuenta sobre la union. Las cuentas con sesion propia
+ * (otro login) mantienen su peticion con su token. Sin cuentas: la sesion por cookie.
+ */
+export function planRequestGroups(
+    targets: Array<{ id: string; email: string; token?: string | null }>,
+    accessible: ReadonlySet<string> | null,
+): RequestGroup[] {
+    if (targets.length === 0) return [{ key: '__session', token: null, mailboxes: null }];
+    const covered = accessible ? targets.filter((t) => accessible.has(t.id)) : [];
+    const rest = accessible ? targets.filter((t) => !accessible.has(t.id)) : targets;
+    const groups: RequestGroup[] = [];
+    const single = (t: { id: string; email: string; token?: string | null }): RequestGroup => ({ key: String(t.email || t.id).trim().toLowerCase(), token: t.token ?? null, mailboxes: null });
+    if (covered.length >= 2) {
+        const ids = covered.map((t) => t.id).sort();
+        groups.push({ key: `mb:${ids.join(',')}`, token: null, mailboxes: ids });
+    } else {
+        covered.forEach((t) => groups.push(single(t)));
+    }
+    rest.forEach((t) => groups.push(single(t)));
+    return groups;
+}
+
+/** Anade una pagina del servidor a la lista conservando el orden recibido; descarta ids ya presentes (sin reordenar). */
+export function appendServerPage<T extends ListEmail>(existing: T[], incoming: T[]): T[] {
+    const seen = new Set(existing.map((e) => e.id));
+    const fresh = incoming.filter((e) => { if (seen.has(e.id)) return false; seen.add(e.id); return true; });
+    return fresh.length === 0 ? existing : [...existing, ...fresh];
+}
+
+/** Une paginas de VARIAS cuentas (cada una ya ordenada por el servidor) en un unico orden con el mismo criterio. */
+export function mergeMailboxPages<T extends ListEmail>(sort: ListSort, ...lists: T[][]): T[] {
+    const byId = new Map<string, T>();
+    for (const e of lists.flat()) byId.set(e.id, e);
+    return Array.from(byId.values()).sort(compareEmailsBy(sort));
 }
 
 /**

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdmin } from '@/lib/admin-auth';
-import { runRetention, getRetentionConfig } from '@/lib/retention';
+import { runRetention, getEffectiveRetentionConfig } from '@/lib/retention';
 import { safeEqual, getClientIp, auditLog } from '@/lib/security';
 
 export const runtime = 'nodejs';
@@ -26,7 +26,7 @@ async function handle(req: NextRequest) {
     const dryRun = req.nextUrl.searchParams.get('dryRun') === '1' || req.nextUrl.searchParams.get('dryRun') === 'true';
     try {
         const report = await runRetention({ dryRun });
-        return NextResponse.json({ ok: true, config: getRetentionConfig(), report }, { headers: { 'Cache-Control': 'no-store' } });
+        return NextResponse.json({ ok: true, config: await getEffectiveRetentionConfig(), report }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (e: any) {
         auditLog('retention.error', { ip: getClientIp(req), error: String(e?.message || 'unknown').slice(0, 120) });
         return NextResponse.json({ error: 'Retention run failed' }, { status: 500 });

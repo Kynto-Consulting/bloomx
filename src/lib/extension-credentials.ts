@@ -11,11 +11,45 @@
 import { RESERVED_ENV_RE } from '@/lib/expansions/manifest-schema';
 
 export const MAX_CREDENTIAL_LENGTH = 4096;
+/** Unica credencial multilinea y de hasta 16 KB: el JSON de la cuenta de servicio de Google. */
+export const MULTILINE_CREDENTIAL_KEY = 'GOOGLE_SERVICE_ACCOUNT_JSON';
+export const MAX_SERVICE_ACCOUNT_LENGTH = 16384;
 const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+/** Fuente ACTIVA de una variable (sin valores): dominio -> heredado -> entorno del servidor -> sin configurar. */
+export type CredentialSource = 'domain' | 'legacy' | 'server-env' | 'missing';
 
 export interface CredentialKeyStatus {
     name: string;
+    /** Hay credencial propia del dominio (paso 1). */
     configured: boolean;
+    /** Fuente activa; ausente en backends antiguos (se deduce de `configured`). */
+    source?: CredentialSource;
+    /** Hay un valor heredado del dominio que se puede copiar a credenciales del dominio. */
+    movable?: boolean;
+}
+
+const SOURCES: readonly CredentialSource[] = ['domain', 'legacy', 'server-env', 'missing'];
+
+/** Fuente efectiva de una clave (tolera respuestas sin `source`). */
+export function effectiveSource(key: Pick<CredentialKeyStatus, 'configured' | 'source'>): CredentialSource {
+    if (key.source && SOURCES.includes(key.source)) return key.source;
+    return key.configured ? 'domain' : 'missing';
+}
+
+/** Sufijo de la clave i18n legacyMode.sources.* para una fuente. */
+export function sourceI18nKey(source: CredentialSource): 'domain' | 'legacy' | 'serverEnv' | 'missing' {
+    return source === 'server-env' ? 'serverEnv' : source;
+}
+
+/** Claves cuyo valor heredado el dueno puede mover a credenciales del dominio. */
+export function movableKeys(keys: readonly CredentialKeyStatus[]): string[] {
+    return keys.filter((k) => k.movable === true && effectiveSource(k) === 'legacy').map((k) => k.name);
+}
+
+/** Claves servidas por el entorno global del backend: no se pueden copiar (el frontend nunca ve el valor). */
+export function serverEnvKeys(keys: readonly CredentialKeyStatus[]): string[] {
+    return keys.filter((k) => effectiveSource(k) === 'server-env').map((k) => k.name);
 }
 
 export type CredentialError = 'empty' | 'tooLong' | 'control';
@@ -43,11 +77,14 @@ export function declaredCredentialKeys(template: unknown): string[] {
 }
 
 /** Valida un valor nuevo antes de enviarlo. `null` = valido. */
-export function validateCredentialValue(value: string): CredentialError | null {
+export function validateCredentialValue(value: string, key?: string): CredentialError | null {
+    // Solo GOOGLE_SERVICE_ACCOUNT_JSON: hasta 16384 caracteres y saltos de linea (\n, \r, \t).
+    const multiline = key === MULTILINE_CREDENTIAL_KEY;
     if (value.trim() === '') return 'empty';
-    if (value.length > MAX_CREDENTIAL_LENGTH) return 'tooLong';
+    if (value.length > (multiline ? MAX_SERVICE_ACCOUNT_LENGTH : MAX_CREDENTIAL_LENGTH)) return 'tooLong';
     // eslint-disable-next-line no-control-regex
-    if (/[\u0000-\u001f\u007f]/.test(value)) return 'control';
+    const control = multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/;
+    if (control.test(value)) return 'control';
     return null;
 }
 
@@ -64,7 +101,7 @@ export function validateDraft(draft: CredentialDraft): Record<string, Credential
     const errors: Record<string, CredentialError> = {};
     for (const [key, value] of Object.entries(draft.values)) {
         if (removals.has(key) || value === '') continue;
-        const error = validateCredentialValue(value);
+        const error = validateCredentialValue(value, key);
         if (error) errors[key] = error;
     }
     return errors;

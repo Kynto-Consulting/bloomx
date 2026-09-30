@@ -1,28 +1,20 @@
-import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { adminRoute, audit, parseBody } from '@/lib/admin/http';
+import { assertInstanceDomain } from '@/lib/admin/extensions-instance';
+import { backendError, managerFetch } from '@/lib/admin/extensions-proxy';
+import { installBody } from '@/lib/admin/extensions-schemas';
 
-export async function POST(req: Request) {
-    const guard = await requireAdmin(req);
-    if (!guard.ok) return guard.response;
-
-    try {
-        const body = await req.json();
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev';
-        const cookieStore = req.headers.get('cookie') || '';
-
-        const response = await fetch(`${backendUrl}/api/manager/extensions/install`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': cookieStore,
-            },
-            body: JSON.stringify(body),
-        });
-
-        const data = await response.json();
-        return NextResponse.json(data, { status: response.status });
-    } catch (error) {
-        console.error('[ADMIN_EXTENSION_INSTALL_PROXY]', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-    }
-}
+/**
+ * POST { domainId, extensionId } -> { success: true }
+ * Instala (o ACTUALIZA: es idempotente, conserva credenciales y ajustes y refresca la version instalada) una extension en el
+ * dominio de esta instancia. El backend comprueba sesion de manager, propiedad del dominio y pago (402 PAYMENT_REQUIRED).
+ * Solo se reenvian los dos ids y solo se devuelve `success`: nunca la fila de instalacion (podria llevar authData).
+ */
+export const POST = adminRoute({ scope: 'extensions.install', write: true }, async (ctx) => {
+    const body = await parseBody(ctx.req, installBody);
+    await assertInstanceDomain(body.domainId, ctx.req);
+    const result = await managerFetch(ctx.req, '/api/manager/extensions/install', { body: { domainId: body.domainId, extensionId: body.extensionId } });
+    const ok = result.status >= 200 && result.status < 300 && result.data?.success === true;
+    audit(ctx, 'extension.install', { domainId: body.domainId, extensionId: body.extensionId, outcome: ok ? 'ok' : 'failed', status: result.status });
+    if (!ok) throw backendError(result, 'extension_not_found');
+    return { success: true };
+});

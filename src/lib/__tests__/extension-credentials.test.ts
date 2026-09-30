@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
     MAX_CREDENTIAL_LENGTH,
+    MAX_SERVICE_ACCOUNT_LENGTH,
     buildCredentialPayload,
     credentialsHttpErrorKey,
     declaredCredentialKeys,
@@ -41,6 +42,19 @@ describe('validateCredentialValue', () => {
         expect(validateCredentialValue('a\u0000b')).toBe('control');
         expect(validateCredentialValue('x'.repeat(MAX_CREDENTIAL_LENGTH))).toBeNull();
         expect(validateCredentialValue('x'.repeat(MAX_CREDENTIAL_LENGTH + 1))).toBe('tooLong');
+    });
+});
+
+describe('GOOGLE_SERVICE_ACCOUNT_JSON', () => {
+    it('admite 16384 caracteres y saltos de linea solo en esa clave', () => {
+        const key = 'GOOGLE_SERVICE_ACCOUNT_JSON';
+        expect(validateCredentialValue('{\n  "a": 1\r\n}', key)).toBeNull();
+        expect(validateCredentialValue('x'.repeat(MAX_SERVICE_ACCOUNT_LENGTH), key)).toBeNull();
+        expect(validateCredentialValue('x'.repeat(MAX_SERVICE_ACCOUNT_LENGTH + 1), key)).toBe('tooLong');
+        expect(validateCredentialValue('a\u0000b', key)).toBe('control');
+        expect(validateCredentialValue('a\nb', 'OTHER_KEY')).toBe('control');
+        expect(validateCredentialValue('x'.repeat(MAX_CREDENTIAL_LENGTH + 1), 'OTHER_KEY')).toBe('tooLong');
+        expect(validateDraft({ values: { [key]: '{\n}' }, removals: [] })).toEqual({});
     });
 });
 

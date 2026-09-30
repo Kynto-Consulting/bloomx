@@ -5,7 +5,10 @@ import { auditLog, getClientIp } from '@/lib/security';
 /**
  * Proxy de credenciales por dominio de extensiones -> backend /api/extension/settings.
  *
- *   GET  ?domainId=..&extensionId=..            -> { keys: [{ name, configured }] }
+ *   GET  ?domainId=..&extensionId=..            -> { keys: [{ name, configured, source, movable }] }
+ *        source = fuente ACTIVA de la variable: 'domain' | 'legacy' | 'server-env' | 'missing' (sin valores).
+ *   POST { domainId, extensionId, action: 'migrate-legacy' } -> { success, migrated: [nombres], serverEnv: [nombres], keys }
+ *        copia (cifrados, en el backend) los valores heredados del dominio a credenciales del dominio.
  *   PUT  { domainId, extensionId, credentials } -> { success, keys }   (null/"" borra una credencial)
  *
  * - Solo admin (requireAdmin). El backend vuelve a comprobar sesion de manager y propiedad del dominio.
@@ -16,17 +19,32 @@ import { auditLog, getClientIp } from '@/lib/security';
 const BACKEND_URL = () => process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev';
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-function publicKeys(data: any): { name: string; configured: boolean }[] {
+const SOURCES = ['domain', 'legacy', 'server-env', 'missing'] as const;
+
+function publicKeys(data: any): { name: string; configured: boolean; source: (typeof SOURCES)[number]; movable: boolean }[] {
     if (!data || !Array.isArray(data.keys)) return [];
     return data.keys
         .filter((k: any) => k && typeof k.name === 'string')
-        .map((k: any) => ({ name: String(k.name), configured: k.configured === true }));
+        .map((k: any) => {
+            const source = SOURCES.includes(k.source) ? k.source : k.configured === true ? 'domain' : 'missing';
+            return { name: String(k.name), configured: k.configured === true, source, movable: k.movable === true };
+        });
+}
+
+function nameList(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((n): n is string => typeof n === 'string' && /^[A-Z][A-Z0-9_]{1,63}$/.test(n)) : [];
 }
 
 function shape(status: number, data: any) {
     if (status >= 200 && status < 300) {
         return NextResponse.json(
-            { ...(data?.success === true ? { success: true } : {}), keys: publicKeys(data) },
+            {
+                ...(data?.success === true ? { success: true } : {}),
+                // Solo NOMBRES de variable (nunca valores), reconstruidos con lista blanca.
+                ...(Array.isArray(data?.migrated) ? { migrated: nameList(data.migrated) } : {}),
+                ...(Array.isArray(data?.serverEnv) ? { serverEnv: nameList(data.serverEnv) } : {}),
+                keys: publicKeys(data),
+            },
             { status, headers: NO_STORE },
         );
     }
@@ -104,6 +122,49 @@ export async function PUT(req: Request) {
         return shape(response.status, data);
     } catch (error) {
         console.error('[ADMIN_EXTENSION_SETTINGS_PUT]', error instanceof Error ? error.message : 'error');
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500, headers: NO_STORE });
+    }
+}
+
+export async function POST(req: Request) {
+    const guard = await requireAdmin(req);
+    if (!guard.ok) return guard.response;
+
+    try {
+        let body: any = null;
+        try {
+            body = await req.json();
+        } catch {
+            body = null;
+        }
+        const domainId = typeof body?.domainId === 'string' ? body.domainId : '';
+        const extensionId = typeof body?.extensionId === 'string' ? body.extensionId : '';
+        if (!domainId || !extensionId || body?.action !== 'migrate-legacy') {
+            return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: NO_STORE });
+        }
+
+        const response = await fetch(`${BACKEND_URL()}/api/extension/settings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '' },
+            body: JSON.stringify({ domainId, extensionId, action: 'migrate-legacy' }),
+            cache: 'no-store',
+        });
+        const data = await response.json().catch(() => ({}));
+
+        auditLog('admin.extension.credentials.migrate', {
+            userId: guard.actor.id,
+            ip: getClientIp(req),
+            domainId,
+            extensionId,
+            outcome: response.ok ? 'ok' : 'failed',
+            status: response.status,
+            // Solo nombres de variable (no valores).
+            set: response.ok ? nameList(data?.migrated) : [],
+        });
+
+        return shape(response.status, data);
+    } catch (error) {
+        console.error('[ADMIN_EXTENSION_SETTINGS_MIGRATE]', error instanceof Error ? error.message : 'error');
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500, headers: NO_STORE });
     }
 }

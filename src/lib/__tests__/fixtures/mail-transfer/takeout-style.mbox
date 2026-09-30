@@ -1,0 +1,51 @@
+From 1700000000000000001@xxx Mon Jan 01 10:00:00 +0000 2024
+X-GM-THRID: 1700000000000000001
+X-Gmail-Labels: Inbox,Unread,Category Personal,Proyecto Alfa
+Delivered-To: ana@example.test
+Received: by 2002:a05:6a00:1 with SMTP id z; Mon, 1 Jan 2024 02:00:00 -0800 (PST)
+Date: Mon, 01 Jan 2024 10:00:00 +0000
+From: "Luis =?UTF-8?Q?P=C3=A9rez?=" <luis@remoto.test>
+To: Ana <ana@example.test>
+Subject: =?UTF-8?Q?Reuni=C3=B3n_de_a?= =?UTF-8?Q?pertura?=
+Message-ID: <takeout-1@remoto.test>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset="UTF-8"
+Content-Transfer-Encoding: quoted-printable
+
+Hola Ana=2C ma=C3=B1ana a las 10.
+>From aqui empieza una linea escapada.
+--b1
+Content-Type: text/html; charset="UTF-8"
+
+<p>Hola <b>Ana</b></p>
+--b1--
+
+From 1700000000000000002@xxx Tue Jan 02 11:30:00 +0000 2024
+X-Gmail-Labels: Sent,Starred
+Delivered-To: ana@example.test
+Date: Tue, 02 Jan 2024 11:30:00 +0000
+From: Ana <ana@example.test>
+To: luis@remoto.test
+Cc: Grupo <grupo@example.test>
+Subject: Re: Reunion de apertura
+Message-ID: <takeout-2@example.test>
+In-Reply-To: <takeout-1@remoto.test>
+References: <takeout-1@remoto.test>
+Content-Type: text/plain; charset="UTF-8"
+
+De acuerdo, nos vemos.
+
+From 1700000000000000003@xxx Wed Jan 03 08:00:00 +0000 2024
+X-Gmail-Labels: Trash
+Delivered-To: ana@example.test
+Date: Wed, 03 Jan 2024 08:00:00 +0000
+From: Spam <promo@remoto.test>
+To: ana@example.test
+Subject: Oferta unica
+Message-ID: <takeout-3@remoto.test>
+Content-Type: text/plain; charset="UTF-8"
+
+Compra ya.

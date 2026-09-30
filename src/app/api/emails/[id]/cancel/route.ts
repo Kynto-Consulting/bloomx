@@ -1,11 +1,42 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
-import { Resend } from 'resend';
+import { canAccessEmail } from '@/lib/mailbox-access';
+import { cancelScheduledSend, failureToHttp } from '@/lib/resend-scheduled';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+/** Cuerpo HTML del correo programado: lo guardado al programar (htmlKey/textKey); si no, lo que tenga el proveedor; si no, el resumen. */
+async function recoverBody(email: { htmlKey: string | null; textKey: string | null; messageId: string | null; snippet: string | null }): Promise<string> {
+    try {
+        // El almacenamiento (SDK de S3) solo se carga si hay algo que leer.
+        const { getFromStorage } = (email.htmlKey || email.textKey) ? await import('@/lib/storage') : { getFromStorage: async () => null };
+        if (email.htmlKey) {
+            const html = await getFromStorage(email.htmlKey);
+            if (html) return html;
+        }
+        if (email.textKey) {
+            const text = await getFromStorage(email.textKey);
+            if (text) return `<p>${text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\r?\n/g, '<br>')}</p>`;
+        }
+    } catch (e) {
+        console.error('Failed to read scheduled body from storage', e);
+    }
+    if (email.messageId) {
+        try {
+            const { resend } = await import('@/lib/resend');
+            const resendEmail = await resend.emails.get(email.messageId);
+            const data = (resendEmail as any)?.data;
+            if (data) return data.html || data.text || '';
+        } catch (e) {
+            console.error('Failed to fetch from Resend', e);
+        }
+    }
+    return '';
+}
 
+/**
+ * POST /api/emails/[id]/cancel: cancela un envio programado y lo devuelve a BORRADORES (con destinatarios, cc/bcc,
+ * asunto, cuerpo y adjuntos). Si el proveedor dice que ya salio, NO toca nada localmente salvo reflejar que ya se envio.
+ */
 export async function POST(
     req: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -29,69 +60,39 @@ export async function POST(
             return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 
-        // Verify ownership (simple check on From email matching session user)
-        // Adjust logic if you have strict user IDs
-        if (!email.from.includes(user.email)) {
-            // Fallback: check if the user is the sender (parsed)
-            // For now assuming if you can access it, you can cancel it (since we filter by folder usually)
-            // But strict check:
-            const senderEmail = email.from.match(/<(.+)>/)?.[1] || email.from;
-            if (senderEmail !== user.email) {
-                // Allow if alias?
-            }
+        // Propiedad (IDOR): el correo debe estar en un buzon accesible para el usuario de la sesion. 404 (no 403) para
+        // no revelar la existencia de correos ajenos. Se comprueba ANTES de tocar Resend, borradores o la BD.
+        if (!(await canAccessEmail(user.id, email.userId))) {
+            return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 
         if (email.status !== 'scheduled' && email.folder !== 'scheduled') {
-            return NextResponse.json({ error: 'Email is not scheduled' }, { status: 400 });
+            return NextResponse.json({ error: 'Email is not scheduled', code: 'NOT_SCHEDULED' }, { status: 409 });
         }
 
-        // 2. Cancel in Resend
-        try {
-            if (email.messageId) {
-                await (resend.emails as any).cancel(email.messageId);
-            }
-        } catch (error) {
-            console.error('Resend cancellation failed:', error);
-            // We might continue if it failed because it wasn't found, but if it's too late, we should stop.
-            // But typical Resend error for "too late" or "already sent" should probably stop us.
-            // For now, assume if ID exists we try.
-        }
-
-        // 3. Convert back to Draft
-        // We need to reconstruct the body. `email.snippet` is text. 
-        // We might not have the full HTML if we didn't store it in DB (we store key). 
-        // But wait, we store `htmlKey` or `textKey`. 
-        // If we don't have the content easily, we might have trouble.
-        // However, the `Email` model changes I made earlier didn't explicitly add `body` text storage, 
-        // passing `html` to Resend. 
-        // Wait, did I store the body in `Email`? 
-        // The `Email` model has: subject, snippet, cleanTo, to, from. It does NOT have the full body content directly unless `htmlKey` is used.
-        // But `POST / api / emails` saved `htmlKey: null`. 
-        // CHECK: In `POST / api / emails`, I see: `htmlKey: null`. Attempting to retrieve content??
-        // If I can't retrieve the content, I can't make a draft.
-        // RETROACTIVE FIX: We need to store the body instructions or content in the Email model if we want to "Edit" it later, 
-        // OR rely on Resend to give it back? Resend `emails.get` retrieves details.
-
-        // Let's fetch the email details from Resend to get the body back if possible?
-        // Resend `retrieve` might give html.
-        let bodyContent = '';
+        // 2. Cancelar en Resend. Sin id remoto (404) no hay nada que cancelar alli; "ya enviado" o proveedor caido detienen el
+        //    proceso: seguir dejaria un borrador Y el correo saliendo igualmente.
         if (email.messageId) {
-            try {
-                const resendEmail = await resend.emails.get(email.messageId);
-                if (resendEmail.data) {
-                    bodyContent = resendEmail.data.html || resendEmail.data.text || '';
+            const outcome = await cancelScheduledSend(email.messageId);
+            if (!outcome.ok && outcome.kind !== 'not_found') {
+                if (outcome.kind === 'already_sent') {
+                    await prisma.email.updateMany({ where: { id, userId: email.userId, folder: 'scheduled' }, data: { folder: 'sent', status: 'sent' } });
                 }
-            } catch (e) {
-                console.error('Failed to fetch from Resend', e);
+                const http = failureToHttp(outcome);
+                return NextResponse.json({ error: http.error, code: http.code }, { status: http.status });
             }
         }
 
+        // 3. Volver a borrador con todo lo que tenia el correo.
+        const bodyContent = await recoverBody(email);
         const draft = await prisma.draft.create({
             data: {
-                from: email.from, // We might need to parse just the email if TagInput expects just email?
+                from: email.from,
                 to: email.to,
+                cc: email.cc ?? null,
+                bcc: email.bcc ?? null,
                 subject: email.subject,
-                body: bodyContent || email.snippet || '', // Fallback
+                body: bodyContent || email.snippet || '',
                 attachments: {
                     create: email.attachments.map(a => ({
                         filename: a.filename,
@@ -100,16 +101,22 @@ export async function POST(
                         key: a.key
                     }))
                 }
-            }
+            },
+            include: { attachments: true },
         });
 
         // 4. Delete the Scheduled Email
-        await prisma.email.delete({ where: { id } });
+        await prisma.email.deleteMany({ where: { id, userId: email.userId } });
 
-        return NextResponse.json({ success: true, draftId: draft.id });
+        // `draft`: lo necesario para abrirlo en el redactor sin otra peticion (editar un programado).
+        return NextResponse.json({
+            success: true,
+            draftId: draft.id,
+            draft: { id: draft.id, from: email.from, to: email.to, cc: email.cc ?? '', bcc: email.bcc ?? '', subject: email.subject ?? '', body: bodyContent || email.snippet || '', attachments: draft.attachments ?? [] },
+        });
 
     } catch (error: any) {
         console.error('Cancel error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: 'Failed to cancel the scheduled email' }, { status: 500 });
     }
 }

@@ -9,6 +9,8 @@ import { useDialog } from '@/components/ui/useDialog';
 import { useSurfaceColors } from '@/hooks/useSurfaceColors';
 import { agendaAccentText, agendaSoft, agendaTextOn, agendaTint, safeAgendaColor } from '@/lib/agenda-color';
 import { bookingErrorKey } from '@/lib/i18n/format';
+import { meetingProviderName, safeConferenceUrl } from '@/lib/conferencing/hosts';
+import { PROVIDER_INFO, providerFromLegacyValue } from '@/lib/conferencing/types';
 
 type Availability = { dayOfWeek: number; startTime: string; endTime: string; isEnabled: boolean };
 type Schedule = {
@@ -182,7 +184,7 @@ function BookingModal({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div aria-hidden="true" className="absolute inset-0 bg-black/50 backdrop-blur-sm" onMouseDown={onClose} />
+            <div aria-hidden="true" className="absolute inset-0 bg-overlay backdrop-blur-sm" onMouseDown={onClose} />
             <motion.div
                 ref={dialogRef}
                 role="dialog"
@@ -223,10 +225,15 @@ function BookingModal({
                                 {booking.meetUrl && (
                                     <div className="flex items-start gap-2">
                                         <Video className="h-3.5 w-3.5 mt-0.5 shrink-0" style={{ color: pal.accent }} aria-hidden="true" />
-                                        <a href={booking.meetUrl} target="_blank" rel="noopener noreferrer"
-                                            className="break-all font-medium hover:underline text-xs" style={{ color: pal.accent }}>
-                                            {booking.meetUrl}
-                                        </a>
+                                        {safeConferenceUrl(booking.meetUrl) ? (
+                                            <a href={safeConferenceUrl(booking.meetUrl) as string} target="_blank" rel="noopener noreferrer"
+                                                aria-label={`${meetingProviderName(booking.meetUrl)}: ${booking.meetUrl}`}
+                                                className="break-all font-medium hover:underline text-xs" style={{ color: pal.accent }}>
+                                                {booking.meetUrl}
+                                            </a>
+                                        ) : (
+                                            <span className="break-all text-xs text-muted-foreground">{booking.meetUrl}</span>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -417,7 +424,7 @@ export default function BookingPage({ params }: { params: Promise<{ scheduleId: 
                                 {schedule.conferencing && (
                                     <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                         <Video className="h-4 w-4 shrink-0" style={{ color: pal.accent }} aria-hidden="true" />
-                                        {schedule.conferencing === 'meet' ? 'Google Meet' : 'Zoom'} · {t('book.videoCall')}
+                                        {PROVIDER_INFO[providerFromLegacyValue(schedule.conferencing) ?? 'zoom'].name} · {t('book.videoCall')}
                                     </div>
                                 )}
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">

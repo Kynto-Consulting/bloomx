@@ -38,6 +38,8 @@ const securityHeaders = [
 /** @type {import('next').NextConfig} */
 const nextConfig = {
     poweredByHeader: false,
+    // services.formats.sanitizeHtml (api/internal/formats) usa DOMPurify con jsdom en el servidor: que no se empaquete.
+    serverExternalPackages: ['isomorphic-dompurify'],
     env: {
         NEXT_PUBLIC_BRAND_NAME: process.env.BRAND_NAME,
         NEXT_PUBLIC_BRAND_COLOR: process.env.BRAND_COLOR,

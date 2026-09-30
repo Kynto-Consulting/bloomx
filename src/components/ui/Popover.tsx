@@ -146,7 +146,7 @@ export function Popover({
         <div
             ref={popoverRef}
             className={cn(
-                'fixed z-[150] bg-background rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200',
+                'fixed z-[150] bg-popover text-popover-foreground border border-border rounded-lg shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-200',
                 coords.placement === 'top' ? 'origin-bottom' : 'origin-top',
                 className
             )}

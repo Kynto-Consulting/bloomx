@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { parseContactInput, parseContactPagination } from '@/lib/contacts';
+import { buildContactSavedContext, fireLifecycleHook } from '@/lib/expansions/server-hooks';
 
 /**
  * GET /api/contacts?limit=&offset=&q=
@@ -75,6 +76,7 @@ export async function POST(req: NextRequest) {
         const contact = await prisma.contact.create({
             data: { userId: user.id, email, name, notes, source: 'local' },
         });
+        fireLifecycleHook('CONTACT_SAVED', user.id, buildContactSavedContext({ contactId: contact.id, email: contact.email, created: true, source: contact.source }));
         return NextResponse.json(contact, { status: 201 });
     } catch (error: any) {
         // Carrera: otra peticion lo creo entre la comprobacion y el INSERT (violacion de unicidad).

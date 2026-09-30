@@ -98,8 +98,13 @@ export async function patchAllUserMeetRooms(
             select: { meetUrl: true },
         }),
         prisma.calendarEvent.findMany({
-            where: { userId, location: { contains: 'meet.google.com' }, status: { not: 'cancelled' } },
-            select: { location: true, externalId: true },
+            // Eventos nuevos guardan el enlace en conferenceUrl (y en location); los antiguos solo en location.
+            where: {
+                userId,
+                status: { not: 'cancelled' },
+                OR: [{ location: { contains: 'meet.google.com' } }, { conferenceUrl: { contains: 'meet.google.com' } }],
+            },
+            select: { location: true, conferenceUrl: true, externalId: true },
         }),
     ]);
 
@@ -108,9 +113,10 @@ export async function patchAllUserMeetRooms(
 
     for (const b of bookings) if (b.meetUrl) urls.add(b.meetUrl);
     for (const e of calEvents) {
-        if (e.location) {
-            urls.add(e.location);
-            calEventMap.set(e.location, e.externalId);
+        const link = [e.conferenceUrl, e.location].find((v) => typeof v === 'string' && v.includes('meet.google.com'));
+        if (link) {
+            urls.add(link);
+            calEventMap.set(link, e.externalId);
         }
     }
 

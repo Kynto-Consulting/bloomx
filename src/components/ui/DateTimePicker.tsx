@@ -211,7 +211,7 @@ export function DateTimePicker({
                 width: pos.width,
                 zIndex: 9999,
             }}
-            className="bg-background border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 origin-top"
+            className="bg-popover text-popover-foreground border border-border rounded-xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 origin-top"
             onMouseDown={e => e.stopPropagation()}
         >
             <div className="flex select-none">

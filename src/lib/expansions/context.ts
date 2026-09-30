@@ -128,3 +128,6 @@ export function buildReadingContext(context: any): any {
     }
     return next;
 }
+
+// Contexto por punto de montaje (ver mount-points.ts). Reexportado para que el renderer importe todo desde aqui.
+export { buildMountContext, MOUNT_POINT_CONTEXT } from "./mount-points";

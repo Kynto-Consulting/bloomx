@@ -4,15 +4,21 @@ import React, { createContext, useContext, useState, useCallback, useEffect, Rea
 import { useReAuth, type ReAuthRequirements } from '@/contexts/ReAuthContext';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { syncExtensionSettingsTabs } from '@/lib/expansions/client/dynamic-settings';
+import { OverlayHost } from '@/components/expansions/kit/OverlayHost';
 
 interface ModalOptions {
+    /** sm|md|lg|xl|full (los anchos heredados en px se aproximan). */
     width?: string;
     closable?: boolean;
+    /** Nombre accesible del dialogo. */
+    label?: string;
 }
 
 interface DrawerOptions {
     side?: 'left' | 'right';
+    /** sm|md|lg */
     width?: string;
+    label?: string;
 }
 
 interface ExpansionUIContextType {
@@ -36,7 +42,8 @@ interface ExpansionUIContextType {
     requestReAuth: (req: ReAuthRequirements) => void;
 }
 
-const ExpansionUIContext = createContext<ExpansionUIContextType | undefined>(undefined);
+/** Exportado para aislar una vista previa (playground/galeria): `<ExpansionUIContext.Provider value={undefined}>` hace que los overlays se abran dentro del marco con su propio tema. */
+export const ExpansionUIContext = createContext<ExpansionUIContextType | undefined>(undefined);
 
 export function ExpansionUIProvider({ children }: { children: ReactNode }) {
     const [modalContent, setModalContent] = useState<ReactNode | null>(null);
@@ -74,72 +81,31 @@ export function ExpansionUIProvider({ children }: { children: ReactNode }) {
         setDrawerOptions({});
     }, []);
 
-    // Escape key to close
-    useEffect(() => {
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                if (modalContent) closeModal();
-                else if (drawerContent) closeDrawer();
-            }
-        };
-        window.addEventListener('keydown', handler);
-        return () => window.removeEventListener('keydown', handler);
-    }, [modalContent, drawerContent, closeModal, closeDrawer]);
-
     return (
         <ExpansionUIContext.Provider value={{ openModal, closeModal, openDrawer, closeDrawer, requestReAuth }}>
             {children}
 
-            {/* Modal Overlay */}
-            {modalContent && (
-                <div
-                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget && modalOptions.closable !== false) closeModal();
-                    }}
-                >
-                    <div
-                        className="relative bg-card rounded-xl shadow-2xl animate-in zoom-in-95 duration-200 max-h-[85vh] overflow-y-auto"
-                        style={{ width: modalOptions.width || 'auto', maxWidth: '90vw' }}
-                    >
-                        {modalOptions.closable !== false && (
-                            <button
-                                onClick={closeModal}
-                                className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors"
-                            >
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                            </button>
-                        )}
-                        {modalContent}
-                    </div>
-                </div>
-            )}
-
-            {/* Drawer Overlay */}
-            {drawerContent && (
-                <div
-                    className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm animate-in fade-in duration-150"
-                    onClick={(e) => {
-                        if (e.target === e.currentTarget) closeDrawer();
-                    }}
-                >
-                    <div
-                        className={`fixed top-0 bottom-0 bg-card shadow-2xl animate-in duration-200 overflow-y-auto ${drawerOptions.side === 'left'
-                                ? 'left-0 slide-in-from-left'
-                                : 'right-0 slide-in-from-right'
-                            }`}
-                        style={{ width: drawerOptions.width || '400px', maxWidth: '90vw' }}
-                    >
-                        <button
-                            onClick={closeDrawer}
-                            className="absolute top-3 right-3 z-10 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-muted-foreground transition-colors"
-                        >
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                        </button>
-                        {drawerContent}
-                    </div>
-                </div>
-            )}
+            {/* Overlays de extensiones: dialogo/cajon accesibles (foco atrapado, Escape, fondo bg-overlay) */}
+            <OverlayHost
+                kind="modal"
+                open={modalContent !== null}
+                onClose={closeModal}
+                label={modalOptions.label || 'Extension'}
+                width={modalOptions.width}
+                closable={modalOptions.closable !== false}
+            >
+                {modalContent}
+            </OverlayHost>
+            <OverlayHost
+                kind="drawer"
+                open={drawerContent !== null}
+                onClose={closeDrawer}
+                label={drawerOptions.label || 'Extension'}
+                width={drawerOptions.width}
+                side={drawerOptions.side}
+            >
+                {drawerContent}
+            </OverlayHost>
         </ExpansionUIContext.Provider>
     );
 }

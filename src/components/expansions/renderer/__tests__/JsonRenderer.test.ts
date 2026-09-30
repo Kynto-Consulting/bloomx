@@ -30,7 +30,9 @@ async function render(component: any, context: any = { extensionId: 'core-test' 
 
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 const text = () => container.textContent || '';
-const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => b.textContent?.includes(label)) as HTMLButtonElement;
+// Textos integrados del kit: espanol por defecto (la app los localiza); los alias cubren ambos idiomas.
+const ALIASES: Record<string, string[]> = { Submit: ['Submit', 'Enviar'], Back: ['Back', 'Atras'] };
+const button = (label: string) => Array.from(container.querySelectorAll('button')).find((b) => (ALIASES[label] ?? [label]).some((alias) => b.textContent?.includes(alias) || b.getAttribute('aria-label') === alias)) as HTMLButtonElement;
 const click = async (el: Element) => { await act(async () => { el.dispatchEvent(new MouseEvent('click', { bubbles: true })); }); await flush(); };
 const type = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
     await act(async () => {
@@ -165,7 +167,7 @@ describe('JsonRenderer: WIZARD y NEXT_STEP (Trello)', () => {
         });
         const select = container.querySelector('select') as HTMLSelectElement;
         await act(async () => {
-            select.value = 'b1';
+            select.value = '0'; // SelectField usa el indice de la opcion como valor del <option>
             select.dispatchEvent(new Event('change', { bubbles: true }));
         });
         await flush();
@@ -297,8 +299,11 @@ describe('JsonRenderer: componentes con estado (hooks fuera del switch)', () => 
         });
         await flush();
         expect(text()).toContain('v=seteado');
-        expect(text()).not.toContain('interior');
+        // el contenido plegado sigue montado (no pierde estado) pero oculto
+        const hiddenPanel = () => Array.from(container.querySelectorAll('[hidden]')).some((el) => el.textContent?.includes('interior'));
+        expect(hiddenPanel()).toBe(true);
         await click(button('Sec'));
+        expect(hiddenPanel()).toBe(false);
         expect(text()).toContain('interior');
 
         // re-render con un tipo distinto en la misma raiz: no debe lanzar "rendered more hooks"

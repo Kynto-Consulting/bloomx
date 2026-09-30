@@ -1,3 +1,4 @@
+import { findUserByEmail } from '@/lib/user-lookup';
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import GoogleProvider from "next-auth/providers/google";
@@ -42,9 +43,7 @@ export const authOptions: NextAuthOptions = {
                     return null;
                 }
 
-                const user = await prisma.user.findUnique({
-                    where: { email: credentials.email }
-                });
+                const user = await findUserByEmail(String(credentials.email));
 
                 // bcrypt.compare siempre (igualar tiempos, anti-enumeracion); sin logs con PII
                 const hash = user?.password || (await getDummyBcryptHash());

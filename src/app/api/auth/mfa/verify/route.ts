@@ -3,6 +3,7 @@ import { auditLog, getClientIp } from "@/lib/security";
 import { getMfaStatus, MfaStoreUnavailableError, verifyMfa } from "@/lib/mfa";
 import { mfaAttemptLimit, NO_STORE, resolveMfaActor } from "@/lib/mfa-http";
 import { setSessionCookie } from "@/lib/session";
+import { getUserState } from "@/lib/admin/user-state";
 
 /**
  * POST /api/auth/mfa/verify   { mfaToken, code? | recoveryCode? }
@@ -33,6 +34,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Invalid code" }, { status: 401, headers: NO_STORE });
         }
 
+        const adminState = await getUserState(actor.userId);
+        if (adminState.disabled) {
+            auditLog("auth.login.disabled", { userId: actor.userId, ip });
+            return NextResponse.json({ error: "Account disabled", code: "ACCOUNT_DISABLED" }, { status: 403, headers: NO_STORE });
+        }
         const token = await setSessionCookie({ sub: actor.userId, email: actor.email, name: actor.name }, { mfa: true });
         auditLog("auth.login.success", { userId: actor.userId, email: actor.email, ip, mfa: result.method });
         if (result.method === "recovery") {
@@ -44,6 +50,7 @@ export async function POST(req: NextRequest) {
                 token,
                 user: { id: actor.userId, email: actor.email, name: actor.name },
                 recoveryCodesLeft: result.recoveryCodesLeft,
+                ...(adminState.mustChangePassword ? { mustChangePassword: true } : {}),
             },
             { headers: NO_STORE }
         );

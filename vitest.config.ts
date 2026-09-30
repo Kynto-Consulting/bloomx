@@ -3,5 +3,5 @@ import path from 'node:path';
 
 export default defineConfig({
     resolve: { alias: { '@': path.resolve(__dirname, 'src') } },
-    test: { setupFiles: ['./vitest.setup.ts'], include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'], environment: 'node', exclude: ['**/node_modules/**', '**/*.pg.test.ts'] },
+    test: { setupFiles: ['./vitest.setup.ts'], include: ['src/**/*.test.{ts,tsx}', 'scripts/**/*.test.ts'], environment: 'node', exclude: ['**/node_modules/**', '**/*.pg.test.ts'] },
 });

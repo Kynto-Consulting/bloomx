@@ -21,6 +21,7 @@ import { Readable } from 'stream';
 
 import { extractAttachmentsFromRawMime } from '../src/lib/mime-attachments';
 import { saveAttachmentContentIds, type ContentIdEntry } from '../src/lib/attachment-content-id';
+import { inviteProdId } from '../src/lib/calendar/invite-template.js';
 
 const prisma = new PrismaClient();
 
@@ -96,7 +97,7 @@ function buildRequestIcsFromEvent(ev: EventForIcs): Buffer {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        `PRODID:-//${process.env.BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        `PRODID:${inviteProdId(process.env.BRAND_NAME || process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom', 'es')}`,
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
         'BEGIN:VEVENT',

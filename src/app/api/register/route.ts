@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { env } from '@/lib/env';
+import { getRegistrationPolicy } from '@/lib/domain-registration';
 import { auditLog, BCRYPT_COST, getClientIp, isProduction, rateLimitAsync, safeEqual, validateNewPassword } from '@/lib/security';
 
 export async function POST(req: NextRequest) {
@@ -17,17 +18,26 @@ export async function POST(req: NextRequest) {
 
         const { email, password, name, key } = await req.json();
 
-        // En produccion el registro queda deshabilitado si REGISTRATION_KEY no se configuro explicitamente
-        // (evita registro abierto con la clave por defecto "dev-secret").
-        const configuredKey = env.REGISTRATION_KEY;
-        if (isProduction() && (!configuredKey || configuredKey === 'dev-secret')) {
-            auditLog('auth.register.disabled', { ip });
-            return NextResponse.json({ error: 'Invalid registration secret' }, { status: 403 });
+        // Politica del dominio activo (landing.registration): el servidor la aplica aunque el formulario se manipule.
+        const policy = await getRegistrationPolicy(req);
+        if (!policy.enabled) {
+            auditLog('auth.register.closed', { ip });
+            return NextResponse.json({ error: 'Registration is closed' }, { status: 403 });
         }
 
-        if (!safeEqual(typeof key === 'string' ? key : '', configuredKey)) {
-            auditLog('auth.register.bad_key', { ip });
-            return NextResponse.json({ error: 'Invalid registration secret' }, { status: 403 });
+        if (policy.requireKey) {
+            // En produccion el registro queda deshabilitado si REGISTRATION_KEY no se configuro explicitamente
+            // (evita registro abierto con la clave por defecto "dev-secret").
+            const configuredKey = env.REGISTRATION_KEY;
+            if (isProduction() && (!configuredKey || configuredKey === 'dev-secret')) {
+                auditLog('auth.register.disabled', { ip });
+                return NextResponse.json({ error: 'Invalid registration secret' }, { status: 403 });
+            }
+
+            if (!safeEqual(typeof key === 'string' ? key : '', configuredKey)) {
+                auditLog('auth.register.bad_key', { ip });
+                return NextResponse.json({ error: 'Invalid registration secret' }, { status: 403 });
+            }
         }
 
         if (!email || !password || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {

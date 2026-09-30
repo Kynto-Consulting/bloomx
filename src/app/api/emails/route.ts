@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { getCurrentUser } from "@/lib/session";
-import { buildContainsFilter, buildOperatorFilters, ftsEmailIds, parseSearchQuery } from '@/lib/rules/search';
+import { parseSearchQuery } from '@/lib/rules/search';
 import { uploadToStorage, getBufferFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
-import { runEmailPreSendHooksForRequest } from '@/lib/expansions/server-hooks';
+import { buildEmailSentContext, fireLifecycleHook, runEmailPreSendHooksForRequest } from '@/lib/expansions/server-hooks';
 import {
     MAX_RECIPIENTS,
     formatFromHeader,
@@ -18,6 +18,10 @@ import {
 } from '@/lib/mail-validation';
 import { sanitizeFilename } from '@/lib/mime-decode';
 import { attachSendKeyEmail, claimSendKey, markSendKeySent, releaseSendKey } from '@/lib/send-idempotency';
+import { MAIL_PAGE_SIZE, decodeCursor, encodeCursor, parseFilter, parseMailboxesParam, parseSort } from '@/lib/mail-query';
+import type { MailListScope } from '@/lib/mail-list-sql';
+import { getScopeCounts, ownAddressesOf, resolveMailboxScope, selectPageRows } from '@/lib/mail-store';
+import { checkQuotaForSend, invalidateQuotaCache } from '@/lib/mail-quota';
 
 const MAX_SENDS_PER_HOUR = Number.parseInt(process.env.MAX_SENDS_PER_HOUR || '200', 10) || 200;
 const MAX_ATTACHMENTS = 25;
@@ -53,8 +57,20 @@ export async function GET(req: NextRequest) {
     const since = searchParams.get('since'); // Date string ISO
     const accountRaw = extractEmailAddress(searchParams.get('account') || '');
     const accountNormalized = normalizeMailboxIdentity(accountRaw);
-    const limit = 20;
-    const skip = (page - 1) * limit;
+    const limit = MAIL_PAGE_SIZE;
+    // Orden y filtro rapido en el SERVIDOR; paginacion por cursor estable (keyset). `page` sigue funcionando (sin cursor).
+    const sort = parseSort(searchParams.get('sort'));
+    const filter = parseFilter(searchParams.get('filter'));
+    const cursorRaw = searchParams.get('cursor');
+    const cursor = cursorRaw ? decodeCursor(cursorRaw, sort) : null;
+    if (cursorRaw && !cursor) return NextResponse.json({ error: 'Invalid cursor' }, { status: 400 });
+    const skip = cursor ? 0 : (page - 1) * limit;
+    const wantCounts = searchParams.get('counts') !== '0';
+    const mailboxesRaw = searchParams.get('mailboxes');
+    const requestedMailboxes = mailboxesRaw === null ? null : parseMailboxesParam(mailboxesRaw);
+    if (mailboxesRaw !== null && (!requestedMailboxes || requestedMailboxes.length === 0)) {
+        return NextResponse.json({ error: 'Invalid mailboxes' }, { status: 400 });
+    }
 
     const sessionUser = await getCurrentUser();
     if (!sessionUser) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -86,9 +102,15 @@ export async function GET(req: NextRequest) {
             .filter((email) => email.includes('@')),
     ]);
 
-    let mailboxUserId = user.id;
+    // Buzones sobre los que se consulta. `mailboxes=<ids|all>` = union en el servidor (solo buzones accesibles por la sesion);
+    // sin el, un unico buzon (el de la sesion o el de `account`).
+    let mailboxUserIds: string[] = [user.id];
 
-    if (accountCandidates.length > 0) {
+    if (requestedMailboxes) {
+        const resolved = await resolveMailboxScope(user.id, requestedMailboxes);
+        if (!resolved.ok) return NextResponse.json({ error: resolved.error }, { status: resolved.status });
+        mailboxUserIds = resolved.userIds;
+    } else if (accountCandidates.length > 0) {
         const selectedAccount = accountCandidates.find((candidate) => {
             if (connectedMailboxEmails.has(candidate)) return true;
             const normalizedCandidate = normalizeMailboxIdentity(candidate);
@@ -113,21 +135,17 @@ export async function GET(req: NextRequest) {
             });
 
             if (targetUser) {
-                mailboxUserId = targetUser.id;
+                mailboxUserIds = [targetUser.id];
             }
         }
     }
-
-    // Local expansions removed.
-    // const { ensureCoreExpansions, expansionRegistry } = await import('@/lib/expansions/server');
-    // ensureCoreExpansions();
 
     // Lazy Unsnooze: Check for snoozed emails that need to wake up
     // We do this before fetching to ensure data is consistent
     try {
         await prisma.email.updateMany({
             where: {
-                userId: mailboxUserId,
+                userId: { in: mailboxUserIds },
                 folder: 'snoozed',
                 scheduledAt: { lte: new Date() }
             },
@@ -141,117 +159,67 @@ export async function GET(req: NextRequest) {
     }
 
     try {
-        const whereObj: any = {
-            AND: [
-                { userId: mailboxUserId } // Force mailbox isolation by selected account
-            ]
+        // Fechas: se ignoran si son invalidas (antes provocaban 500 en Prisma).
+        const validIso = (raw: string | null): string | null => {
+            const d = raw ? new Date(raw) : null;
+            return d && !Number.isNaN(d.getTime()) ? d.toISOString() : null;
         };
 
-        // Fechas: se ignoran si son invalidas (antes provocaban 500 en Prisma).
-        const sinceDate = since ? new Date(since) : null;
-        if (sinceDate && !Number.isNaN(sinceDate.getTime())) {
-            whereObj.AND.push({
-                createdAt: { gt: sinceDate }
-            });
-        }
-
-        const until = searchParams.get('until');
-        const untilDate = until ? new Date(until) : null;
-        if (untilDate && !Number.isNaN(untilDate.getTime())) {
-            whereObj.AND.push({
-                createdAt: { lt: untilDate }
-            });
-        }
-
-        // Busqueda: operadores (label:, from:, to:, subject:, has:attachment, is:unread|read|starred)
-        // + texto libre. El texto usa full-text de Postgres (indice GIN) con fallback a contains.
-        const parsedSearch = parseSearchQuery(q);
-        whereObj.AND.push(...buildOperatorFilters(parsedSearch));
-        if (parsedSearch.text) {
-            const ftsIds = await ftsEmailIds(prisma, mailboxUserId, parsedSearch.text);
-            if (ftsIds && ftsIds.length > 0) {
-                whereObj.AND.push({ id: { in: ftsIds } });
-            } else {
-                whereObj.AND.push(buildContainsFilter(parsedSearch.text));
-            }
-        }
-
-        const accountCandidates = Array.from(new Set([
-            accountRaw,
-            accountNormalized,
-        ].filter(Boolean)));
-
-        if (accountCandidates.length > 0) {
-            const accountOrFilters = accountCandidates.flatMap((candidate) => ([
-                { cleanTo: { contains: candidate, mode: 'insensitive' } },
-                { to: { contains: candidate, mode: 'insensitive' } }
-            ]));
-
-            whereObj.AND.push({
-                OR: accountOrFilters
-            });
-        }
-
-        // Advanced Filters
+        // Busqueda: operadores (label:, from:, to:, subject:, has:attachment, is:unread|read|starred) + texto libre (full-text con
+        // respaldo "contiene"). Todo se resuelve en SQL junto con la carpeta/etiqueta: sin listas de ids ni topes.
+        const searching = Boolean(q?.trim());
+        const labelsList = label ? label.split(',').map((l) => l.trim()).filter(Boolean).slice(0, 20) : [];
         const fromParam = searchParams.get('from');
-        if (fromParam) {
-            whereObj.AND.push({ from: { contains: fromParam, mode: 'insensitive' } });
-        }
+        const scope: MailListScope = {
+            userIds: mailboxUserIds,
+            folder: folder || null,
+            labels: labelsList,
+            search: searching ? parseSearchQuery(q) : null,
+            useFts: true,
+            since: validIso(since),
+            until: validIso(searchParams.get('until')),
+            fromContains: fromParam ? fromParam : null,
+            hasAttachment: searchParams.get('hasAttachment') === 'true',
+            account: accountCandidates,
+        };
 
-        const hasAttachment = searchParams.get('hasAttachment') === 'true';
-        if (hasAttachment) {
-            whereObj.AND.push({ attachments: { some: {} } });
-        }
+        // Direcciones propias de TODOS los buzones consultados (filtro "de mi").
+        const owners = mailboxUserIds.length === 1 && mailboxUserIds[0] === user.id
+            ? [user]
+            : await prisma.user.findMany({ where: { id: { in: Array.from(new Set([...mailboxUserIds, user.id])) } }, select: { email: true, accounts: { select: { providerAccountId: true } } } });
+        const own = Array.from(new Set(owners.flatMap((u) => ownAddressesOf(u))));
 
-        if (label) {
-            const labelsList = label.split(',').map((l) => l.trim()).filter(Boolean).slice(0, 20);
-            whereObj.AND.push({
-                labels: {
-                    some: {
-                        name: {
-                            in: labelsList,
-                            mode: 'insensitive'
-                        }
-                    }
-                },
-                folder: { notIn: ['trash', 'spam'] } // Explicitly exclude trash/spam from label views
-            });
-        } else if (!q?.trim()) {
-            // Only filter by folder if no label is selected and not searching globally
-            // (or maybe search should be within folder? Usually Gmail global search ignores folder unless specified)
-            // Let's make search global (ignore folder) if q is present.
-            // For now: Global search if q present.
-            if (folder) {
-                whereObj.AND.push({ folder });
-            }
-        } else {
-            // If searching (q exists), we generally want to search ALL folders, 
-            // but usually except Trash/Spam unless specified.
-            // For simplicity, let's search everything for now, or exclude trash/spam.
-            whereObj.AND.push({
-                folder: { notIn: ['trash', 'spam'] }
-            });
-        }
-
-        const emails = await prisma.email.findMany({
-            where: whereObj,
-            orderBy: { createdAt: 'desc' },
-            skip,
-            take: limit,
+        // La pagina se elige en SQL con comparacion de tupla (createdAt, id) [o (clave de remitente, createdAt, id)]; una fila de mas
+        // indica si hay siguiente. Despues se cargan las filas completas (adjuntos y etiquetas) en ese mismo orden.
+        const pageRows = await selectPageRows({ scope, sort, filter, own, cursor, take: limit + 1, offset: skip });
+        const hasMore = pageRows.length > limit;
+        const keep = hasMore ? pageRows.slice(0, limit) : pageRows;
+        const byId = new Map((await prisma.email.findMany({
+            where: { id: { in: keep.map((r) => r.id) }, userId: { in: mailboxUserIds } },
             include: {
                 attachments: true,
                 labels: true // Include labels in response
             }
-        });
+        })).map((e) => [e.id, e]));
+        const emails = keep.map((r) => byId.get(r.id)).filter((e): e is NonNullable<typeof e> => Boolean(e));
+        const last = keep[keep.length - 1];
+        const nextCursor = hasMore && last ? encodeCursor(sort, last) : null;
 
-        console.log(`[GET / api / emails] Folder: ${folder}, Q: ${q}, Found: ${emails.length} `);
-        if (folder === 'trash') {
-            console.log(`[GET / api / emails] Trash IDs: `, emails.map(e => e.id));
+        if (!wantCounts) {
+            return NextResponse.json({ emails, hasMore, nextCursor, sort, filter, ...(requestedMailboxes ? { mailboxes: mailboxUserIds } : {}) });
         }
 
-        const count = await prisma.email.count({ where: whereObj });
+        // `total` = mensajes que cumplen el filtro activo; `totalThreads` y `filters` = HILOS (las filas que dibuja la interfaz),
+        // con el mismo criterio de agrupacion que la lista (lib/mail-list-sql.ts).
+        const counts = await getScopeCounts(scope, own);
+        const total = counts.messages[filter === 'all' ? 'all' : filter];
+        const totalThreads = counts.threads[filter === 'all' ? 'all' : filter];
 
-        return NextResponse.json({ emails, total: count, page, pages: Math.ceil(count / limit) });
+        return NextResponse.json({
+            emails, total, totalThreads, page, pages: Math.ceil(total / limit), hasMore, nextCursor, sort, filter,
+            filters: counts.threads, messageFilters: counts.messages,
+            ...(requestedMailboxes ? { mailboxes: mailboxUserIds } : {}),
+        });
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: 'Failed to fetch emails' }, { status: 500 });
@@ -306,6 +274,17 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ error: 'Invalid scheduledAt' }, { status: 400 });
             }
             validatedScheduledAt = String(scheduledAt);
+        }
+
+        // ---- Cuota de buzon: solo bloquea si el dominio activo `enforceMailQuota` (por defecto NO bloquea) ----
+        const quotaCheck = await checkQuotaForSend(sessionUser.id);
+        if (quotaCheck.blocked && quotaCheck.status) {
+            return NextResponse.json({
+                error: 'Mailbox quota exceeded. Free up space before sending.',
+                code: 'QUOTA_EXCEEDED',
+                usedBytes: quotaCheck.status.usedBytes,
+                limitBytes: quotaCheck.status.limitBytes,
+            }, { status: 403 });
         }
 
         // ---- Limite de envio por usuario (anti spam / cuenta comprometida) ----
@@ -579,6 +558,8 @@ export async function POST(req: NextRequest) {
 
         if (validatedScheduledAt) {
             payload.scheduledAt = validatedScheduledAt;
+            // La API REST de Resend espera `scheduled_at` (el SDK 2.x no traduce `scheduledAt`): sin esto el envio salia al instante.
+            payload.scheduled_at = new Date(validatedScheduledAt).toISOString();
         }
 
         // Idempotencia: un reintento con la misma Idempotency-Key devuelve el envio original.
@@ -679,6 +660,8 @@ export async function POST(req: NextRequest) {
             }
         });
 
+        invalidateQuotaCache(user.id);
+
         if (idemClaimId) {
             await attachSendKeyEmail(idemClaimId, email.id)
                 .catch((e) => console.error('[POST /api/emails] idempotency record failed:', (e as Error)?.message));
@@ -701,6 +684,14 @@ export async function POST(req: NextRequest) {
         // ----------------------------------------------------
         // Local expansions removed.
         // ----------------------------------------------------
+
+        // Hook EMAIL_SENT (no bloqueante, contexto minimo: solo conteos). Los programados no se notifican aqui.
+        if (!validatedScheduledAt) {
+            fireLifecycleHook('EMAIL_SENT', user.id, buildEmailSentContext({
+                emailId: email.id, to: toList.valid, cc: ccList.valid, bcc: bccList.valid,
+                hasAttachments: processedAttachments.length > 0, sentAt: new Date(),
+            }));
+        }
 
         return NextResponse.json({ success: true, id: data?.id, warnings: preSend.warnings.length > 0 ? preSend.warnings : undefined });
 

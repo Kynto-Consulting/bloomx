@@ -6,11 +6,16 @@ import { TagInput } from '@/components/ui/TagInput';
 import { DateTimePicker } from '@/components/ui/DateTimePicker';
 import { executeExtensionAction, fetchExpansions } from '@/lib/expansions/api';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
-import { buildCalendarInviteHtml } from '@/lib/calendar/email-templates';
+import { buildEmailHtml, buildEmailText, calendarInviteOptions, emailSubject } from '@/lib/calendar/email-templates';
+import { getEmailBrand } from '@/lib/calendar/email-brand';
+import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { toast } from 'sonner';
 import { useI18n } from '@/components/I18nProvider';
 import { pluralKey } from '@/lib/i18n/format';
-import { Video, Loader2 as SpinIcon, X as XIcon } from 'lucide-react';
+import { ConferencingPicker } from '@/components/conferencing/ConferencingPicker';
+import { JoinMeetingButton } from '@/components/conferencing/JoinMeetingButton';
+import { locationWithoutLink, meetingFromLink, type PickerMeeting } from '@/components/conferencing/picker-state';
+import { providerIdForLink } from '@/lib/conferencing/hosts';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -70,7 +75,8 @@ export function CreateEventForm({
     onSaved: () => void;
     onClose?: () => void;
 }) {
-    const { t, intlLocale } = useI18n();
+    const { t, intlLocale, locale: uiLocale } = useI18n();
+    const { config: domainConfig } = useDomainConfig();
     const fmtTime = (value: string) =>
         new Intl.DateTimeFormat(intlLocale, { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
     const fmtFull = (value: string) =>
@@ -87,8 +93,8 @@ export function CreateEventForm({
     const [isGoogleMeetAvailable, setIsGoogleMeetAvailable] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isInviting, setIsInviting] = useState(false);
-    const [conferenceUrl, setConferenceUrl] = useState<string | null>(null);
-    const [isCreatingMeet, setIsCreatingMeet] = useState(false);
+    // Reunion creada/pegada con el selector de videoconferencia (su enlace tambien va en `location`).
+    const [conference, setConference] = useState<PickerMeeting | null>(null);
     const attendeeChangeSeqRef = useRef(0);
     // Stable idempotency key for NEW events: a double-click / retried POST reuses
     // the same UID, so the server's inviteUid upsert path updates instead of
@@ -183,12 +189,28 @@ export function CreateEventForm({
         return parsed.toISOString();
     }, []);
 
+    // Reunion efectiva: la del selector mientras su enlace siga en la ubicacion; si no, el enlace reconocido que ya
+    // trae la ubicacion (evento guardado con Zoom/Meet) para mostrar su proveedor.
+    const effectiveConference = React.useMemo<PickerMeeting | null>(() => {
+        if (conference && location.includes(conference.joinUrl)) return conference;
+        return providerIdForLink(location) ? meetingFromLink(location) : null;
+    }, [conference, location]);
+
     const buildEventPayload = useCallback((targetCalendarId?: string) => {
         const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const startsAtIso = toIsoIfValid(startsAt);
         const endsAtIso = toIsoIfValid(endsAt);
+        // Solo si hay conferencia; el id de reunion solo existe cuando la creo una extension.
+        const conferenceFields = effectiveConference
+            ? {
+                conferenceUrl: effectiveConference.joinUrl,
+                conferenceProvider: effectiveConference.provider,
+                ...(effectiveConference.meetingId ? { conferenceMeetingId: effectiveConference.meetingId } : {}),
+            }
+            : {};
 
         return {
+            ...conferenceFields,
             calendarId: targetCalendarId,
             title: title || t('calendar.form.defaultTitle'),
             location,
@@ -200,7 +222,7 @@ export function CreateEventForm({
             attendees: getAttendeeList(),
             inviteUid: eventId ? undefined : inviteUidRef.current,
         };
-    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid, eventId, t]);
+    }, [title, location, startsAt, endsAt, getAttendeeList, toIsoIfValid, eventId, t, effectiveConference]);
 
     const markAttendeesAsPending = useCallback((emails: string[]) => {
         const normalizedEmails = normalizeTags(emails);
@@ -309,24 +331,17 @@ export function CreateEventForm({
         };
     }, []);
 
-    const createGoogleMeet = useCallback(async () => {
-        setIsCreatingMeet(true);
-        try {
-            const res = await fetch('/api/calendar/conferencing/meet', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: title || t('calendar.form.defaultMeetingTitle'), startsAt: toIsoIfValid(startsAt), endsAt: toIsoIfValid(endsAt) }),
-            });
-            const data = await res.json();
-            if (!res.ok || !data.meetUrl) throw new Error('meet_failed');
-            setConferenceUrl(data.meetUrl);
-            setLocation(data.meetUrl);
-        } catch {
-            toast.error(t('calendar.form.meetFailed'));
-        } finally {
-            setIsCreatingMeet(false);
+    // El selector de videoconferencia crea/pega/quita la reunion: su enlace se guarda en `location` (como siempre).
+    const handleConferenceChange = useCallback((meeting: PickerMeeting | null) => {
+        if (meeting) {
+            setConference(meeting);
+            setLocation(meeting.joinUrl);
+            return;
         }
-    }, [title, startsAt, endsAt, toIsoIfValid, t]);
+        const previous = effectiveConference?.joinUrl;
+        setConference(null);
+        if (previous) setLocation((current) => locationWithoutLink(current, previous));
+    }, [effectiveConference]);
 
     // Shared send path: generate the .ics for the event and email it to the
     // given recipients. Used by both Save (auto-send) and the Invitar button.
@@ -349,36 +364,29 @@ export function CreateEventForm({
             throw new Error(t('calendar.form.inviteAttachmentFailed'));
         }
 
-        // Contenido SALIENTE (asunto/texto del correo a los invitados): el HTML de invitacion es es-PE fijo,
-        // asi que el asunto y el texto plano se mantienen en espanol para no mezclar idiomas en un mismo correo.
-        const subjectTitle = title || inviteAttachmentResult.subject || 'Nuevo evento';
-        const startsAtLabel = startsAt ? new Date(startsAt).toLocaleString('es-PE') : 'Por definir';
+        // Contenido SALIENTE: MISMA plantilla (marca de la empresa, idioma del usuario) para HTML, texto y asunto.
+        const subjectTitle = title || inviteAttachmentResult.subject || '';
         const parsedStart = startsAt ? new Date(startsAt) : new Date();
         const parsedEnd = endsAt ? new Date(endsAt) : new Date(parsedStart.getTime() + 3600000);
-        const html = buildCalendarInviteHtml({
+        const templateOptions = calendarInviteOptions({
             title: subjectTitle,
             startsAt: parsedStart,
             endsAt: parsedEnd,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             location: location || null,
+            brand: getEmailBrand(domainConfig),
+            locale: uiLocale,
         });
-
-        // Same language/facts as the HTML part — a text/HTML mismatch is a spam signal.
-        const text = [
-            `Te invitaron a: ${subjectTitle}`,
-            '',
-            `Cuándo: ${startsAtLabel} — ${parsedEnd.toLocaleString('es-PE')}`,
-            location ? `Enlace/Lugar: ${location}` : '',
-            '',
-            'El archivo .ics está adjunto para agregar esta invitación a tu calendario.',
-        ].filter(Boolean).join('\n');
+        const html = buildEmailHtml(templateOptions);
+        // Mismo idioma y datos que el HTML: una discrepancia texto/HTML es una senal de spam.
+        const text = buildEmailText(templateOptions);
 
         const sendInvitesResponse = await fetch('/api/emails', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 to: cleanRecipients.join(','),
-                subject: `Invitación: ${subjectTitle}`,
+                subject: emailSubject(uiLocale, 'invitation', subjectTitle),
                 html,
                 text,
                 attachments: [inviteAttachmentResult.attachment],
@@ -393,7 +401,7 @@ export function CreateEventForm({
         markAttendeesAsPending(cleanRecipients);
         window.dispatchEvent(new CustomEvent('bloomx:calendar-sync-complete'));
         return true;
-    }, [title, location, startsAt, endsAt, normalizeTags, markAttendeesAsPending, t]);
+    }, [title, location, startsAt, endsAt, normalizeTags, markAttendeesAsPending, t, domainConfig, uiLocale]);
 
     const saveEvent = async (e?: React.FormEvent) => {
         if (e) e.preventDefault();
@@ -443,6 +451,7 @@ export function CreateEventForm({
             if (!eventId) {
                 setTitle('');
                 setLocation('');
+                setConference(null);
                 setAttendeeTags([]);
             }
             onSaved();
@@ -534,31 +543,6 @@ export function CreateEventForm({
                         className="w-full flex-1 border-b border-border/60 focus:border-primary focus:outline-none py-2 text-sm placeholder:text-muted-foreground bg-transparent read-only:outline-none read-only:border-none"
                     />
 
-                    {!isReadOnly && isGoogleMeetAvailable && !conferenceUrl && (
-                        <button
-                            type="button"
-                            onClick={createGoogleMeet}
-                            disabled={isCreatingMeet}
-                            title={t('calendar.form.addMeet')}
-                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-border bg-card text-muted-foreground text-xs hover:bg-muted/50 disabled:opacity-50 transition-colors"
-                        >
-                            {isCreatingMeet ? <SpinIcon className="h-3 w-3 animate-spin" /> : <Video className="h-3 w-3" />}
-                            {isCreatingMeet ? t('calendar.form.creatingMeet') : 'Meet'}
-                        </button>
-                    )}
-                    {!isReadOnly && conferenceUrl && (
-                        <button
-                            type="button"
-                            onClick={() => { setConferenceUrl(null); setLocation(''); }}
-                            title={t('calendar.form.removeMeet')}
-                            className="shrink-0 pb-1 flex items-center gap-1 px-2 py-1 rounded border border-primary/20 bg-primary/10 text-primary text-xs hover:bg-primary/15 transition-colors"
-                        >
-                            <Video className="h-3 w-3" />
-                            Meet
-                            <XIcon className="h-3 w-3" />
-                        </button>
-                    )}
-
                     {!isReadOnly && (
                         <div className="shrink-0 pb-1">
                             <ExtensionLoader
@@ -583,6 +567,26 @@ export function CreateEventForm({
                         </div>
                     )}
                 </div>
+
+                {isReadOnly ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <JoinMeetingButton url={location} />
+                    </div>
+                ) : (
+                    <ConferencingPicker
+                        compact
+                        allowCustom
+                        value={effectiveConference}
+                        onChange={handleConferenceChange}
+                        context={{
+                            title,
+                            startsAt: toIsoIfValid(startsAt) || null,
+                            endsAt: toIsoIfValid(endsAt) || null,
+                            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                            attendees: attendeeTags.filter((tag) => tag.includes('@')),
+                        }}
+                    />
+                )}
 
                 <div className="space-y-1">
                     {isReadOnly ? (

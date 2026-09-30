@@ -84,8 +84,9 @@ async function main() {
 
     // Also find calendar events with a Google Meet location.
     const calEvents = await prisma.calendarEvent.findMany({
-        where: { location: { contains: 'meet.google.com' }, status: { not: 'cancelled' } },
-        select: { id: true, location: true, userId: true },
+        // conferenceUrl (eventos nuevos) o location (eventos anteriores a esa columna).
+        where: { OR: [{ location: { contains: 'meet.google.com' } }, { conferenceUrl: { contains: 'meet.google.com' } }], status: { not: 'cancelled' } },
+        select: { id: true, location: true, conferenceUrl: true, userId: true },
     });
 
     console.log(`[fix-meet-rooms] Found ${bookings.length} bookings + ${calEvents.length} calendar events with Meet URLs.`);
@@ -101,9 +102,10 @@ async function main() {
         byUser.get(uid)!.add(b.meetUrl);
     }
     for (const e of calEvents) {
-        if (!e.location) continue;
+        const link = [e.conferenceUrl, e.location].find((v) => typeof v === 'string' && v.includes('meet.google.com'));
+        if (!link) continue;
         if (!byUser.has(e.userId)) byUser.set(e.userId, new Set());
-        byUser.get(e.userId)!.add(e.location);
+        byUser.get(e.userId)!.add(link);
     }
 
     let patched = 0;

@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { createOAuthState, setOAuthStateCookie } from '@/lib/oauth-state';
+import { isSafeRelativePath } from '@/lib/security';
+import { apiBase } from '@/lib/conferencing/api-bases';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ provider: string }> }) {
     const { provider } = await params;
@@ -32,7 +34,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
             break;
         case 'zoom':
             clientId = process.env.ZOOM_CLIENT_ID || '';
-            authUrl = 'https://zoom.us/oauth/authorize';
+            authUrl = `${apiBase('ZOOM_OAUTH_BASE')}/oauth/authorize`;
             break;
         case 'trello':
             clientId = process.env.TRELLO_API_KEY || ''; // Trello uses API Key as Client ID
@@ -70,5 +72,18 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ prov
 
     const res = NextResponse.redirect(`${authUrl}?${queryParams.toString()}`);
     if (oauth) setOAuthStateCookie(res, provider, oauth.nonce);
+    // Zoom: vuelve a la pantalla desde la que se conecto (`returnTo`, solo rutas internas) tras el consentimiento.
+    if (provider === 'zoom') {
+        const returnTo = req.nextUrl.searchParams.get('returnTo');
+        if (isSafeRelativePath(returnTo)) {
+            res.cookies.set('bloomx_oauth_return_zoom', returnTo, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
+                path: '/api/auth/callback/zoom',
+                maxAge: 600,
+            });
+        }
+    }
     return res;
 }

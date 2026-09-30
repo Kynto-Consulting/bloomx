@@ -19,9 +19,9 @@
  */
 import { backgroundScheme, contrast, ensureContrast, hexToHsl, hexToRgb, hslToHex, luminance, mix, readableOnAA } from './color';
 import {
-    ALPHA_TOKENS, TOKEN_KEYS, hasBrandConfig, legacyFontStack, normalizeThemeHex,
+    ALPHA_TOKENS, LEGACY_COLOR_FIELDS, TOKEN_KEYS, hasBrandConfig, legacyFontStack, normalizeThemeHex,
     resolveFontStack, resolveRadiusRem, sanitizeThemeConfig,
-    type DomainThemeConfig, type ThemeMode, type TokenKey,
+    type DomainThemeConfig, type ThemeMode, type ThemePalette, type TokenKey,
 } from './theme-config';
 import {
     CONTRAST_REQUIREMENTS, DARK_ACCENT_SHADES, HUES, darkPaletteRemap, getAvailableThemeIds, getTheme, getThemePolicy,
@@ -353,6 +353,25 @@ function legacyBase(cfg: DomainThemeConfig): { common: BaseTokens; neutrals: Bas
     if (cfg.inputColor) neutrals.input = cfg.inputColor;
     if (cfg.ringColor) neutrals.ring = cfg.ringColor;
     return { common, neutrals, neutralsMode };
+}
+
+/**
+ * Migra los campos ANTIGUOS de color (primaryColor, textColor, ...) a `palette` por modo, con la MISMA interpretacion
+ * que buildBrandThemes (primario/acento en ambos modos; neutros en el modo del fondo). Devuelve una copia sin campos
+ * antiguos de color; el resultado visual es identico. El editor del panel trabaja siempre sobre `palette`.
+ */
+export function migrateLegacyTheme(cfgInput: unknown): DomainThemeConfig {
+    const cfg = sanitizeThemeConfig(cfgInput);
+    const legacy = legacyBase(cfg);
+    const out: DomainThemeConfig = { ...cfg };
+    for (const f of LEGACY_COLOR_FIELDS) delete (out as Record<string, unknown>)[f];
+    const light: BaseTokens = { ...legacy.common, ...(legacy.neutralsMode === 'light' ? legacy.neutrals : {}), ...(cfg.palette?.light ?? {}) };
+    const dark: BaseTokens = { ...legacy.common, ...(legacy.neutralsMode === 'dark' ? legacy.neutrals : {}), ...(cfg.palette?.dark ?? {}) };
+    const palette: ThemePalette = {};
+    if (Object.keys(light).length) palette.light = light;
+    if (Object.keys(dark).length) palette.dark = dark;
+    if (palette.light || palette.dark) out.palette = palette; else delete out.palette;
+    return out;
 }
 
 /**

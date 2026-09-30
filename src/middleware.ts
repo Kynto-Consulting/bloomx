@@ -62,6 +62,17 @@ export async function middleware(req: NextRequest) {
         if (!hasCred) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Herramientas de extensiones (playground, galeria, gestion) para PRUEBAS LOCALES sin sesion: solo en desarrollo y con
+    // NEXT_PUBLIC_BLOOMX_THEME_OVERRIDE definida (la misma condicion que getThemeOverride; en produccion nunca aplica).
+    // No abre ninguna API: las paginas solo usan datos simulados y el resto de rutas siguen exigiendo sesion.
+    if (
+        process.env.NODE_ENV !== 'production' &&
+        Boolean(process.env.NEXT_PUBLIC_BLOOMX_THEME_OVERRIDE) &&
+        (pathname === '/extensions' || pathname.startsWith('/extensions/playground') || pathname.startsWith('/extensions/components') || pathname === '/dev/email-preview')
+    ) {
+        return NextResponse.next();
+    }
+
     // 1. Define public paths (login, register, api auth routes, static files)
 
     //if path is just "/" 

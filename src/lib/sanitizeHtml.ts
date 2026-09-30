@@ -27,8 +27,12 @@ let hooksInstalled = false;
 function installHooks() {
     if (hooksInstalled) return;
     hooksInstalled = true;
+    installSanitizeHooks(DOMPurify);
+}
 
-    DOMPurify.addHook('afterSanitizeAttributes', (node: Element) => {
+/** Mismos hooks sobre cualquier instancia de DOMPurify (p.ej. isomorphic-dompurify en servidor para services.formats). */
+export function installSanitizeHooks(purify: Pick<typeof DOMPurify, 'addHook'>) {
+    purify.addHook('afterSanitizeAttributes', (node: Element) => {
         if (node.tagName === 'A' && node.hasAttribute('href')) {
             node.setAttribute('target', '_blank');
             node.setAttribute('rel', 'noopener noreferrer nofollow');
@@ -40,7 +44,7 @@ function installHooks() {
     });
 }
 
-const PURIFY_CONFIG = {
+export const PURIFY_CONFIG = {
     USE_PROFILES: { html: true }, // sin SVG / MathML
     FORBID_TAGS: [
         'script', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet',

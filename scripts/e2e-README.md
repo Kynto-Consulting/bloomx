@@ -13,6 +13,8 @@ Todo corre en 127.0.0.1 con datos y credenciales de PRUEBA. Nunca se usa el `.en
 | `scripts/e2e-webhook.mjs` | Webhook `email.received` firmado con Svix (`BAD_SIG=1` prueba firma invalida) | - |
 | `scripts/e2e-totp.ts` | Codigo TOTP actual con `src/lib/totp.ts` | - |
 | `scripts/e2e-session-replay.mjs` | Login + MFA (codigo de recuperacion), logout y replay de la cookie (debe dar 401) | - |
+| `scripts/fake-conferencing.mjs` | Google y Zoom FALSOS (token, Calendar con conferenceData, Meet spaces, Zoom meetings, fallos inyectables con POST /__fail) | 54340 |
+| `scripts/e2e-conferencing-seed.ts` | Cuentas Google/Zoom falsas del usuario de prueba + `.e2e/conferencing.env` (bases de los falsos) + credenciales "del panel" opcionales (`--zoom-s2s`) | - |
 | `scripts/e2e-tracker.mjs` | Servidor "tracker" en 54399 para ver si alguna imagen remota se descarga | 54399 |
 
 ## Reproducir
@@ -36,11 +38,21 @@ node scripts/e2e-webhook.mjs "Proveedor <b@ext.test>" "Factura octubre" "<id-1@e
 npx tsx scripts/e2e-totp.ts "<clave base32>"
 ```
 
+## Reuniones (Zoom / Meet) en local
+```bash
+node scripts/fake-conferencing.mjs &       # Google y Zoom falsos (54340)
+npx tsx scripts/e2e-conferencing-seed.ts   # tras seed-e2e.ts; con --zoom-s2s simula credenciales de instancia
+node scripts/fake-backend.mjs &            # ejecuta los server.js REALES de zoom / google-meet / calendar (repo hermano)
+node scripts/e2e-dev.mjs &                 # mezcla .e2e/conferencing.env (bases de API solo para pruebas)
+```
+Prueba: calendario -> Crear evento -> Google Meet / Zoom -> Crear reunion -> Guardar; redactar -> `/zoom` o `/meet`. Consulta lo que recibieron los falsos en `.e2e/conferencing-captured.json` y fuerza errores con `curl -X POST 127.0.0.1:54340/__fail -d '{"provider":"zoom","mode":"rate_limited"}'` (modos: none, revoked, rate_limited, server_error).
+Si varios agentes comparten el navegador, usa `localhost:3100` para tu sesion (la cookie de `127.0.0.1` es otra).
+
 ## Notas
 - El webhook de prueba NO incluye `email_id`: con `email_id` la app consulta `https://api.resend.com/emails/receiving/...` (URL fija, no configurable por `RESEND_BASE_URL`).
 - Los dialogos nativos (`confirm`) estan deshabilitados en el navegador integrado: para probar Sealer sin contrasena, `window.confirm = () => true`.
 - El almacenamiento local queda en `.gemini/storage` (ignorado por git). `.env.e2e` y `.e2e/` tambien.
 
 ## Detener y limpiar
-Detener next dev, fake-resend, fake-backend, e2e-tracker y e2e-pg (SIGTERM borra el cluster). Luego:
+Detener next dev, fake-resend, fake-backend, fake-conferencing, e2e-tracker y e2e-pg (SIGTERM borra el cluster). Luego:
 `rm -rf .e2e .gemini/storage .env.e2e prisma/.pgdata`

@@ -2,7 +2,9 @@ import { prisma } from './prisma';
 import { auditLog } from './audit';
 import { deleteManyFromStorage, deleteStoragePrefix, listStorageObjects } from './storage';
 import { inboundEmailPrefix } from './attachment-keys';
+import { rawObjectKeys } from './raw-mime';
 import { purgeExpiredRevocations } from './session-revocation';
+import { purgeExpiredSessionRows } from './admin/session-registry';
 
 // Retencion y borrado completo (ISO 27001:2022 A.8.10 eliminacion de informacion, NIST 800-53 SI-12 / MP-6,
 // CIS v8 3.4 / 3.5, GDPR art. 5(1)(e)).
@@ -37,7 +39,7 @@ export async function deleteEmailsCompletely(emailIds: string[]): Promise<Delete
 
     const candidates = new Set<string>();
     for (const e of emails) {
-        for (const k of [e.htmlKey, e.textKey, e.rawKey]) if (k) candidates.add(k);
+        for (const k of [e.htmlKey, e.textKey, ...rawObjectKeys(e.rawKey)]) if (k) candidates.add(k);
         for (const a of e.attachments) if (a.key && a.key !== 'PENDING') candidates.add(a.key);
     }
     const keys = Array.from(candidates);
@@ -55,7 +57,7 @@ export async function deleteEmailsCompletely(emailIds: string[]): Promise<Delete
                 select: { key: true },
             }),
         ]);
-        for (const o of otherEmails) for (const k of [o.htmlKey, o.textKey, o.rawKey]) if (k) referenced.add(k);
+        for (const o of otherEmails) for (const k of [o.htmlKey, o.textKey, ...rawObjectKeys(o.rawKey)]) if (k) referenced.add(k);
         for (const a of otherAtts) referenced.add(a.key);
     }
 
@@ -133,6 +135,76 @@ export function getRetentionConfig(): RetentionConfig {
     };
 }
 
+// ---------------------------------------------------------------------------
+// Politica editable desde la consola: AdminSetting(key='retention', value JSON) se superpone a las variables de entorno.
+// ---------------------------------------------------------------------------
+export const RETENTION_KEYS = ['spamDays', 'trashDays', 'rawDays', 'auditDays', 'secureMessageDays', 'batch'] as const;
+export type RetentionKey = (typeof RETENTION_KEYS)[number];
+export const RETENTION_SETTING_KEY = 'retention';
+
+/** Limites validos por clave (dias 0..3650, 0 = desactivado; batch 1..1000; auditDays 0 o >= 30). */
+export const RETENTION_LIMITS: Record<RetentionKey, { min: number; max: number; zeroOrMin?: number }> = {
+    spamDays: { min: 0, max: 3650 },
+    trashDays: { min: 0, max: 3650 },
+    rawDays: { min: 0, max: 3650 },
+    auditDays: { min: 0, max: 3650, zeroOrMin: 30 },
+    secureMessageDays: { min: 0, max: 3650 },
+    batch: { min: 1, max: 1000 },
+};
+
+export function isValidRetentionValue(key: RetentionKey, value: unknown): value is number {
+    if (typeof value !== 'number' || !Number.isInteger(value)) return false;
+    const l = RETENTION_LIMITS[key];
+    if (value < l.min || value > l.max) return false;
+    if (l.zeroOrMin !== undefined && value !== 0 && value < l.zeroOrMin) return false;
+    return true;
+}
+
+/** Filtra un valor JSON de la BD: solo claves conocidas con valores validos (lo demas se ignora, nunca rompe la purga). */
+export function sanitizeRetentionOverrides(value: unknown): Partial<RetentionConfig> {
+    const out: Partial<RetentionConfig> = {};
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+    for (const key of RETENTION_KEYS) {
+        const v = (value as Record<string, unknown>)[key];
+        if (isValidRetentionValue(key, v)) out[key] = v;
+    }
+    return out;
+}
+
+const MISSING = /does not exist|42P01|42703/i;
+
+export interface RetentionOverridesRow {
+    overrides: Partial<RetentionConfig>;
+    updatedAt: Date | null;
+    updatedBy: string | null;
+}
+
+/** Lee la politica guardada. Tabla ausente => sin overrides. Otros errores de BD se propagan. */
+export async function loadRetentionOverrides(): Promise<RetentionOverridesRow> {
+    try {
+        const rows = await prisma.$queryRaw<Array<{ value: unknown; updatedAt: Date | null; updatedBy: string | null }>>`
+            SELECT "value", "updatedAt", "updatedBy" FROM "AdminSetting" WHERE "key" = ${RETENTION_SETTING_KEY}`;
+        const row = rows?.[0];
+        if (!row) return { overrides: {}, updatedAt: null, updatedBy: null };
+        let value: unknown = row.value;
+        if (typeof value === 'string') {
+            try { value = JSON.parse(value); } catch { value = null; }
+        }
+        return { overrides: sanitizeRetentionOverrides(value), updatedAt: row.updatedAt ?? null, updatedBy: row.updatedBy ?? null };
+    } catch (e: any) {
+        const text = `${e?.code ?? ''} ${e?.meta?.code ?? ''} ${e?.message ?? ''}`;
+        if (MISSING.test(text)) return { overrides: {}, updatedAt: null, updatedBy: null };
+        throw e;
+    }
+}
+
+/** Politica vigente: entorno como base y, encima, lo guardado desde la consola (validado). */
+export async function getEffectiveRetentionConfig(): Promise<RetentionConfig> {
+    const base = getRetentionConfig();
+    const { overrides } = await loadRetentionOverrides();
+    return { ...base, ...overrides };
+}
+
 export interface RetentionReport {
     dryRun: boolean;
     spamEmails: number;
@@ -141,16 +213,22 @@ export interface RetentionReport {
     secureMessages: number;
     auditEventsPurged: number;
     revocationsPurged: number;
+    extensionNotificationsPurged: number;
     storageFailed: number;
+    /** Filas de UserSession caducadas hace mas de un dia (en simulacion: las que se purgarian). */
+    sessionRowsPurged?: number;
+    /** Trabajos de importar/exportar correo caducados o abandonados cuyo almacenamiento se borro. */
+    mailTransferJobsPurged?: number;
 }
 
 const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 3600 * 1000);
 
-export async function runRetention(opts: { dryRun?: boolean } = {}): Promise<RetentionReport> {
-    const cfg = getRetentionConfig();
+/** `quiet`: no escribe el evento `retention.run` (simulaciones internas de la consola). */
+export async function runRetention(opts: { dryRun?: boolean; quiet?: boolean } = {}): Promise<RetentionReport> {
+    const cfg = await getEffectiveRetentionConfig();
     const dryRun = !!opts.dryRun;
     const report: RetentionReport = {
-        dryRun, spamEmails: 0, trashEmails: 0, rawPayloads: 0, secureMessages: 0, auditEventsPurged: 0, revocationsPurged: 0, storageFailed: 0,
+        dryRun, spamEmails: 0, trashEmails: 0, rawPayloads: 0, secureMessages: 0, auditEventsPurged: 0, revocationsPurged: 0, extensionNotificationsPurged: 0, storageFailed: 0,
     };
 
     const purgeFolder = async (folder: string, days: number): Promise<number> => {
@@ -176,8 +254,9 @@ export async function runRetention(opts: { dryRun?: boolean } = {}): Promise<Ret
             select: { id: true, rawKey: true },
             take: cfg.batch,
         });
-        const keys = Array.from(new Set(withRaw.map((e) => e.rawKey!).filter(Boolean)));
-        report.rawPayloads = keys.length;
+        // raw.json (payload del webhook) Y raw.eml (MIME original): ambos llevan cabeceras completas del remitente
+        const keys = Array.from(new Set(withRaw.flatMap((e) => rawObjectKeys(e.rawKey)).filter(Boolean)));
+        report.rawPayloads = new Set(withRaw.map((e) => e.rawKey)).size;
         if (!dryRun && keys.length > 0) {
             // Solo si ningun correo pendiente de reprocesar la necesita; se conserva la clave en BD (los lectores toleran null al fallar la lectura)
             const r = await deleteManyFromStorage(keys);
@@ -213,6 +292,40 @@ export async function runRetention(opts: { dryRun?: boolean } = {}): Promise<Ret
     }
     if (!dryRun) report.revocationsPurged = await purgeExpiredRevocations().catch(() => 0);
 
-    auditLog('retention.run', { ...report });
+    // Notificaciones de extensiones: las entregadas ya cumplieron (7 dias) y las nunca entregadas caducan a los 30.
+    // El almacenamiento KV (ExtensionStorage) y las notificaciones se borran con el usuario por FK ON DELETE CASCADE.
+    if (!dryRun) {
+        try {
+            report.extensionNotificationsPurged = Number(await prisma.$executeRaw`DELETE FROM "ExtensionNotification" WHERE ("deliveredAt" IS NOT NULL AND "deliveredAt" < ${daysAgo(7)}) OR "createdAt" < ${daysAgo(30)}`);
+        } catch (e: any) {
+            if (!/does not exist|42P01/i.test(String(e?.message))) console.error('[retention] extension notifications purge failed:', e?.message || 'unknown');
+        }
+    }
+
+    // Filas de sesiones emitidas ya caducadas (registro de la consola). Tolerante a tabla ausente.
+    try {
+        if (dryRun) {
+            const rows = await prisma.$queryRaw<Array<{ n: bigint }>>`SELECT COUNT(*) AS n FROM "UserSession" WHERE "expiresAt" < NOW() - INTERVAL '1 day'`;
+            report.sessionRowsPurged = Number(rows?.[0]?.n ?? 0);
+        } else {
+            report.sessionRowsPurged = await purgeExpiredSessionRows();
+        }
+    } catch (e: any) {
+        if (!MISSING.test(String(e?.message))) console.error('[retention] session rows purge failed:', e?.message || 'unknown');
+        report.sessionRowsPurged = 0;
+    }
+
+    // Paquetes de exportacion caducados (24 h) y subidas abandonadas de importar/exportar correo: se borran del storage.
+    if (!dryRun) {
+        try {
+            const { purgeExpiredMailTransfers } = await import('./mail-transfer/runtime');
+            report.mailTransferJobsPurged = (await purgeExpiredMailTransfers()).jobs;
+        } catch (e: any) {
+            if (!MISSING.test(String(e?.message))) console.error('[retention] mail transfer purge failed:', e?.message || 'unknown');
+            report.mailTransferJobsPurged = 0;
+        }
+    }
+
+    if (!opts.quiet) auditLog('retention.run', { ...report });
     return report;
 }

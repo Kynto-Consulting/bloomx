@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/session';
 import { auditLog, getClientIp } from '@/lib/security';
+import { invalidateStatusCache } from '@/lib/conferencing/status';
+import { resolveDomain } from '@/lib/conferencing/http';
 
 export async function DELETE(req: NextRequest) {
     // La sesion real es el JWT propio (lib/session.ts), no una sesion de NextAuth: antes esta ruta siempre daba 401.
@@ -18,6 +20,7 @@ export async function DELETE(req: NextRequest) {
             }
         });
 
+        invalidateStatusCache({ userId: user.id, domain: resolveDomain(req) });
         auditLog('auth.oauth.unlinked', { provider: 'google', userId: user.id, ip: getClientIp(req) });
         return NextResponse.json({ success: true, message: 'Google account unlinked' });
     } catch (error) {

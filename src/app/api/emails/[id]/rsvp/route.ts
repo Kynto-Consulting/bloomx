@@ -5,14 +5,9 @@ import { getFromStorage } from '@/lib/storage';
 import { resend } from '@/lib/resend';
 import { buildReplyIcs, InviteResponseStatus, parseInviteFromIcs } from '@/lib/calendar/ics';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
-
-function normalizeResponseLabel(response: InviteResponseStatus) {
-    return {
-        accepted: 'Accepted',
-        tentative: 'Tentative',
-        declined: 'Declined',
-    }[response];
-}
+import { conferenceFieldsFor } from '@/lib/calendar/invite-state';
+import { buildEmailHtml, buildEmailText, emailSubject, emailText, inviteResponseOptions } from '@/lib/calendar/email-templates';
+import { getRequestEmailBrand, getRequestEmailLocale } from '@/lib/calendar/email-brand-server';
 
 export async function POST(
     req: NextRequest,
@@ -60,22 +55,44 @@ export async function POST(
             return NextResponse.json({ error: 'Unable to determine the invite organizer' }, { status: 400 });
         }
 
+        // Marca + idioma primero: el PRODID del ICS de respuesta lleva la marca del dominio.
+        const brand = await getRequestEmailBrand(req);
+        const locale = getRequestEmailLocale(req, brand, 'user');
         const replyIcs = buildReplyIcs({
             invite,
             attendeeEmail: user.email,
             attendeeName: user.name || user.email,
             response,
+            brandName: brand.name,
+            locale,
         });
 
-        const responseLabel = normalizeResponseLabel(response);
-        const subject = `${responseLabel}: ${invite.summary || email.subject || 'Invitation'}`;
+        // La respuesta sale de la MISMA plantilla (marca de la empresa, idioma del usuario) que el resto de correos de eventos.
+        const eventTitle = invite.summary || email.subject || emailText(locale, 'defaultTitle');
+        const answer = emailText(locale, `chips.${response}`);
+        const subject = emailSubject(locale, 'response', eventTitle, { answer });
         const formattedFrom = user.name ? `${user.name} <${user.email}>` : user.email;
+        const startsAt = invite.startsAt ? new Date(invite.startsAt) : null;
+        const endsAt = invite.endsAt ? new Date(invite.endsAt) : null;
+        const templateOptions = inviteResponseOptions({
+            title: eventTitle,
+            response,
+            responderName: user.name,
+            responderEmail: user.email,
+            startsAt: startsAt && !Number.isNaN(startsAt.getTime()) ? startsAt : null,
+            endsAt: endsAt && !Number.isNaN(endsAt.getTime()) ? endsAt : null,
+            timezone: null,
+            location: invite.location || null,
+            brand,
+            locale,
+        });
 
         const { error } = await resend.emails.send({
             from: formattedFrom,
             to: [invite.organizerEmail],
             subject,
-            text: `${responseLabel} by ${user.name || user.email}${invite.summary ? ` for ${invite.summary}` : ''}.`,
+            html: buildEmailHtml(templateOptions),
+            text: buildEmailText(templateOptions),
             attachments: [
                 {
                     filename: attachment.filename || 'reply.ics',
@@ -125,22 +142,15 @@ export async function POST(
             };
 
             if (existingEvent) {
+                // Responder NO recrea ni reprograma nada: el contenido del evento (titulo, horario, enlace, estado) lo
+                // gestiona el procesado de invitaciones recibidas (mismo inviteUid, SEQUENCE monotono). Aqui solo cambia
+                // la respuesta del usuario; un evento cancelado sigue cancelado y NO se llama a ningun proveedor de
+                // conferencia.
                 await prisma.calendarEvent.update({
                     where: { id: existingEvent.id },
                     data: {
-                        calendarId: sharedCalendar.id,
-                        title: invite.summary || email.subject || 'Invitation',
-                        description: invite.description || null,
-                        location: invite.meetUrl || invite.location || null,
-                        startsAt: invite.startsAt ? new Date(invite.startsAt) : existingEvent.startsAt,
-                        endsAt: invite.endsAt ? new Date(invite.endsAt) : existingEvent.endsAt,
-                        source: 'shared',
-                        status: 'confirmed',
                         responseStatus: response,
-                        inviteUid: invite.uid || existingEvent.inviteUid,
-                        organizerEmail: invite.organizerEmail,
-                        organizerName: invite.organizerName,
-                        sourceEmailId: email.id,
+                        inviteUid: existingEvent.inviteUid || invite.uid || null,
                         attendees: {
                             deleteMany: { email: user.email },
                             create: attendeeData,
@@ -155,6 +165,7 @@ export async function POST(
                         title: invite.summary || email.subject || 'Invitation',
                         description: invite.description || null,
                         location: invite.meetUrl || invite.location || null,
+                        ...conferenceFieldsFor(invite.meetUrl || invite.location),
                         startsAt: new Date(invite.startsAt),
                         endsAt: new Date(invite.endsAt),
                         source: 'shared',

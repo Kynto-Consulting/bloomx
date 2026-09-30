@@ -3,7 +3,9 @@
 Estado real del sistema al 2026-09-29. Una **extensión** es un directorio en `bloomx-extensions/<nombre>/` con:
 
 - `manifest.json`: declara la interfaz (botones, formularios, overlays), los permisos y los hooks. El frontend lo pinta con `JsonRenderer`.
-- `server.js` (opcional): lógica de servidor. Se descarga de Backblaze B2 y se ejecuta en un sandbox `node:vm` del backend (`bloomx-backend/src/lib/extensions/sandbox.ts`).
+- `server.js` (opcional): lógica de servidor. Se descarga de Backblaze B2 y se ejecuta en el backend **compartido**, en un `worker_threads` por invocación con un contexto `node:vm` (`bloomx-backend/src/lib/extensions/sandbox.ts`; límites en §7). Las extensiones **solo cliente** (`"clientOnly": true`) no tienen `server.js`.
+
+> La referencia vigente y con ejemplos está también en la documentación de la app: `/docs/expansions` y `/docs/create-extension` (`src/app/docs/_content/pages/`). Este archivo la complementa con detalle del renderer.
 
 No existen `src/lib/expansions/server.ts`, `src/lib/expansions/core/`, flags `EXPANSION_*` ni un `ClientExpansion` para casi todo: eso pertenecía a un diseño anterior. Lo único "nativo" del cliente es `core-mail-groups` (`components/expansions/settings/MailGroupsSettings.tsx`, registrado en `lib/expansions/client/registry.ts`).
 
@@ -43,12 +45,13 @@ module.exports = {
 | `services.ai.generate(system, prompt, opts?)` | Plataforma | Máx. 5 llamadas por invocación. `opts.response_format = {type:'json_object'}` para JSON. |
 | `services.auth.getToken(provider)` | Runtime | Token OAuth: cuenta vinculada del usuario > `authData` del dominio > fallback controlado. Devuelve `null` si no hay. |
 | `domain` | Servidor | `{ id, name, displayName, logo, theme }`. Úsalo para marca (`domain.displayName`, `domain.theme.primaryColor`). |
-| `user` | JWT verificado | `{ id, email }`. |
+| `user` | Identidad firmada por el dominio (`X-User-Id`, `X-User-Email`) | `{ id, email }` o `null` (p. ej. en hooks `CRON`). |
+| `services.mail.{listRecent,getEmail,applyBatch,undoRun}` | Puente firmado backend → frontend | Solo si la llamada va firmada (dominio con clave), el backend tiene `BACKEND_SIGNING_PRIVATE_KEY`, hay usuario y el manifest declara `READ_EMAIL` (lectura) o `MAIL_LABEL` (etiquetar/deshacer). Máx. 60 llamadas y 15 s por invocación. Un permiso ausente da `MAIL_PERMISSION_DENIED`. |
 | `settings` | `ExtensionOnDomain.settings` | **Sin** claves con nombre `token/secret/password/credential…` (`stripSecrets`). |
 | `extension` | Servidor | `{ id, sourceId, name, manifest }`. |
 | Resto | Contexto del cliente | `emailContent`, `subject`, `to`, `from`, `secureData`… **No fiable**: lo manda el navegador. `auth`, `user`, `env` del cliente se descartan. |
 
-Globals disponibles en el sandbox (todo lo demás no existe): `console`, `fetch` (SSRF-safe, https, máx. 20 por invocación), `URL`, `URLSearchParams`, `Buffer` (subconjunto), `crypto {randomUUID, sha256Hex, hmacSha256Hex}`, `setTimeout`, `process.env` (solo las variables autorizadas). Sin `require`, `eval` ni `new Function`.
+Globals disponibles en el sandbox (todo lo demás no existe): `console`, `fetch` (SSRF-safe, https, máx. 20 por invocación), `URL`, `URLSearchParams`, `Buffer` (subconjunto: `from`, `byteLength`, `isBuffer`, `toString`), `crypto {randomUUID, sha256Hex, hmacSha256Hex}`, `setTimeout`/`clearTimeout`, `process.env` (solo las variables autorizadas). Sin `require`, `eval`, `new Function` ni `setInterval`.
 
 **Resolución de acciones**: `CALL_BACKEND.function = "searchGifs"` → `manifest.api.functions.searchGifs.handler = "search"` → `exports.search`. Si `api.functions` no la declara, se usa el nombre tal cual. `api.functions.<x>.timeout` (100–60000 ms) acota esa función; por defecto 25 s.
 
@@ -64,7 +67,7 @@ Campos principales:
 {
   "manifestVersion": "1.0",
   "id": "core-notion", "name": "…", "version": "1.0.0", "description": "…",
-  "status": "active",                       // "disabled": no se monta (p. ej. sealer, organizer)
+  "status": "active",                       // "disabled": no se monta (hoy ninguna extensión lo está)
   "permissions": ["READ_EMAIL", "ENV_READ:NOTION_API_KEY", "HTTP_REQUEST"],
   "auth": { "type": "OAUTH2", "provider": "hubspot", "scopes": [] },
   "api": { "runtime": "nodejs", "entry": "server.js",
@@ -94,7 +97,9 @@ Formas heredadas que `normalizeMount` convierte: `component: "MODAL"` con `props
 | `PAGE` | `/extensions/<path>` | — |
 | `OVERLAY` | `OPEN_OVERLAY.targetId` | Contexto del mount que lo abre. |
 
-**Sin consumidor (no los uses):** `slashCommands[]` y `SLASH_COMMAND` (`ComposeModal` fija `slashCommandsList = []`; requiere un ejecutor imperativo de acciones), `BEFORE_SEND_HANDLER`, `CUSTOM_ROUTE`, `backendRoutes` (no hay router `/api/ext/[id]/*`; se quitaron de giphy y hubspot: usan `CALL_BACKEND`).
+**`slashCommands[]` sí se consumen**: el editor del composer lee los comandos de los manifests instalados (`src/lib/slash-commands.ts`, `SlashMenu.tsx`, `expansions/SlashActionRunner.tsx`), abre un menú con `/` (flechas, `Home`/`End`, Enter ejecuta, Tab completa, Esc cierra) y ejecuta la `action` con el mismo motor que los botones; el texto tras el comando llega como `args`/`slashArgs`. Clave `^[a-zA-Z0-9_-]{1,32}$`; si dos extensiones repiten la clave gana la primera.
+
+**Sin consumidor (no los uses):** `BEFORE_SEND_HANDLER`, `CUSTOM_ROUTE`, `backendRoutes` (no hay router `/api/ext/[id]/*`; se quitaron de giphy y hubspot: usan `CALL_BACKEND`). `EMAIL_HEADER` y `SETTINGS_TAB` están en el schema pero no tienen consumidor documentado.
 
 ### Componentes y acciones
 
@@ -123,8 +128,8 @@ Evaluador propio sin `eval` (`lib/expansions/expressions.ts`). Soporta: rutas (`
 | Evento | Quién lo llama | Efecto |
 |---|---|---|
 | `EMAIL_PRE_SEND` | `POST /api/emails` (frontend, firmado o en modo legado), justo antes de enviar | Handler devuelve `{ stop: true, message }` → **el correo no se envía** (HTTP 422, `code: "EXTENSION_BLOCKED"`). `{ modify: { subject?, html?, text? } }` reemplaza asunto/cuerpo (nunca destinatarios). `{ warning }` se devuelve en `warnings`. `MONITOR` se ejecuta pero no bloquea ni modifica. `onError: "block"` bloquea si el handler falla (DLP lo usa). |
-| `EMAIL_RECEIVED` | Ingest de correo entrante, solo con dominio **firmado** (`runEmailReceivedHooks` en `lib/expansions/server-hooks.ts`) | Sin bloqueo. **Pendiente:** llamar a `runEmailReceivedHooks({emailId,userId,domain})` desde `webhooks/resend` (ruta editada por otro equipo). |
-| `CRON` | `runCronHooks` (dominio firmado) o el operador del backend con `BACKEND_CRON_SECRET` | Ejecuta los intercepts `point:"CRON"` con ese `schedule` en el dominio firmado (o en todos, si lo lanza el operador). Ninguna extensión actual lo usa. |
+| `EMAIL_RECEIVED` | `POST /api/webhooks/resend` tras guardar el correo, en segundo plano (`runEmailReceivedHooks` en `lib/expansions/server-hooks.ts`), solo con dominio **firmado** | Sin bloqueo. Contexto `{emailId, userId, domain}`. Si el frontend no tiene `BLOOMX_DOMAIN_PRIVATE_KEY` se omite en silencio. Presupuesto de 60 s. |
+| `CRON` | El endpoint existe en el backend (dominio firmado, u operador con `BACKEND_CRON_SECRET`); `runCronHooks` existe en el frontend **pero nadie lo llama** (`/api/cron/run` no invoca hooks) | Ejecuta los intercepts `point:"CRON"` con ese `schedule` (máx. 500 ejecuciones). Ninguna extensión actual lo declara. Corren con `user: null`, sin `services.mail`. |
 
 Autenticación: firma Ed25519 con `BLOOMX_DOMAIN_PRIVATE_KEY` (sin secretos compartidos; ver README). Frontend: `EXTENSION_HOOKS_FAIL_CLOSED=true` para **no enviar** si el backend no puede evaluar los hooks (por defecto se envía y se registra el fallo), `EXTENSION_HOOKS_DISABLED=true` para desactivar.
 
@@ -143,7 +148,7 @@ Cada dominio usa **sus** claves (Notion, Trello, HubSpot, Zoom, Google Meet, Gip
    - `PUT /api/extension/settings { domainId, extensionId, credentials: { NOTION_API_KEY: "…", NOTION_DATABASE_ID: null } }` (cookie de sesión de manager, dueño del dominio). `null`/`""` borra. Solo acepta claves declaradas por el manifest. `GET ?domainId=&extensionId=` devuelve `{ keys: [{name, configured}] }`, nunca valores.
 2. Fallback al entorno global del servidor, **controlado**: las variables no sensibles (`DLP_KEYWORDS`, `DLP_DETECTORS`, `HUBSPOT_PORTAL_ID`…) siempre; las sensibles (nombre con `KEY|TOKEN|SECRET|PASSWORD|ACCOUNT_ID|CLIENT_ID|REFRESH|WEBHOOK_URL`) **solo** si el operador las lista en `EXTENSION_GLOBAL_ENV_FALLBACK` (coma, o `*`). Cada uso deja un `[EXT_SECURITY]` en el log.
 
-`/api/config` nunca devuelve `credentials` (`stripSecrets`). No hay aún pantalla en `/admin` para escribirlas: usa la API.
+`/api/config` nunca devuelve `credentials` (`stripSecrets`). **Pantalla:** Admin → Extensiones → *Credenciales* (`ExtensionCredentialsModal`, visible si el manifest declara `ENV_READ:*`); los valores guardados nunca vuelven al navegador. También puedes usar la API. En modo legado no hay credenciales por dominio. Sin `DATA_ENCRYPTION_KEY` en el backend, en producción el `PUT` responde 503.
 
 ## 6. Crear o modificar una extensión
 
@@ -156,10 +161,13 @@ Pruebas del frontend (`npm test` en `bloomx`): evaluador de expresiones, validad
 
 ## 7. Límites conocidos
 
-- `node:vm` **no es una frontera de seguridad fuerte** (sin límite de memoria/CPU del event loop). Para código de terceros hace falta `isolated-vm` o un proceso/contenedor por ejecución.
-- El dominio del RPC sale de la cabecera del proxy (`X-BloomX-Domain`), no del JWT: un usuario autenticado de un dominio podría pedir otro. Falta un claim de dominio en el JWT.
-- `Sealer` (cifrado E2E) está **deshabilitado**: no hay directorio de claves públicas por usuario y `Domain.publicKey` es un UUID, no una clave RSA; tampoco hay hook de envío en el composer.
-- `Organizer` está deshabilitado: el sandbox no puede leer el buzón.
-- `MailView` pasa solo `data.email` a `EMAIL_TOOLBAR`: `emailContent` es el `snippet` (extracto). Para dar el cuerpo completo a summarizer/translator/notion/trello basta con que MailView pase `{ ...data.email, content: data.content }` (`ExtensionLoader` ya convierte `content` a texto).
-- `appointments` y `google-sync` no tienen `server.js`: `sync-extensions.mjs` los omite.
-- `slashCommands` de calendar/translator/slash-commands no se consumen.
+- **Sandbox**: un `worker_threads` por invocación con contexto `node:vm` (sin `eval`), `env` vacío salvo lo autorizado, heap de 128 MB (joven 32 MB, pila 4 MB), timeout duro de 25 s (por función `api.functions.<f>.timeout`) con `worker.terminate()`, 20 `fetch` y 5 llamadas de IA por invocación, máx. 500 mensajes y 200 logs, `EXT_SANDBOX_MAX_WORKERS` (8) simultáneos con cola de 5 s (`Sandbox busy`). **No es una frontera de seguridad fuerte**: si el código escapara del contexto seguiría en el mismo proceso y usuario (con `fs`, `net`, `child_process`) y la memoria fuera del heap de V8 no está acotada. Para código de terceros hostil hace falta un contenedor/microVM por tenant.
+- Globals del sandbox: `console`, `setTimeout`/`clearTimeout`, `URL`, `URLSearchParams`, `Buffer` mínimo, `crypto {randomUUID, sha256Hex, hmacSha256Hex}`, `fetch`, `module`/`exports`, `process.env`. No hay `setInterval`, `AbortController`, `Headers`, `Request`, `Response`, `FormData` ni `Blob`.
+- La identidad del dominio es la firma Ed25519 con `X-BloomX-Domain` explícito; un dominio sin clave funciona en modo legado con privilegios reducidos (sin credenciales, `services.mail`, `EMAIL_RECEIVED` ni `CRON`). El anti-replay por nonce vive en memoria de cada instancia.
+- `Sealer` está **activo** pero no es una extensión de servidor: el cifrado (AES-256-GCM, clave en el fragmento `#k=`) ocurre en el navegador. La clave viaja en el enlace salvo contraseña, no admite adjuntos y evade el DLP (ver `/docs/sealer`).
+- `Organizer` está **activo** y requiere `services.mail` (dominio firmado + `BACKEND_SIGNING_PRIVATE_KEY` + permisos `READ_EMAIL`/`MAIL_LABEL`); sin ello falla con `ORGANIZER_MAIL_SERVICE_UNAVAILABLE` y el hook se omite.
+- `MailView` pasa solo `data.email` a `EMAIL_TOOLBAR`: `emailContent` es el `snippet` (extracto). Para dar el cuerpo completo a summarizer/translator/notion/trello basta con que MailView pase `{ ...data.email, content: data.content }` (`ExtensionLoader` ya convierte `content` a texto). No se verificó si ya se corrigió.
+- `appointments` y `google-sync` son `clientOnly` (sin `server.js`): `sync-extensions.mjs` los publica con `scriptUrl = null`.
+- `sync-extensions.mjs`, `scripts/sync-repository-extensions.mjs` y `POST /api/admin/extensions` validan manifest **y UI** (ver `bloomx-extensions/_shared/validate.mjs`): una extensión inválida NO se publica (los scripts la cuentan como fallo y salen con código 1; la API responde 400/422 con la ruta del error). Si el validador no se puede ejecutar, tampoco se publica.
+- El test de contrato de `bloomx-extensions` cuenta las carpetas (21): actualízalo al añadir una.
+- `docs`: los archivos de `bloomorg-updates/` describen el diseño original; manda esta guía y `/docs/expansions`.

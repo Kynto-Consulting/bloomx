@@ -1,39 +1,25 @@
-import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
-import { auditLog, getClientIp } from '@/lib/security';
+import { adminRoute, audit, parseBody } from '@/lib/admin/http';
+import { assertInstanceDomain } from '@/lib/admin/extensions-instance';
+import { backendError, managerFetch } from '@/lib/admin/extensions-proxy';
+import { installBody } from '@/lib/admin/extensions-schemas';
 
-export async function POST(req: Request) {
-    const guard = await requireAdmin(req);
-    if (!guard.ok) return guard.response;
-
-    try {
-        const body = await req.json();
-        const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev';
-        const cookieStore = req.headers.get('cookie') || '';
-
-        const response = await fetch(`${backendUrl}/api/manager/extensions/uninstall`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': cookieStore,
-            },
-            body: JSON.stringify(body),
-        });
-
-        const data = await response.json();
-        // Desinstalar borra authData y credenciales cifradas del dominio (lo hace el backend); aqui queda la traza.
-        auditLog('admin.extension.uninstall', {
-            userId: guard.actor.id,
-            ip: getClientIp(req),
-            domainId: typeof body?.domainId === 'string' ? body.domainId : undefined,
-            extensionId: typeof body?.extensionId === 'string' ? body.extensionId : undefined,
-            outcome: response.ok ? 'ok' : 'failed',
-            status: response.status,
-            credentialsWiped: response.ok,
-        });
-        return NextResponse.json(data, { status: response.status });
-    } catch (error) {
-        console.error('[ADMIN_EXTENSION_UNINSTALL_PROXY]', error);
-        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
-    }
-}
+/**
+ * POST { domainId, extensionId } -> { success: true }
+ * Desinstala: el backend pone enabled:false y BORRA tokens OAuth, credenciales cifradas y claves de ajustes sensibles del
+ * dominio (tras intentar revocar los tokens en el proveedor). Aqui queda la traza (`admin.extension.uninstall`).
+ */
+export const POST = adminRoute({ scope: 'extensions.uninstall', write: true }, async (ctx) => {
+    const body = await parseBody(ctx.req, installBody);
+    await assertInstanceDomain(body.domainId, ctx.req);
+    const result = await managerFetch(ctx.req, '/api/manager/extensions/uninstall', { body: { domainId: body.domainId, extensionId: body.extensionId } });
+    const ok = result.status >= 200 && result.status < 300 && result.data?.success === true;
+    audit(ctx, 'extension.uninstall', {
+        domainId: body.domainId,
+        extensionId: body.extensionId,
+        outcome: ok ? 'ok' : 'failed',
+        status: result.status,
+        credentialsWiped: ok,
+    });
+    if (!ok) throw backendError(result);
+    return { success: true };
+});

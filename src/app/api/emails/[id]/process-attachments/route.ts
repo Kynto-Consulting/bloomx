@@ -10,6 +10,7 @@ import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
 import { uniqueAttachmentKey } from '@/lib/attachment-keys';
 import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { auditLog } from '@/lib/security';
+import { rawEmlKey, rawMimeMaxBytes, storeRawMimeEnabled } from '@/lib/raw-mime';
 
 // Large inbound attachments mean downloading the full raw MIME (all parts,
 // base64) and re-uploading to our own storage. Give the function room so big
@@ -206,10 +207,13 @@ export async function POST(
     // Download raw MIME with retries; the saved URL may have expired between webhook and
     // this run, so re-derive a fresh one from Resend and retry once before giving up.
     let rawMime: string;
+    // Bytes exactos del MIME original (se guardan como raw.eml para que la exportacion conserve las cabeceras tal cual)
+    let rawBytes: Buffer;
     try {
         const mimeRes = await fetchWithRetry(rawMimeUrl);
         assertMimeSize(mimeRes);
-        rawMime = await mimeRes.text();
+        rawBytes = Buffer.from(await mimeRes.arrayBuffer());
+        rawMime = rawBytes.toString('utf8');
     } catch (err) {
         const fresh = await resolveFreshRawMimeUrl(email.rawKey);
         if (!fresh || fresh === rawMimeUrl) {
@@ -219,11 +223,20 @@ export async function POST(
         try {
             const mimeRes = await fetchWithRetry(fresh);
             assertMimeSize(mimeRes);
-            rawMime = await mimeRes.text();
+            rawBytes = Buffer.from(await mimeRes.arrayBuffer());
+            rawMime = rawBytes.toString('utf8');
         } catch (err2) {
             console.error(`[process-attachments] Retry with fresh URL failed for email ${emailId}:`, err2);
             return NextResponse.json({ error: 'Failed to fetch raw MIME' }, { status: 502 });
         }
+    }
+
+    // MIME original a storage (raw.eml junto a raw.json) si esta activado y cabe en RAW_MIME_MAX_MB. Mejor esfuerzo: nunca rompe el proceso.
+    // Email.rawKey sigue apuntando a raw.json (otras rutas lo parsean como JSON); la clave de raw.eml se deriva de ella.
+    const emlKey = rawEmlKey(email.rawKey);
+    if (emlKey && storeRawMimeEnabled() && rawBytes.length > 0 && rawBytes.length <= rawMimeMaxBytes()) {
+        const stored = await uploadWithRetry(emlKey, rawBytes, 'message/rfc822');
+        if (!stored) console.error(`[process-attachments] raw.eml not stored for email ${emailId}`);
     }
 
     // Extract all attachment parts

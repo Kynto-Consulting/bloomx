@@ -3,6 +3,8 @@ import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { sendEventInvites } from '@/lib/calendar/notify';
+import { buildCalendarEventContext, fireLifecycleHook } from '@/lib/expansions/server-hooks';
+import { conferenceFieldsFromBody, effectiveConference } from '@/lib/conferencing/event-fields';
 
 export async function GET(req: NextRequest) {
     const user = await getCurrentUser();
@@ -43,6 +45,8 @@ export async function GET(req: NextRequest) {
             ...event,
             title: safeTitle,
             displayTitle: safeTitle,
+            // Eventos anteriores a las columnas de conferencia: el enlace se deriva de location (sin migrar datos).
+            ...effectiveConference(event),
         };
     });
 
@@ -67,6 +71,8 @@ export async function POST(req: NextRequest) {
     if (!title || !calendarId || !startsAt || !endsAt || Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
         return NextResponse.json({ error: 'Invalid event payload' }, { status: 400 });
     }
+
+    const conference = await conferenceFieldsFromBody(body, user.id);
 
     const calendar = await prisma.calendar.findFirst({
         where: { id: calendarId, userId: user.id }
@@ -105,6 +111,7 @@ export async function POST(req: NextRequest) {
                     endsAt,
                     organizerEmail,
                     organizerName,
+                    ...conference,
                 },
                 include: {
                     calendar: true,
@@ -147,6 +154,7 @@ export async function POST(req: NextRequest) {
             inviteUid,
             organizerEmail,
             organizerName,
+            ...conference,
             attendees: {
                 create: [
                     ...(user.email ? [{
@@ -165,6 +173,11 @@ export async function POST(req: NextRequest) {
         }
     });
 
+    fireLifecycleHook('CALENDAR_EVENT_CREATED', user.id, buildCalendarEventContext({
+        eventId: event.id, calendarId: event.calendarId, startsAt: event.startsAt, endsAt: event.endsAt,
+        allDay: event.allDay, status: (event as any).status || 'confirmed', attendees: event.attendees, source: event.source,
+    }));
+
     // Server-side auto-invite: mail everyone added on create, regardless of the
     // client bundle. Best-effort, stamps invitedAt so it won't double-send.
     if (attendeeEmails.length > 0) {
@@ -175,6 +188,7 @@ export async function POST(req: NextRequest) {
             event,
             recipients: attendeeEmails,
             timezone: typeof body?.timeZone === 'string' ? body.timeZone : null,
+            request: req,
         });
 
         if (notified > 0) {

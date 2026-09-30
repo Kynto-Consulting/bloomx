@@ -14,6 +14,12 @@ const s3Client = new S3Client({
         secretAccessKey: (env.S3_SECRET_KEY || env.B2_SECRET_KEY)!,
     },
     forcePathStyle: true,
+    // Los SDK v3 recientes (>=3.729) anaden por defecto un checksum CRC32 (y aws-chunked + trailer en streams) a cada
+    // peticion y validan uno en las respuestas. Backblaze B2, MinIO antiguos y otros S3 compatibles pueden rechazarlo
+    // (p. ej. "Unsupported header 'x-amz-checksum-crc32'" / STREAMING-UNSIGNED-PAYLOAD-TRAILER). WHEN_REQUIRED solo lo
+    // calcula donde el protocolo lo exige (DeleteObjects) y funciona igual en AWS S3.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
 });
 
 const BUCKET = (env.S3_BUCKET || env.B2_BUCKET)!;
@@ -93,7 +99,17 @@ export async function uploadToStorage(key: string, body: Buffer | string | Reada
     }
 }
 
-export async function getFromStorage(key: string) {
+/** NoSuchKey / 404: el objeto no existe (no es un fallo del almacenamiento). */
+function isNotFound(error: any): boolean {
+    return error?.name === 'NoSuchKey' || error?.name === 'NotFound' || error?.Code === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404;
+}
+
+export interface StorageReadOptions {
+    /** true: los errores distintos de "no existe" (5xx, red, credenciales) se propagan en vez de devolver null. */
+    strict?: boolean;
+}
+
+export async function getFromStorage(key: string, opts: StorageReadOptions = {}) {
     if (isS3Configured) {
         try {
             const command = new GetObjectCommand({
@@ -103,7 +119,9 @@ export async function getFromStorage(key: string) {
             const response = await s3Client.send(command);
             return response.Body?.transformToString();
         } catch (error) {
+            if (isNotFound(error)) return null; // objeto inexistente: caso normal, sin ruido en logs
             console.error("Error getting from storage:", error);
+            if (opts.strict) throw error;
             return null;
         }
     } else {
@@ -119,14 +137,16 @@ export async function getFromStorage(key: string) {
     }
 }
 
-export async function getBufferFromStorage(key: string): Promise<Buffer | null> {
+export async function getBufferFromStorage(key: string, opts: StorageReadOptions = {}): Promise<Buffer | null> {
     if (isS3Configured) {
         try {
             const response = await s3Client.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
             const bytes = await response.Body?.transformToByteArray();
             return bytes ? Buffer.from(bytes) : null;
         } catch (error) {
+            if (isNotFound(error)) return null;
             console.error("Error getting binary from storage:", error);
+            if (opts.strict) throw error;
             return null;
         }
     }
@@ -145,6 +165,7 @@ export async function deleteFromStorage(key: string): Promise<boolean> {
             await s3Client.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
             return true;
         } catch (error) {
+            if (isNotFound(error)) return true; // ya no existia: objetivo cumplido (igual que el modo local)
             console.error("Error deleting from storage:", error);
             return false;
         }
@@ -164,13 +185,16 @@ export interface StorageObjectInfo { key: string; lastModified?: Date; size?: nu
 export async function listStorageObjects(prefix: string, max = 10_000): Promise<StorageObjectInfo[]> {
     const out: StorageObjectInfo[] = [];
     if (isS3Configured) {
+        if (max <= 0) return out;
         let token: string | undefined;
         do {
-            const res: any = await s3Client.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix, ContinuationToken: token }));
+            // MaxKeys = lo que falta (<=1000): no se descargan paginas enteras para descartarlas por el corte de `max`.
+            const res: any = await s3Client.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: prefix, ContinuationToken: token, MaxKeys: Math.min(1000, max - out.length) }));
             for (const o of res.Contents || []) {
                 if (o.Key) out.push({ key: o.Key, lastModified: o.LastModified, size: o.Size });
                 if (out.length >= max) return out;
             }
+            // Truncada sin token (servidor defectuoso) => se detiene en vez de repetir la primera pagina indefinidamente.
             token = res.IsTruncated ? res.NextContinuationToken : undefined;
         } while (token);
         return out;
@@ -211,7 +235,16 @@ export async function deleteManyFromStorage(keys: string[]): Promise<{ deleted: 
                 const errs: any[] = res.Errors || [];
                 failed.push(...errs.map((e) => String(e.Key)));
                 deleted += batch.length - errs.length;
-            } catch (error) {
+            } catch (error: any) {
+                const code = error?.name || error?.Code;
+                if (code === 'NotImplemented' || code === 'MissingContentMD5' || error?.$metadata?.httpStatusCode === 501) {
+                    // S3 compatible sin DeleteObjects (o que lo rechaza): borrado clave a clave.
+                    for (const k of batch) {
+                        if (await deleteFromStorage(k)) deleted++;
+                        else failed.push(k);
+                    }
+                    continue;
+                }
                 console.error("Error bulk deleting from storage:", error);
                 failed.push(...batch);
             }
@@ -257,7 +290,8 @@ export async function getObjectStream(key: string, range?: string | null): Promi
                 status: res.$metadata?.httpStatusCode || 200,
             };
         } catch (error: any) {
-            if (error?.name === 'NoSuchKey' || error?.$metadata?.httpStatusCode === 404) return null;
+            // 404 (no existe) y 416 (rango fuera del objeto) => null; el proxy responde 404 y no un 500.
+            if (isNotFound(error) || error?.name === 'InvalidRange' || error?.$metadata?.httpStatusCode === 416) return null;
             throw error;
         }
     }

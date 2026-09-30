@@ -20,6 +20,7 @@ import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { SlashActionRunner, type SlashRun } from '@/components/expansions/SlashActionRunner';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { collectOverlays, collectSlashCommands, type SlashCommand } from '@/lib/slash-commands';
+import { ComposerConferencingPanel, type ComposerInsertion } from '@/components/conferencing/ComposerConferencingPanel';
 import { useSession } from '@/components/SessionProvider';
 // import { ClientExpansions } from '@/lib/expansions/client/renderer'; // Legacy
 import { ClientExpansionContext } from '@/lib/expansions/client/types'; // Legacy
@@ -34,6 +35,7 @@ import { useFocusTrap } from '@/hooks/useFocusTrap';
 import { buildSealedEmailBody, createSealedLink, validateSealOptions } from '@/lib/sealed/client';
 import { sealedMessages } from '@/lib/sealed/messages';
 import { useI18n } from '@/components/I18nProvider';
+import { emitComposeOpened } from '@/lib/expansions/client/emit-event';
 
 function extractPlainTextFromHtml(value: string) {
     return String(value || '')
@@ -89,6 +91,14 @@ export function ComposeModal({
     const { data: session } = useSession();
     const router = useRouter();
 
+    // Hook COMPOSE_OPENED (fire-and-forget; el modo se infiere del asunto inicial; el servidor valida ids).
+    useEffect(() => {
+        const subjectHint = String(initialSubject || '').trim();
+        const mode = /^(fwd?|rv):/i.test(subjectHint) ? 'forward' : /^re:/i.test(subjectHint) ? (initialCc ? 'replyAll' : 'reply') : 'new';
+        emitComposeOpened({ mode, ...(initialDraftId ? { draftId: initialDraftId } : {}) });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     const [toTags, setToTags] = useState<string[]>(splitAddressList(initialTo));
     const [senderOptions, setSenderOptions] = useState<string[]>([]);
     const [fromAddress, setFromAddress] = useState(String(initialFrom || '').trim().toLowerCase());
@@ -127,7 +137,9 @@ export function ComposeModal({
     const [sealPanelOpen, setSealPanelOpen] = useState(false);
     const [sealPassword, setSealPassword] = useState('');
     const [sealMaxViews, setSealMaxViews] = useState<number | null>(null);
-    const { locale: uiLocale } = useI18n();
+    const { locale: uiLocale, t: tr } = useI18n();
+    // Panel de videoconferencia del composer (comandos de nucleo "/zoom" y "/meet").
+    const [conferencingPanel, setConferencingPanel] = useState<'zoom' | 'google-meet' | null>(null);
     const sm = sealedMessages(uiLocale);
     // 'Copiar enlace': crea el mensaje sellado y copia el enlace SIN enviar correo (se comparte por otro canal).
     const [sealCopying, setSealCopying] = useState(false);
@@ -952,6 +964,7 @@ export function ComposeModal({
         // Escape dentro del editor / selects / listas de sugerencias lo gestiona ese control.
         if (target.isContentEditable || target.tagName === 'SELECT' || target.closest?.('[role="listbox"]')) return;
         if (schedulePickerOpen) { setSchedulePickerOpen(false); return; }
+        if (conferencingPanel) { setConferencingPanel(null); return; }
         if (popover || activeSlashComponent) { setPopover(null); setActiveSlashComponent(null); return; }
         if (maximized) { setMaximized(false); return; }
         handleClose();
@@ -963,14 +976,33 @@ export function ComposeModal({
 
     // Comandos "/" declarados por las extensiones instaladas (manifest.slashCommands). Editor los muestra en un menu;
     // al elegir uno, SlashActionRunner ejecuta su accion con el motor de extensiones.
+    // "/zoom" y "/meet" son comandos de NUCLEO (abren el ConferencingPicker); ganan a un comando de extension homonimo.
     const slashCommandsList: SlashCommand[] = useMemo(
-        () => collectSlashCommands(installedExtensions).map((command) => ({
-            ...command,
-            execute: (args: string) => runSlashCommand(command, args),
-        })),
+        () => {
+            const core: SlashCommand[] = [
+                { key: 'zoom', description: tr('conferencing.composer.zoomDescription'), extensionName: 'Zoom', execute: () => setConferencingPanel('zoom') },
+                { key: 'meet', description: tr('conferencing.composer.meetDescription'), extensionName: 'Google Meet', execute: () => setConferencingPanel('google-meet') },
+            ];
+            const coreKeys = new Set(core.map((c) => c.key));
+            return [
+                ...core,
+                ...collectSlashCommands(installedExtensions)
+                    .filter((command) => !coreKeys.has(command.key.toLowerCase()))
+                    .map((command) => ({
+                        ...command,
+                        execute: (args: string) => runSlashCommand(command, args),
+                    })),
+            ];
+        },
         // eslint-disable-next-line react-hooks/exhaustive-deps
-        [installedExtensions],
+        [installedExtensions, tr],
     );
+
+    // Reunion creada: inserta el bloque (boton "Unirse" + datos de marcacion) y adjunta el ICS si la extension lo entrego.
+    const handleConferencingInsert = useCallback((insertion: ComposerInsertion) => {
+        if (insertion.html) editorRef.current?.insertContent(insertion.html);
+        if (insertion.attachment) setAttachments((prev) => [...prev, insertion.attachment]);
+    }, []);
 
     // ...
 
@@ -981,7 +1013,7 @@ export function ComposeModal({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 100, scale: 0.9 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                className="fixed bottom-0 z-50 w-64 rounded-t-lg bg-background shadow-lg"
+                className="fixed bottom-0 z-50 w-64 rounded-t-lg bg-background text-foreground shadow-lg"
                 style={{ right: `${rightOffset}px` }}
             >
                 <div
@@ -1016,9 +1048,9 @@ export function ComposeModal({
     }
 
     const modalClass = maximized
-        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-card rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
+        ? "fixed inset-0 md:inset-4 z-50 flex flex-col bg-card text-card-foreground rounded-none md:rounded-lg shadow-2xl overflow-hidden shadow-md"
         : cn(
-            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-card rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
+            "fixed bottom-0 right-0 md:right-[var(--right-offset)] z-50 flex flex-col bg-card text-card-foreground rounded-t-xl shadow-2xl overflow-hidden ring-1 ring-border/10 shadow-md",
             isResizing ? "transition-none select-none" : ""
         );
 
@@ -1114,7 +1146,7 @@ export function ComposeModal({
 
             {/* Active Slash Command Overlay */}
             {activeSlashComponent && (
-                <div className="absolute inset-x-0 bottom-0 top-auto z-50 bg-card shadow-2xl border-t animate-in slide-in-from-bottom-5 rounded-b-xl overflow-hidden">
+                <div className="absolute inset-x-0 bottom-0 top-auto z-50 bg-card text-card-foreground shadow-2xl border-t animate-in slide-in-from-bottom-5 rounded-b-xl overflow-hidden">
                     <div className="flex justify-end p-1 bg-muted/50 border-b">
                         <button onClick={() => setActiveSlashComponent(null)} className="p-1 hover:bg-secondary rounded"><X className="w-3 h-3" /></button>
                     </div>
@@ -1133,14 +1165,14 @@ export function ComposeModal({
                                     id={fromId}
                                     value={fromAddress}
                                     onChange={(event) => setFromAddress(event.target.value)}
-                                    className="w-full bg-transparent text-sm text-foreground/80 outline-none"
+                                    className="w-full bg-transparent text-sm text-foreground outline-none"
                                 >
                                     {senderOptions.map((email) => (
                                         <option key={email} value={email}>{email}</option>
                                     ))}
                                 </select>
                             ) : (
-                                <div className="text-sm text-foreground/80 truncate">
+                                <div className="text-sm text-foreground truncate">
                                     {effectiveSenderEmail || session?.user?.email || 'Unknown sender'}
                                 </div>
                             )}
@@ -1236,11 +1268,24 @@ export function ComposeModal({
 
                 {/* Active Slash Component (e.g. Zoom Form) */}
                 {activeSlashComponent && activeSlashComponent.Component && (
-                    <div className="absolute bottom-14 left-4 z-40 bg-card border border-border rounded-lg shadow-xl p-0 animate-in fade-in zoom-in-95">
+                    <div className="absolute bottom-14 left-4 z-40 bg-card text-card-foreground border border-border rounded-lg shadow-xl p-0 animate-in fade-in zoom-in-95">
                         <activeSlashComponent.Component
                             context={{ ...contextProps, onClose: () => setActiveSlashComponent(null) }}
                             args={activeSlashComponent.args}
                             onClose={() => setActiveSlashComponent(null)}
+                        />
+                    </div>
+                )}
+
+                {/* Panel de videoconferencia (/zoom, /meet) */}
+                {conferencingPanel && (
+                    <div className="absolute bottom-14 left-4 z-40 max-h-[70%] overflow-y-auto bg-card text-card-foreground border border-border rounded-lg shadow-xl animate-in fade-in zoom-in-95">
+                        <ComposerConferencingPanel
+                            provider={conferencingPanel}
+                            subject={subject}
+                            recipients={[...toTags, ...ccTags].filter((tag) => tag.includes('@'))}
+                            onInsert={handleConferencingInsert}
+                            onClose={() => setConferencingPanel(null)}
                         />
                     </div>
                 )}
@@ -1311,7 +1356,7 @@ export function ComposeModal({
                             )}
                             {sealed && (
                                 <>
-                                    <p id={`${uid}-seal-pw-risk`} role={sealPassword ? undefined : 'note'} className={cn('text-xs rounded-md px-2 py-1.5', sealPassword ? 'text-muted-foreground' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400')}>
+                                    <p id={`${uid}-seal-pw-risk`} role={sealPassword ? undefined : 'note'} className={cn('text-xs rounded-md px-2 py-1.5', sealPassword ? 'text-muted-foreground' : 'bg-warning/10 text-warning')}>
                                         {sealPassword ? sm.passwordRisk : `${sm.passwordHint} ${sm.passwordRisk}`}
                                     </p>
                                     <div className="flex flex-wrap items-center gap-2">
@@ -1335,7 +1380,7 @@ export function ComposeModal({
                                                 <input readOnly value={sealCopiedLink.url} onFocus={(e) => e.currentTarget.select()} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 font-mono text-xs" />
                                             </label>
                                         )}
-                                        {sealCopiedLink?.copied && <p className="text-xs text-emerald-700 dark:text-emerald-400">{sm.copied}</p>}
+                                        {sealCopiedLink?.copied && <p className="text-xs text-success">{sm.copied}</p>}
                                     </div>
                                 </>
                             )}
@@ -1381,7 +1426,7 @@ export function ComposeModal({
                                 </button>
                                 {schedulePickerOpen && (
                                     <div className="absolute bottom-full right-0 mb-2 z-[200]">
-                                        <div className="bg-background rounded-lg shadow-xl border border-border overflow-hidden">
+                                        <div className="bg-background text-foreground rounded-lg shadow-xl border border-border overflow-hidden">
                                             <DateTimePicker
                                                 value={scheduleValue}
                                                 onChange={(v) => {
@@ -1507,7 +1552,7 @@ export function ComposeModal({
                     <button
                         type="button"
                         onClick={handleDelete}
-                        className="text-muted-foreground hover:bg-secondary hover:text-foreground/80 p-2 rounded-full transition-colors"
+                        className="text-muted-foreground hover:bg-secondary hover:text-foreground p-2 rounded-full transition-colors"
                         title="Descartar borrador"
                         aria-label="Descartar borrador"
                     >

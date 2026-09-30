@@ -17,6 +17,8 @@ export interface MfaLoginResult {
     token?: string;
     user?: { id: string; email: string; name?: string | null; avatar?: string };
     recoveryCodes?: string[];
+    /** Un administrador pidio cambiar la contrasena en el proximo acceso. */
+    mustChangePassword?: boolean;
 }
 
 async function postJson(url: string, body: unknown) {

@@ -163,7 +163,7 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
                         key={tag}
                         className={cn(
                             "inline-flex items-center gap-1 px-2 py-0.5 text-sm rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/80 animate-in fade-in zoom-in-95 duration-200",
-                            !valid && "ring-1 ring-destructive text-destructive"
+                            !valid && "bg-destructive/10 ring-1 ring-destructive text-destructive"
                         )}
                         title={valid ? undefined : 'Direccion de correo no valida'}
                     >
@@ -220,7 +220,7 @@ export function TagInput({ value = [], onChange, placeholder, label, className, 
                         id={listboxId}
                         role="listbox"
                         aria-label="Sugerencias de contactos"
-                        className="absolute left-0 top-full z-20 mt-2 w-full min-w-[240px] overflow-hidden rounded-xl border bg-background shadow-lg"
+                        className="absolute left-0 top-full z-20 mt-2 w-full min-w-[240px] overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg"
                     >
                         {suggestions.map((suggestion, index) => (
                             <div

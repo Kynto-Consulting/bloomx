@@ -42,7 +42,7 @@ function LoginForm() {
             }
         }
         // Force a hard reload to pick up the HttpOnly cookie and update state
-        window.location.href = '/';
+        window.location.href = result.mustChangePassword ? '/security?force=1' : '/';
     };
 
     const loginUser = async (e: React.FormEvent) => {

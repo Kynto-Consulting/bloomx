@@ -1,5 +1,6 @@
 import type { MetadataRoute } from 'next';
 import { headers } from 'next/headers';
+import { manifestColors } from '@/lib/manifest-colors';
 
 type DomainConfig = {
     name?: string;
@@ -43,7 +44,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
     const config = await getManifestConfig();
     const brandName = config?.displayName || config?.name || 'Mail';
     const brandLogo = config?.logo || null;
-    const themeColor = config?.theme?.primaryColor || '#2563eb';
+    const { themeColor, backgroundColor } = manifestColors(config?.theme);
 
     return {
         name: brandName,
@@ -52,7 +53,7 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#ffffff',
+        background_color: backgroundColor,
         theme_color: themeColor,
         // Los PNG 192/512 son necesarios para que Chrome/Android ofrezca instalar la app (los genera
         // scripts/generate-icons.mjs). Si el dominio tiene logo propio se antepone; los PNG quedan de respaldo.

@@ -162,10 +162,10 @@ describe('runEmailReceivedHooks', () => {
 
     it('devuelve cuantos hooks corrieron y nunca lanza', async () => {
         process.env.BLOOMX_DOMAIN_PRIVATE_KEY = generateEd25519KeyPair().privatePem;
-        const ok = await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1', domain: 'acme.com' }, { fetchImpl: (async () => json({ results: [{}, {}] })) as any, backendUrl: 'https://be' });
+        const ok = await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1', domain: 'acme.com' }, { fetchImpl: (async () => json({ results: [{}, {}] })) as any, backendUrl: 'https://be', loadDisabled: async () => [] });
         expect(ok).toEqual({ executed: 2 });
 
-        const failed = await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1' }, { fetchImpl: (async () => { throw new Error('x'); }) as any, backendUrl: 'https://be' });
+        const failed = await runEmailReceivedHooks({ emailId: 'e1', userId: 'u1' }, { fetchImpl: (async () => { throw new Error('x'); }) as any, backendUrl: 'https://be', loadDisabled: async () => [] });
         expect(failed).toBeNull();
     });
 });

@@ -1,3 +1,11 @@
+import { findMeetingUrlInText } from '../conferencing/hosts';
+import { inviteProdId } from './invite-template.js';
+
+/** PRODID con la marca del dominio (`-//<Marca>//BloomX Calendar//ES|EN`); sin marca, NEXT_PUBLIC_BRAND_NAME o Bloom. */
+function prodId(brandName?: string | null, locale?: 'es' | 'en'): string {
+    return inviteProdId(brandName || process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom', locale ?? 'en') as string;
+}
+
 export type InviteResponseStatus = 'accepted' | 'tentative' | 'declined';
 
 export type ParsedInvite = {
@@ -480,19 +488,9 @@ export function parseInviteFromIcs(source: string): ParsedInvite | null {
         if (conferenceVal.startsWith('http')) meetUrl = conferenceVal;
     }
 
+    // Descripcion de texto del ICS: primer enlace de un proveedor RECONOCIDO por host (no por subcadena).
     if (!meetUrl && description) {
-        const teamsMatch = description.match(/https:\/\/teams\.microsoft\.com\/[^\s<>\]"\\]+/);
-        if (teamsMatch) meetUrl = teamsMatch[0];
-    }
-
-    if (!meetUrl && description) {
-        const meetMatch = description.match(/https:\/\/meet\.google\.com\/[^\s<>\]"\\]+/);
-        if (meetMatch) meetUrl = meetMatch[0];
-    }
-
-    if (!meetUrl && description) {
-        const zoomMatch = description.match(/https:\/\/[a-z0-9.-]*zoom\.us\/[^\s<>\]"\\]+/);
-        if (zoomMatch) meetUrl = zoomMatch[0];
+        meetUrl = findMeetingUrlInText(description) || undefined;
     }
 
     const parsed = {
@@ -545,6 +543,8 @@ export function buildCancelIcs(options: {
     organizerName?: string | null;
     attendees?: Array<{ email: string; name?: string | null; isOrganizer?: boolean }>;
     sequence?: number;
+    brandName?: string | null;
+    locale?: 'es' | 'en';
 }) {
     const toIcs = (value?: string | Date | null) =>
         value ? formatIcsDate(value instanceof Date ? value.toISOString() : String(value)) : '';
@@ -552,7 +552,7 @@ export function buildCancelIcs(options: {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        `PRODID:${prodId(options.brandName, options.locale)}`,
         'CALSCALE:GREGORIAN',
         'METHOD:CANCEL',
         'BEGIN:VEVENT',
@@ -586,6 +586,8 @@ export function buildReplyIcs(options: {
     attendeeEmail: string;
     attendeeName?: string;
     response: InviteResponseStatus;
+    brandName?: string | null;
+    locale?: 'es' | 'en';
 }) {
     const attendeeName = options.attendeeName || options.attendeeEmail;
     const responseMap = {
@@ -599,7 +601,7 @@ export function buildReplyIcs(options: {
     return [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        `PRODID:${prodId(options.brandName, options.locale)}`,
         'CALSCALE:GREGORIAN',
         'METHOD:REPLY',
         'BEGIN:VEVENT',

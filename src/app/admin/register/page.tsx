@@ -67,7 +67,7 @@ export default function AdminRegister() {
             if (!res.ok) {
                 setError(result.error || t('admin.register.verifyFailed'));
             } else {
-                router.push('/admin/dashboard');
+                router.push('/admin');
             }
         } catch (e) {
             setError(t('common.networkError'));

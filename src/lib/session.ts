@@ -4,6 +4,7 @@ import {
     signSessionJWT,
     verifyJWT,
     isSessionPayload,
+    getSessionAbsoluteMaxSeconds,
     type SessionIssueOptions,
 } from "./jwt";
 import { clearSessionCookies, readSessionCookie, sessionCookieOptions, writeSessionCookie } from "./session-cookie";
@@ -23,8 +24,19 @@ export async function setSessionCookie(
     opts: Pick<SessionIssueOptions, "mfa" | "at"> = {}
 ) {
     const tv = await getTokenVersion(payload.sub);
-    const { token, ttl } = await signSessionJWT(payload, { ...opts, tv });
+    const { token, ttl, jti } = await signSessionJWT(payload, { ...opts, tv });
     writeSessionCookie(await cookies(), token, ttl);
+    // Registro de la sesion (para que la consola de admin pueda listarla/revocarla) y ultimo acceso. Best-effort, sin bloquear.
+    try {
+        const h = await headers();
+        const ip = (h.get("x-forwarded-for") || h.get("x-real-ip") || "").split(",")[0].trim() || null;
+        void import("./admin/session-registry")
+            .then((m) => m.registerSession({
+                jti, userId: payload.sub, tv, mfa: opts.mfa === true, ip, userAgent: h.get("user-agent"),
+                expiresAtSec: (opts.at ?? Math.floor(Date.now() / 1000)) + getSessionAbsoluteMaxSeconds(), // tope absoluto (la ventana se renueva con la actividad)
+            }))
+            .catch(() => undefined);
+    } catch { /* fuera de contexto de peticion */ }
     return token; // Return token for client-side storage
 }
 

@@ -152,4 +152,32 @@ describe('VirtualMailRows', () => {
         mount({ ids: [...makeIds(5, 'new'), ...ids] });
         expect(scroller.scrollTop).toBe(0);
     });
+
+    it('encabezados pegajosos: el ultimo encabezado antes de la ventana sigue montado y fijo arriba (position: sticky)', () => {
+        const ids = makeIds(200);
+        const sticky = [0, 50, 120];
+        mount({ ids, stickyIndexes: sticky });
+        // arriba del todo: el encabezado 0 es el activo
+        const first = host.querySelector('#row-m0')!.parentElement as HTMLElement;
+        expect(first.style.position).toBe('sticky');
+        act(() => {
+            scroller.scrollTop = 80 * ROW; // ventana ~80..86: el activo es el encabezado 50
+            scroller.dispatchEvent(new Event('scroll'));
+        });
+        const active = host.querySelector('#row-m50')!.parentElement as HTMLElement;
+        expect(active).not.toBeNull();
+        expect(active.style.position).toBe('sticky');
+        expect(active.style.top).toBe('0px');
+        // los demas encabezados montados no son pegajosos: van en su sitio (absolutos)
+        expect(host.querySelector('#row-m0')).toBeNull();
+        // una fila normal lejana al activo sigue posicionada de forma absoluta
+        const row = host.querySelector('#row-m82')!.parentElement as HTMLElement;
+        expect(row.style.position).toBe('absolute');
+    });
+
+    it('sin encabezados pegajosos todas las filas son absolutas (sin cambios de comportamiento)', () => {
+        mount({ ids: makeIds(200) });
+        const positions = Array.from(host.querySelectorAll('[role="listitem"]')).map((el) => (el.parentElement as HTMLElement).style.position);
+        expect(new Set(positions)).toEqual(new Set(['absolute']));
+    });
 });

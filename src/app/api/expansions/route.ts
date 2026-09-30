@@ -1,26 +1,18 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { getGoogleAccessToken } from '@/lib/google/account';
-import { buildBackendHeaders } from '@/lib/backend-auth';
+import { getLinkedAuth } from '@/lib/conferencing/auth-context';
+import { buildBackendHeaders, loadDomainPrivateKey } from '@/lib/backend-auth';
+import { loadDisabledExtensionsForUser } from '@/lib/expansions/user-disabled';
+import { sanitizeDisabledForRequest } from '@/lib/expansions/server-hooks';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://backend.bloomx.arubik.dev';
 
+// Cuentas vinculadas (Google y Zoom) del USUARIO DE LA SESION, compartido con la fachada de conferencias
+// (lib/conferencing/auth-context.ts). Google/Zoom son opcionales para el usuario actual.
 async function getLinkedAuthContext(userId: string) {
-    const auth: Record<string, any> = {};
-
-    try {
-        const google = await getGoogleAccessToken(userId);
-        auth.google = {
-            accessToken: google.accessToken,
-            accountId: google.accountId,
-            source: 'user-account'
-        };
-    } catch {
-        // Google is optional for the current user.
-    }
-
-    return auth;
+    const { auth } = await getLinkedAuth(userId);
+    return auth as Record<string, any>;
 }
 
 export async function GET(req: NextRequest) {
@@ -68,11 +60,18 @@ export async function POST(req: NextRequest) {
         const enrichedContext = Object.keys(linkedAuth).length > 0
             ? { ...safeClientContext, auth: linkedAuth }
             : safeClientContext;
+        // Extensiones que el usuario desactivo (de sus ajustes en BD, no del navegador). Solo dominio FIRMADO; el backend ignora la lista
+        // para las obligatorias. Si no se pueden leer, no se envia (comportamiento de siempre).
+        let disabledExtensions: string[] = [];
+        if (loadDomainPrivateKey()) {
+            try { disabledExtensions = sanitizeDisabledForRequest(await loadDisabledExtensionsForUser(user.id)); } catch { disabledExtensions = []; }
+        }
         const payload = {
             extensionId: body?.extensionId,
             action: body?.action,
             params: body?.params,
             context: enrichedContext,
+            ...(disabledExtensions.length > 0 ? { disabledExtensions } : {}),
         };
 
         // Forward to backend execution endpoint (firmado con la clave de esta instancia, o legado sin clave)

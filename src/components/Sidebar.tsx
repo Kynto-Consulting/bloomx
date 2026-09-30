@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useEffect } from 'react';
+import { Suspense, useState, useEffect, useRef, type DragEvent } from 'react';
 import Link from 'next/link';
 
 import { useSearchParams, usePathname } from 'next/navigation';
@@ -28,6 +28,10 @@ import {
     shouldSidebarRefresh,
     type LabelRef,
 } from '@/lib/mail-list';
+import { MAIL_DND_TYPE, canDropOnFolder, dragState, parseDragPayload } from '@/lib/mail-dnd';
+import { useMailActions } from '@/components/mail/useMailActions';
+import { Avatar } from '@/components/mail/ui';
+import { QuotaMeter } from '@/components/mail/QuotaMeter';
 
 // Init
 
@@ -48,7 +52,7 @@ const DEFAULT_SECTION_ORDER: SidebarSectionKey[] = ['main', 'workspace', 'labels
 
 export function Sidebar({ onClose }: SidebarProps) {
     return (
-        <Suspense fallback={<div className="h-full bg-muted/10" />}>
+        <Suspense fallback={<div className="h-full bg-sidebar" />}>
             <SidebarContent onClose={onClose} />
         </Suspense>
     );
@@ -71,8 +75,44 @@ function SidebarContent({ onClose }: SidebarProps) {
         archive: 0,
         scheduled: 0
     });
+    // Totales (leidos + no leidos) por carpeta: `counts` son los NO LEIDOS.
+    const [totals, setTotals] = useState<Record<string, number>>({});
     const [labels, setLabels] = useState<LabelRef[]>([]);
     const [unifiedReplyModeEnabled, setUnifiedReplyModeEnabled] = useState(false);
+
+    // Arrastrar correos de la lista a una carpeta o etiqueta (la alternativa accesible es el menu "Mover a..." / tecla V).
+    const mailActions = useMailActions();
+    const [dropTarget, setDropTarget] = useState<string | null>(null);
+    const isMailDrag = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(MAIL_DND_TYPE);
+    const handleFolderDragOver = (e: DragEvent, folderId: string) => {
+        if (!isMailDrag(e) || !canDropOnFolder(folderId, dragState.get())) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (dropTarget !== `folder:${folderId}`) setDropTarget(`folder:${folderId}`);
+    };
+    const handleLabelDragOver = (e: DragEvent, labelId: string) => {
+        if (!isMailDrag(e)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        if (dropTarget !== `label:${labelId}`) setDropTarget(`label:${labelId}`);
+    };
+    const handleDragLeave = (targetKey: string) => {
+        setDropTarget((current) => (current === targetKey ? null : current));
+    };
+    const handleDrop = async (e: DragEvent, target: { kind: 'folder'; id: string } | { kind: 'label'; label: LabelRef }) => {
+        const payload = parseDragPayload(e.dataTransfer.getData(MAIL_DND_TYPE));
+        setDropTarget(null);
+        dragState.end();
+        if (!payload) return;
+        e.preventDefault();
+        const emails = payload.emails.map((m) => ({ ...m })) as any[];
+        if (target.kind === 'folder') {
+            if (!canDropOnFolder(target.id, payload)) return;
+            await mailActions.moveToFolder(emails.filter((m) => m.folder !== target.id), target.id, payload.source);
+        } else {
+            await mailActions.applyLabel(emails, target.label, { onlyAdd: true });
+        }
+    };
 
     const activeLabels = searchParams.get('label')?.split(',') || [];
 
@@ -114,6 +154,17 @@ function SidebarContent({ onClose }: SidebarProps) {
     const [isSubmittingLabel, setIsSubmittingLabel] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
+    const [settingsTab, setSettingsTab] = useState<'integrations' | undefined>(undefined);
+    // Otros componentes (selector de videoconferencia) piden abrir Ajustes -> Integraciones con este evento.
+    useEffect(() => {
+        const onOpen = (event: Event) => {
+            const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
+            setSettingsTab(tab === 'integrations' ? 'integrations' : undefined);
+            setShowSettings(true);
+        };
+        window.addEventListener('bloomx:open-settings', onOpen);
+        return () => window.removeEventListener('bloomx:open-settings', onOpen);
+    }, []);
     const [collapsedSections, setCollapsedSections] = useState<Record<SidebarSectionKey, boolean>>(DEFAULT_SECTION_STATE);
     const [sectionOrder, setSectionOrder] = useState<SidebarSectionKey[]>(DEFAULT_SECTION_ORDER);
 
@@ -201,7 +252,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     type="button"
                     onClick={() => toggleSection(section)}
                     aria-expanded={!isCollapsed}
-                    className="flex flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-muted/60"
+                    className="flex flex-1 items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-[0.16em] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 >
                     {isCollapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
                     <span>{sectionMeta[section].title}</span>
@@ -213,7 +264,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     type="button"
                     onClick={() => moveSection(section, -1)}
                     disabled={index <= 0}
-                    className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1 rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                     title={t('sidebar.moveUp')}
                     aria-label={t('sidebar.moveSectionUp', { name: sectionMeta[section].title })}
                 >
@@ -223,7 +274,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     type="button"
                     onClick={() => moveSection(section, 1)}
                     disabled={index >= sectionOrder.length - 1}
-                    className="p-1 rounded-sm text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed"
+                    className="p-1 rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                     title={t('sidebar.moveDown')}
                     aria-label={t('sidebar.moveSectionDown', { name: sectionMeta[section].title })}
                 >
@@ -262,6 +313,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     setCounts(data.counts);
                     setData(COUNTS_CACHE_KEY, data.counts, { silent: true });
                 }
+                if (data?.totals && typeof data.totals === 'object') setTotals(data.totals);
                 if (Array.isArray(data?.labels)) {
                     let normalized = normalizeLabelList(data.labels);
                     if (normalized.length < data.labels.length) {
@@ -363,10 +415,10 @@ function SidebarContent({ onClose }: SidebarProps) {
     const brandLogo = domainConfig.logo;
 
     return (
-        <div className="flex h-full min-h-0 flex-col bg-muted/10 group">
+        <div className="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground group">
             {/* Account / Compose */}
             <div className="flex px-4 py-4 items-center justify-between">
-                <div className="flex items-center gap-2 text-primary font-bold text-lg tracking-tight">
+                <div className="flex items-center gap-2 text-sidebar-foreground font-bold text-lg tracking-tight">
                     {brandLogo ? (
                         <img src={brandLogo} alt={brandName} className="h-7 w-7 rounded-lg object-contain" />
                     ) : (
@@ -382,7 +434,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </div>
                 {/* Mobile Close Button */}
                 {onClose && (
-                    <button onClick={onClose} aria-label={t('sidebar.close')} className="md:hidden p-2 text-muted-foreground hover:text-foreground">
+                    <button onClick={onClose} aria-label={t('sidebar.close')} className="md:hidden p-2 text-muted-foreground hover:text-sidebar-foreground">
                         <X className="h-5 w-5" />
                     </button>
                 )}
@@ -396,10 +448,12 @@ function SidebarContent({ onClose }: SidebarProps) {
                         openCompose();
                         onClose?.();
                     }}
-                    className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary text-primary-foreground px-4 py-2.5 text-sm font-medium hover:bg-primary/90 transition-all shadow-sm active:scale-[0.98]"
+                    aria-keyshortcuts="C"
+                    className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground px-4 py-3 text-sm font-semibold hover:bg-primary/90 transition-all shadow-md active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                 >
-                    <Plus className="h-4 w-4" />
+                    <Plus className="h-4 w-4" aria-hidden="true" />
                     <span>{t('sidebar.newMessage')}</span>
+                    <kbd aria-hidden="true" className="ml-1 hidden rounded border border-primary-foreground/40 px-1 text-[10px] font-semibold opacity-80 md:inline">C</kbd>
                 </motion.button>
             </div>
 
@@ -413,12 +467,26 @@ function SidebarContent({ onClose }: SidebarProps) {
                                     <div className="flex flex-col gap-1">
                                         {mainNav.map((item) => {
                                             const isActive = currentFolder === item.id;
+                                            const dropKey = `folder:${item.id}`;
+                                            const isDropTarget = dropTarget === dropKey;
+                                            const unread = item.id === 'drafts' || item.id === 'scheduled' ? 0 : item.count;
+                                            const total = item.id === 'drafts' ? counts.drafts : (totals[item.id] ?? 0);
+                                            const countLabel = unread > 0
+                                                ? t('sidebar.counts.unreadOfTotal', { unread, total: Math.max(total, unread) })
+                                                : total > 0 ? t('sidebar.counts.total', { total }) : '';
                                             return (
-                                                <div key={item.id} className="relative">
+                                                <div
+                                                    key={item.id}
+                                                    className={cn('relative rounded-lg', isDropTarget && 'ring-2 ring-ring bg-sidebar-accent')}
+                                                    data-drop-folder={item.id}
+                                                    onDragOver={(e) => handleFolderDragOver(e, item.id)}
+                                                    onDragLeave={() => handleDragLeave(dropKey)}
+                                                    onDrop={(e) => { void handleDrop(e, { kind: 'folder', id: item.id }); }}
+                                                >
                                                     {isActive && (
                                                         <motion.div
                                                             layoutId="sidebar-nav-active"
-                                                            className="absolute inset-0 bg-primary/10 rounded-lg"
+                                                            className="absolute inset-0 bg-sidebar-accent rounded-lg"
                                                             initial={false}
                                                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
                                                         />
@@ -426,27 +494,34 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                     <Link
                                                         href={getFolderUrl(item.id)}
                                                         onClick={() => onClose?.()}
+                                                        aria-current={isActive ? 'page' : undefined}
+                                                        aria-label={countLabel ? `${item.name}, ${countLabel}` : undefined}
                                                         className={cn(
-                                                            "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors group/item",
+                                                            "relative flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors group/item",
+                                                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                                             isActive
-                                                                ? "text-primary"
-                                                                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                                                ? "text-sidebar-accent-foreground"
+                                                                : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                                                         )}
                                                     >
-                                                        <item.icon className={cn("h-4 w-4 transition-colors", isActive ? "text-primary" : "text-muted-foreground group-hover/item:text-foreground")} />
-                                                        {item.name}
-                                                        {item.count > 0 && (
+                                                        <item.icon className={cn("h-4 w-4 transition-colors", isActive ? "opacity-100" : "opacity-70 group-hover/item:opacity-100")} aria-hidden="true" />
+                                                        <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                                                        {unread > 0 && (
                                                             <motion.span
-                                                                key={item.count}
+                                                                key={unread}
                                                                 initial={{ scale: 0.8, opacity: 0 }}
                                                                 animate={{ scale: 1, opacity: 1 }}
+                                                                aria-hidden="true"
                                                                 className={cn(
-                                                                    "ml-auto text-xs font-semibold px-2 py-0.5 rounded-full",
+                                                                    "text-xs font-semibold px-2 py-0.5 rounded-full tabular-nums",
                                                                     "bg-primary text-primary-foreground"
                                                                 )}
                                                             >
-                                                                {item.count}
+                                                                {unread}
                                                             </motion.span>
+                                                        )}
+                                                        {total > 0 && (
+                                                            <span aria-hidden="true" className={cn('min-w-[1.5rem] text-right text-xs tabular-nums', isActive ? 'opacity-80' : 'text-muted-foreground')}>{total}</span>
                                                         )}
                                                     </Link>
                                                 </div>
@@ -471,7 +546,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 onClick={() => onClose?.()}
                                                 className={cn(
                                                     "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                                                    item.active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+                                                    item.active ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                                                 )}
                                             >
                                                 <item.icon className="h-4 w-4" />
@@ -493,7 +568,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                     <button
                                         type="button"
                                         onClick={() => setIsCreatingLabel(!isCreatingLabel)}
-                                        className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-sm hover:bg-muted"
+                                        className="text-muted-foreground hover:text-sidebar-accent-foreground transition-colors p-1 rounded-sm hover:bg-sidebar-accent"
                                         title={t('sidebar.createLabel')}
                                         aria-label={t('sidebar.createLabel')}
                                         aria-expanded={isCreatingLabel}
@@ -510,7 +585,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                             initial={{ opacity: 0, height: 0 }}
                                             animate={{ opacity: 1, height: 'auto' }}
                                             exit={{ opacity: 0, height: 0 }}
-                                            className="mb-2 px-2 pb-2 bg-muted/30 rounded-lg p-2 border border-border/50 overflow-hidden"
+                                            className="mb-2 px-2 pb-2 bg-sidebar-accent/50 rounded-lg p-2 border border-sidebar-border overflow-hidden"
                                         >
                                             <div className="flex items-center gap-1">
                                                 <input
@@ -529,7 +604,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 <button type="button" aria-label={t('sidebar.saveLabel')} onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
                                                     <Check className="h-3 w-3" />
                                                 </button>
-                                                <button type="button" aria-label={t('common.cancel')} onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-muted text-muted-foreground">
+                                                <button type="button" aria-label={t('common.cancel')} onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground">
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
@@ -538,36 +613,57 @@ function SidebarContent({ onClose }: SidebarProps) {
 
                                     <nav className="grid gap-0.5">
                                         {labels.length === 0 && !isCreatingLabel && (
-                                            <div className="px-4 py-4 text-xs text-muted-foreground/60 text-center border mr-2 ml-2 rounded border-dashed">{t('sidebar.noLabels')}</div>
+                                            <div className="px-4 py-4 text-xs text-muted-foreground text-center border mr-2 ml-2 rounded border-dashed border-sidebar-border">{t('sidebar.noLabels')}</div>
                                         )}
                                         {labels.map((label) => {
                                             const isActive = activeLabels.includes(label.name.toLowerCase());
+                                            const dropKey = `label:${label.id}`;
+                                            const unread = label.count ?? 0;
+                                            const total = label.total ?? 0;
+                                            const name = labelDisplayName(label.name, t);
+                                            const countLabel = unread > 0
+                                                ? t('sidebar.counts.unreadOfTotal', { unread, total: Math.max(total, unread) })
+                                                : total > 0 ? t('sidebar.counts.total', { total }) : '';
                                             return (
-                                                <Link
+                                                <div
                                                     key={label.id}
-                                                    href={getLabelUrl(label.name)}
-                                                    className={cn(
-                                                        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                                                        isActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                                    )}
+                                                    className={cn('rounded-lg', dropTarget === dropKey && 'ring-2 ring-ring bg-sidebar-accent')}
+                                                    data-drop-label={label.id}
+                                                    onDragOver={(e) => handleLabelDragOver(e, label.id)}
+                                                    onDragLeave={() => handleDragLeave(dropKey)}
+                                                    onDrop={(e) => { void handleDrop(e, { kind: 'label', label }); }}
                                                 >
-                                                    <div className="flex items-center justify-center w-4 relative">
-                                                        <span
-                                                            className="h-2.5 w-2.5 rounded-full ring-2 ring-transparent group-hover:ring-border transition-all"
-                                                            style={{ backgroundColor: label.color ?? undefined }}
-                                                        />
-                                                        {isActive && (
-                                                            <div className="absolute inset-0 flex items-center justify-center">
-                                                                <div className="h-4 w-4 bg-primary/20 rounded-full animate-pulse" />
-                                                            </div>
+                                                    <Link
+                                                        href={getLabelUrl(label.name)}
+                                                        aria-current={isActive ? 'page' : undefined}
+                                                        aria-label={countLabel ? `${name}, ${countLabel}` : undefined}
+                                                        className={cn(
+                                                            "flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                                            isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
                                                         )}
-                                                    </div>
-                                                    <span className={cn("flex-1", isActive && "font-bold")}>{labelDisplayName(label.name, t)}</span>
-                                                    {(label.count ?? 0) > 0 && (
-                                                        <span className="ml-auto text-xs text-muted-foreground">{label.count}</span>
-                                                    )}
-                                                    {isActive && <Check className="h-3 w-3 text-primary ml-1" />}
-                                                </Link>
+                                                    >
+                                                        <div className="flex items-center justify-center w-4 relative">
+                                                            <span
+                                                                aria-hidden="true"
+                                                                className="h-2.5 w-2.5 rounded-full ring-1 ring-sidebar-border transition-all"
+                                                                style={{ backgroundColor: label.color ?? undefined }}
+                                                            />
+                                                            {isActive && (
+                                                                <div className="absolute inset-0 flex items-center justify-center">
+                                                                    <div className="h-4 w-4 bg-primary/20 rounded-full animate-pulse" />
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <span className={cn("min-w-0 flex-1 truncate", isActive && "font-bold")}>{name}</span>
+                                                        {unread > 0 && (
+                                                            <span aria-hidden="true" className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">{unread}</span>
+                                                        )}
+                                                        {total > 0 && (
+                                                            <span aria-hidden="true" className={cn("min-w-[1.5rem] text-right text-xs tabular-nums", !isActive && "text-muted-foreground")}>{total}</span>
+                                                        )}
+                                                        {isActive && <Check className="h-3 w-3 ml-1" aria-hidden="true" />}
+                                                    </Link>
+                                                </div>
                                             );
                                         })}
                                     </nav>
@@ -582,15 +678,17 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </div>
             </div>
 
+            <div className="mt-auto"><QuotaMeter /></div>
+
             {/* User Profile / Settings stub - Hidden on Mobile */}
-            <div className="p-4 mt-auto hidden md:block">
+            <div className="p-4 pt-2">
                 <AccountSwitcher
                     onOpenSettings={() => setShowSettings(true)}
                     showConnectedCount={unifiedReplyModeEnabled}
                 />
             </div>
 
-            <SettingsModal open={showSettings} onClose={() => setShowSettings(false)} />
+            <SettingsModal open={showSettings} onClose={() => { setShowSettings(false); setSettingsTab(undefined); }} initialTab={settingsTab} />
             <CronTrigger />
         </div>
     );
@@ -601,6 +699,36 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
     const { t } = useI18n();
     const [isOpen, setIsOpen] = useState(false);
     const [accounts, setAccounts] = useState<StoredAccount[]>([]);
+    const triggerRef = useRef<HTMLButtonElement | null>(null);
+    const menuRef = useRef<HTMLDivElement | null>(null);
+
+    // Al abrir, el foco va a la cuenta activa; al cerrar vuelve al boton (teclado y lector de pantalla).
+    const wasOpen = useRef(false);
+    useEffect(() => {
+        if (isOpen) {
+            wasOpen.current = true;
+            const id = requestAnimationFrame(() => {
+                const items = menuRef.current?.querySelectorAll<HTMLElement>('[data-menu-item]');
+                const active = menuRef.current?.querySelector<HTMLElement>('[aria-checked="true"]');
+                (active ?? items?.[0] ?? menuRef.current)?.focus();
+            });
+            return () => cancelAnimationFrame(id);
+        }
+        if (wasOpen.current) { wasOpen.current = false; triggerRef.current?.focus(); }
+    }, [isOpen]);
+
+    const onMenuKeyDown = (e: React.KeyboardEvent) => {
+        e.stopPropagation();
+        const nodes = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[data-menu-item]') ?? []);
+        const current = nodes.indexOf(document.activeElement as HTMLElement);
+        const focusAt = (i: number) => nodes[(i + nodes.length) % nodes.length]?.focus();
+        if (e.key === 'Escape') { e.preventDefault(); setIsOpen(false); }
+        else if (e.key === 'Tab') setIsOpen(false);
+        else if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(current + 1); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); focusAt(current < 0 ? -1 : current - 1); }
+        else if (e.key === 'Home') { e.preventDefault(); focusAt(0); }
+        else if (e.key === 'End') { e.preventDefault(); focusAt(nodes.length - 1); }
+    };
 
     useEffect(() => {
         setAccounts(AccountManager.getAccounts());
@@ -673,16 +801,15 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                 aria-haspopup="menu"
                 aria-expanded={isOpen}
                 aria-label={t('sidebar.accountMenu')}
-                className="flex w-full items-center gap-3 hover:bg-muted/50 p-2 rounded-lg transition-colors -mx-2 text-left"
+                ref={triggerRef}
+                className="flex min-h-11 w-full items-center gap-3 hover:bg-sidebar-accent p-2 rounded-lg transition-colors -mx-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-                <div className="h-9 w-9 rounded-full bg-gradient-to-tr from-pink-500 to-violet-500 flex items-center justify-center text-white font-medium text-xs shrink-0 border border-border">
-                    {(session.user.name?.[0] || session.user.email?.[0] || '?').toUpperCase()}
-                </div>
+                <Avatar from={session.user.name || session.user.email} className="h-9 w-9 text-xs border border-sidebar-border" />
                 <div className="flex flex-col overflow-hidden flex-1">
                     <span className="text-sm font-medium truncate">{session.user.name || t('sidebar.userFallback')}</span>
                     <span className="text-xs text-muted-foreground truncate">{profileText}</span>
                 </div>
-                <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                <ChevronUp className={cn('h-4 w-4 text-muted-foreground transition-transform', !isOpen && 'rotate-180')} aria-hidden="true" />
             </button>
 
             <AnimatePresence>
@@ -690,11 +817,16 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                     <>
                         <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
                         <motion.div
+                            ref={menuRef}
+                            role="menu"
+                            aria-label={t('sidebar.myAccounts')}
+                            tabIndex={-1}
+                            onKeyDown={onMenuKeyDown}
                             initial={{ opacity: 0, y: 10, scale: 0.95 }}
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.95 }}
                             transition={{ duration: 0.2 }}
-                            className="absolute bottom-full left-0 w-64 mb-2 bg-popover/95 backdrop-blur-md shadow-lg rounded-xl p-2 z-50 flex flex-col gap-1 ring-1 ring-border/10"
+                            className="absolute bottom-full left-0 w-64 mb-2 bg-popover text-popover-foreground shadow-lg rounded-xl p-2 z-50 flex flex-col gap-1 ring-1 ring-border/10 outline-none"
                         >
                             <div className="px-2 py-1.5 text-xs text-muted-foreground font-semibold uppercase tracking-wider">
                                 {t('sidebar.myAccounts')}
@@ -703,24 +835,35 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
                             {accounts.map(acc => {
                                 const isActive = acc.id === session.user?.id;
                                 return (
-                                    <div key={acc.id} className="group flex items-center gap-2 p-2 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer" onClick={() => handleSwitch(acc)}>
-                                        <div className={cn("h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0",
-                                            isActive ? "bg-primary text-primary-foreground" : "bg-secondary text-secondary-foreground")}>
-                                            {acc.name?.[0] || acc.email[0]}
-                                        </div>
-                                        <div className="flex flex-col overflow-hidden flex-1">
-                                            <span className={cn("text-sm font-medium truncate", isActive && "text-primary")}>{acc.name}</span>
-                                            <span className="text-xs text-muted-foreground truncate">{acc.email}</span>
-                                        </div>
-                                        {isActive && <Check className="h-4 w-4 text-primary" />}
+                                    <div key={acc.id} role="none" className="group flex items-center gap-1 rounded-lg hover:bg-muted/50 transition-colors">
+                                        <button
+                                            type="button"
+                                            role="menuitemradio"
+                                            aria-checked={isActive}
+                                            data-menu-item
+                                            tabIndex={-1}
+                                            onClick={() => handleSwitch(acc)}
+                                            className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-lg p-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        >
+                                            <Avatar from={acc.email} className={cn('h-8 w-8 text-xs', isActive && 'ring-2 ring-ring ring-offset-1 ring-offset-popover')} />
+                                            <span className="flex min-w-0 flex-1 flex-col">
+                                                <span className={cn('text-sm font-medium truncate', isActive && 'font-bold')}>{acc.name || acc.email}</span>
+                                                <span className="text-xs text-muted-foreground truncate">{acc.email}</span>
+                                            </span>
+                                            {isActive && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+                                        </button>
                                         {!isActive && (
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); handleLogout(acc.id); }}
-                                                className="p-1.5 text-muted-foreground hover:bg-destructive/15 hover:text-destructive rounded-md opacity-0 group-hover:opacity-100 transition-all"
+                                                type="button"
+                                                role="menuitem"
+                                                data-menu-item
+                                                tabIndex={-1}
+                                                onClick={() => handleLogout(acc.id)}
+                                                className="mr-1 rounded-md p-1.5 text-muted-foreground outline-none transition-all hover:bg-destructive/15 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100 [@media(pointer:coarse)]:opacity-100"
                                                 title={t('sidebar.forgetAccount')}
                                                 aria-label={t('sidebar.forgetAccountNamed', { email: acc.email })}
                                             >
-                                                <LogOut className="h-3.5 w-3.5" />
+                                                <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
                                             </button>
                                         )}
                                     </div>
@@ -729,17 +872,17 @@ function AccountSwitcher({ onOpenSettings, showConnectedCount }: { onOpenSetting
 
                             <div className="h-px bg-border my-1" />
 
-                            <button onClick={handleAddAccount} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium">
+                            <button type="button" role="menuitem" data-menu-item tabIndex={-1} onClick={handleAddAccount} className="flex min-h-11 items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
                                 <UserPlus className="h-4 w-4 text-muted-foreground" />
                                 {t('sidebar.addAccount')}
                             </button>
 
-                            <button onClick={onOpenSettings} className="flex items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium">
+                            <button type="button" role="menuitem" data-menu-item tabIndex={-1} onClick={onOpenSettings} className="flex min-h-11 items-center gap-2 p-2 rounded-lg hover:bg-muted text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
                                 <Settings className="h-4 w-4 text-muted-foreground" />
                                 {t('sidebar.settings')}
                             </button>
 
-                            <button onClick={() => handleLogout(session.user?.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-destructive/10 text-destructive text-sm font-medium">
+                            <button type="button" role="menuitem" data-menu-item tabIndex={-1} onClick={() => handleLogout(session.user?.id)} className="flex min-h-11 items-center gap-2 p-2 rounded-lg hover:bg-destructive/10 text-destructive text-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring">
                                 <LogOut className="h-4 w-4" />
                                 {t('sidebar.signOut')}
                             </button>

@@ -19,12 +19,13 @@ Para permitir que los usuarios inicien sesión con Google y usen integraciones c
 4. Haz clic en **Save and Continue**.
 5. **Scopes (Alcances)**:
    - Haz clic en **Add or Remove Scopes**.
-   - Busca y selecciona:
-     - `.../auth/userinfo.email`
-     - `.../auth/userinfo.profile`
-     - `.../auth/drive.file` (Para subir archivos)
-     - `.../auth/drive.readonly` (Para leer archivos)
-     - `.../auth/calendar` (Si usas calendario completo) o `.../calendar.events`
+   - Busca y selecciona los alcances que BloomX solicita (`src/app/api/auth/google/route.ts`):
+     - `openid`, `.../auth/userinfo.email` y `.../auth/userinfo.profile` (inicio de sesión)
+     - `.../auth/drive.readonly` (leer archivos de Drive)
+     - `.../auth/calendar` (calendarios y eventos)
+     - `.../auth/contacts.readonly` (sincronizar contactos)
+     - `.../auth/meetings.space.created` (crear salas de Google Meet)
+   - La autorización pide acceso sin conexión (`access_type=offline`, `prompt=consent`): se guarda un *refresh token*, **cifrado** en la tabla `Account`.
    - Haz clic en **Update** y luego **Save and Continue**.
 6. **Test Users (Usuarios de prueba)**:
    - Agrega tu propio correo de gmail para poder probar.
@@ -60,15 +61,16 @@ NEXTAUTH_SECRET=cambia_esto_por_un_string_largo_y_seguro
 
 ## 5. Habilitar APIs
 
-Para que Drive y Calendar funcionen, debes habilitar sus APIs explícitamente:
+Para que Drive, Calendar, contactos y Meet funcionen, debes habilitar sus APIs explícitamente:
 
 1. Ve a **APIs & Services** > **Library**.
 2. Busca **"Google Drive API"** y haz clic en **Enable**.
 3. Busca **"Google Calendar API"** y haz clic en **Enable**.
+4. Busca **"People API"** (contactos) y **"Google Meet REST API"** y habilítalas.
 
 ## 6. Probar
 
-1. Reinicia tu servidor (`bun run dev`).
+1. Reinicia tu servidor (`npm run dev`).
 2. Ve a Bloomx y abre la expansión de Google Drive (clip).
 3. Si no has iniciado sesión, verás el botón "Sign In with Google".
 4. Al hacer clic, te llevará a Google, te pedirá permisos y volverá a Bloomx.
@@ -76,3 +78,7 @@ Para que Drive y Calendar funcionen, debes habilitar sus APIs explícitamente:
 ---
 
 **Nota sobre Producción**: Cuando despliegues a producción (Vercel, etc.), deberás agregar la URL de producción a los orígenes y redirects en la consola de Google (ej. `https://tu-app.vercel.app/api/auth/callback/google`).
+
+**Notas de seguridad**: el inicio de sesión con Google **no** exige TOTP a un usuario que activó MFA voluntariamente (sí lo bloquea si MFA es obligatorio para su correo). Revocar los permisos de la app en la cuenta de Google es la forma de invalidar el *refresh token*.
+
+Ver también la documentación de la app: `/docs/env-variables` (grupo OAuth) y `/docs/security#limits`.

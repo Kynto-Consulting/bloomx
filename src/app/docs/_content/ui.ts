@@ -1,0 +1,81 @@
+import type { Locale } from './types';
+
+/** Cadenas de la interfaz de la documentacion (el contenido de cada pagina vive en ./pages). */
+const UI = {
+    es: {
+        siteTitle: '{name} Docs',
+        openApp: 'Abrir la app',
+        menu: 'Abrir navegación de la documentación',
+        navLabel: 'Navegación de la documentación',
+        close: 'Cerrar',
+        onThisPage: 'En esta página',
+        prev: 'Anterior',
+        next: 'Siguiente',
+        copy: 'Copiar',
+        copied: 'Copiado',
+        copyCode: 'Copiar código',
+        search: 'Buscar en la documentación',
+        searchPlaceholder: 'Buscar… (por ejemplo: CRON_SECRET)',
+        searchNoResults: 'Sin resultados para “{q}”.',
+        searchHint: 'Escribe al menos 2 letras.',
+        searchResults: '{n} resultados',
+        skipToContent: 'Ir al contenido',
+        envName: 'Variable',
+        envScope: 'Dónde',
+        envRequired: 'Requisito',
+        envDefault: 'Por defecto',
+        envDesc: 'Descripción',
+        scopeFrontend: 'Frontend',
+        scopeBackend: 'Backend',
+        scopeBoth: 'Ambos',
+        reqRequired: 'Obligatoria',
+        reqOptional: 'Opcional',
+        reqConditional: 'Condicional',
+        noDefault: '—',
+        diagramLabel: 'Diagrama',
+        lastVerified: 'Verificado contra el código el {date}.',
+        editHint: 'Esta documentación se genera desde src/app/docs/_content; un test comprueba enlaces y variables.',
+    },
+    en: {
+        siteTitle: '{name} Docs',
+        openApp: 'Open app',
+        menu: 'Open documentation navigation',
+        navLabel: 'Documentation navigation',
+        close: 'Close',
+        onThisPage: 'On this page',
+        prev: 'Previous',
+        next: 'Next',
+        copy: 'Copy',
+        copied: 'Copied',
+        copyCode: 'Copy code',
+        search: 'Search the documentation',
+        searchPlaceholder: 'Search… (for example: CRON_SECRET)',
+        searchNoResults: 'No results for “{q}”.',
+        searchHint: 'Type at least 2 letters.',
+        searchResults: '{n} results',
+        skipToContent: 'Skip to content',
+        envName: 'Variable',
+        envScope: 'Where',
+        envRequired: 'Requirement',
+        envDefault: 'Default',
+        envDesc: 'Description',
+        scopeFrontend: 'Frontend',
+        scopeBackend: 'Backend',
+        scopeBoth: 'Both',
+        reqRequired: 'Required',
+        reqOptional: 'Optional',
+        reqConditional: 'Conditional',
+        noDefault: '—',
+        diagramLabel: 'Diagram',
+        lastVerified: 'Verified against the code on {date}.',
+        editHint: 'This documentation is generated from src/app/docs/_content; a test checks links and variables.',
+    },
+} as const;
+
+export type UiKey = keyof (typeof UI)['es'];
+
+export function ui(locale: Locale, key: UiKey, params?: Record<string, string | number>): string {
+    let s: string = UI[locale]?.[key] ?? UI.es[key];
+    if (params) s = s.replace(/\{(\w+)\}/g, (w, n: string) => (n in params ? String(params[n]) : w));
+    return s;
+}

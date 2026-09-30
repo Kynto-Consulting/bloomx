@@ -84,7 +84,7 @@ export function FloatingWindow({
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 100, scale: 0.9 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                className="fixed bottom-0 z-50 w-64 rounded-t-lg bg-background shadow-lg"
+                className="fixed bottom-0 z-50 w-64 rounded-t-lg border border-b-0 border-border bg-card text-card-foreground shadow-lg"
                 style={{ right: `${rightOffset}px` }}
             >
                 <div

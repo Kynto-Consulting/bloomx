@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { parseContactInput } from '@/lib/contacts';
+import { buildContactDeletedContext, buildContactSavedContext, fireLifecycleHook } from '@/lib/expansions/server-hooks';
 
 // GET /api/contacts/[id] — un contacto propio.
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -53,6 +54,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
                 source: 'local',
             },
         });
+        fireLifecycleHook('CONTACT_SAVED', user.id, buildContactSavedContext({ contactId: contact.id, email: contact.email, created: false, source: contact.source }));
         return NextResponse.json(contact);
     } catch (error: any) {
         if (error?.code === 'P2002') {
@@ -71,5 +73,6 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     const { id } = await params;
 
     const result = await prisma.contact.deleteMany({ where: { id, userId: user.id } });
+    if (result.count > 0) fireLifecycleHook('CONTACT_DELETED', user.id, buildContactDeletedContext({ contactId: id }));
     return NextResponse.json({ success: true, deleted: result.count });
 }

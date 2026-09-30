@@ -31,7 +31,7 @@ export function ConfirmDialog({
             onClose={busy ? () => undefined : onCancel}
             closeOnBackdrop={!busy}
             dialogOptions={{ disableEscape: busy, initialFocus: () => (destructive ? cancelRef.current : undefined) }}
-            panelClassName="w-full max-w-md rounded-xl border border-border bg-background p-5 shadow-xl"
+            panelClassName="w-full max-w-md rounded-xl border border-border bg-card p-5 text-card-foreground shadow-xl"
         >
             {({ titleId, descriptionId }) => (
                 <div role="document">

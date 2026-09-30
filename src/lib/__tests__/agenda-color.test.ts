@@ -90,3 +90,30 @@ describe('agendaAccentText / agendaSoft sobre las superficies de TODOS los temas
         expect(agendaAccentText('#1e3a8a', ['#ffffff'])).toBe('#1e3a8a');
     });
 });
+
+// ---- Fase 3b: contraste con las paletas de empresa de theme-fixtures.ts ----
+import { BRAND_FIXTURES } from '../theme-fixtures';
+import { buildBrandThemes } from '../brand-theme';
+import { normalizeHex } from '../color';
+
+describe('agenda-color sobre paletas de empresa', () => {
+    const cases = Object.entries(BRAND_FIXTURES).flatMap(([name, cfg]) => {
+        const bt = buildBrandThemes(cfg);
+        return bt ? [[name, 'light', bt.light.tokens] as const, [name, 'dark', bt.dark.tokens] as const] : [];
+    });
+
+    it('hay paletas que probar', () => expect(cases.length).toBeGreaterThanOrEqual(20));
+
+    it.each(cases)('%s (%s): chips suaves y acentos de usuario legibles sobre fondo y tarjeta', (_n, _m, tokens) => {
+        const surfaces = [tokens.background, tokens.card].map((s) => normalizeHex(s)!);
+        for (const color of USER_COLORS) {
+            for (const surface of surfaces) {
+                const soft = agendaSoft(color, surface);
+                expect(contrast(soft.foreground, soft.background), `${color} sobre ${surface}: chip`).toBeGreaterThanOrEqual(AGENDA_MIN_CONTRAST);
+                expect(contrast(agendaAccentText(color, surface), surface), `${color} sobre ${surface}: acento`).toBeGreaterThanOrEqual(AGENDA_MIN_CONTRAST);
+            }
+            // relleno solido: el texto no depende de la paleta de la app
+            expect(agendaContrast(color)).toBeGreaterThanOrEqual(AGENDA_MIN_CONTRAST);
+        }
+    });
+});

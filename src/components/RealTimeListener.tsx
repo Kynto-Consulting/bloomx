@@ -5,6 +5,7 @@ import { useCache } from '@/contexts/CacheContext';
 import { toast } from 'sonner';
 import { usePathname } from 'next/navigation';
 import { useSession } from '@/components/SessionProvider';
+import { useI18n } from '@/components/I18nProvider';
 import { EMAIL_LISTS_AND_COUNTS_PATTERN } from '@/lib/mail-list';
 
 const MAX_BACKOFF_MS = 60_000;
@@ -13,6 +14,10 @@ export function RealTimeListener() {
     const { status } = useSession();
     const { invalidate } = useCache();
     const pathname = usePathname();
+    const { t } = useI18n();
+    // El idioma puede cambiar sin reconectar el canal SSE: el aviso lee el traductor desde una ref.
+    const tRef = useRef(t);
+    tRef.current = t;
 
     // Refs para que el efecto de conexion NO dependa de pathname/invalidate:
     // reconectar en cada navegacion era innecesario.
@@ -59,7 +64,8 @@ export function RealTimeListener() {
                 try {
                     const data = JSON.parse(event.data);
                     if (data.type === 'NEWMESSAGE') {
-                        toast.info('New message received!');
+                        // id fijo: varios avisos seguidos se funden en uno (y se anuncia una sola vez a los lectores de pantalla)
+                        toast.info(tRef.current('emailList.toast.newMessage'), { id: 'bx-new-message' });
                         refreshMail();
                     }
                 } catch (e) {

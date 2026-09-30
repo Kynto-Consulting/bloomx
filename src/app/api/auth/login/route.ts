@@ -4,7 +4,9 @@ import bcrypt from "bcryptjs";
 import { setSessionCookie } from "@/lib/session";
 import { signPendingJWT } from "@/lib/jwt";
 import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
+import { findUserByEmail } from "@/lib/user-lookup";
 import { auditLog, getClientIp, getDummyBcryptHash, rateLimitAsync, rateLimitResetAsync } from "@/lib/security";
+import { getUserState } from "@/lib/admin/user-state";
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
@@ -39,9 +41,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        const user = await prisma.user.findUnique({
-            where: { email },
-        });
+        const user = await findUserByEmail(email);
 
         // Se ejecuta siempre un bcrypt.compare para igualar tiempos (anti-enumeracion)
         const hash = user?.password || (await getDummyBcryptHash());
@@ -53,6 +53,13 @@ export async function POST(req: NextRequest) {
         }
 
         await rateLimitResetAsync(acctKey);
+
+        // Cuenta deshabilitada desde la consola de administracion (solo se revela tras una contrasena correcta).
+        const adminState = await getUserState(user.id);
+        if (adminState.disabled) {
+            auditLog("auth.login.disabled", { userId: user.id, ip });
+            return NextResponse.json({ error: "Account disabled", code: "ACCOUNT_DISABLED" }, { status: 403, headers: NO_STORE });
+        }
 
         // Segundo factor (NIST 800-63B AAL2, CIS 6.3-6.5). No se emite cookie hasta verificarlo.
         // Obligatorio para administradores (ADMIN_EMAILS); opcional para el resto si lo activaron.
@@ -84,7 +91,7 @@ export async function POST(req: NextRequest) {
         auditLog("auth.login.success", { userId: user.id, email: user.email, ip });
 
         return NextResponse.json(
-            { success: true, token, user: { id: user.id, email: user.email, name: user.name } },
+            { success: true, token, user: { id: user.id, email: user.email, name: user.name }, ...(adminState.mustChangePassword ? { mustChangePassword: true } : {}) },
             { headers: NO_STORE }
         );
 

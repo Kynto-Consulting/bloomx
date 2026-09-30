@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { useTheme } from '@/components/ThemeProvider';
-import { invert, normalizeHex } from '@/lib/color';
+import { buildMailThemeCss, readMailTokens } from '@/lib/mail-theme';
 import { analyzeLink, describeLinkRisk } from '@/lib/link-safety';
 import { assetCspSource } from '@/lib/cid-display';
 
@@ -28,7 +28,7 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     font-size: 14px;
     line-height: 1.5;
-    color: #1a1a1a;
+    color: var(--bx-text);
     width: 100%;
     max-width: 100%;
     overflow-x: hidden;
@@ -38,18 +38,18 @@ body {
 table { width: 100% !important; max-width: 100% !important; table-layout: fixed; }
 th, td { word-break: break-word; overflow-wrap: anywhere; }
 img { max-width: 100%; height: auto; }
-a { color: #2563eb; text-decoration: underline; word-break: break-word; overflow-wrap: anywhere; }
+a { color: var(--bx-link); text-decoration: underline; word-break: break-word; overflow-wrap: anywhere; }
 pre, code { white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
-blockquote { margin: 0 0 0 .8ex; border-left: 1px #999 solid; padding-left: 1ex; max-width: 100%; }
+blockquote { margin: 0 0 0 .8ex; border-left: 1px var(--bx-quote) solid; padding-left: 1ex; max-width: 100%; }
 .gmail_quote_toggle {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 24px; background-color: #f3f4f6; border: 1px solid #d1d5db;
-    border-radius: 4px; cursor: pointer; margin: 8px 0; color: #6b7280;
+    width: 32px; height: 24px; background-color: var(--bx-chip); border: 1px solid var(--bx-chip-border);
+    border-radius: 4px; cursor: pointer; margin: 8px 0; color: var(--bx-chip-text);
     font-weight: bold; font-size: 12px; position: relative; z-index: 50;
 }
 .bx-linkwarn {
     display: inline-block; margin: 0 0 0 4px; padding: 0 5px; font-size: 11px; line-height: 1.6;
-    color: #92400e; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px;
+    color: var(--bx-warn-text); background: var(--bx-warn-bg); border: 1px solid var(--bx-warn-border); border-radius: 4px;
     text-decoration: none; word-break: break-all; font-weight: 600;
 }
 #content { display: block; padding: 1px; width: 100%; max-width: 100%; overflow-x: hidden; }
@@ -101,7 +101,7 @@ function setupQuotes() {
             btn.className = 'gmail_quote_toggle';
             btn.textContent = '\\u2022\\u2022\\u2022';
             btn.title = 'Show quoted text';
-            btn.style.cssText = 'display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 24px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; color: #4b5563; font-weight: bold; font-size: 14px; margin: 8px 0; user-select: none; z-index: 50;';
+            btn.style.cssText = 'display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 24px; background: var(--bx-chip); border: 1px solid var(--bx-chip-border); border-radius: 4px; cursor: pointer; color: var(--bx-chip-text); font-weight: bold; font-size: 14px; margin: 8px 0; user-select: none; z-index: 50;';
             btn.onclick = function (e) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -143,23 +143,13 @@ if (contentEl && window.ResizeObserver) {
 `;
 
 /**
- * Tema del correo. Los correos HTML traen sus propios colores (casi siempre pensados
- * sobre blanco), asi que por defecto se muestran sobre "papel" blanco tambien en temas
- * oscuros ('paper'). Alternativa 'invert': invierte luminosidad conservando el tono
- * (invert + hue-rotate) y re-invierte imagenes/video para que no salgan en negativo.
- * Solo se concatenan colores calculados por nosotros, nunca datos del correo.
+ * Tema del correo derivado de los tokens del tema activo (ver `@/lib/mail-theme`): papel, texto,
+ * enlaces (--link), citas y avisos. 'paper' (defecto) o 'invert' (invert + hue-rotate con colores
+ * pre-invertidos e imagenes re-invertidas). Solo se concatenan colores calculados por nosotros.
  */
-function buildThemeCss(invertMode: boolean): string {
-    if (!invertMode) return 'html { background: #ffffff; color-scheme: light; }';
-    let parentBg = '#0f1115';
-    try {
-        const v = normalizeHex(getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim());
-        if (v) parentBg = v;
-    } catch { /* usa el valor por defecto */ }
-    return `
-html { background: ${invert(parentBg)}; filter: invert(1) hue-rotate(180deg); }
-img, video, picture, canvas, svg image, [style*="background-image"] { filter: invert(1) hue-rotate(180deg); }
-.gmail_quote_toggle { filter: none; }`;
+function buildThemeCss(scheme: 'light' | 'dark', invertMode: boolean): string {
+    const tokens = readMailTokens(typeof document !== 'undefined' ? document.documentElement : null, scheme);
+    return buildMailThemeCss(tokens, scheme, invertMode);
 }
 
 /**
@@ -242,14 +232,15 @@ export function SafeIframe({ html, className, blockRemoteImages = false, trusted
     const tokenRef = useRef<string>('');
     const [height, setHeight] = useState('200px');
     const [srcDoc, setSrcDoc] = useState('');
-    const { scheme, mailDarkMode } = useTheme();
+    const { scheme, mailDarkMode, resolvedTheme } = useTheme();
+    const themeId = resolvedTheme?.id;
     const invertMode = scheme === 'dark' && mailDarkMode === 'invert';
 
     useEffect(() => {
         // Solo en cliente (DOMPurify necesita DOM; crypto para nonce/token).
         tokenRef.current = randomToken();
-        setSrcDoc(buildDocument(html || '', randomToken(), tokenRef.current, blockRemoteImages, buildThemeCss(invertMode), trustedKey ? trustedKey.split(' ') : []));
-    }, [html, blockRemoteImages, invertMode, trustedKey]);
+        setSrcDoc(buildDocument(html || '', randomToken(), tokenRef.current, blockRemoteImages, buildThemeCss(scheme, invertMode), trustedKey ? trustedKey.split(' ') : []));
+    }, [html, blockRemoteImages, invertMode, scheme, themeId, trustedKey]);
 
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {

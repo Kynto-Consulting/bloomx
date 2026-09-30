@@ -1,98 +1,40 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Archive, ArchiveX, Trash2, Clock, Reply, ReplyAll, Forward, MoreVertical, MousePointerClick, Star, Tag, Check, ArrowLeft, X, Sparkles, CalendarDays, MapPin, ShieldCheck, ShieldAlert, ShieldQuestion, ImageOff } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Forward, MousePointerClick, RefreshCw, Reply, ReplyAll } from 'lucide-react';
 import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
-import { formatDate, cn } from '@/lib/utils';
+import { useSession } from '@/components/SessionProvider';
+import { useI18n } from '@/components/I18nProvider';
+import { cn } from '@/lib/utils';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { buildForwardHeaderHtml } from '@/lib/forward-header';
 import { toast } from 'sonner';
 import { fetchDeduped } from '@/lib/fetchdedupe';
-
-import * as Icons from 'lucide-react';
-import { SafeIframe } from './ui/SafeIframe';
 import { ExtensionLoader } from './expansions/ExtensionLoader';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Popover } from './ui/Popover';
 import { AccountManager } from '@/lib/account-manager';
 import { splitAddressList, extractEmailOnly, buildReplyAllRecipients, findAttachmentForCid, replaceCidReferences, extractCidReferences } from '@/lib/email-utils';
-import { resolveInlineCidImages } from '@/lib/cid-display';
-import type { EmailAuthentication, AuthVerdict } from '@/lib/email-auth';
-import { mergeEmailPatchResponse, applyEmailPatch, optimisticEmailPatch } from '@/lib/mail-view-state';
-import {
-    hasRemoteImages, isRemoteImagesAllowed, allowForEmail, allowForSender, loadPolicy, savePolicy, emptyPolicy,
-    type RemoteImagePolicy,
-} from '@/lib/remote-images';
+import { resolveJoinLink } from '@/lib/calendar/join-link';
+import { applyEmailPatch, initialExpandedIds } from '@/lib/mail-view-state';
+import { loadPolicy, savePolicy, emptyPolicy, type RemoteImagePolicy } from '@/lib/remote-images';
+import { COUNTS_CACHE_KEY, labelSelectionState, type LabelRef, type ListEmail } from '@/lib/mail-list';
+import { ownAddressSet, senderName, threadParticipants } from '@/lib/mail-list-view';
+import { labelDisplayName } from '@/lib/organizer/labels';
+import { folderOfEmail, type MailActionId } from '@/lib/mail-actions';
+import { buildShortcutMap } from '@/lib/shortcuts';
+import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
+import { mailBus, mailNav, neighbours } from '@/components/mail/mail-bus';
+import { ReaderToolbar, type ReaderMenuKind } from '@/components/mail/ReaderToolbar';
+import { ThreadMessage } from '@/components/mail/ThreadMessage';
+import { MoveMenu } from '@/components/mail/MoveMenu';
+import { SnoozeMenu } from '@/components/mail/SnoozeMenu';
+import { useMailActions } from '@/components/mail/useMailActions';
+import { useLabels } from '@/components/mail/useLabels';
+import { buildPrintDocument, printHtmlDocument } from '@/components/mail/print-email';
+import type { EmailDetails, InvitePreview } from '@/components/mail/reader-types';
 
 const ENABLE_THREAD_VIEW = true;
-
-interface EmailDetails {
-    email: {
-        id: string;
-        from: string;
-        to: string;
-        cc?: string | null;
-        bcc?: string | null;
-        cleanTo?: string | null;
-        replyTo?: string | null;
-        subject: string;
-        createdAt: string;
-        read: boolean;
-        starred: boolean;
-        folder: string;
-        attachments: any[];
-        labels: any[];
-        snippet?: string;
-    };
-    content: string;
-    invitePreview?: {
-        attachmentId: string;
-        filename: string;
-        uid?: string | null;
-        title: string;
-        description?: string | null;
-        location?: string | null;
-        meetUrl?: string | null;
-        startsAt?: string | null;
-        endsAt?: string | null;
-        method?: string | null;
-        organizerEmail?: string | null;
-        organizerName?: string | null;
-    } | null;
-    inviteResponse?: {
-        response: 'accepted' | 'tentative' | 'declined';
-        respondedAt?: string;
-        organizerEmail?: string;
-        organizerName?: string;
-        uid?: string;
-    } | null;
-    authentication?: EmailAuthentication | null;
-    thread?: EmailDetails[]; // Thread support
-}
-
-function getMeetProvider(url?: string | null) {
-    if (!url) return null;
-    if (url.includes('meet.google.com')) return 'Google Meet';
-    if (url.includes('zoom.us')) return 'Zoom';
-    if (url.includes('teams.microsoft.com')) return 'Microsoft Teams';
-    return 'Videollamada';
-}
-
-function formatInviteDate(value?: string | null) {
-    if (!value) return '';
-
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
-        return value;
-    }
-
-    return new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-    }).format(parsed);
-}
 
 function extractRecipientEmails(value?: string | null): string[] {
     return splitAddressList(value).map(extractEmailOnly).filter(Boolean);
@@ -100,49 +42,10 @@ function extractRecipientEmails(value?: string | null): string[] {
 
 function resolveSenderFromEmail(email: { to?: string | null; cleanTo?: string | null }): string | undefined {
     const candidates = extractRecipientEmails(email.cleanTo || email.to);
-
     for (const recipient of candidates) {
-        if (AccountManager.getAccountByEmail(recipient)) {
-            return recipient;
-        }
+        if (AccountManager.getAccountByEmail(recipient)) return recipient;
     }
-
     return AccountManager.getActiveAccount()?.email || undefined;
-}
-
-const VERDICT_LABEL: Record<AuthVerdict, string> = {
-    pass: 'correcto', fail: 'fallo', softfail: 'fallo suave', neutral: 'neutral', none: 'sin registro',
-    temperror: 'error temporal', permerror: 'error permanente', unknown: 'desconocido',
-};
-
-/** Insignia de autenticacion SPF/DKIM/DMARC (solo informativa; ver src/lib/email-auth.ts). */
-function AuthBadge({ auth }: { auth?: EmailAuthentication | null }) {
-    if (!auth) return null;
-    const detail = `SPF: ${VERDICT_LABEL[auth.spf]} · DKIM: ${VERDICT_LABEL[auth.dkim]} · DMARC: ${VERDICT_LABEL[auth.dmarc]}` +
-        (auth.trusted ? '' : ' · cabeceras contradictorias: no fiable');
-    const cfg = {
-        verified: { Icon: ShieldCheck, text: 'Verificado', cls: 'border-success/40 bg-success/10 text-success' },
-        partial: { Icon: ShieldQuestion, text: 'Parcial', cls: 'border-warning/40 bg-warning/10 text-warning' },
-        failed: { Icon: ShieldAlert, text: 'Sin autenticar', cls: 'border-destructive/40 bg-destructive/10 text-destructive' },
-        unknown: { Icon: ShieldQuestion, text: 'Sin datos', cls: 'border-border bg-muted text-muted-foreground' },
-    }[auth.summary];
-    const Icon = cfg.Icon;
-    const untrusted = !auth.trusted && auth.summary === 'verified';
-    return (
-        <span
-            className={cn('inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium', untrusted ? 'border-warning/40 bg-warning/10 text-warning' : cfg.cls)}
-            title={detail}
-            aria-label={`Autenticacion del remitente: ${cfg.text}. ${detail}`}
-        >
-            <Icon className="h-3 w-3" aria-hidden="true" />
-            {untrusted ? 'Verificado (no fiable)' : cfg.text}
-            <span className="hidden md:inline font-normal opacity-80">
-                SPF {auth.spf === 'pass' ? '✓' : auth.spf === 'fail' || auth.spf === 'softfail' ? '✗' : '?'}{' '}
-                DKIM {auth.dkim === 'pass' ? '✓' : auth.dkim === 'fail' ? '✗' : '?'}{' '}
-                DMARC {auth.dmarc === 'pass' ? '✓' : auth.dmarc === 'fail' ? '✗' : '?'}
-            </span>
-        </span>
-    );
 }
 
 const CID_INLINE_LIMIT = 2 * 1024 * 1024;
@@ -178,22 +81,44 @@ async function inlineCidImages(html: string, attachments: any[] | undefined): Pr
     return replaceCidReferences(html, (cid) => resolved.get(cid) ?? null);
 }
 
+const threadKey = (id: string) => `email-${id}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`;
+
+/** Enlace de reunion de una invitacion: decide por HOST si es boton, texto con aviso o nada (ver lib/calendar/join-link). */
+const resolveInviteJoin = (invite: InvitePreview) => resolveJoinLink({
+    meetUrl: invite.meetUrl,
+    location: invite.location,
+    description: invite.description,
+});
+
+const quickBtn = cn(
+    'inline-flex min-h-10 items-center gap-2 rounded-full border border-border bg-background px-4 py-2 text-sm font-medium transition-colors',
+    'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+);
+
 export function MailView() {
+    const { t, intlLocale } = useI18n();
     const searchParams = useSearchParams();
     const router = useRouter();
     const id = searchParams.get('id');
+    const { data: session } = useSession();
+    const rootRef = useRef<HTMLDivElement | null>(null);
     const [data, setLocalData] = useState<EmailDetails | null>(null);
+    const dataRef = useRef<EmailDetails | null>(null);
+    dataRef.current = data;
     const [loading, setLoading] = useState(false);
-    const [summary, setSummary] = useState<string | null>(null);
+    const [loadError, setLoadError] = useState(false);
+    const [reloadKey, setReloadKey] = useState(0);
     const [inviteActionEmailId, setInviteActionEmailId] = useState<string | null>(null);
     const [addCalendarEmailId, setAddCalendarEmailId] = useState<string | null>(null);
-
-    const [availableLabels, setAvailableLabels] = useState<any[]>([]);
-    const [showLabelMenu, setShowLabelMenu] = useState(false);
-    const labelMenuTriggerRef = useRef<HTMLButtonElement>(null);
     const { getData, setData: setCacheData, invalidate } = useCache();
-
     const { openCompose } = useCompose();
+    const openDraft = useCallback((d: { id: string; from?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; attachments?: unknown[] }) => {
+        openCompose({ id: d.id, draftId: d.id, from: d.from, to: d.to || '', cc: d.cc || '', bcc: d.bcc || '', subject: d.subject || '', body: d.body || '', minimized: false, attachments: (d.attachments as any[]) || [] });
+    }, [openCompose]);
+    const actions = useMailActions({ openDraft });
+    const actionsRef = useRef(actions);
+    actionsRef.current = actions;
+    const { labels: availableLabels, loading: labelsLoading, ensure: ensureLabels } = useLabels();
 
     // Politica de imagenes remotas (bloqueadas por defecto; se permite por correo o por remitente).
     const [imagePolicy, setImagePolicy] = useState<RemoteImagePolicy>(emptyPolicy);
@@ -203,236 +128,215 @@ export function MailView() {
         savePolicy(next);
     };
 
-    // Track expanded state for thread items
+    // Mensajes expandidos del hilo y cuales llegaron sin leer (se resaltan aunque ya se marquen como leidos).
     const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+    const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+
+    const [menu, setMenu] = useState<ReaderMenuKind | null>(null);
+    const menuAnchorRef = useRef<HTMLElement | null>(null);
+
+    const ownAddresses = useMemo(
+        () => ownAddressSet([session?.user?.email, AccountManager.getActiveAccount()?.email, ...AccountManager.getAccounts().map((a) => a.email)]),
+        [session?.user?.email],
+    );
+
+    /** Marca como leido sin recargar la lista: PATCH + parche en la lista abierta + contadores. */
+    const markReadQuiet = useCallback(async (emailId: string) => {
+        try {
+            const res = await fetch(`/api/emails/${emailId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ read: true }),
+            });
+            if (!res.ok) return;
+            mailBus.emit({ type: 'patch', items: [{ id: emailId, updates: { read: true } }] });
+            void invalidate(COUNTS_CACHE_KEY);
+        } catch { /* se reintenta al volver a abrir */ }
+    }, [invalidate]);
 
     useEffect(() => {
         if (!id) return;
         let cancelled = false; // evita que una respuesta tardia de otro correo pise la vista actual
 
-        async function fetchEmailAndLabels() {
+        async function fetchEmail() {
             setLoading(true);
+            setLoadError(false);
             try {
-                // Fetch Email - Cache Key v2 to bust old structure
-                const emailKey = `email-${id}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`;
+                const emailKey = threadKey(id as string);
                 let emailData = await getData<EmailDetails>(emailKey);
-
                 if (!emailData) {
                     emailData = await fetchDeduped(`/api/emails/${id}${ENABLE_THREAD_VIEW ? '?thread=true' : ''}`);
-                    if (emailData?.email) {
-                        setCacheData(emailKey, emailData);
-                    }
+                    if (emailData?.email) setCacheData(emailKey, emailData);
                 }
-
-                // Fetch Common Labels
-                const labelsKey = 'labels-all';
-                let labelsData = await getData<any[]>(labelsKey);
-
-                if (!labelsData) {
-                    const resLabels = await fetch('/api/labels');
-                    labelsData = await resLabels.json();
-                    if (Array.isArray(labelsData)) {
-                        setCacheData(labelsKey, labelsData);
-                    }
-                }
-
                 if (cancelled) return;
+                if (!emailData?.email) { setLoadError(true); return; }
 
-                if (emailData?.email) {
-                    // Mark as read if needed
-                    if (!emailData.email.read) {
-                        // Copia: emailData puede ser el mismo objeto que vive en la cache.
-                        emailData = { ...emailData, email: { ...emailData.email, read: true } };
-                        const readEmail = emailData!;
-                        // Fire and forget API update
-                        fetch(`/api/emails/${emailData.email.id}`, {
-                            method: 'PATCH',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ read: true })
-                        }).then(async () => {
-                            // Optimistically update the list cache to avoid full re-render
-                            const folder = readEmail.email.folder || 'inbox';
-                            const listKey = `emails-${folder}`;
-                            const cachedList = await getData<any[]>(listKey);
+                const items = emailData.thread && emailData.thread.length > 0 ? emailData.thread : [emailData];
+                // Resaltar lo que llego sin leer ANTES de marcarlo como leido.
+                setUnreadIds(new Set(items.filter((m) => m.email.read === false).map((m) => m.email.id)));
+                setExpandedIds(initialExpandedIds(items.map((m) => ({ id: m.email.id, read: m.email.read })), emailData.email.id));
 
-                            if (Array.isArray(cachedList)) {
-                                const idx = cachedList.findIndex((e: any) => e.id === readEmail.email.id);
-                                if (idx !== -1) {
-                                    const newList = [...cachedList];
-                                    newList[idx] = { ...newList[idx], read: true };
-                                    // This triggers listeners (EmailList) but with specific data change
-                                    // Since EmailList is memoized, only the changed item re-renders
-                                    setCacheData(listKey, newList);
-                                }
-                            }
-
-                            invalidate('stats-counts');
-                        });
-                        // Update cache with read status
-                        setCacheData(emailKey, emailData);
-                    }
-
-                    setLocalData(emailData);
-                    // Start with only the NEWEST email expanded (index 0 now)
-                    if (emailData.thread && emailData.thread.length > 0) {
-                        // Safety check for malformed data
-                        const firstItem = emailData.thread[0];
-                        const firstId = firstItem.email?.id || (firstItem as any).id; // Fallback if flat
-                        if (firstId) setExpandedIds(new Set([firstId]));
-                    } else {
-                        setExpandedIds(new Set([emailData.email.id]));
-                    }
+                if (!emailData.email.read) {
+                    // Copia: emailData puede ser el mismo objeto que vive en la cache.
+                    emailData = { ...emailData, email: { ...emailData.email, read: true } };
+                    void markReadQuiet(emailData.email.id);
+                    setCacheData(emailKey, emailData);
                 }
-                if (Array.isArray(labelsData)) {
-                    setAvailableLabels(labelsData);
-                }
+                setLocalData(emailData);
             } catch (err) {
                 console.error(err);
+                if (!cancelled) setLoadError(true);
             } finally {
                 if (!cancelled) setLoading(false);
             }
         }
-        fetchEmailAndLabels();
+        fetchEmail();
         return () => { cancelled = true; };
-    }, [id, getData, setCacheData]);
+    }, [id, getData, setCacheData, markReadQuiet, reloadKey]);
 
-    const handleUpdate = async (updates: any) => {
-        if (!data) return;
-
-        const emailId = data.email.id;
-        const cacheKey = `email-${emailId}-${ENABLE_THREAD_VIEW ? 'thread-v2' : 'single'}`;
-        const previousData = data;
-
-        // Parche optimista sin claves de UI (toggleLabelId) y con las etiquetas ya resueltas.
-        const patch = optimisticEmailPatch(updates, data.email.labels || [], availableLabels);
-        const optimistic = applyEmailPatch(data, emailId, patch);
-
-        setLocalData(optimistic);
-        setCacheData(cacheKey, optimistic);
-
-        try {
-            const res = await fetch(`/api/emails/${emailId}`, {
-                method: 'PATCH',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(updates)
-            });
-
-            if (!res.ok) throw new Error('Failed to update');
-
-            if (updates.toggleLabelId || updates.labelIds) {
-                // La respuesta de PATCH es la fila de Email (labels) SIN adjuntos firmados ni replyTo resuelto:
-                // se fusiona con lo que hay en pantalla en vez de reemplazar el correo.
-                const json = await res.json();
-                const merged = applyEmailPatch(optimistic, emailId, json, mergeEmailPatchResponse);
-                setLocalData(merged);
-                setCacheData(cacheKey, merged);
-            }
-
-            toast.success('Updated');
-        } catch (error) {
-            setLocalData(previousData);
-            setCacheData(cacheKey, previousData);
-            toast.error('Failed to update');
-        }
-    };
-
-    const toggleLabel = (labelId: string) => {
-        handleUpdate({ toggleLabelId: labelId });
-    };
-
-    const createAndApplyLabel = async () => {
-        const rawName = window.prompt('Label name');
-        const name = String(rawName || '').trim();
-
-        if (!name) {
+    // Cambios hechos desde otras partes (lista, menus, deshacer) se reflejan en el lector abierto.
+    useEffect(() => mailBus.subscribe((event) => {
+        const current = dataRef.current;
+        if (!current) return;
+        let next = current;
+        const apply = (emailId: string, patch: Record<string, unknown>) => { next = applyEmailPatch(next, emailId, patch); };
+        if (event.type === 'patch') {
+            event.items.forEach((i) => apply(i.id, i.updates));
+        } else if (event.type === 'upsert') {
+            event.emails.forEach((e) => apply(e.id, { read: e.read, starred: e.starred, labels: e.labels, folder: e.folder }));
+        } else {
             return;
         }
-
-        try {
-            const response = await fetch('/api/labels', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name }),
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to create label');
-            }
-
-            const label = await response.json();
-
-            setAvailableLabels((prev) => {
-                const exists = prev.some((item) => item.id === label.id);
-                if (exists) return prev;
-                return [...prev, label].sort((a, b) => String(a.name).localeCompare(String(b.name)));
-            });
-
-            const cachedLabels = (await getData<any[]>('labels-all')) || [];
-            if (!cachedLabels.some((item) => item.id === label.id)) {
-                setCacheData('labels-all', [...cachedLabels, label]);
-            }
-
-            toggleLabel(label.id);
-            setShowLabelMenu(false);
-            toast.success('Label created');
-        } catch (error) {
-            toast.error('Failed to create label');
+        if (next !== current) {
+            setLocalData(next);
+            setCacheData(threadKey(current.email.id), next);
         }
+    }), [setCacheData]);
+
+    const threadItems = useMemo<EmailDetails[]>(() => (data ? (data.thread && data.thread.length > 0 ? data.thread : [data]) : []), [data]);
+    const stale = Boolean(data && id && data.email.id !== id && !threadItems.some((m) => m.email.id === id));
+    const folder = data?.email.folder || searchParams.get('folder') || 'inbox';
+
+    /** Correos sobre los que actuan las acciones del lector: los mensajes del hilo que estan en la misma carpeta. */
+    const targets = useCallback((): ListEmail[] => {
+        const current = dataRef.current;
+        if (!current) return [];
+        const items = current.thread && current.thread.length > 0 ? current.thread : [current];
+        const inFolder = items.filter((m) => m.email.folder === current.email.folder).map((m) => m.email as unknown as ListEmail);
+        return inFolder.length > 0 ? inFolder : [current.email as unknown as ListEmail];
+    }, []);
+
+    const closeReader = useCallback(() => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete('id');
+        router.push(`/?${params.toString()}`);
+    }, [router, searchParams]);
+
+    const openEmail = useCallback((emailId: string) => {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('id', emailId);
+        router.push(`/?${params.toString()}`);
+    }, [router, searchParams]);
+
+    // --- Acciones (las mismas que la lista: ver lib/mail-actions) ---
+    const runAction = useCallback(async (action: MailActionId) => {
+        const list = targets();
+        if (list.length === 0) return;
+        const a = actionsRef.current;
+        switch (action) {
+            case 'archive': case 'unarchive': case 'trash': case 'restore': case 'spam': case 'notSpam':
+                closeReader();
+                await a.moveEmails(list, action, folder);
+                break;
+            case 'deleteForever': case 'deleteDraft':
+                if (await a.deleteForever(list, folder)) closeReader();
+                break;
+            case 'markRead': await a.setFlags(list.filter((e) => !e.read), { read: true }); break;
+            case 'markUnread': await a.setFlags(list.filter((e) => e.read), { read: false }); break;
+            case 'star': await a.setFlags(list.filter((e) => !e.starred), { starred: true }); break;
+            case 'unstar': await a.setFlags(list.filter((e) => e.starred), { starred: false }); break;
+            case 'cancelSchedule': if (await a.cancelSchedule(list)) closeReader(); break;
+            case 'editScheduled': if (await a.cancelSchedule(list.slice(0, 1), { open: true })) closeReader(); break;
+            case 'sendNow': if (await a.sendNow(list)) closeReader(); break;
+            case 'deleteScheduled': if (await a.deleteScheduled(list)) closeReader(); break;
+            default: break;
+        }
+    }, [targets, closeReader, folder]);
+
+    const openMenu = (kind: ReaderMenuKind, anchor: HTMLElement | null) => {
+        menuAnchorRef.current = anchor;
+        if (kind === 'move' || kind === 'label') void ensureLabels();
+        setMenu(kind);
     };
 
+    const toggleStar = () => { if (data) void runAction(data.email.starred ? 'unstar' : 'star'); };
+    const toggleRead = () => { if (data) void runAction(data.email.read ? 'markUnread' : 'markRead'); };
+
+    const allExpanded = threadItems.length > 0 && threadItems.every((m) => expandedIds.has(m.email.id));
+    const toggleExpandAll = () => setExpandedIds(
+        allExpanded
+            ? new Set([threadItems[0]?.email.id].filter(Boolean) as string[])
+            : new Set(threadItems.map((m) => m.email.id)),
+    );
+    const toggleExpand = useCallback((emailId: string) => {
+        const current = dataRef.current;
+        const item = current && (current.thread?.find((m) => m.email.id === emailId) ?? (current.email.id === emailId ? current : null));
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(emailId)) next.delete(emailId); else next.add(emailId);
+            return next;
+        });
+        // Al expandir un mensaje sin leer se marca como leido (el resaltado se conserva en esta sesion).
+        if (item && item.email.read === false && !expandedIdsRef.current.has(emailId)) void markReadQuiet(emailId);
+    }, [markReadQuiet]);
+    const expandedIdsRef = useRef(expandedIds);
+    expandedIdsRef.current = expandedIds;
+
+    // Los mensajes sin leer que se abren expandidos (ademas del principal) tambien se marcan como leidos.
+    useEffect(() => {
+        if (!data) return;
+        for (const m of threadItems) {
+            if (expandedIdsRef.current.has(m.email.id) && m.email.read === false && m.email.id !== data.email.id) void markReadQuiet(m.email.id);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [data?.email.id, threadItems.length]);
+
+    // --- Invitaciones ---
     const handleInviteResponse = async (emailId: string, response: 'accepted' | 'tentative' | 'declined') => {
         setInviteActionEmailId(emailId);
-
         try {
             const res = await fetch(`/api/emails/${emailId}/rsvp`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ response })
+                body: JSON.stringify({ response }),
             });
-
             const json = await res.json();
-            if (!res.ok) {
-                throw new Error(json.error || 'Failed to send RSVP');
-            }
-
+            if (!res.ok) throw new Error(json.error || t('mailView.invite.rsvpFailed'));
             setLocalData((current) => {
                 if (!current) return current;
-
-                const updateItem = (item: EmailDetails): EmailDetails => {
-                    if (item.email.id !== emailId) return item;
-                    return {
-                        ...item,
-                        inviteResponse: json.inviteResponse,
-                    };
-                };
-
+                const updateItem = (item: EmailDetails): EmailDetails => (item.email.id !== emailId ? item : { ...item, inviteResponse: json.inviteResponse });
                 return {
                     ...current,
                     inviteResponse: current.email.id === emailId ? json.inviteResponse : current.inviteResponse,
                     thread: current.thread?.map(updateItem),
                 };
             });
-
-            toast.success(`Invitation ${response}`);
+            toast.success(t(`mailView.invite.responded.${response}`));
         } catch (error: any) {
-            toast.error(error.message || 'Failed to send RSVP');
+            toast.error(error.message || t('mailView.invite.rsvpFailed'));
         } finally {
             setInviteActionEmailId(null);
         }
     };
 
-    const handleAddToCalendar = async (emailId: string, invitePreview: NonNullable<EmailDetails['invitePreview']>) => {
+    const handleAddToCalendar = async (emailId: string, invitePreview: InvitePreview) => {
         setAddCalendarEmailId(emailId);
         try {
             const calendarsRes = await fetch('/api/calendars');
-            if (!calendarsRes.ok) throw new Error('No se pudieron obtener los calendarios');
+            if (!calendarsRes.ok) throw new Error(t('mailView.invite.calendarsFailed'));
             const calendars: any[] = await calendarsRes.json();
-
-            const target = calendars.find((c) => c.source === 'shared' && !c.isReadOnly)
-                || calendars.find((c) => !c.isReadOnly);
-
-            if (!target) throw new Error('No hay un calendario disponible');
-
+            const target = calendars.find((c) => c.source === 'shared' && !c.isReadOnly) || calendars.find((c) => !c.isReadOnly);
+            if (!target) throw new Error(t('mailView.invite.noCalendar'));
             const res = await fetch('/api/calendar/events', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -449,53 +353,17 @@ export function MailView() {
                     source: 'shared',
                 }),
             });
-
             const json = await res.json();
-            if (!res.ok) throw new Error(json.error || 'No se pudo agregar el evento');
-
-            toast.success('Evento agregado al calendario');
+            if (!res.ok) throw new Error(json.error || t('mailView.invite.addFailed'));
+            toast.success(t('mailView.invite.added'));
         } catch (error: any) {
-            toast.error(error.message || 'Error al agregar al calendario');
+            toast.error(error.message || t('mailView.invite.addFailed'));
         } finally {
             setAddCalendarEmailId(null);
         }
     };
 
-    const trashEmail = async () => {
-        if (!data) return;
-
-        // Trust the URL param first if available, otherwise fallback to email data
-        const folderParam = searchParams.get('folder');
-        const isTrashContext = folderParam === 'trash' || data.email.folder === 'trash';
-        const currentFolder = data.email.folder || 'inbox';
-
-        if (isTrashContext) {
-            const toastId = toast.loading('Deleting permanently...');
-            try {
-                const res = await fetch(`/api/emails/${data.email.id}/delete`, { method: 'DELETE' });
-                if (res.ok) {
-                    toast.success('Deleted permanently', { id: toastId });
-
-                    // Invalidate both potential keys to be safe
-                    invalidate(`emails-trash`);
-                    invalidate(`emails-${currentFolder}`);
-
-                    router.push(`/?folder=${folderParam || 'inbox'}`);
-                } else {
-                    toast.error('Failed to delete', { id: toastId });
-                }
-            } catch (e) {
-                toast.error('Failed to delete', { id: toastId });
-            }
-        } else {
-            await handleUpdate({ folder: 'trash' });
-            invalidate(`email-${data.email.id}`);
-            invalidate(`emails-${currentFolder}`);
-            invalidate('emails-trash'); // Ensure trash count/list updates
-            router.push('/');
-        }
-    };
-
+    // --- Responder / reenviar ---
     /** Mensaje al que se responde: el pulsado (boton dentro del mensaje) o, en la barra, el mas reciente. */
     const resolveTarget = (item?: EmailDetails) => {
         if (item?.email) return { targetEmail: item.email, targetContent: item.content };
@@ -503,34 +371,42 @@ export function MailView() {
         return { targetEmail: newest!.email, targetContent: newest!.content };
     };
 
+    const formatQuoteDate = (value: string) => {
+        try {
+            return new Intl.DateTimeFormat(intlLocale, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
+        } catch {
+            return value;
+        }
+    };
+
     const buildQuote = async (targetEmail: EmailDetails['email'], targetContent: string) => {
         // Las imagenes cid: solo existen dentro del correo original: se incrustan para que sigan visibles.
         const content = await inlineCidImages(targetContent || '', targetEmail.attachments);
-        const quoteHeader = `<div dir="ltr" class="gmail_attr">On ${formatDate(targetEmail.createdAt)}, ${targetEmail.from} wrote:<br></div>`;
+        const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const header = esc(t('emailList.quoteHeader', { date: formatQuoteDate(targetEmail.createdAt), from: targetEmail.from }));
+        const quoteHeader = `<div dir="ltr" class="gmail_attr">${header}<br></div>`;
         const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${content}</blockquote>`;
         return `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`;
     };
 
+    const reSubject = (subject: string) => (/^re:/i.test(subject) ? subject : `Re: ${subject}`);
+
     const handleReply = async (item?: EmailDetails) => {
         if (!data) return;
         const { targetEmail, targetContent } = resolveTarget(item);
-        const replyTarget = targetEmail.replyTo || targetEmail.from;
-        const replyFrom = resolveSenderFromEmail(targetEmail);
-
         openCompose({
             id: crypto.randomUUID(),
-            from: replyFrom,
-            to: replyTarget,
-            subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
+            from: resolveSenderFromEmail(targetEmail),
+            to: targetEmail.replyTo || targetEmail.from,
+            subject: reSubject(targetEmail.subject),
             body: await buildQuote(targetEmail, targetContent),
-            minimized: false
+            minimized: false,
         });
     };
 
     const handleReplyAll = async (item?: EmailDetails) => {
         if (!data) return;
         const { targetEmail, targetContent } = resolveTarget(item);
-
         const replyFrom = resolveSenderFromEmail(targetEmail);
         const ownEmails = [
             replyFrom || '',
@@ -539,7 +415,6 @@ export function MailView() {
             ...extractRecipientEmails(targetEmail.cleanTo).filter(e => !!AccountManager.getAccountByEmail(e)),
             ...extractRecipientEmails(targetEmail.to).filter(e => !!AccountManager.getAccountByEmail(e)),
         ];
-
         const recipients = buildReplyAllRecipients({
             from: targetEmail.from,
             replyTo: targetEmail.replyTo,
@@ -547,27 +422,24 @@ export function MailView() {
             cc: targetEmail.cc,
             ownEmails,
         });
-
         openCompose({
             id: crypto.randomUUID(),
             from: replyFrom,
             to: recipients.to.join(', '),
             cc: recipients.cc.length > 0 ? recipients.cc.join(', ') : undefined,
-            subject: targetEmail.subject.startsWith('Re:') ? targetEmail.subject : `Re: ${targetEmail.subject}`,
+            subject: reSubject(targetEmail.subject),
             body: await buildQuote(targetEmail, targetContent),
-            minimized: false
+            minimized: false,
         });
     };
 
     const handleForward = async (item?: EmailDetails) => {
         if (!data) return;
         const { targetEmail, targetContent } = resolveTarget(item);
-        const forwardFrom = resolveSenderFromEmail(targetEmail);
         const content = await inlineCidImages(targetContent || '', targetEmail.attachments);
-
         openCompose({
             id: crypto.randomUUID(),
-            from: forwardFrom,
+            from: resolveSenderFromEmail(targetEmail),
             to: '',
             attachments: (targetEmail.attachments || [])
                 .filter((att: any) => att && (att.key || att.url))
@@ -580,369 +452,227 @@ export function MailView() {
                     url: att.key ? undefined : att.url,
                     forwarded: true,
                 })),
-            subject: targetEmail.subject.startsWith('Fwd:') ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
-            // Cabecera escapada (ver lib/forward-header.ts): antes "Nombre <a@b.com>" se interpretaba como etiqueta HTML.
-            body: `<p></p>${buildForwardHeaderHtml({ from: targetEmail.from, date: formatDate(targetEmail.createdAt), subject: targetEmail.subject, to: targetEmail.to })}<br>${content}`,
-            minimized: false
+            subject: /^(fwd|fw):/i.test(targetEmail.subject) ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
+            // Cabecera escapada (ver lib/forward-header.ts): "Nombre <a@b.com>" no se interpreta como etiqueta HTML.
+            body: `<p></p>${buildForwardHeaderHtml({ from: targetEmail.from, date: formatQuoteDate(targetEmail.createdAt), subject: targetEmail.subject, to: targetEmail.to })}<br>${content}`,
+            minimized: false,
         });
     };
 
-    const toggleExpand = (id: string) => {
-        const newSet = new Set(expandedIds);
-        if (newSet.has(id)) {
-            newSet.delete(id);
-        } else {
-            newSet.add(id);
-        }
-        setExpandedIds(newSet);
+    // --- Imprimir ---
+    const printThread = () => {
+        if (!data) return;
+        const dateFmt = new Intl.DateTimeFormat(intlLocale, { dateStyle: 'full', timeStyle: 'short' });
+        const shown = threadItems.filter((m) => expandedIds.has(m.email.id));
+        const list = (shown.length > 0 ? shown : [threadItems[0]]).slice().reverse();
+        const doc = buildPrintDocument(
+            list.map((m) => ({
+                from: m.email.from,
+                to: m.email.to,
+                cc: m.email.cc,
+                date: dateFmt.format(new Date(m.email.createdAt)),
+                subject: m.email.subject || t('emailList.noSubject'),
+                html: sanitizeHtml(m.content || ''),
+                attachments: (m.email.attachments || []).map((a: any) => a.filename).filter(Boolean),
+            })),
+            {
+                from: t('mailView.recipients.from'),
+                to: t('mailView.recipients.to'),
+                cc: t('mailView.recipients.cc'),
+                date: t('mailView.recipients.date'),
+                attachments: t('mailView.attachments.short'),
+            },
+            data.email.subject || t('emailList.noSubject'),
+        );
+        if (!printHtmlDocument(doc)) toast.error(t('mailView.toolbar.printFailed'));
     };
 
-    if (!id || !data) {
+    // --- Teclado propio del lector (a: responder a todos, f: reenviar). El resto (e, #, !, z, j/k, v, l...) vive en la lista. ---
+    const isVisible = () => Boolean(rootRef.current && rootRef.current.offsetParent !== null);
+    useKeyboardShortcuts(buildShortcutMap({
+        replyAll: () => { if (isVisible() && data) void handleReplyAll(); },
+        forward: () => { if (isVisible() && data) void handleForward(); },
+    }));
+
+    // --- Vecinos (anterior / siguiente) segun el orden de la lista ---
+    const [navIds, setNavIds] = useState<string[]>(() => mailNav.get());
+    useEffect(() => mailNav.subscribe(() => setNavIds(mailNav.get())), []);
+    const { prev, next } = neighbours(navIds, id);
+
+    // --- Menus ---
+    const menuTargets = menu ? targets() : [];
+    const labelStateFor = (labelId: string) => labelSelectionState(menuTargets as any, menuTargets.map((e) => e.id), labelId);
+    const participants = useMemo(() => threadParticipants(threadItems.map((m) => m.email as unknown as ListEmail), 4), [threadItems]);
+
+    if (!id) {
         return (
-            <div className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
-                <MousePointerClick className="h-8 w-8 opacity-50" />
-                No message selected
+            <div ref={rootRef} className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
+                <MousePointerClick className="h-8 w-8 opacity-50" aria-hidden="true" />
+                {t('mailView.noSelection')}
             </div>
         );
     }
 
-    const threadItems = (data.thread && data.thread.length > 0) ? data.thread : [data];
+    if (!data || stale) {
+        return (
+            <div ref={rootRef} className="flex h-full flex-col bg-background">
+                {loadError && !loading ? (
+                    <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+                        <p className="text-sm font-medium text-foreground">{t('mailView.loadError.title')}</p>
+                        <p className="text-xs text-muted-foreground">{t('mailView.loadError.help')}</p>
+                        <div className="flex gap-2">
+                            <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" /> {t('emailList.loadError.retry')}
+                            </button>
+                            <button type="button" onClick={closeReader} className="rounded-md border border-border px-3 py-1.5 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{t('mailView.toolbar.close')}</button>
+                        </div>
+                    </div>
+                ) : (
+                    <div role="status" aria-busy="true" aria-label={t('common.loading')} className="flex-1 space-y-4 p-6">
+                        <span className="sr-only">{t('common.loading')}</span>
+                        <div className="h-6 w-2/3 animate-pulse rounded bg-muted" />
+                        <div className="flex items-center gap-3"><div className="h-9 w-9 animate-pulse rounded-full bg-muted" /><div className="h-4 w-1/3 animate-pulse rounded bg-muted" /></div>
+                        <div className="h-3 w-full animate-pulse rounded bg-muted" />
+                        <div className="h-3 w-5/6 animate-pulse rounded bg-muted" />
+                        <div className="h-3 w-4/6 animate-pulse rounded bg-muted" />
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    const subject = threadItems[0].email.subject || t('emailList.noSubject');
+    const labels: LabelRef[] = (data.email.labels || []) as LabelRef[];
+    const toolbarProps = {
+        folder,
+        read: Boolean(data.email.read),
+        starred: Boolean(data.email.starred),
+        hasPrev: Boolean(prev),
+        hasNext: Boolean(next),
+        threadSize: threadItems.length,
+        allExpanded,
+        onBack: closeReader,
+        onClose: closeReader,
+        onPrev: () => { if (prev) openEmail(prev); },
+        onNext: () => { if (next) openEmail(next); },
+        onAction: (a: MailActionId) => { void runAction(a); },
+        onMenu: openMenu,
+        onToggleStar: toggleStar,
+        onToggleRead: toggleRead,
+        onPrint: printThread,
+        onToggleExpandAll: toggleExpandAll,
+    };
 
     return (
-        <div className="flex h-full flex-col bg-background overflow-x-hidden">
-            <div className="flex items-center gap-2 p-2 bg-background/95 backdrop-blur-sm sticky top-0 z-10 border-b overflow-x-auto">
-                <button type="button" onClick={() => router.push('/')} className="md:hidden p-2" aria-label="Volver a la lista" title="Volver"><ArrowLeft className="h-5 w-5" aria-hidden="true" /></button>
-                <div className="flex items-center gap-1">
-                    <button onClick={() => {
-                        const params = new URLSearchParams(searchParams);
-                        params.delete('id');
-                        router.push(`/?${params.toString()}`);
-                    }} className="p-2 hover:bg-muted rounded-md hidden md:block" title="Cerrar" aria-label="Cerrar correo"><X className="h-4 w-4" aria-hidden="true" /></button>
-                    <div className="h-5 w-px bg-border mx-1 hidden md:block" />
+        <div ref={rootRef} className="flex h-full flex-col overflow-x-hidden bg-background" data-mail-reader>
+            <ReaderToolbar
+                variant="top"
+                {...toolbarProps}
+                extra={<ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email ? { ...data.email, content: data.content } : undefined} />}
+            />
 
-                    <button type="button" onClick={() => handleUpdate({ folder: 'archive' })} className="p-2 hover:bg-muted rounded-md" title="Archivar" aria-label="Archivar"><Archive className="h-4 w-4" aria-hidden="true" /></button>
-                    <button type="button" onClick={() => handleUpdate({ folder: 'spam' })} className="p-2 hover:bg-muted rounded-md" title="Marcar como spam" aria-label="Marcar como spam"><ArchiveX className="h-4 w-4" aria-hidden="true" /></button>
-                    <button type="button" onClick={trashEmail} className="p-2 hover:bg-muted rounded-md" title="Eliminar" aria-label="Eliminar"><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
-                    <button
-                        ref={labelMenuTriggerRef}
-                        onClick={() => setShowLabelMenu((current) => !current)}
-                        className="p-2 hover:bg-muted rounded-md"
-                        title="Etiquetas"
-                        aria-label="Etiquetas"
-                        aria-haspopup="menu"
-                        aria-expanded={showLabelMenu}
-                    >
-                        <Tag className="h-4 w-4" />
-                    </button>
-                    <button type="button" onClick={() => handleReply()} className="p-2 hover:bg-muted rounded-md" title="Responder" aria-label="Responder"><Reply className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
-                    <button type="button" onClick={() => handleReplyAll()} className="p-2 hover:bg-muted rounded-md" title="Responder a todos" aria-label="Responder a todos"><ReplyAll className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
-                    <button type="button" onClick={() => handleForward()} className="p-2 hover:bg-muted rounded-md" title="Reenviar" aria-label="Reenviar"><Forward className="h-4 w-4 text-muted-foreground" aria-hidden="true" /></button>
-
-                    {/* JSON Extensions Toolbar */}
-                    <ExtensionLoader mountPoint="EMAIL_TOOLBAR" context={data?.email ? { ...data.email, content: data.content } : undefined} />
-                </div>
-
-                <Popover
-                    trigger={labelMenuTriggerRef}
-                    isOpen={showLabelMenu}
-                    onClose={() => setShowLabelMenu(false)}
-                    width={260}
-                    header={false}
-                    className="rounded-xl border border-border bg-card p-2 shadow-2xl"
-                >
-                    <div className="flex flex-col gap-1">
-                        <div className="px-2 py-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Labels</div>
-
-                        {availableLabels.length === 0 ? (
-                            <div className="px-2 py-2 text-sm text-muted-foreground">No labels yet</div>
-                        ) : (
-                            availableLabels.map((label) => {
-                                const selected = Boolean(data?.email?.labels?.some((item: any) => item.id === label.id));
-
-                                return (
-                                    <button
-                                        key={label.id}
-                                        type="button"
-                                        role="menuitemcheckbox"
-                                        aria-checked={selected}
-                                        onClick={() => toggleLabel(label.id)}
-                                        className="flex items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground/80 hover:bg-muted"
-                                    >
-                                        <span className="truncate">{label.name}</span>
-                                        {selected ? <Check className="h-4 w-4 text-success" /> : null}
-                                    </button>
-                                );
-                            })
+            <div className="flex-1 overflow-y-auto overflow-x-hidden" aria-busy={loading || undefined}>
+                <div className="px-4 pb-2 pt-5 sm:px-6">
+                    <h2 className="text-xl font-semibold leading-tight">{subject}</h2>
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                        {labels.length > 0 && (
+                            <ul className="flex flex-wrap items-center gap-1.5" aria-label={t('emailList.row.labels')}>
+                                {labels.map((label) => (
+                                    <li key={label.id} className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-chip px-1.5 py-0.5 text-[11px] font-medium text-chip-foreground">
+                                        <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: label.color || undefined }} />
+                                        {labelDisplayName(label.name, t)}
+                                    </li>
+                                ))}
+                            </ul>
                         )}
-
-                        <div className="my-1 border-t border-border/60" />
-
-                        <button
-                            type="button"
-                            onClick={createAndApplyLabel}
-                            className="rounded-lg px-2 py-2 text-left text-sm font-medium text-primary hover:bg-primary/10"
-                        >
-                            Create label
-                        </button>
-                    </div>
-                </Popover>
-
-                <div className="h-5 w-px bg-border mx-1" />
-                <button type="button" onClick={() => handleUpdate({ starred: !data.email?.starred })} className={cn("p-2 hover:bg-muted rounded-md", data.email?.starred && "text-yellow-500")} title={data.email?.starred ? 'Quitar estrella' : 'Marcar con estrella'} aria-label={data.email?.starred ? 'Quitar estrella' : 'Marcar con estrella'} aria-pressed={!!data.email?.starred}>
-                    <Star className={cn("h-4 w-4", data.email?.starred && "fill-current")} />
-                </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto overflow-x-hidden">
-                <div className="p-6 pb-2">
-                    <h2 className="text-xl font-semibold leading-tight">{threadItems[0].email.subject || '(No Subject)'}</h2>
-                </div>
-
-                <div className="flex flex-col overflow-x-hidden">
-                    <AnimatePresence initial={false}>
-                        {threadItems.map((item, index) => {
-                            const isExpanded = expandedIds.has(item.email.id);
-                            const isLast = index === threadItems.length - 1; // Actually now it's index 0 that is usually expanded if we reversed? No.
-                            // Wait, API returns sorted DESC (Newest first).
-                            // So threadItems[0] is newest. threadItems[length-1] is oldest.
-                            // Render order: We usually want Oldest -> Newest (Gmail style) or Newest -> Oldest?
-                            // User asked: "el orden al revez pls esta de el mas viejo al mas nuevo. primero el mas nuevo" -> "order reverse pls it is oldest to newest. first the newest".
-                            // So we render Newest first (Index 0).
-
-                            const cleanHtml = sanitizeHtml(item.content || "");
-                            const remoteAllowed = isRemoteImagesAllowed(imagePolicy, item.email.id, item.email.from);
-                            const remoteBlocked = !remoteAllowed && hasRemoteImages(cleanHtml);
-                            // `cid:` -> URL firmada del adjunto inline (solo src="cid:...", solo /api/assets). Se calcula DESPUES de hasRemoteImages:
-                            // las imagenes propias no cuentan como remotas y las remotas de verdad siguen bloqueadas.
-                            const cidResolved = resolveInlineCidImages(cleanHtml, item.email.attachments, typeof window !== 'undefined' ? window.location.origin : undefined);
-                            const invitePreview = item.invitePreview;
-                            const inviteResponse = item.inviteResponse;
-                            const formattedStartsAt = formatInviteDate(invitePreview?.startsAt);
-                            const formattedEndsAt = formatInviteDate(invitePreview?.endsAt);
-                            const isInviteActionPending = inviteActionEmailId === item.email.id;
-
-                            return (
-                                <motion.div
-                                    key={item.email.id}
-                                    initial={{ opacity: 0, y: 20 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    transition={{ duration: 0.3, delay: index * 0.05 }}
-                                    className={cn("transition-all", isExpanded ? "bg-background shadow-sm z-10 my-1 rounded-sm" : "bg-muted/30 cursor-pointer hover:bg-muted/50")}
-                                    layout
+                        {threadItems.length > 1 && (
+                            <>
+                                <span>{t('emailList.threadMessages', { n: threadItems.length })}</span>
+                                <span aria-hidden="true">·</span>
+                                <span className="truncate">{participants.names.join(', ')}{participants.extra > 0 ? ` +${participants.extra}` : ''}</span>
+                                <button
+                                    type="button"
+                                    onClick={toggleExpandAll}
+                                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                    <div
-                                        className="p-4"
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-expanded={isExpanded}
-                                        aria-label={`${isExpanded ? 'Contraer' : 'Expandir'} mensaje de ${item.email.from}`}
-                                        onKeyDown={(e) => {
-                                            if (e.target !== e.currentTarget) return;
-                                            if (e.key === 'Enter' || e.key === ' ') {
-                                                e.preventDefault();
-                                                toggleExpand(item.email.id);
-                                            }
-                                        }}
-                                        onClick={(e) => {
-                                            if (!isExpanded) {
-                                                toggleExpand(item.email.id);
-                                            } else {
-                                                // Optional: Allow collapsing?
-                                                toggleExpand(item.email.id);
-                                            }
-                                        }}
-                                    >
-                                        <div className="flex items-start justify-between gap-4 cursor-pointer min-w-0">
-                                            <div className="flex items-center gap-3 min-w-0 flex-1">
-                                                <div className={cn("flex h-8 w-8 items-center justify-center rounded-full font-semibold text-xs transition-colors", isExpanded ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground")}>
-                                                    {item.email.from.charAt(0).toUpperCase()}
-                                                </div>
-                                                <div className="flex flex-col min-w-0">
-                                                    <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:gap-2">
-                                                        <span className={cn("text-sm font-medium transition-colors truncate", !isExpanded && "text-muted-foreground")}>{item.email.from}</span>
-                                                        <span className="text-xs text-muted-foreground truncate">&lt;{item.email.to}&gt;</span>
-                                                    </div>
-                                                    {isExpanded && item.authentication && (
-                                                        <span className="mt-1"><AuthBadge auth={item.authentication} /></span>
-                                                    )}
-                                                    {isExpanded && item.email.cc && (
-                                                        <span className="text-xs text-muted-foreground truncate">CC: {item.email.cc}</span>
-                                                    )}
-                                                    {isExpanded && item.email.bcc && (
-                                                        <span className="text-xs text-muted-foreground truncate">BCC: {item.email.bcc}</span>
-                                                    )}
-                                                    <span className="text-xs text-muted-foreground sm:hidden">{formatDate(item.email.createdAt)}</span>
-                                                    {!isExpanded && (
-                                                        <motion.span
-                                                            initial={{ opacity: 0 }}
-                                                            animate={{ opacity: 1 }}
-                                                            className="text-xs text-muted-foreground truncate max-w-[300px] opacity-70"
-                                                        >
-                                                            {item.email.snippet || "Click to expand..."}
-                                                        </motion.span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                            <div className="hidden text-xs text-muted-foreground whitespace-nowrap shrink-0 sm:block">{formatDate(item.email.createdAt)}</div>
-                                        </div>
-                                    </div>
-
-                                    <AnimatePresence>
-                                        {isExpanded && (
-                                            <motion.div
-                                                initial={{ opacity: 0, height: 0 }}
-                                                animate={{ opacity: 1, height: 'auto' }}
-                                                exit={{ opacity: 0, height: 0 }}
-                                                transition={{ duration: 0.3, ease: "easeInOut" }}
-                                                className="overflow-hidden"
-                                            >
-                                                <div className="px-4 pb-8 pl-4 sm:pl-14 min-w-0 overflow-x-hidden">
-                                                    {invitePreview && (() => {
-                                                        const meetProvider = getMeetProvider(invitePreview.meetUrl);
-                                                        return (
-                                                        <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/7 p-4 text-sm text-foreground">
-                                                            <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
-                                                                <div className="space-y-2">
-                                                                    <div className="flex items-center gap-2 font-medium text-foreground">
-                                                                        <CalendarDays className="h-4 w-4" />
-                                                                        <span>Calendar invitation detected</span>
-                                                                    </div>
-                                                                    <div className="text-base font-semibold text-foreground">{invitePreview.title}</div>
-                                                                    {formattedStartsAt && (
-                                                                        <div className="flex items-center gap-2 text-foreground/80">
-                                                                            <Clock className="h-4 w-4" />
-                                                                            <span>
-                                                                                {formattedStartsAt}
-                                                                                {formattedEndsAt ? ` - ${formattedEndsAt}` : ''}
-                                                                            </span>
-                                                                        </div>
-                                                                    )}
-                                                                    {(invitePreview.location || invitePreview.meetUrl) && (
-                                                                        <div className="flex items-center gap-2 text-foreground/80">
-                                                                            <MapPin className="h-4 w-4 shrink-0" />
-                                                                            {invitePreview.meetUrl ? (
-                                                                                <a
-                                                                                    href={invitePreview.meetUrl}
-                                                                                    target="_blank"
-                                                                                    rel="noopener noreferrer"
-                                                                                    className="font-medium text-primary hover:underline"
-                                                                                >
-                                                                                    {meetProvider || invitePreview.location || 'Unirse a la reunión'}
-                                                                                </a>
-                                                                            ) : (
-                                                                                <span>{invitePreview.location}</span>
-                                                                            )}
-                                                                        </div>
-                                                                    )}
-                                                                    <div className="flex flex-wrap gap-2 pt-1">
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={isInviteActionPending}
-                                                                            onClick={() => handleInviteResponse(item.email.id, 'accepted')}
-                                                                            className="inline-flex items-center rounded-full border border-success/45 bg-card px-3 py-2 text-sm font-medium text-success transition-colors hover:bg-success/10 disabled:opacity-60"
-                                                                        >
-                                                                            Accept
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={isInviteActionPending}
-                                                                            onClick={() => handleInviteResponse(item.email.id, 'tentative')}
-                                                                            className="inline-flex items-center rounded-full border border-warning/45 bg-card px-3 py-2 text-sm font-medium text-warning transition-colors hover:bg-warning/10 disabled:opacity-60"
-                                                                        >
-                                                                            Maybe
-                                                                        </button>
-                                                                        <button
-                                                                            type="button"
-                                                                            disabled={isInviteActionPending}
-                                                                            onClick={() => handleInviteResponse(item.email.id, 'declined')}
-                                                                            className="inline-flex items-center rounded-full border border-destructive/45 bg-card px-3 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-60"
-                                                                        >
-                                                                            Decline
-                                                                        </button>
-                                                                        {invitePreview.meetUrl && (
-                                                                            <a
-                                                                                href={invitePreview.meetUrl}
-                                                                                target="_blank"
-                                                                                rel="noopener noreferrer"
-                                                                                className="inline-flex items-center rounded-full border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-                                                                            >
-                                                                                Unirse a {meetProvider || 'la reunión'}
-                                                                            </a>
-                                                                        )}
-                                                                    </div>
-                                                                </div>
-                                                                <button
-                                                                    type="button"
-                                                                    disabled={addCalendarEmailId === item.email.id}
-                                                                    onClick={() => handleAddToCalendar(item.email.id, invitePreview)}
-                                                                    className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-primary/15 disabled:opacity-60"
-                                                                >
-                                                                    <CalendarDays className="h-4 w-4" />
-                                                                    Agregar al calendario
-                                                                </button>
-                                                            </div>
-                                                        </div>
-                                                        );
-                                                    })()}
-
-                                                    {remoteBlocked && (
-                                                        <div role="status" className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground/80">
-                                                            <ImageOff className="h-4 w-4 shrink-0" aria-hidden="true" />
-                                                            <span className="flex-1 min-w-[180px]">Se bloquearon las imagenes remotas para proteger tu privacidad (pueden avisar al remitente de que abriste el correo).</span>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => updateImagePolicy(allowForEmail(imagePolicy, item.email.id))}
-                                                                className="rounded-full border bg-background px-3 py-1 font-medium hover:bg-muted"
-                                                            >
-                                                                Cargar imagenes remotas
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                onClick={() => updateImagePolicy(allowForSender(imagePolicy, item.email.from))}
-                                                                className="rounded-full border bg-background px-3 py-1 font-medium hover:bg-muted"
-                                                            >
-                                                                Siempre de este remitente
-                                                            </button>
-                                                        </div>
-                                                    )}
-
-                                                    <SafeIframe html={cidResolved.html} blockRemoteImages={!remoteAllowed} trustedImageSources={cidResolved.sources} />
-
-                                                    <div className="mt-8 flex gap-2 opacity-100">
-                                                        <button type="button" onClick={() => handleReply(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <Reply className="h-4 w-4" aria-hidden="true" /> Responder
-                                                        </button>
-                                                        <button type="button" onClick={() => handleReplyAll(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <ReplyAll className="h-4 w-4" aria-hidden="true" /> Responder a todos
-                                                        </button>
-                                                        <button type="button" onClick={() => handleForward(item)} className="inline-flex items-center gap-2 px-4 py-2 rounded-full border bg-background hover:bg-muted text-sm font-medium transition-colors">
-                                                            <Forward className="h-4 w-4" aria-hidden="true" /> Reenviar
-                                                        </button>
-                                                    </div>
-
-                                                    {item.email.attachments && item.email.attachments.length > 0 && (
-                                                        <div className="mt-6 pt-4 border-t">
-                                                            <div className="flex flex-wrap gap-3">
-                                                                {item.email.attachments.map((att: any) => (
-                                                                    <a key={att.id} href={att.url || '#'} download={att.filename || undefined} target="_blank" rel="noopener noreferrer" title={`Descargar ${att.filename || 'adjunto'}`} className="flex items-center gap-3 p-2 rounded-lg border bg-background hover:bg-accent transition-colors">
-                                                                        <Icons.File className="w-4 h-4 text-muted-foreground" />
-                                                                        <span className="text-sm truncate max-w-[200px]">{att.filename}</span>
-                                                                    </a>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </motion.div>
-                                        )}
-                                    </AnimatePresence>
-                                </motion.div>
-                            );
-                        })}
-                    </AnimatePresence>
+                                    {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden="true" />}
+                                    {allExpanded ? t('mailView.thread.collapseAll') : t('mailView.thread.expandAll')}
+                                </button>
+                            </>
+                        )}
+                    </div>
                 </div>
+
+                <div className="flex flex-col overflow-x-hidden border-t border-border" role="feed" aria-label={t('mailView.thread.label')}>
+                    {threadItems.map((item, index) => (
+                        <ThreadMessage
+                            key={item.email.id}
+                            item={item}
+                            index={index}
+                            expanded={expandedIds.has(item.email.id)}
+                            wasUnread={unreadIds.has(item.email.id)}
+                            imagePolicy={imagePolicy}
+                            onImagePolicy={updateImagePolicy}
+                            onToggle={toggleExpand}
+                            onReply={handleReply}
+                            onReplyAll={handleReplyAll}
+                            onForward={handleForward}
+                            inviteBusy={inviteActionEmailId === item.email.id}
+                            calendarBusy={addCalendarEmailId === item.email.id}
+                            onInvite={handleInviteResponse}
+                            onAddToCalendar={handleAddToCalendar}
+                            own={ownAddresses}
+                            resolveJoin={resolveInviteJoin}
+                        />
+                    ))}
+                </div>
+
+                {/* Respuesta rapida al pie del hilo */}
+                {folder !== 'drafts' && (
+                    <section aria-label={t('mailView.reply.section')} className="m-4 rounded-xl border border-border bg-card p-3 text-card-foreground sm:mx-6 sm:mb-6">
+                        <p className="mb-2 text-xs text-muted-foreground">
+                            {t('mailView.reply.to', { name: senderName(threadItems[0].email.from) || threadItems[0].email.from })}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                            <button type="button" data-quick-reply="reply" onClick={() => void handleReply()} className={quickBtn}><Reply className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.reply')}</button>
+                            <button type="button" data-quick-reply="replyAll" onClick={() => void handleReplyAll()} className={quickBtn}><ReplyAll className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.replyAll')}</button>
+                            <button type="button" data-quick-reply="forward" onClick={() => void handleForward()} className={quickBtn}><Forward className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.forward')}</button>
+                        </div>
+                    </section>
+                )}
             </div>
+
+            <ReaderToolbar variant="bottom" {...toolbarProps} />
+
+            {(menu === 'move' || menu === 'label') && (
+                <MoveMenu
+                    open
+                    mode={menu}
+                    onClose={() => setMenu(null)}
+                    anchorRef={menuAnchorRef}
+                    currentFolder={folderOfEmail(data.email as unknown as ListEmail, folder)}
+                    labels={availableLabels}
+                    loading={labelsLoading}
+                    labelState={labelStateFor}
+                    onMove={(to) => { const list = targets(); closeReader(); void actions.moveToFolder(list, to, folder); }}
+                    onToggleLabel={(label) => { void actions.applyLabel(targets(), label); }}
+                />
+            )}
+            {(menu === 'snooze' || menu === 'reschedule') && (
+                <SnoozeMenu
+                    open
+                    variant={menu}
+                    onClose={() => setMenu(null)}
+                    anchorRef={menuAnchorRef}
+                    onSnooze={(until) => {
+                        const list = targets();
+                        if (menu === 'reschedule') { void actions.reschedule(list, until); return; }
+                        closeReader();
+                        void actions.snoozeEmails(list, until, folder);
+                    }}
+                />
+            )}
+            {actions.dialog}
         </div>
     );
 }

@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Trash2, X } from 'lucide-react';
+import { AlertTriangle, ArrowRightLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Server, Trash2, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useI18n } from '@/components/I18nProvider';
 import {
     MAX_CREDENTIAL_LENGTH,
     buildCredentialPayload,
     credentialsHttpErrorKey,
+    effectiveSource,
+    movableKeys,
+    serverEnvKeys,
+    sourceI18nKey,
     validateDraft,
     type CredentialKeyStatus,
 } from '@/lib/extension-credentials';
@@ -48,6 +52,8 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
     const [formError, setFormError] = useState<string | null>(null);
     const [savedNote, setSavedNote] = useState<string | null>(null);
     const [attempted, setAttempted] = useState(false);
+    const [moving, setMoving] = useState(false);
+    const [moveNote, setMoveNote] = useState<string | null>(null);
 
     const reset = useCallback(() => {
         setValues({});
@@ -80,6 +86,7 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
         if (!open) return;
         reset();
         setSavedNote(null);
+        setMoveNote(null);
         setKeys([]);
         const controller = new AbortController();
         void fetchStatus(controller.signal);
@@ -149,6 +156,38 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
         }
     };
 
+    const movable = useMemo(() => movableKeys(keys), [keys]);
+    const fromServer = useMemo(() => serverEnvKeys(keys), [keys]);
+
+    /** "Mover a credenciales del dominio": el backend copia (cifrado) los valores heredados; aqui nunca hay valores. */
+    const handleMove = async () => {
+        if (!domainId || !extensionId || moving) return;
+        setMoving(true);
+        setFormError(null);
+        setMoveNote(null);
+        try {
+            const res = await fetch(ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ domainId, extensionId, action: 'migrate-legacy' }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                setFormError(errorText(credentialsHttpErrorKey(res.status)));
+                return;
+            }
+            setKeys(Array.isArray(data?.keys) ? data.keys : keys);
+            const count = Array.isArray(data?.migrated) ? data.migrated.length : 0;
+            const message = count > 0 ? t('legacyMode.move.done', { count }) : t('legacyMode.move.nothing');
+            setMoveNote(message);
+            if (count > 0) toast.success(message);
+        } catch {
+            setFormError(t('legacyMode.move.failed'));
+        } finally {
+            setMoving(false);
+        }
+    };
+
     return (
         <Modal
             open={open && !!extension}
@@ -212,6 +251,29 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                             </div>
                         )}
 
+                        {load === 'ready' && (movable.length > 0 || fromServer.length > 0 || moveNote) && (
+                            <div className="space-y-2 rounded-lg border border-border bg-muted/40 p-3 text-sm">
+                                {movable.length > 0 && (
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <p className="min-w-0 flex-1 text-xs text-muted-foreground">{t('legacyMode.move.hint')}</p>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleMove()}
+                                            disabled={moving || saving}
+                                            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent hover:text-accent-foreground disabled:opacity-50"
+                                        >
+                                            {moving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <ArrowRightLeft className="h-4 w-4" aria-hidden="true" />}
+                                            {moving ? t('legacyMode.move.busy') : t('legacyMode.move.button')}
+                                        </button>
+                                    </div>
+                                )}
+                                {fromServer.length > 0 && (
+                                    <p className="text-xs text-muted-foreground">{t('legacyMode.move.serverEnvOnly')}</p>
+                                )}
+                                {moveNote && <p role="status" className="text-xs text-success">{moveNote}</p>}
+                            </div>
+                        )}
+
                         {load === 'ready' && keys.length > 0 && (
                             <ul className="space-y-4">
                                 {keys.map((key) => {
@@ -241,6 +303,12 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                                                     </span>
                                                 )}
                                             </div>
+
+                                            <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground" data-source={effectiveSource(key)}>
+                                                {effectiveSource(key) === 'server-env' && <Server className="h-3 w-3" aria-hidden="true" />}
+                                                <span className="sr-only">{t('legacyMode.sources.label')}: </span>
+                                                {t(`legacyMode.sources.${sourceI18nKey(effectiveSource(key))}`)}
+                                            </p>
 
                                             {key.configured && !removing && (
                                                 <p className="mt-1 font-mono text-xs text-muted-foreground" aria-hidden="true">

@@ -4,8 +4,14 @@ import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
 import { buildCancelIcs } from '@/lib/calendar/ics';
-import { buildEmailHtml, resolveTimeZone } from '@/lib/calendar/email-templates';
+import { buildEmailHtml, buildEmailText, emailSubject, eventCancellationOptions, resolveTimeZone } from '@/lib/calendar/email-templates';
+import { getRequestEmailBrand, getRequestEmailLocale } from '@/lib/calendar/email-brand-server';
 import { sendEventInvites } from '@/lib/calendar/notify';
+import { buildCalendarEventContext, fireLifecycleHook } from '@/lib/expansions/server-hooks';
+import { conferenceFieldsFromBody } from '@/lib/conferencing/event-fields';
+import { deleteMeeting } from '@/lib/conferencing/service';
+import { resolveDomain } from '@/lib/conferencing/http';
+import { isConferencingProviderId } from '@/lib/conferencing/types';
 
 export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const user = await getCurrentUser();
@@ -54,6 +60,8 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     const existingEmails = existingAttendees.map(a => a.email);
     const attendeesToAdd = attendeeEmails.filter((e: string) => !existingEmails.includes(e));
 
+    const conference = await conferenceFieldsFromBody(body, user.id);
+
     const updated = await prisma.calendarEvent.update({
         where: { id },
         data: {
@@ -61,6 +69,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             location: body?.location || null,
             startsAt,
             endsAt,
+            ...conference,
             attendees: {
                 create: attendeesToAdd.map((e: string) => ({
                     email: e,
@@ -75,6 +84,11 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
         }
     });
 
+    fireLifecycleHook('CALENDAR_EVENT_UPDATED', user.id, buildCalendarEventContext({
+        eventId: updated.id, calendarId: updated.calendarId, startsAt: updated.startsAt, endsAt: updated.endsAt,
+        allDay: updated.allDay, status: (updated as any).status || 'confirmed', attendees: updated.attendees, source: updated.source,
+    }));
+
     // Server-side auto-invite for newly-added guests on edit. Best-effort.
     let invitedCount = 0;
     if (attendeesToAdd.length > 0 && !updated.calendar.isReadOnly) {
@@ -85,6 +99,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
             event: updated,
             recipients: attendeesToAdd,
             timezone: typeof body?.timeZone === 'string' ? body.timeZone : null,
+            request: req,
         });
     }
 
@@ -131,7 +146,12 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             const sequenceBase = new Date(event.updatedAt || new Date()).getTime();
             const sequence = (Number.isFinite(sequenceBase) ? Math.floor(sequenceBase / 1000) : 0) + 1;
 
+            // Marca + idioma primero: el PRODID del ICS lleva la marca del dominio.
+            const brand = await getRequestEmailBrand(req);
+            const locale = getRequestEmailLocale(req, brand, 'user');
             const icsContent = buildCancelIcs({
+                brandName: brand.name,
+                locale,
                 uid: eventUid,
                 title: event.title,
                 description: event.description,
@@ -145,22 +165,20 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             });
 
             const cancelTz = resolveTimeZone(null); // DELETE carries no tz payload → default
-            const html = buildEmailHtml({
-                type: 'cancellation',
+            // Misma plantilla y marca que el resto de correos de eventos; idioma: preferencia del usuario > empresa.
+            const templateOptions = eventCancellationOptions({
                 title: event.title,
-                when: { start: event.startsAt, end: event.endsAt, timezone: cancelTz },
+                startsAt: event.startsAt,
+                endsAt: event.endsAt,
+                timezone: cancelTz,
                 location: event.location,
                 organizer: { email: organizerEmail, name: organizerName },
-                hint: 'Este evento fue cancelado. Tu calendario se actualizará con el archivo .ics adjunto.',
+                brand,
+                locale,
             });
-
-            const text = [
-                `Evento cancelado: ${event.title}`,
-                `Cuándo: ${new Date(event.startsAt).toLocaleString('es-PE', { timeZone: cancelTz })}`,
-                event.location ? `Lugar: ${event.location}` : '',
-                '',
-                'El archivo .ics adjunto actualiza tu calendario.',
-            ].filter(Boolean).join('\n');
+            const html = buildEmailHtml(templateOptions);
+            const text = buildEmailText(templateOptions);
+            const cancelSubject = emailSubject(locale, 'cancellation', event.title);
 
             const icsBuffer = Buffer.from(icsContent, 'utf8');
             const formattedFrom = `${organizerName} <${organizerEmail}>`;
@@ -168,7 +186,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
             const { error } = await resend.emails.send({
                 from: formattedFrom,
                 to: recipients,
-                subject: `Cancelado: ${event.title}`,
+                subject: cancelSubject,
                 html,
                 text,
                 attachments: [{ filename: 'cancel.ics', content: icsBuffer }],
@@ -182,7 +200,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
                 // Persist to Sent so it shows in the mailbox.
                 try {
                     const timestamp = Date.now();
-                    const safeSubject = `Cancelado: ${event.title}`.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
+                    const safeSubject = cancelSubject.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
                     const icsKey = `attachments/${organizerEmail}/${timestamp}-cancel.ics`;
                     // Upload the body too — the viewer renders from htmlKey/textKey.
                     const htmlKey = `sent/${organizerEmail}/${timestamp}-${safeSubject}.html`;
@@ -202,7 +220,7 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
                             from: formattedFrom,
                             to: recipients.join(', '),
                             cleanTo: recipients.join(', '),
-                            subject: `Cancelado: ${event.title}`,
+                            subject: cancelSubject,
                             messageId: crypto.randomUUID(),
                             snippet: text.substring(0, 200),
                             folder: 'sent',
@@ -230,6 +248,18 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
     await prisma.calendarEvent.delete({
         where: { id }
     });
+
+    // La reunion de Zoom/Meet creada para este evento se cancela en el proveedor (best-effort; solo si es del usuario).
+    const meetingId = (event as any).conferenceMeetingId as string | null | undefined;
+    const meetingProvider = (event as any).conferenceProvider;
+    if (meetingId && isConferencingProviderId(meetingProvider)) {
+        await deleteMeeting({ userId: user.id, email: user.email || null, domain: resolveDomain(req) }, meetingProvider, meetingId).catch(() => undefined);
+    }
+
+    fireLifecycleHook('CALENDAR_EVENT_CANCELLED', user.id, buildCalendarEventContext({
+        eventId: event.id, calendarId: event.calendarId, startsAt: event.startsAt, endsAt: event.endsAt,
+        allDay: event.allDay, status: 'cancelled', attendees: event.attendees, source: event.source,
+    }));
 
     return NextResponse.json({ success: true, cancelledNotified });
 }

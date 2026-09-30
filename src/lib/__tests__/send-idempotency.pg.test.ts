@@ -13,6 +13,9 @@ vi.mock('@/lib/resend', () => ({ resend: { emails: { send: (...a: unknown[]) => 
 vi.mock('@/lib/storage', () => ({ uploadToStorage: vi.fn(async () => undefined), getBufferFromStorage: vi.fn(async () => null) }));
 vi.mock('@/lib/expansions/server-hooks', () => ({
     runEmailPreSendHooksForRequest: async () => ({ stop: false, modify: {}, warnings: [] }),
+    // Eventos de ciclo de vida (EMAIL_SENT): no-op en la prueba.
+    buildEmailSentContext: () => ({}),
+    fireLifecycleHook: () => false,
 }));
 
 let me: { id: string; email: string; name: string };

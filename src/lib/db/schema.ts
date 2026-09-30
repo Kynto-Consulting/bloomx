@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { getDbPool } from './pool';
+import { CREATED_MS_FUNCTION_DDL, CREATED_MS_TRIGGER_DDL, SENDER_KEY_FUNCTION_DDL, SENDER_KEY_INDEX_DDL } from './mail-sql';
 
 type ColumnSpec = {
     name: string;
@@ -16,7 +17,11 @@ type TableSpec = {
     createStatement: string;
     columns: ColumnSpec[];
     constraints?: ConstraintSpec[];
+    /** Funciones SQL (CREATE OR REPLACE): se crean ANTES de los indices que las usan. */
+    functions?: string[];
     indexes?: string[];
+    /** Sentencias posteriores a los indices (disparadores y rellenos unicos). Deben ser idempotentes. */
+    after?: string[];
 };
 
 const TABLES: TableSpec[] = [
@@ -138,13 +143,20 @@ const TABLES: TableSpec[] = [
             { name: 'smartReplies', definition: 'JSONB' },
             { name: 'attachmentsChecked', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
             { name: 'rawMimeUrl', definition: 'TEXT' },
+            // Carpeta desde la que se movio el correo a archive/trash/spam (la fija el servidor; "Restaurar" vuelve ahi).
+            // Aditivo y tolerante: lib/mail-previous-folder.ts lee/escribe con SQL crudo y cae a la bandeja si la columna no existe.
+            { name: 'previousFolder', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Email_pkey', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_pkey" PRIMARY KEY ("id")' },
             { name: 'Email_messageId_key', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_messageId_key" UNIQUE ("messageId")' },
             { name: 'Email_userId_fkey', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
         ],
+        // Orden por remitente (clave normalizada, indexada) y createdAt siempre en milisegundos (cursor estable). Ver db/mail-sql.ts.
+        functions: [SENDER_KEY_FUNCTION_DDL, CREATED_MS_FUNCTION_DDL],
+        after: [CREATED_MS_TRIGGER_DDL],
         indexes: [
+            SENDER_KEY_INDEX_DDL,
             'CREATE INDEX IF NOT EXISTS "Email_to_idx" ON "Email" ("to")',
             'CREATE INDEX IF NOT EXISTS "Email_folder_idx" ON "Email" ("folder")',
             'CREATE INDEX IF NOT EXISTS "Email_createdAt_idx" ON "Email" ("createdAt")',
@@ -152,6 +164,8 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "Email_userId_folder_createdAt_idx" ON "Email" ("userId", "folder", "createdAt" DESC)',
             'CREATE INDEX IF NOT EXISTS "Email_userId_folder_read_idx" ON "Email" ("userId", "folder", "read")',
             'CREATE INDEX IF NOT EXISTS "Email_userId_scheduledAt_idx" ON "Email" ("userId", "scheduledAt")',
+            // Filtro "destacados" y su conteo por carpeta (parcial: solo las filas destacadas, un indice muy pequeno).
+            'CREATE INDEX IF NOT EXISTS "Email_userId_folder_starred_idx" ON "Email" ("userId", "folder", "createdAt" DESC) WHERE "starred" = TRUE',
             // Full-text (busqueda). La expresion debe coincidir con FTS_EXPRESSION_SQL en src/lib/rules/search.ts
             `CREATE INDEX IF NOT EXISTS "Email_fts_idx" ON "Email" USING GIN (to_tsvector('simple', coalesce("subject",'') || ' ' || coalesce("from",'') || ' ' || coalesce("snippet",'')))`,
         ],
@@ -560,6 +574,10 @@ const TABLES: TableSpec[] = [
             { name: 'organizerEmail', definition: 'TEXT' },
             { name: 'organizerName', definition: 'TEXT' },
             { name: 'sourceEmailId', definition: 'TEXT' },
+            // Conferencia adjunta (aditivas; eventos existentes siguen usando `location` como enlace)
+            { name: 'conferenceUrl', definition: 'TEXT' },
+            { name: 'conferenceProvider', definition: 'TEXT' },
+            { name: 'conferenceMeetingId', definition: 'TEXT' },
             { name: 'lastSyncedAt', definition: 'TIMESTAMPTZ' },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
@@ -788,6 +806,63 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "AuditEvent_event_ts_idx" ON "AuditEvent" ("event", "ts")',
         ],
     },
+    // ---- Extensiones (aditivo): almacenamiento KV y notificaciones de services.storage / services.notify. SQL crudo. ----
+    {
+        name: 'ExtensionStorage',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ExtensionStorage" (
+            "userId" TEXT NOT NULL,
+            "extensionId" TEXT NOT NULL,
+            "key" TEXT NOT NULL,
+            "value" TEXT NOT NULL,
+            "bytes" INTEGER NOT NULL,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'extensionId', definition: 'TEXT NOT NULL' },
+            { name: 'key', definition: 'TEXT NOT NULL' },
+            { name: 'value', definition: 'TEXT NOT NULL' },
+            { name: 'bytes', definition: 'INTEGER NOT NULL' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ExtensionStorage_pkey', statement: 'ALTER TABLE "ExtensionStorage" ADD CONSTRAINT "ExtensionStorage_pkey" PRIMARY KEY ("userId", "extensionId", "key")' },
+            { name: 'ExtensionStorage_userId_fkey', statement: 'ALTER TABLE "ExtensionStorage" ADD CONSTRAINT "ExtensionStorage_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+    },
+    {
+        name: 'ExtensionNotification',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ExtensionNotification" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "extensionId" TEXT NOT NULL,
+            "level" TEXT NOT NULL DEFAULT 'info',
+            "title" TEXT,
+            "message" TEXT NOT NULL,
+            "url" TEXT,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "deliveredAt" TIMESTAMPTZ
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'extensionId', definition: 'TEXT NOT NULL' },
+            { name: 'level', definition: "TEXT NOT NULL DEFAULT 'info'" },
+            { name: 'title', definition: 'TEXT' },
+            { name: 'message', definition: 'TEXT NOT NULL' },
+            { name: 'url', definition: 'TEXT' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'deliveredAt', definition: 'TIMESTAMPTZ' },
+        ],
+        constraints: [
+            { name: 'ExtensionNotification_pkey', statement: 'ALTER TABLE "ExtensionNotification" ADD CONSTRAINT "ExtensionNotification_pkey" PRIMARY KEY ("id")' },
+            { name: 'ExtensionNotification_userId_fkey', statement: 'ALTER TABLE "ExtensionNotification" ADD CONSTRAINT "ExtensionNotification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "ExtensionNotification_pending_idx" ON "ExtensionNotification" ("userId", "createdAt") WHERE "deliveredAt" IS NULL',
+            'CREATE INDEX IF NOT EXISTS "ExtensionNotification_createdAt_idx" ON "ExtensionNotification" ("createdAt")',
+        ],
+    },
     {
         name: 'UserMfa',
         createStatement: `CREATE TABLE IF NOT EXISTS "UserMfa" (
@@ -957,6 +1032,253 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "ElixirCampaignRow_sentAt_idx" ON "ElixirCampaignRow" ("sentAt")',
         ],
     },
+    // ---- Consola de administracion (aditivo, SQL crudo; ver src/lib/admin/*) ----
+    // Estado administrativo por usuario (deshabilitado, cambio de clave forzado, ultimo acceso). Tabla aparte a proposito:
+    // asi "User" no cambia y las consultas existentes no dependen de columnas nuevas.
+    {
+        name: 'UserAdminState',
+        createStatement: `CREATE TABLE IF NOT EXISTS "UserAdminState" (
+            "userId" TEXT NOT NULL,
+            "disabled" BOOLEAN NOT NULL DEFAULT FALSE,
+            "disabledAt" TIMESTAMPTZ,
+            "mustChangePassword" BOOLEAN NOT NULL DEFAULT FALSE,
+            "lastLoginAt" TIMESTAMPTZ,
+            "lastLoginIp" TEXT,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'disabled', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'disabledAt', definition: 'TIMESTAMPTZ' },
+            { name: 'mustChangePassword', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'lastLoginAt', definition: 'TIMESTAMPTZ' },
+            { name: 'lastLoginIp', definition: 'TEXT' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'UserAdminState_pkey', statement: 'ALTER TABLE "UserAdminState" ADD CONSTRAINT "UserAdminState_pkey" PRIMARY KEY ("userId")' },
+            { name: 'UserAdminState_userId_fkey', statement: 'ALTER TABLE "UserAdminState" ADD CONSTRAINT "UserAdminState_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "UserAdminState_disabled_idx" ON "UserAdminState" ("disabled") WHERE "disabled" = TRUE',
+            'CREATE INDEX IF NOT EXISTS "UserAdminState_lastLoginAt_idx" ON "UserAdminState" ("lastLoginAt")',
+        ],
+    },
+    // Registro de sesiones emitidas (el JWT es sin estado: sin esto no se pueden LISTAR). `tv` = User.tokenVersion al emitir:
+    // la sesion sigue activa mientras tv >= User.tokenVersion y su jti no este en RevokedSession.
+    {
+        name: 'UserSession',
+        createStatement: `CREATE TABLE IF NOT EXISTS "UserSession" (
+            "jti" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "tv" INTEGER NOT NULL DEFAULT 0,
+            "mfa" BOOLEAN NOT NULL DEFAULT FALSE,
+            "ip" TEXT,
+            "userAgent" TEXT,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "expiresAt" TIMESTAMPTZ NOT NULL
+        )`,
+        columns: [
+            { name: 'jti', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'tv', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'mfa', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'ip', definition: 'TEXT' },
+            { name: 'userAgent', definition: 'TEXT' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+        ],
+        constraints: [
+            { name: 'UserSession_pkey', statement: 'ALTER TABLE "UserSession" ADD CONSTRAINT "UserSession_pkey" PRIMARY KEY ("jti")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "UserSession_userId_createdAt_idx" ON "UserSession" ("userId", "createdAt" DESC)',
+            'CREATE INDEX IF NOT EXISTS "UserSession_expiresAt_idx" ON "UserSession" ("expiresAt")',
+        ],
+    },
+    // Politicas editables desde la consola (retencion). Sustituyen a la variable de entorno cuando existen.
+    {
+        name: 'AdminSetting',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AdminSetting" (
+            "key" TEXT NOT NULL,
+            "value" JSONB NOT NULL DEFAULT 'null'::jsonb,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedBy" TEXT
+        )`,
+        columns: [
+            { name: 'key', definition: 'TEXT NOT NULL' },
+            { name: 'value', definition: "JSONB NOT NULL DEFAULT 'null'::jsonb" },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedBy', definition: 'TEXT' },
+        ],
+        constraints: [
+            { name: 'AdminSetting_pkey', statement: 'ALTER TABLE "AdminSetting" ADD CONSTRAINT "AdminSetting_pkey" PRIMARY KEY ("key")' },
+        ],
+    },
+    // Registro de reuniones de la fachada de conferencias: idempotencia persistente + propiedad (lib/conferencing/ledger.ts).
+    {
+        name: 'ConferenceMeeting',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ConferenceMeeting" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "provider" TEXT NOT NULL,
+            "meetingId" TEXT NOT NULL,
+            "joinUrl" TEXT NOT NULL,
+            "hostUrl" TEXT,
+            "idempotencyKey" TEXT,
+            "status" TEXT NOT NULL DEFAULT 'ready',
+            "payload" JSONB,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'provider', definition: 'TEXT NOT NULL' },
+            { name: 'meetingId', definition: 'TEXT NOT NULL' },
+            { name: 'joinUrl', definition: 'TEXT NOT NULL' },
+            { name: 'hostUrl', definition: 'TEXT' },
+            { name: 'idempotencyKey', definition: 'TEXT' },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'ready'" },
+            { name: 'payload', definition: 'JSONB' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ConferenceMeeting_pkey', statement: 'ALTER TABLE "ConferenceMeeting" ADD CONSTRAINT "ConferenceMeeting_pkey" PRIMARY KEY ("id")' },
+            { name: 'ConferenceMeeting_userId_provider_idempotencyKey_key', statement: 'ALTER TABLE "ConferenceMeeting" ADD CONSTRAINT "ConferenceMeeting_userId_provider_idempotencyKey_key" UNIQUE ("userId", "provider", "idempotencyKey")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "ConferenceMeeting_userId_provider_meetingId_idx" ON "ConferenceMeeting" ("userId", "provider", "meetingId")',
+            'CREATE INDEX IF NOT EXISTS "ConferenceMeeting_createdAt_idx" ON "ConferenceMeeting" ("createdAt")',
+        ],
+    },
+    // ---- Importar / exportar correo (aditivo; lib/mail-transfer/*, SQL crudo) ----
+    // Trabajos en segundo plano por lotes (patron del worker de Elixir): estado, cursor de reanudacion, contadores, bloqueo.
+    // "userId" NO tiene FK a proposito: el administrador puede ser un "manager" del backend que no es un User de la app.
+    {
+        name: 'MailTransferJob',
+        createStatement: `CREATE TABLE IF NOT EXISTS "MailTransferJob" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "actorKind" TEXT NOT NULL DEFAULT 'user',
+            "domain" TEXT NOT NULL DEFAULT '',
+            "kind" TEXT NOT NULL,
+            "scope" TEXT NOT NULL DEFAULT 'domain',
+            "targetUserId" TEXT,
+            "format" TEXT NOT NULL DEFAULT 'unknown',
+            "status" TEXT NOT NULL DEFAULT 'created',
+            "phase" TEXT NOT NULL DEFAULT '',
+            "fileName" TEXT,
+            "options" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "summary" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "cursor" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "totalBytes" BIGINT NOT NULL DEFAULT 0,
+            "uploadedBytes" BIGINT NOT NULL DEFAULT 0,
+            "totalItems" INTEGER NOT NULL DEFAULT 0,
+            "doneItems" INTEGER NOT NULL DEFAULT 0,
+            "importedItems" INTEGER NOT NULL DEFAULT 0,
+            "duplicateItems" INTEGER NOT NULL DEFAULT 0,
+            "skippedItems" INTEGER NOT NULL DEFAULT 0,
+            "errorItems" INTEGER NOT NULL DEFAULT 0,
+            "bytesProcessed" BIGINT NOT NULL DEFAULT 0,
+            "outputBytes" BIGINT NOT NULL DEFAULT 0,
+            "outputSha256" TEXT,
+            "lockedUntil" TIMESTAMPTZ,
+            "lastError" TEXT,
+            "cancelRequested" BOOLEAN NOT NULL DEFAULT FALSE,
+            "downloadedAt" TIMESTAMPTZ,
+            "expiresAt" TIMESTAMPTZ,
+            "startedAt" TIMESTAMPTZ,
+            "finishedAt" TIMESTAMPTZ,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'actorKind', definition: "TEXT NOT NULL DEFAULT 'user'" },
+            { name: 'domain', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'kind', definition: 'TEXT NOT NULL' },
+            { name: 'scope', definition: "TEXT NOT NULL DEFAULT 'domain'" },
+            { name: 'targetUserId', definition: 'TEXT' },
+            { name: 'format', definition: "TEXT NOT NULL DEFAULT 'unknown'" },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'created'" },
+            { name: 'phase', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'fileName', definition: 'TEXT' },
+            { name: 'options', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'summary', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'cursor', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'totalBytes', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'uploadedBytes', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'totalItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'doneItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'importedItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'duplicateItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'skippedItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'errorItems', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'bytesProcessed', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'outputBytes', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'outputSha256', definition: 'TEXT' },
+            { name: 'lockedUntil', definition: 'TIMESTAMPTZ' },
+            { name: 'lastError', definition: 'TEXT' },
+            { name: 'cancelRequested', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'downloadedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ' },
+            { name: 'startedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'finishedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'MailTransferJob_pkey', statement: 'ALTER TABLE "MailTransferJob" ADD CONSTRAINT "MailTransferJob_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "MailTransferJob_userId_createdAt_idx" ON "MailTransferJob" ("userId", "createdAt" DESC)',
+            'CREATE INDEX IF NOT EXISTS "MailTransferJob_domain_status_idx" ON "MailTransferJob" ("domain", "status")',
+            'CREATE INDEX IF NOT EXISTS "MailTransferJob_status_updatedAt_idx" ON "MailTransferJob" ("status", "updatedAt")',
+        ],
+    },
+    // Una fila por mensaje importado (o por buzon exportado): idempotencia por (job, clave de origen) e informe descargable.
+    {
+        name: 'MailTransferItem',
+        createStatement: `CREATE TABLE IF NOT EXISTS "MailTransferItem" (
+            "id" BIGSERIAL NOT NULL,
+            "jobId" TEXT NOT NULL,
+            "mailbox" TEXT NOT NULL DEFAULT '',
+            "sourceKey" TEXT NOT NULL,
+            "messageId" TEXT,
+            "status" TEXT NOT NULL DEFAULT 'pending',
+            "error" TEXT,
+            "emailId" TEXT,
+            "folder" TEXT,
+            "bytes" BIGINT NOT NULL DEFAULT 0,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'BIGSERIAL NOT NULL' },
+            { name: 'jobId', definition: 'TEXT NOT NULL' },
+            { name: 'mailbox', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'sourceKey', definition: 'TEXT NOT NULL' },
+            { name: 'messageId', definition: 'TEXT' },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'pending'" },
+            { name: 'error', definition: 'TEXT' },
+            { name: 'emailId', definition: 'TEXT' },
+            { name: 'folder', definition: 'TEXT' },
+            { name: 'bytes', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'MailTransferItem_pkey', statement: 'ALTER TABLE "MailTransferItem" ADD CONSTRAINT "MailTransferItem_pkey" PRIMARY KEY ("id")' },
+            { name: 'MailTransferItem_jobId_fkey', statement: 'ALTER TABLE "MailTransferItem" ADD CONSTRAINT "MailTransferItem_jobId_fkey" FOREIGN KEY ("jobId") REFERENCES "MailTransferJob"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE UNIQUE INDEX IF NOT EXISTS "MailTransferItem_jobId_sourceKey_key" ON "MailTransferItem" ("jobId", "sourceKey")',
+            'CREATE INDEX IF NOT EXISTS "MailTransferItem_jobId_status_idx" ON "MailTransferItem" ("jobId", "status")',
+        ],
+    },
 ];
 
 let ensureSchemaPromise: Promise<void> | null = null;
@@ -1023,8 +1345,16 @@ async function ensureTable(pool: Queryable, table: TableSpec) {
         await ensureConstraint(pool, table.name, constraint);
     }
 
+    for (const fn of table.functions || []) {
+        await pool.query(fn);
+    }
+
     for (const indexStatement of table.indexes || []) {
         await pool.query(indexStatement);
+    }
+
+    for (const statement of table.after || []) {
+        await pool.query(statement);
     }
 }
 

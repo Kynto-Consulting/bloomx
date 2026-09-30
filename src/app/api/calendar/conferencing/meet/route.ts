@@ -1,53 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getCurrentUser } from '@/lib/session';
-import { prisma } from '@/lib/prisma';
+import { createMeeting } from '@/lib/conferencing/service';
+import { CONFERENCING_ERROR_STATUS, isConferencingError } from '@/lib/conferencing/types';
+import { errorResponse, limit, NO_STORE_HEADERS, readIdempotencyKey, requireActor } from '@/lib/conferencing/http';
 
+export const runtime = 'nodejs';
+
+/**
+ * ALIAS COMPATIBLE de la ruta antigua (POST /api/calendar/conferencing/meet -> { meetUrl }).
+ * Ahora delega en la fachada unica (POST /api/calendar/conferencing/google-meet): misma sesion, propiedad, limite y
+ * errores tipados. Conserva la forma historica: body { title, startsAt, endsAt } y respuesta { meetUrl } (+ `meeting`).
+ * En errores devuelve { error: <mensaje>, code } (la forma antigua era un texto).
+ */
 export async function POST(req: NextRequest) {
-    const user = await getCurrentUser();
-    if (!user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const who = await requireActor(req);
+    if (!who.ok) return who.response;
 
-    const googleAccount = await prisma.account.findFirst({
-        where: { userId: user.id, provider: 'google' },
-        select: { refresh_token: true },
-    });
+    const limited = await limit(`conf:create:${who.actor.userId}`, 20, 60_000);
+    if (limited) return errorResponse(limited);
 
-    if (!googleAccount?.refresh_token) {
-        return NextResponse.json({ error: 'Google account not linked' }, { status: 400 });
+    let body: any = {};
+    try {
+        body = await req.json();
+    } catch {
+        body = {};
     }
+    const key = readIdempotencyKey(req);
 
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            client_id: process.env.GOOGLE_CLIENT_ID || '',
-            client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
-            grant_type: 'refresh_token',
-            refresh_token: googleAccount.refresh_token,
-        }),
-    });
-    if (!tokenRes.ok) return NextResponse.json({ error: 'Failed to refresh token' }, { status: 500 });
-    const { access_token } = await tokenRes.json();
-
-    // Create via Meet REST API directly so the space is open (no waiting room) from the start.
-    // Calendar API's createRequest produces rooms that are not patchable via meetings.space.created scope.
-    const spaceRes = await fetch('https://meet.googleapis.com/v2/spaces', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            config: { accessType: 'OPEN', entryPointAccess: 'ALL' },
-        }),
-    });
-
-    if (!spaceRes.ok) {
-        const body = await spaceRes.text().catch(() => '');
-        console.error('[meet] Failed to create space:', spaceRes.status, body);
-        return NextResponse.json({ error: 'Failed to create Meet room' }, { status: 500 });
+    try {
+        const meeting = await createMeeting(
+            who.actor,
+            'google-meet',
+            {
+                topic: typeof body?.title === 'string' ? body.title : typeof body?.topic === 'string' ? body.topic : undefined,
+                startsAt: typeof body?.startsAt === 'string' ? body.startsAt : null,
+                endsAt: typeof body?.endsAt === 'string' ? body.endsAt : null,
+            },
+            { idempotencyKey: key === 'invalid' ? null : key },
+        );
+        return NextResponse.json({ meetUrl: meeting.joinUrl, meeting }, { headers: NO_STORE_HEADERS });
+    } catch (error) {
+        if (isConferencingError(error)) {
+            return NextResponse.json(
+                { error: error.message, code: error.code, ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) },
+                { status: CONFERENCING_ERROR_STATUS[error.code], headers: NO_STORE_HEADERS },
+            );
+        }
+        return errorResponse(error);
     }
-
-    const space = await spaceRes.json();
-    const meetUrl: string | null = space.meetingUri || null;
-
-    if (!meetUrl) return NextResponse.json({ error: 'No Meet URL returned' }, { status: 500 });
-
-    return NextResponse.json({ meetUrl });
 }

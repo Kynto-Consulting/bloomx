@@ -8,40 +8,40 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  avatar    String?
-  signature String? @db.Text
-  expansionSettings Json? // Stores settings for all expansions { "core-signature": { ... } }
-  emails    Email[]
-  labels    Label[]
-  rules     Rule[]
-  accounts  Account[]
-  moltSessions MoltSession[]
-  pushSubscriptions PushSubscription[]
-  calendars Calendar[]
-  calendarEvents CalendarEvent[]
-  contacts Contact[]
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  name                 String?
+  password             String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  avatar               String?
+  signature            String?               @db.Text
+  expansionSettings    Json? // Stores settings for all expansions { "core-signature": { ... } }
+  emails               Email[]
+  labels               Label[]
+  rules                Rule[]
+  accounts             Account[]
+  moltSessions         MoltSession[]
+  pushSubscriptions    PushSubscription[]
+  calendars            Calendar[]
+  calendarEvents       CalendarEvent[]
+  contacts             Contact[]
   appointmentSchedules AppointmentSchedule[]
 }
 
 model Account {
-  id                 String  @id @default(cuid())
-  userId             String
-  type               String
-  provider           String
-  providerAccountId  String
-  refresh_token      String? @db.Text
-  access_token       String? @db.Text
-  expires_at         Int?
-  token_type         String?
-  scope              String?
-  id_token           String? @db.Text
-  session_state      String?
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -50,33 +50,35 @@ model Account {
 }
 
 model Email {
-  id          String       @id @default(cuid())
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messageId   String       @unique
-  from        String
-  to          String
-  cc          String?
-  bcc         String?
-  replyTo     String?
-  subject     String?
-  snippet     String?
-  htmlKey     String?
-  textKey     String?
-  rawKey      String?
-  createdAt   DateTime     @default(now())
-  read        Boolean      @default(false)
-  folder      String       @default("inbox")
-  status      String       @default("received")
-  starred     Boolean      @default(false)
-  cleanTo     String?
-  scheduledAt DateTime?
-  smartReplies Json?
-  attachmentsChecked Boolean @default(false)
-  rawMimeUrl  String?      // Resend raw MIME download URL for async attachment processing
-  attachments Attachment[]
-  events      EmailEvent[]
-  labels      Label[]      @relation("EmailToLabel")
+  id                 String       @id @default(cuid())
+  userId             String
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageId          String       @unique
+  from               String
+  to                 String
+  cc                 String?
+  bcc                String?
+  replyTo            String?
+  subject            String?
+  snippet            String?
+  htmlKey            String?
+  textKey            String?
+  rawKey             String?
+  createdAt          DateTime     @default(now())
+  read               Boolean      @default(false)
+  folder             String       @default("inbox")
+  status             String       @default("received")
+  starred            Boolean      @default(false)
+  cleanTo            String?
+  scheduledAt        DateTime?
+  smartReplies       Json?
+  attachmentsChecked Boolean      @default(false)
+  rawMimeUrl         String? // Resend raw MIME download URL for async attachment processing
+  // Carpeta de origen al mover a archive/trash/spam (aditivo: ADD COLUMN IF NOT EXISTS "previousFolder" TEXT). La fija el servidor.
+  previousFolder     String?
+  attachments        Attachment[]
+  events             EmailEvent[]
+  labels             Label[]      @relation("EmailToLabel")
 
   @@index([to])
   @@index([folder])
@@ -94,7 +96,7 @@ model Attachment {
   mimeType  String
   size      Int
   key       String
-  status    String   @default("ready")  // "pending" | "ready" | "failed"
+  status    String   @default("ready") // "pending" | "ready" | "failed"
   createdAt DateTime @default(now())
   draftId   String?
   // Content-ID (sin angulos) de imagenes inline: resuelve `cid:` antes que el filename. Aditivo (ADD COLUMN IF NOT EXISTS "contentId" TEXT).
@@ -178,32 +180,32 @@ model RuleRun {
 }
 
 model MoltSession {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  accessToken   String   @unique // The token MoltBot sends with requests
-  refreshToken  String?  // Used to rotate access tokens
-  expiresAt     DateTime // When the access token expires
-  
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  accessToken  String   @unique // The token MoltBot sends with requests
+  refreshToken String? // Used to rotate access tokens
+  expiresAt    DateTime // When the access token expires
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([userId])
   @@index([accessToken])
 }
 
 model PushSubscription {
-  id             String   @id
-  userId         String   @map("user_id")
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  endpoint       String   @unique
+  id             String    @id
+  userId         String    @map("user_id")
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  endpoint       String    @unique
   p256dh         String
   auth           String
-  expirationTime BigInt?  @map("expiration_time")
-  userAgent      String?  @map("user_agent")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  expirationTime BigInt?   @map("expiration_time")
+  userAgent      String?   @map("user_agent")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
   lastSuccessAt  DateTime? @map("last_success_at")
 
   @@index([userId])
@@ -242,29 +244,33 @@ model Calendar {
 }
 
 model CalendarEvent {
-  id             String            @id @default(cuid())
-  userId         String
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  calendarId     String
-  calendar       Calendar          @relation(fields: [calendarId], references: [id], onDelete: Cascade)
-  title          String
-  description    String?           @db.Text
-  location       String?
-  startsAt       DateTime
-  endsAt         DateTime
-  allDay         Boolean           @default(false)
-  status         String            @default("confirmed")
-  responseStatus String?
-  source         String            @default("local")
-  externalId     String?
-  inviteUid      String?
-  organizerEmail String?
-  organizerName  String?
-  sourceEmailId  String?
-  lastSyncedAt   DateTime?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
-  attendees      CalendarAttendee[]
+  id                  String             @id @default(cuid())
+  userId              String
+  user                User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  calendarId          String
+  calendar            Calendar           @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+  title               String
+  description         String?            @db.Text
+  location            String?
+  startsAt            DateTime
+  endsAt              DateTime
+  allDay              Boolean            @default(false)
+  status              String             @default("confirmed")
+  responseStatus      String?
+  source              String             @default("local")
+  externalId          String?
+  inviteUid           String?
+  organizerEmail      String?
+  organizerName       String?
+  sourceEmailId       String?
+  // Conferencia adjunta (opcional; el enlace tambien sigue en location por compatibilidad con eventos existentes)
+  conferenceUrl       String?
+  conferenceProvider  String?
+  conferenceMeetingId String?
+  lastSyncedAt        DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  attendees           CalendarAttendee[]
 
   @@index([userId])
   @@index([calendarId])
@@ -381,6 +387,33 @@ model AuditEvent {
   @@index([event, ts])
 }
 
+// Sandbox de extensiones (services.storage / services.notify). SIN relaciones (como AuditEvent): acceso por SQL crudo.
+// La FK a User con ON DELETE CASCADE vive solo en el DDL (src/lib/db/schema.ts).
+model ExtensionStorage {
+  userId      String
+  extensionId String
+  key         String
+  value       String   @db.Text // JSON serializado
+  bytes       Int
+  updatedAt   DateTime @default(now())
+
+  @@id([userId, extensionId, key])
+}
+
+model ExtensionNotification {
+  id          String    @id
+  userId      String
+  extensionId String
+  level       String    @default("info")
+  title       String?
+  message     String    @db.Text
+  url         String?
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  @@index([createdAt])
+}
+
 model UserMfa {
   userId         String    @id
   secretEnc      String    @db.Text // AES-256-GCM (encryption.ts v3)
@@ -400,4 +433,122 @@ model RevokedSession {
 
   @@index([expiresAt])
   @@index([userId])
+}
+
+// Consola de administracion (ADITIVO, NO ejecutado; DDL en src/lib/db/schema.ts, acceso por SQL crudo en src/lib/admin/*).
+model UserAdminState {
+  userId             String    @id
+  disabled           Boolean   @default(false)
+  disabledAt         DateTime?
+  mustChangePassword Boolean   @default(false)
+  lastLoginAt        DateTime?
+  lastLoginIp        String?
+  updatedAt          DateTime  @default(now())
+
+  @@index([lastLoginAt])
+}
+
+model UserSession {
+  jti       String   @id
+  userId    String
+  tv        Int      @default(0)
+  mfa       Boolean  @default(false)
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([expiresAt])
+}
+
+model AdminSetting {
+  key       String   @id
+  value     Json     @default("null")
+  updatedAt DateTime @default(now())
+  updatedBy String?
+}
+
+// Registro de reuniones creadas por la fachada de conferencias (src/lib/conferencing). Sirve para: (1) idempotencia
+// persistente (Idempotency-Key => misma reunion, tambien con varias instancias serverless), (2) PROPIEDAD: solo el
+// usuario que creo una reunion puede borrarla/actualizarla (en modo instancia el token del proveedor es de toda la cuenta).
+model ConferenceMeeting {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String
+  meetingId      String
+  joinUrl        String   @db.Text
+  hostUrl        String?  @db.Text
+  idempotencyKey String?
+  status         String   @default("ready") // pending | ready | deleted
+  payload        Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, provider, idempotencyKey])
+  @@index([userId, provider, meetingId])
+  @@index([createdAt])
+}
+
+// Importar / exportar correo (ADITIVO; DDL con IF NOT EXISTS en src/lib/db/schema.ts, acceso por SQL crudo en src/lib/mail-transfer/*).
+// "userId" es el administrador que lanza el trabajo (o el propio usuario en "Mi buzon"); sin FK porque un "manager" del backend no es un User.
+model MailTransferJob {
+  id              String             @id
+  userId          String
+  actorKind       String             @default("user")
+  domain          String             @default("")
+  kind            String // import | export
+  scope           String             @default("domain") // domain | mailboxes | self
+  targetUserId    String?
+  format          String             @default("unknown")
+  status          String             @default("created") // created|uploading|uploaded|analyzing|ready|queued|running|done|failed|canceled|expired
+  phase           String             @default("")
+  fileName        String?
+  options         Json               @default("{}")
+  summary         Json               @default("{}")
+  cursor          Json               @default("{}")
+  totalBytes      BigInt             @default(0)
+  uploadedBytes   BigInt             @default(0)
+  totalItems      Int                @default(0)
+  doneItems       Int                @default(0)
+  importedItems   Int                @default(0)
+  duplicateItems  Int                @default(0)
+  skippedItems    Int                @default(0)
+  errorItems      Int                @default(0)
+  bytesProcessed  BigInt             @default(0)
+  outputBytes     BigInt             @default(0)
+  outputSha256    String?
+  lockedUntil     DateTime?
+  lastError       String?
+  cancelRequested Boolean            @default(false)
+  downloadedAt    DateTime?
+  expiresAt       DateTime?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @default(now())
+  items           MailTransferItem[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([domain, status])
+  @@index([status, updatedAt])
+}
+
+model MailTransferItem {
+  id        BigInt          @id @default(autoincrement())
+  jobId     String
+  mailbox   String          @default("")
+  sourceKey String
+  messageId String?
+  status    String          @default("pending") // pending | imported | duplicate | skipped | error | done
+  error     String?
+  emailId   String?
+  folder    String?
+  bytes     BigInt          @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @default(now())
+  job       MailTransferJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, sourceKey])
+  @@index([jobId, status])
 }

@@ -1,0 +1,40 @@
+From - Tue Feb 06 09:00:00 2024
+X-Mozilla-Status: 0001
+X-Mozilla-Status2: 00000000
+X-Mozilla-Keys: $label1
+Message-ID: <tb-1@remoto.test>
+Date: Tue, 6 Feb 2024 09:00:00 +0100
+From: Marta =?ISO-8859-1?Q?Mu=F1oz?= <marta@remoto.test>
+To: bea@example.test
+Subject: Informe
+ trimestral
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+	boundary="------------tbbound"
+
+--------------tbbound
+Content-Type: text/plain; charset=ISO-8859-1; format=flowed
+Content-Transfer-Encoding: quoted-printable
+
+Adjunto el informe. Saludos, Mar=EDa.
+
+From lo que sea, esta linea no separa mensajes porque la siguiente no es una cabecera.
+--------------tbbound
+Content-Type: text/plain; charset=UTF-8; name="nota.txt"
+Content-Disposition: attachment; filename="nota.txt"
+Content-Transfer-Encoding: base64
+
+SG9sYSBtdW5kbw==
+--------------tbbound--
+
+From - Wed Feb 07 09:00:00 2024
+X-Mozilla-Status: 0000
+X-Status: F
+Message-ID: <tb-2@remoto.test>
+Date: Wed, 7 Feb 2024 09:00:00 +0100
+From: marta@remoto.test
+To: bea@example.test
+Subject: Sin leer y destacado
+Content-Type: text/plain; charset=utf-8
+
+Cuerpo.

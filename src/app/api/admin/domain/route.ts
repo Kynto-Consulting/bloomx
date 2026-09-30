@@ -1,6 +1,8 @@
 
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { requireAdmin } from "@/lib/admin-auth";
+import { DOMAIN_CONFIG_TAG } from "@/lib/domain-config-cache";
 
 export async function GET(req: Request) {
     const guard = await requireAdmin(req);
@@ -46,6 +48,9 @@ export async function PUT(req: Request) {
         if (!res.ok) {
             return NextResponse.json(data, { status: res.status });
         }
+
+        // El layout cachea /api/config 60 s: se invalida para que el proximo SSR (login, recarga) ya use el tema nuevo.
+        try { revalidateTag(DOMAIN_CONFIG_TAG, { expire: 0 }); } catch { /* fuera de contexto de Next (tests) */ }
 
         return NextResponse.json(data);
 

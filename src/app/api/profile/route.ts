@@ -64,6 +64,8 @@ export async function PUT(req: NextRequest) {
                 { mfa: currentSession?.mfa === true }
             );
             auditLog('auth.password.changed', { userId: user.id });
+            // Un cambio de contrasena cumple el "cambio forzado" pedido por un administrador (best-effort).
+            void import('@/lib/admin/user-state').then((m) => m.setMustChangePassword(user.id, false)).catch(() => undefined);
         }
 
         // Omit password from response

@@ -45,7 +45,7 @@ export function Modal({
         <div className={cn('fixed inset-0 z-[100] flex items-center justify-center p-4', className)}>
             <div
                 aria-hidden="true"
-                className={cn('absolute inset-0 bg-black/60', backdropClassName)}
+                className={cn('absolute inset-0 bg-overlay', backdropClassName)}
                 onMouseDown={closeOnBackdrop ? onClose : undefined}
             />
             <div
@@ -55,7 +55,7 @@ export function Modal({
                 aria-label={ariaLabelledBy ? undefined : ariaLabel}
                 aria-labelledby={ariaLabelledBy ?? (ariaLabel ? undefined : titleId)}
                 tabIndex={-1}
-                className={cn('relative bg-background text-foreground outline-none', panelClassName)}
+                className={cn('relative bg-card text-card-foreground outline-none', panelClassName)}
             >
                 {typeof children === 'function' ? children({ titleId, descriptionId }) : children}
             </div>

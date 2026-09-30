@@ -29,6 +29,10 @@ interface Props {
     /** Solo para pruebas: sin layout real (jsdom) getBoundingClientRect devuelve 0. */
     measureElement?: (element: HTMLDivElement, entry: ResizeObserverEntry | undefined, instance: Virtualizer<any, any>) => number;
     className?: string;
+    /** Indices de elementos "pegajosos" (encabezados de fecha): el activo se queda fijo arriba mientras se hace scroll. */
+    stickyIndexes?: number[];
+    /** Separacion vertical entre filas (px). */
+    gap?: number;
 }
 
 /**
@@ -39,15 +43,28 @@ interface Props {
  */
 export function VirtualMailRows({
     scrollRef, ids, renderRow, pinnedIndex, hasMore, onNearEnd, handleRef, label,
-    estimateSize = 96, overscan = 8, initialRect, observeElementRect, measureElement, className,
+    estimateSize = 96, overscan = 8, initialRect, observeElementRect, measureElement, className, stickyIndexes, gap = 6,
 }: Props) {
+    // Encabezado pegajoso activo: el ultimo antes del inicio de la ventana visible; siempre se mantiene montado.
+    const activeStickyRef = useRef(-1);
     const virtualizer = useVirtualizer<HTMLElement, HTMLDivElement>({
         count: ids.length,
         getScrollElement: () => scrollRef.current,
         estimateSize: () => estimateSize,
         overscan,
         getItemKey: (index) => ids[index] ?? index,
-        rangeExtractor: (range) => pinRange(defaultRangeExtractor(range), pinnedIndex, ids.length),
+        rangeExtractor: (range) => {
+            let indexes = defaultRangeExtractor(range);
+            if (stickyIndexes && stickyIndexes.length > 0) {
+                activeStickyRef.current = [...stickyIndexes].reverse().find((i) => range.startIndex >= i) ?? -1;
+                if (activeStickyRef.current >= 0 && !indexes.includes(activeStickyRef.current)) {
+                    indexes = [...indexes, activeStickyRef.current].sort((a, b) => a - b);
+                }
+            } else {
+                activeStickyRef.current = -1;
+            }
+            return pinRange(indexes, pinnedIndex, ids.length);
+        },
         ...(initialRect ? { initialRect } : {}),
         ...(observeElementRect ? { observeElementRect } : {}),
         ...(measureElement ? { measureElement } : {}),
@@ -112,23 +129,30 @@ export function VirtualMailRows({
             className={className}
             style={{ position: 'relative', height: virtualizer.getTotalSize(), width: '100%' }}
         >
-            {items.map((item) => (
-                <div
-                    key={item.key}
-                    data-index={item.index}
-                    ref={virtualizer.measureElement}
-                    style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        width: '100%',
-                        transform: `translateY(${item.start}px)`,
-                        paddingBottom: 6, // equivale al gap-1.5 de la lista sin virtualizar
-                    }}
-                >
-                    {renderRow(item.index)}
-                </div>
-            ))}
+            {items.map((item) => {
+                const sticky = stickyIndexes?.includes(item.index) ?? false;
+                const active = sticky && item.index === activeStickyRef.current;
+                return (
+                    <div
+                        key={item.key}
+                        data-index={item.index}
+                        ref={virtualizer.measureElement}
+                        style={active
+                            ? { position: 'sticky', top: 0, left: 0, width: '100%', zIndex: 5, paddingBottom: gap }
+                            : {
+                                position: 'absolute',
+                                top: 0,
+                                left: 0,
+                                width: '100%',
+                                transform: `translateY(${item.start}px)`,
+                                paddingBottom: gap,
+                                ...(sticky ? { zIndex: 4 } : {}),
+                            }}
+                    >
+                        {renderRow(item.index)}
+                    </div>
+                );
+            })}
         </div>
     );
 }

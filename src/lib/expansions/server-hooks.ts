@@ -9,8 +9,15 @@
  *      El resultado { stop, message, warnings, modify } se aplica en la ruta: stop => 422 y NO se envia.
  *  - EMAIL_RECEIVED: para el ingest de correo entrante (webhook de Resend). Requiere dominio FIRMADO (el backend rechaza
  *      este evento en modo legado): sin BLOOMX_DOMAIN_PRIVATE_KEY se omite. Sin bloqueo; nunca lanza.
+ *  - Eventos de ciclo de vida (EMAIL_OPENED, EMAIL_SENT, COMPOSE_OPENED, CALENDAR_EVENT_*, CONTACT_*, APPOINTMENT_BOOKED):
+ *      `fireLifecycleHook`. Contexto MINIMO (buildXxxContext), no bloqueante, nunca lanza, no-op en modo legado.
  *  - CRON: `runCronHooks` ejecuta los intercepts CRON de ESTE dominio (firmado). El cron global de todos los dominios es
  *      del operador del backend (BACKEND_CRON_SECRET en el backend).
+ *
+ * Preferencias del usuario: en dominios FIRMADOS la peticion lleva ademas `disabledExtensions` (las que ESE usuario desactivo en
+ *  /extensions, leidas de sus ajustes en el servidor, validadas y acotadas a 200). Va dentro del cuerpo firmado. El backend NO ejecuta esas
+ *  extensiones para ese usuario, EXCEPTO las obligatorias (`mandatory` en el manifest o politica del dominio). En modo LEGADO (sin
+ *  clave) no se envia y se ejecuta todo como antes. Si no se pueden leer las preferencias tampoco se envia (se ejecutan todas).
  *
  * Politica de fallo de EMAIL_PRE_SEND cuando el backend no responde (red, 5xx, sin configurar):
  *   por defecto se ENVIA igual (un backend caido no debe impedir escribir correos) y se deja un aviso en el log;
@@ -18,9 +25,17 @@
  *   EXTENSION_HOOKS_DISABLED=true desactiva por completo la llamada.
  */
 
+import { after } from 'next/server';
 import { buildBackendHeaders, loadDomainPrivateKey } from '@/lib/backend-auth';
+import { rateLimit } from '@/lib/security';
+import { LIFECYCLE_EVENTS } from './manifest-schema';
+import { MAX_DISABLED_FOR_SERVER, loadDisabledExtensionsForUser } from './user-disabled';
 
-export type HookEvent = 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON';
+export type LifecycleEvent =
+    | 'EMAIL_OPENED' | 'EMAIL_SENT' | 'COMPOSE_OPENED'
+    | 'CALENDAR_EVENT_CREATED' | 'CALENDAR_EVENT_UPDATED' | 'CALENDAR_EVENT_CANCELLED'
+    | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED';
+export type HookEvent = 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON' | LifecycleEvent;
 
 export interface PreSendMessage {
     subject?: string | null;
@@ -56,6 +71,10 @@ export interface HookTransport {
     /** Llamada de servicio (EMAIL_RECEIVED/CRON): exige clave de dominio (firma); nunca se degrada a legado. */
     internal?: boolean;
     timeoutMs?: number;
+    /** Extensiones desactivadas por el usuario (ya leidas). Si es undefined y hay usuario, se leen de sus ajustes (withUserDisabled). */
+    disabledExtensions?: string[];
+    /** Lector de las preferencias del usuario (inyectable en pruebas). Por defecto: BD. */
+    loadDisabled?: (userId: string) => Promise<string[]>;
 }
 
 const DEFAULT_BACKEND = 'http://backend.bloomx.arubik.dev';
@@ -106,6 +125,33 @@ function envFlag(name: string): boolean {
     return String(process.env[name] || '').toLowerCase() === 'true';
 }
 
+const DISABLED_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
+
+/** Lista `disabledExtensions` lista para el cuerpo firmado: solo ids validos, sin duplicados y acotada. */
+export function sanitizeDisabledForRequest(raw: unknown): string[] {
+    if (!Array.isArray(raw)) return [];
+    const out = new Set<string>();
+    for (const item of raw) {
+        if (typeof item === 'string' && DISABLED_ID_RE.test(item)) out.add(item);
+        if (out.size >= MAX_DISABLED_FOR_SERVER) break;
+    }
+    return Array.from(out);
+}
+
+/**
+ * Completa el transporte con las extensiones que el usuario desactivo. Solo en dominios FIRMADOS y con usuario; nunca lanza (si no se
+ * pueden leer las preferencias se sigue sin lista: se ejecutan todas, como siempre).
+ */
+export async function withUserDisabled(transport: HookTransport): Promise<HookTransport> {
+    if (transport.disabledExtensions !== undefined || !transport.userId || !loadDomainPrivateKey()) return transport;
+    try {
+        const ids = await (transport.loadDisabled ?? loadDisabledExtensionsForUser)(transport.userId);
+        return { ...transport, disabledExtensions: sanitizeDisabledForRequest(ids) };
+    } catch {
+        return transport;
+    }
+}
+
 /** Llamada cruda al backend. Lanza si la respuesta no es 2xx o el cuerpo no es JSON. */
 export async function callBackendHooks(event: HookEvent, context: Record<string, unknown>, transport: HookTransport = {}): Promise<any> {
     const fetchImpl = transport.fetchImpl || fetch;
@@ -114,7 +160,9 @@ export async function callBackendHooks(event: HookEvent, context: Record<string,
     if (transport.internal && !loadDomainPrivateKey()) throw new Error('domain signing key not configured');
 
     const url = `${backendUrl}/api/extension/hooks`;
-    const rawBody = JSON.stringify({ event, context });
+    // La lista solo viaja en dominios FIRMADOS (dentro del cuerpo firmado), con usuario y fuera de CRON (que no tiene usuario).
+    const disabled = event !== 'CRON' && transport.userId && loadDomainPrivateKey() ? sanitizeDisabledForRequest(transport.disabledExtensions) : [];
+    const rawBody = JSON.stringify(disabled.length > 0 ? { event, context, disabledExtensions: disabled } : { event, context });
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...buildBackendHeaders({
@@ -148,7 +196,7 @@ export async function runEmailPreSendHooks(message: PreSendMessage, transport: H
     if (envFlag('EXTENSION_HOOKS_DISABLED')) return { stop: false, warnings: [], modify: {} };
 
     try {
-        const json = await callBackendHooks('EMAIL_PRE_SEND', buildPreSendContext(message), transport);
+        const json = await callBackendHooks('EMAIL_PRE_SEND', buildPreSendContext(message), await withUserDisabled(transport));
         return interpretPreSendResponse(json);
     } catch (error: any) {
         // Sin destinatarios ni contenido en el log (PII)
@@ -176,12 +224,12 @@ export async function runEmailReceivedHooks(
     if (!loadDomainPrivateKey()) return null;
     try {
         // El dueño del buzon viaja como X-User-ID FIRMADO (el backend lo usa como trustedUserId).
-        const json = await callBackendHooks('EMAIL_RECEIVED', context, {
+        const json = await callBackendHooks('EMAIL_RECEIVED', context, await withUserDisabled({
             ...transport,
             internal: true,
             host: transport.host || context.domain || process.env.TOP_DOMAIN || null,
             userId: transport.userId || context.userId,
-        });
+        }));
         return { executed: Array.isArray(json?.results) ? json.results.length : 0 };
     } catch (error: any) {
         console.error('[EXTENSION_HOOKS] EMAIL_RECEIVED fallo:', String(error?.message || 'error').slice(0, 120));
@@ -204,4 +252,157 @@ export async function runEmailPreSendHooksForRequest(
 ): Promise<PreSendResult> {
     const host = process.env.TOP_DOMAIN || req.headers.get('host') || '';
     return runEmailPreSendHooks(message, { host, userId: user.id, email: user.email });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Eventos de ciclo de vida (no bloqueantes, contexto minimo con lista blanca)
+// ---------------------------------------------------------------------------------------------------------------
+
+function str(value: unknown, max: number): string {
+    return typeof value === 'string' ? value.slice(0, max) : '';
+}
+function iso(value: unknown): string {
+    if (value === null || value === undefined || value === '') return '';
+    const date = value instanceof Date ? value : new Date(value as any);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+}
+function count(value: unknown): number {
+    if (Array.isArray(value)) return Math.min(value.length, 1000);
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.min(Math.floor(n), 1000) : 0;
+}
+/** Extrae la direccion de "Nombre <a@x.com>" en minusculas (solo el correo, nunca el nombre). */
+function addressOnly(value: unknown): string {
+    const raw = str(value, 400);
+    const bracket = raw.match(/<([^<>\s]+@[^<>\s]+)>/);
+    const found = bracket ? bracket[1] : raw.match(/[^\s<>",;]+@[^\s<>",;]+/)?.[0] || '';
+    return found.toLowerCase().slice(0, 320);
+}
+
+export function buildEmailOpenedContext(input: { emailId: unknown; folder?: unknown; from?: unknown; isRead?: unknown }): Record<string, unknown> {
+    return { emailId: str(input.emailId, 100), folder: str(input.folder, 50), fromEmail: addressOnly(input.from), isRead: input.isRead === true };
+}
+
+export function buildEmailSentContext(input: { emailId: unknown; to?: unknown; cc?: unknown; bcc?: unknown; hasAttachments?: unknown; sentAt?: unknown }): Record<string, unknown> {
+    return {
+        emailId: str(input.emailId, 100),
+        toCount: count(input.to),
+        ccCount: count(input.cc),
+        bccCount: count(input.bcc),
+        hasAttachments: input.hasAttachments === true,
+        sentAt: iso(input.sentAt) || new Date().toISOString(),
+    };
+}
+
+export const COMPOSE_MODES = ['new', 'reply', 'replyAll', 'forward'] as const;
+export function buildComposeOpenedContext(input: { mode?: unknown; inReplyToEmailId?: unknown; draftId?: unknown }): Record<string, unknown> {
+    const mode = (COMPOSE_MODES as readonly string[]).includes(input.mode as string) ? (input.mode as string) : 'new';
+    const out: Record<string, unknown> = { mode };
+    const reply = str(input.inReplyToEmailId, 100);
+    const draft = str(input.draftId, 100);
+    if (reply) out.inReplyToEmailId = reply;
+    if (draft) out.draftId = draft;
+    return out;
+}
+
+export function buildCalendarEventContext(input: {
+    eventId: unknown; calendarId?: unknown; startsAt?: unknown; endsAt?: unknown; allDay?: unknown; status?: unknown; attendees?: unknown; attendeeCount?: unknown; source?: unknown;
+}): Record<string, unknown> {
+    return {
+        eventId: str(input.eventId, 100),
+        calendarId: str(input.calendarId, 100),
+        startsAt: iso(input.startsAt),
+        endsAt: iso(input.endsAt),
+        allDay: input.allDay === true,
+        status: str(input.status, 30),
+        attendeeCount: Array.isArray(input.attendees) ? count(input.attendees) : count(input.attendeeCount),
+        source: str(input.source, 30),
+    };
+}
+
+export function buildContactSavedContext(input: { contactId: unknown; email?: unknown; created?: unknown; source?: unknown }): Record<string, unknown> {
+    return { contactId: str(input.contactId, 100), email: addressOnly(input.email), created: input.created === true, source: str(input.source, 30) };
+}
+
+export function buildContactDeletedContext(input: { contactId: unknown }): Record<string, unknown> {
+    return { contactId: str(input.contactId, 100) };
+}
+
+export function buildAppointmentBookedContext(input: { bookingId: unknown; scheduleId?: unknown; startsAt?: unknown; endsAt?: unknown; guestEmail?: unknown; calendarEventId?: unknown }): Record<string, unknown> {
+    const out: Record<string, unknown> = {
+        bookingId: str(input.bookingId, 100),
+        scheduleId: str(input.scheduleId, 100),
+        startsAt: iso(input.startsAt),
+        endsAt: iso(input.endsAt),
+        guestEmail: addressOnly(input.guestEmail),
+    };
+    const eventId = str(input.calendarEventId, 100);
+    if (eventId) out.calendarEventId = eventId;
+    return out;
+}
+
+const LIFECYCLE_TIMEOUT_MS = 5_000;
+const LIFECYCLE_RATE_PER_MIN = 60;
+
+export interface LifecycleOptions extends HookTransport {
+    /** Fuerza ejecucion sin after() (promesa suelta con catch); util en pruebas. */
+    inline?: boolean;
+}
+
+/** Ejecuta el hook ya validado. Nunca lanza. */
+async function runLifecycle(event: LifecycleEvent, userId: string, context: Record<string, unknown>, opts: LifecycleOptions): Promise<void> {
+    try {
+        const { inline: _inline, ...transport } = opts;
+        await callBackendHooks(event, context, await withUserDisabled({
+            ...transport,
+            internal: true,
+            host: transport.host || process.env.TOP_DOMAIN || null,
+            userId,
+            timeoutMs: transport.timeoutMs ?? LIFECYCLE_TIMEOUT_MS,
+        }));
+    } catch (error: any) {
+        console.error(`[EXTENSION_HOOKS] ${event} fallo:`, error?.name === 'AbortError' ? 'timeout' : String(error?.message || 'error').slice(0, 120));
+    }
+}
+
+/**
+ * Dispara un evento de ciclo de vida. NO bloqueante y nunca lanza. No-op en modo legado (sin clave de dominio),
+ * con EXTENSION_HOOKS_DISABLED, con evento desconocido o al superar 60 eventos/min por usuario+evento.
+ * Usa after() de next/server dentro de una peticion; fuera de ella cae a una promesa suelta con catch.
+ * Devuelve true si se programo la ejecucion.
+ */
+export function fireLifecycleHook(event: LifecycleEvent, userId: string | null | undefined, context: Record<string, unknown>, opts: LifecycleOptions = {}): boolean {
+    try {
+        if (envFlag('EXTENSION_HOOKS_DISABLED')) return false;
+        if (!userId || !(LIFECYCLE_EVENTS as string[]).includes(event)) return false;
+        if (!loadDomainPrivateKey()) return false;
+        if (!rateLimit(`ext-hook:${event}:${userId}`, LIFECYCLE_RATE_PER_MIN, 60_000).ok) return false;
+
+        const task = () => runLifecycle(event, userId, context, opts);
+        if (!opts.inline) {
+            try {
+                after(task);
+                return true;
+            } catch {
+                // fuera del ambito de una peticion: fallback
+            }
+        }
+        void task().catch(() => undefined);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** Dedupe en memoria (por proceso) para eventos repetitivos, p.ej. EMAIL_OPENED por usuario+correo. */
+const recentKeys = new Map<string, number>();
+export function shouldFireOnce(key: string, windowMs = 60_000, now = Date.now()): boolean {
+    const last = recentKeys.get(key);
+    if (last !== undefined && now - last < windowMs) return false;
+    recentKeys.set(key, now);
+    if (recentKeys.size > 5000) {
+        for (const [k, t] of recentKeys) if (now - t >= windowMs) recentKeys.delete(k);
+        if (recentKeys.size > 5000) recentKeys.clear();
+    }
+    return true;
 }

@@ -43,7 +43,7 @@ describe('ensureDatabaseSchema sobre Postgres real', () => {
         const t = (await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public'`)).rows.map((r: any) => r.table_name);
         for (const name of ['User', 'Account', 'Email', 'Attachment', 'EmailEvent', 'Draft', 'Label', 'Rule', 'RuleRun', 'MoltSession',
             'Calendar', 'CalendarEvent', 'CalendarAttendee', 'Contact', 'AppointmentSchedule', 'AppointmentAvailability',
-            'AppointmentBooking', 'AuditEvent', 'UserMfa', 'RevokedSession', 'push_subscriptions', 'push_vapid_config', '_EmailToLabel', 'SecureMessageMeta']) {
+            'AppointmentBooking', 'AuditEvent', 'UserMfa', 'RevokedSession', 'push_subscriptions', 'push_vapid_config', '_EmailToLabel', 'SecureMessageMeta', 'ExtensionStorage', 'ExtensionNotification']) {
             expect(t, name).toContain(name);
         }
     });
@@ -69,7 +69,7 @@ describe('ensureDatabaseSchema sobre Postgres real', () => {
         for (const name of ['Email_userId_folder_createdAt_idx', 'Email_userId_folder_read_idx', 'Email_userId_scheduledAt_idx',
             'AuditEvent_ts_idx', 'AuditEvent_userId_ts_idx', 'AuditEvent_event_ts_idx', 'RevokedSession_expiresAt_idx', 'RevokedSession_userId_idx',
             'Rule_userId_priority_idx', 'RuleRun_userId_idx', 'CalendarEvent_userId_startsAt_idx', 'AppointmentBooking_startsAt_idx',
-            'AppointmentBooking_guestEmail_idx', 'EmailEvent_resendEmailId_idx', 'UserMfa_pkey', 'RevokedSession_pkey', 'AuditEvent_pkey', 'Rule_pkey', 'RuleRun_pkey']) {
+            'AppointmentBooking_guestEmail_idx', 'EmailEvent_resendEmailId_idx', 'UserMfa_pkey', 'RevokedSession_pkey', 'AuditEvent_pkey', 'Rule_pkey', 'RuleRun_pkey', 'ExtensionStorage_pkey', 'ExtensionNotification_pkey', 'ExtensionNotification_pending_idx']) {
             expect(idx.has(name), `falta indice ${name}`).toBe(true);
         }
         expect(idx.get('Email_fts_idx')).toMatch(/USING gin/i);

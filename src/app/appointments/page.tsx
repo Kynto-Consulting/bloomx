@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
+import { normalizeHex } from '@/lib/color';
 import { Sidebar } from '@/components/Sidebar';
 import { Clock, Copy, ExternalLink, Plus, Pencil, Trash2, Check, Video, X, CalendarDays, ToggleLeft, ToggleRight, ChevronRight, ChevronLeft, PlusCircle, Trash, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,13 +10,17 @@ import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
 import { useSurfaceColors } from '@/hooks/useSurfaceColors';
-import { agendaAccentText, agendaSoft, agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
+import { DEFAULT_AGENDA_COLOR, agendaAccentText, agendaSoft, agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
 import { pluralKey, weekdayName } from '@/lib/i18n/format';
+import { useConferencingProviders } from '@/components/conferencing/useConferencingProviders';
+import { STATE_LABEL_KEY, providerReasonKey, providerState } from '@/components/conferencing/picker-state';
+import { PROVIDER_INFO, legacyValueFromProvider, providerFromLegacyValue } from '@/lib/conferencing/types';
 
 // 0 = domingo ... 6 = sabado (los nombres salen de Intl segun el idioma activo).
 const DAYS = [0, 1, 2, 3, 4, 5, 6];
 const TIMEZONES = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone') : ['UTC', 'America/Lima', 'America/New_York', 'Europe/London'];
 const DURATIONS = [15, 20, 30, 45, 60, 90, 120];
+// theme-lint-ignore: paleta de colores de USUARIO para horarios (dato, no tema); el texto se calcula por contraste (agenda-color.ts).
 const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#dc2626', '#ea580c', '#16a34a', '#0891b2'];
 
 type Range = { startTime: string; endTime: string };
@@ -126,13 +131,21 @@ function ScheduleForm({
         name: initial?.name || '',
         description: initial?.description || '',
         duration: initial?.duration || 30,
-        color: initial?.color || brandColor || '#2563eb',
+        color: initial?.color || brandColor || DEFAULT_AGENDA_COLOR,
         timezone: initial?.timezone || userTz,
         conferencing: initial?.conferencing || '',
         days: initial?.availability?.length ? toDayConfigs(initial.availability) : defaultDays(),
     });
 
     const set = (k: keyof FormState, v: any) => setForm(p => ({ ...p, [k]: v }));
+    // Proveedores del registro de videoconferencia; el valor guardado sigue siendo 'meet' | 'zoom' (la API no admite mas).
+    const { providers: confProviders } = useConferencingProviders();
+    const confOptions = (['google-meet', 'zoom'] as const).map(id => ({
+        value: legacyValueFromProvider(id),
+        label: confProviders.find(p => p.id === id)?.name || PROVIDER_INFO[id].name,
+    }));
+    const confProvider = providerFromLegacyValue(form.conferencing);
+    const confStatus = confProvider ? confProviders.find(p => p.id === confProvider) ?? null : null;
     // Color elegido por el usuario: relleno solido (texto legible por contraste) y version "de texto" corregida.
     const accentSolid = safeAgendaColor(form.color || brandColor);
     const onAccent = agendaTextOn(accentSolid);
@@ -160,7 +173,7 @@ function ScheduleForm({
     const inputCls = `w-full rounded-xl px-3.5 py-2.5 text-sm outline-none transition-all bg-muted/50 hover:bg-muted/70 focus:bg-background focus:ring-2 focus:ring-offset-0`;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onCancel(); }}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-overlay p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !saving) onCancel(); }}>
             <motion.div
                 ref={dialogRef}
                 role="dialog"
@@ -235,7 +248,7 @@ function ScheduleForm({
                                 <div className="space-y-1">
                                     <span id={`${uid}-conf`} className="text-sm font-medium">{t('appointments.form.conferencing')}</span>
                                     <div className="flex gap-2" role="group" aria-labelledby={`${uid}-conf`}>
-                                        {[{ value: '', label: t('appointments.form.confNone') }, { value: 'meet', label: 'Google Meet' }, { value: 'zoom', label: 'Zoom' }].map(opt => (
+                                        {[{ value: '', label: t('appointments.form.confNone') }, ...confOptions].map(opt => (
                                             <button key={opt.value} type="button" onClick={() => set('conferencing', opt.value)}
                                                 aria-pressed={form.conferencing === opt.value}
                                                 className="flex-1 rounded-xl border border-transparent bg-muted px-3 py-2 text-sm font-medium transition-colors hover:bg-muted/70"
@@ -246,6 +259,12 @@ function ScheduleForm({
                                             </button>
                                         ))}
                                     </div>
+                                    {confStatus && (
+                                        <p role="status" aria-live="polite" data-testid="conf-status" className={`text-xs ${providerState(confStatus) === 'ready' ? 'text-muted-foreground' : 'text-warning'}`}>
+                                            {t(STATE_LABEL_KEY[providerState(confStatus)])}
+                                            {providerReasonKey(confStatus) ? `: ${t(providerReasonKey(confStatus) as string)}` : ''}
+                                        </p>
+                                    )}
                                 </div>
                             </motion.div>
                         ) : (
@@ -354,8 +373,13 @@ export default function AppointmentsPage() {
     const { config: domainConfig } = useDomainConfig();
     const { t } = useI18n();
     const surface = useSurfaceColors();
-    const brandColor = safeAgendaColor(domainConfig.theme?.primaryColor, '#2563eb');
-    const brandText = agendaTextOn(brandColor);
+    // Color de marca vigente: lee --color-primary (cubre paletas por modo); respaldo al campo legado.
+    const brandColor = useMemo(() => {
+        const fallback = safeAgendaColor(domainConfig.theme?.primaryColor, DEFAULT_AGENDA_COLOR);
+        if (typeof document === 'undefined') return fallback;
+        return normalizeHex(getComputedStyle(document.documentElement).getPropertyValue('--color-primary').trim()) ?? fallback;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [domainConfig.theme, surface.background]);
 
     const [schedules, setSchedules] = useState<Schedule[]>([]);
     const [loading, setLoading] = useState(true);
@@ -494,8 +518,7 @@ export default function AppointmentsPage() {
                             )}
                             <button
                                 onClick={() => { setEditTarget(null); setShowForm(true); }}
-                                className="flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90 transition-opacity"
-                                style={{ backgroundColor: brandColor, color: brandText }}
+                                className="flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
                             >
                                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('appointments.newSchedule')}
                             </button>
@@ -513,8 +536,7 @@ export default function AppointmentsPage() {
                             <p className="text-sm text-muted-foreground mt-1">{t('appointments.emptyHelp')}</p>
                             <button
                                 onClick={() => { setEditTarget(null); setShowForm(true); }}
-                                className="mt-4 inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium hover:opacity-90"
-                                style={{ backgroundColor: brandColor, color: brandText }}
+                                className="mt-4 inline-flex items-center gap-2 rounded-full bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
                             >
                                 <Plus className="h-4 w-4" aria-hidden="true" /> {t('appointments.form.create')}
                             </button>
@@ -548,7 +570,7 @@ export default function AppointmentsPage() {
                                                 {s.conferencing && (
                                                     <span className="flex items-center gap-1">
                                                         <Video className="h-3.5 w-3.5" />
-                                                        {s.conferencing === 'meet' ? 'Google Meet' : 'Zoom'}
+                                                        {PROVIDER_INFO[providerFromLegacyValue(s.conferencing) ?? 'zoom'].name}
                                                     </span>
                                                 )}
                                                 {!!s._count?.bookings && <span>{t('appointments.upcoming', { n: s._count.bookings })}</span>}

@@ -21,9 +21,18 @@ for (const f of fs.readdirSync(root).filter((n) => n.startsWith('.env') && n !==
         if (m && !(m[1] in env)) blank[m[1]] = '';
     }
 }
+// Entorno opcional del E2E de conferencias (scripts/e2e-conferencing-seed.ts): bases de API de servidores FALSOS.
+const confEnv = {};
+const confFile = path.join(root, '.e2e', 'conferencing.env');
+if (fs.existsSync(confFile)) {
+    for (const line of fs.readFileSync(confFile, 'utf8').split(/\r?\n/)) {
+        const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)$/);
+        if (m && !line.trim().startsWith('#')) confEnv[m[1]] = m[2];
+    }
+}
 const port = env.NEXT_PUBLIC_APP_URL.split(':').pop();
 const child = spawn(process.execPath, [path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), 'dev', '-p', port, '-H', '127.0.0.1'], {
-    cwd: root, stdio: 'inherit', env: { ...process.env, ...blank, ...env },
+    cwd: root, stdio: 'inherit', env: { ...process.env, ...blank, ...env, ...confEnv },
 });
 const bye = () => { try { child.kill(); } catch { /* */ } };
 process.on('SIGINT', bye); process.on('SIGTERM', bye);

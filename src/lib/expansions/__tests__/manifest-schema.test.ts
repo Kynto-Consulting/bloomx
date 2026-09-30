@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeMount, validateManifest } from '../manifest-schema';
+import { describePermissions, KNOWN_MOUNT_POINTS, LIFECYCLE_EVENTS, normalizeMount, validateManifest } from '../manifest-schema';
+import { MOUNT_POINT_CONTEXT } from '../mount-points';
 
 const base = () => ({
     id: 'core-x',
@@ -80,6 +81,26 @@ describe('validateManifest', () => {
 
         const bad = validateManifest({ ...base(), intercepts: [{ point: 'BOOM', handler: 'nope', priority: 'URGENT', onError: 'explode', schedule: 'weekly' }] });
         expect(bad.errors.length).toBeGreaterThanOrEqual(5);
+    });
+
+    it('eventos de ciclo de vida y alias hooks son validos; onError block no aplica a ellos', () => {
+        for (const point of LIFECYCLE_EVENTS) {
+            expect(validateManifest({ ...base(), hooks: [{ point, handler: 'go' }] }).ok, point).toBe(true);
+        }
+        const blocked = validateManifest({ ...base(), intercepts: [{ point: 'EMAIL_OPENED', handler: 'go', onError: 'block' }] });
+        expect(blocked.errors.length + blocked.warnings.length).toBeGreaterThan(0);
+    });
+
+    it('nuevos puntos de montaje conocidos y documentados en MOUNT_POINT_CONTEXT', () => {
+        for (const point of ['EMAIL_READER_SIDEBAR', 'EMAIL_LIST_ROW_ACTION', 'CONTEXT_MENU', 'SIDEBAR_PANEL', 'COMPOSER_SIDEBAR', 'CALENDAR_TOOLBAR', 'CALENDAR_EVENT_PANEL', 'CONTACTS_TOOLBAR', 'CONTACT_CARD_PANEL', 'SETTINGS_PANEL']) {
+            expect(KNOWN_MOUNT_POINTS).toContain(point);
+            expect(MOUNT_POINT_CONTEXT[point], point).toBeDefined();
+        }
+    });
+
+    it('describePermissions cubre los permisos nuevos', () => {
+        const described = describePermissions(['CALENDAR_READ', 'CALENDAR_WRITE', 'CONTACTS_READ', 'CONTACTS_WRITE', 'FORMATS', 'STORAGE', 'NOTIFY']);
+        expect(described.every((d) => d.known)).toBe(true);
     });
 
     it('status solo admite active|disabled', () => {

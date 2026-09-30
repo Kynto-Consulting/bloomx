@@ -6,7 +6,7 @@ import { ExtensionLoader } from '@/components/expansions/ExtensionLoader';
 import { useGlobalWindow } from '@/contexts/GlobalWindowContext';
 import { CreateEventForm } from '@/components/calendar/CreateEventForm';
 import { AddCalendarForm } from '@/components/calendar/AddCalendarForm';
-import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check } from 'lucide-react';
+import { Bell, CalendarDays, Menu, Plus, ChevronLeft, ChevronRight, Settings, Search, HelpCircle, User, Check, ChevronDown } from 'lucide-react';
 import { agendaTextOn, safeAgendaColor } from '@/lib/agenda-color';
 import { AnimatePresence, motion } from 'framer-motion';
 import { toast } from 'sonner';
@@ -31,6 +31,9 @@ type CalendarEventRecord = {
     responseStatus?: string | null;
     attendees?: { email: string; name?: string | null; isOrganizer?: boolean; responseStatus?: string | null }[];
 };
+
+// theme-lint-ignore: color de USUARIO del calendario de festivos (dato; el texto se calcula por contraste)
+const HOLIDAY_CALENDAR_COLOR = '#00897B';
 
 export default function CalendarPage() {
     const { t, intlLocale } = useI18n();
@@ -278,7 +281,7 @@ export default function CalendarPage() {
                     const res = await fetch(`https://date.nager.at/api/v3/PublicHolidays/${currentYear}/${code}`);
                     if (res.ok) {
                         const data = await res.json();
-                        const holidayCal: CalendarRecord = { id: `holidays-${code}`, name: holidaysCalendarName(code), color: '#00897B', source: 'public', isReadOnly: true };
+                        const holidayCal: CalendarRecord = { id: `holidays-${code}`, name: holidaysCalendarName(code), color: HOLIDAY_CALENDAR_COLOR, source: 'public', isReadOnly: true };
                         const parsed = data.map((h: any) => ({
                             id: `hol-${code}-${h.date}-${h.name}`,
                             title: h.name,
@@ -300,7 +303,7 @@ export default function CalendarPage() {
         const holidayCals = holidayCountries.map(code => ({
             id: `holidays-${code}`, 
             name: holidaysCalendarName(code),
-            color: '#00897B',
+            color: HOLIDAY_CALENDAR_COLOR,
             source: 'public', 
             isReadOnly: true 
         }));
@@ -662,7 +665,7 @@ export default function CalendarPage() {
             <AnimatePresence>
                 {isAppSidebarOpen && (
                     <>
-                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsAppSidebarOpen(false)} className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm lg:hidden" />
                         <motion.div initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }} className="fixed inset-y-0 left-0 z-[70] w-[80%] max-w-[300px] bg-background lg:hidden shadow-2xl">
                             <AppSidebar onClose={() => setIsAppSidebarOpen(false)} />
                         </motion.div>
@@ -688,19 +691,19 @@ export default function CalendarPage() {
                             <span className="text-xl font-normal tracking-tight hidden sm:block text-foreground/80">{t('calendar.title')}</span>
                         </div>
 
-                        <div className="hidden md:flex items-center border border-input rounded-md bg-card hover:bg-muted/50 shadow-sm overflow-hidden h-[36px]">
+                        <div className="relative hidden md:flex items-center border border-input rounded-md bg-card hover:bg-muted/50 shadow-sm overflow-hidden h-[36px]">
                             <select 
                                 value={viewMode}
                                 aria-label={t('calendar.viewLabel')}
                                 onChange={(e) => setViewMode(e.target.value)}
                                 className="text-sm font-medium text-foreground/80 bg-transparent px-3 py-1 outline-none cursor-pointer appearance-none pr-8 relative h-full"
-                                style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="%234A5568" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.5rem center', backgroundSize: '1em' }}
                             >
                                 <option value="Day">{t('calendar.views.day')}</option>
                                 <option value="Week">{t('calendar.views.week')}</option>
                                 <option value="Month">{t('calendar.views.month')}</option>
                                 <option value="Year">{t('calendar.views.year')}</option>
                             </select>
+                            <ChevronDown className="pointer-events-none absolute right-2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
                         </div>
 
                         <button onClick={setToday} className="border border-input px-4 h-[36px] rounded-md text-sm font-medium text-foreground/80 hover:bg-muted/50 hidden md:block shadow-sm">
@@ -719,6 +722,7 @@ export default function CalendarPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CALENDAR_HEADER" context={{ isGoogleLinked }} />
+                        <ExtensionLoader mountPoint="CALENDAR_TOOLBAR" context={{ range: { from: new Date(currentYear, currentMonth, 1), to: new Date(currentYear, currentMonth + 1, 0, 23, 59, 59) }, view: viewMode.toLowerCase(), isGoogleLinked }} />
                         <button type="button" onClick={() => setIsCalSidebarOpen(true)} aria-label={t('calendar.calendarsPanel')} className="p-2 hover:bg-muted rounded-full transition-colors text-muted-foreground lg:hidden">
                             <Settings className="w-5 h-5 text-foreground/80" aria-hidden="true" />
                         </button>
@@ -854,7 +858,7 @@ export default function CalendarPage() {
                     <AnimatePresence initial={false}>
                         {isCalSidebarOpen && (
                             <>
-                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCalSidebarOpen(false)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm lg:hidden" />
+                                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsCalSidebarOpen(false)} className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm lg:hidden" />
                                 <motion.aside
                                     initial={{ x: 256, opacity: 0 }}
                                     animate={{ x: 0, opacity: 1 }}
@@ -875,7 +879,7 @@ export default function CalendarPage() {
                         <motion.div
                             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                             onClick={() => setMoreList(null)}
-                            className="fixed inset-0 z-[80] bg-black/30"
+                            className="fixed inset-0 z-[80] bg-overlay"
                         />
                         <motion.div
                             initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.96 }}

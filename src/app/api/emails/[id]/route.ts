@@ -7,6 +7,8 @@ import { parseInviteFromIcs } from '@/lib/calendar/ics';
 import { canAccessEmail, getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
 import { escapeHtmlText } from '@/lib/mail-validation';
 import { parseAuthenticationResults } from '@/lib/email-auth';
+import { buildEmailOpenedContext, fireLifecycleHook, shouldFireOnce } from '@/lib/expansions/server-hooks';
+import { moveEmailsTracked, restoreEmailsToPrevious } from '@/lib/mail-store';
 
 function extractMailboxEmail(value: unknown): string {
     if (!value) return '';
@@ -285,6 +287,11 @@ export async function GET(
         const emailReplyTo = await resolveReplyTo(email);
         emailPayload.email.replyTo = emailReplyTo;
 
+        // Hook EMAIL_OPENED (no bloqueante; contexto minimo derivado aqui, nunca del cliente; dedupe 60 s).
+        if (shouldFireOnce(`email-opened:${user.id}:${email.id}`)) {
+            fireLifecycleHook('EMAIL_OPENED', user.id, buildEmailOpenedContext({ emailId: email.id, folder: email.folder, from: email.from, isRead: email.read }));
+        }
+
         return NextResponse.json({
             ...emailPayload,
             thread: threadEmails.length > 0 ? threadEmails : undefined
@@ -306,7 +313,7 @@ export async function PATCH(
     try {
         const { id } = await params; // Await the params
         const body = await req.json();
-        const { starred, folder, labelIds, toggleLabelId, read } = body;
+        const { starred, folder, labelIds, toggleLabelId, read, restore } = body;
 
         // Anti-IDOR: solo correos de buzones accesibles por el usuario.
         const accessibleIds = await getAccessibleMailboxUserIds(user.id);
@@ -363,6 +370,19 @@ export async function PATCH(
                     ? { disconnect: { id: allowedLabel } }
                     : { connect: { id: allowedLabel } };
             }
+        }
+
+        // "Restaurar": vuelve a la carpeta de origen guardada en el servidor (previousFolder); sin dato, a la bandeja.
+        if (restore === true) {
+            if (updateData.folder !== undefined) return NextResponse.json({ error: 'Use folder or restore, not both' }, { status: 400 });
+            const fallback = typeof body.fallbackFolder === 'string' ? { [existing.id]: body.fallbackFolder } : {};
+            await restoreEmailsToPrevious([existing.id], [existing.userId], fallback);
+        }
+
+        // Cambio de carpeta: SQL propio que fija tambien previousFolder (origen de "Restaurar") en la misma sentencia.
+        if (updateData.folder !== undefined) {
+            await moveEmailsTracked({ ids: [existing.id], userIds: [existing.userId], folder: updateData.folder });
+            delete updateData.folder;
         }
 
         const email = await prisma.email.update({

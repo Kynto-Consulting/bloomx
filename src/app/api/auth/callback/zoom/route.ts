@@ -2,7 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { clearOAuthStateCookie, verifyOAuthState } from '@/lib/oauth-state';
-import { auditLog, getClientIp } from '@/lib/security';
+import { auditLog, getClientIp, isSafeRelativePath } from '@/lib/security';
+import { apiBase } from '@/lib/conferencing/api-bases';
+import { invalidateStatusCache } from '@/lib/conferencing/status';
+
+export const runtime = 'nodejs';
+
+/** Destino tras vincular: `returnTo` (ruta interna guardada al iniciar) o la pantalla principal. */
+function destination(req: NextRequest, status: 'zoom_ok' | 'zoom_error' | 'invalid_state'): URL {
+    const raw = req.cookies.get('bloomx_oauth_return_zoom')?.value;
+    const path = isSafeRelativePath(raw) ? (raw as string) : '/';
+    const url = new URL(path, req.url);
+    url.searchParams.set('conferencing', status);
+    return url;
+}
+
+function done(req: NextRequest, status: 'zoom_ok' | 'zoom_error' | 'invalid_state') {
+    const res = NextResponse.redirect(destination(req, status));
+    clearOAuthStateCookie(res, 'zoom');
+    res.cookies.set('bloomx_oauth_return_zoom', '', { path: '/api/auth/callback/zoom', maxAge: 0 });
+    return res;
+}
 
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
@@ -23,63 +43,59 @@ export async function GET(req: NextRequest) {
     const st = verifyOAuthState(req, 'zoom', user.id);
     if (!st.ok) {
         auditLog('auth.oauth.state_mismatch', { provider: 'zoom', reason: st.reason, userId: user.id, ip: getClientIp(req) });
-        const bad = NextResponse.redirect(new URL('/settings?error=InvalidState', req.url));
-        clearOAuthStateCookie(bad, 'zoom');
-        return bad;
+        return done(req, 'invalid_state');
     }
 
     // 2. Exchange Code for Token
-    const tokenRes = await fetch('https://zoom.us/oauth/token', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
-        },
-        body: new URLSearchParams({
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: redirectUri
-        })
-    });
-
-    const tokens = await tokenRes.json();
-    if (!tokenRes.ok) {
-        const fail = NextResponse.redirect(new URL('/settings?error=OAuthFailed', req.url));
-        clearOAuthStateCookie(fail, 'zoom');
-        return fail;
+    let tokens: any;
+    try {
+        const tokenRes = await fetch(`${apiBase('ZOOM_OAUTH_BASE')}/oauth/token`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+            },
+            body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+            signal: AbortSignal.timeout(10_000),
+        });
+        tokens = await tokenRes.json().catch(() => ({}));
+        if (!tokenRes.ok || !tokens?.access_token) return done(req, 'zoom_error');
+    } catch {
+        return done(req, 'zoom_error');
     }
 
-    // 3. Store Tokens (cifrados en reposo por la capa de acceso: lib/account-tokens.ts)
-    await prisma.account.upsert({
-        where: {
-            provider_providerAccountId: {
-                provider: 'zoom',
-                providerAccountId: user.id // Using User ID as placeholder? No, accounts table usually holds provider's user ID.
-                // But we don't fetch Zoom Profile here. We should!
-            }
-        },
-        update: {
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expires_at: Math.floor(Date.now() / 1000 + tokens.expires_in),
-            token_type: tokens.token_type,
-            scope: tokens.scope
-        },
-        create: {
-            userId: user.id,
-            type: 'oauth',
-            provider: 'zoom',
-            providerAccountId: user.id, // Ideally fetch Zoom User ID, but skipping for simplicity or need another call
-            access_token: tokens.access_token,
-            refresh_token: tokens.refresh_token,
-            expires_at: Math.floor(Date.now() / 1000 + tokens.expires_in),
-            token_type: tokens.token_type,
-            scope: tokens.scope
-        }
-    });
+    // 3. Identidad de la cuenta Zoom (informativa): id real si Zoom responde; si no, el id del usuario como antes.
+    let zoomUserId = '';
+    try {
+        const me = await fetch(`${apiBase('ZOOM_API_BASE')}/users/me`, {
+            headers: { Authorization: `Bearer ${tokens.access_token}` },
+            signal: AbortSignal.timeout(8_000),
+        });
+        const profile: any = await me.json().catch(() => ({}));
+        if (me.ok && typeof profile?.id === 'string' && /^[\w-]{3,64}$/.test(profile.id)) zoomUserId = profile.id;
+    } catch {
+        // sin perfil: se usa el id del usuario
+    }
 
+    // 4. Guardar tokens (cifrados en reposo por la capa de acceso: lib/account-tokens.ts). Una sola cuenta Zoom por usuario:
+    //    se actualiza la existente (incluidas las creadas con el id del usuario como providerAccountId) en vez de duplicarla.
+    const data = {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000 + Number(tokens.expires_in || 3600)),
+        token_type: tokens.token_type,
+        scope: tokens.scope,
+    };
+    const existing = await prisma.account.findFirst({ where: { userId: user.id, provider: 'zoom' }, select: { id: true } });
+    if (existing) {
+        await prisma.account.update({ where: { id: existing.id }, data });
+    } else {
+        await prisma.account.create({
+            data: { userId: user.id, type: 'oauth', provider: 'zoom', providerAccountId: zoomUserId || user.id, ...data },
+        });
+    }
+
+    invalidateStatusCache({ userId: user.id, domain: (process.env.TOP_DOMAIN || req.headers.get('host') || '').split(':')[0].toLowerCase() });
     auditLog('auth.oauth.linked', { provider: 'zoom', userId: user.id, ip: getClientIp(req) });
-    const ok = NextResponse.redirect(new URL('/settings', req.url));
-    clearOAuthStateCookie(ok, 'zoom');
-    return ok;
+    return done(req, 'zoom_ok');
 }

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
+import { getRequestEmailBrand, getRequestEmailLocale } from '@/lib/calendar/email-brand-server';
+import { emailSubject, type EmailLocale } from '@/lib/calendar/email-templates';
+import { inviteProdId } from '@/lib/calendar/invite-template.js';
 
 type EventAttendeeRecord = {
     email: string;
@@ -71,11 +74,13 @@ function buildIcsFromEvent(options: {
     attendees: EventAttendeeRecord[];
     uid: string;
     sequence: number;
+    brandName: string;
+    locale: EmailLocale;
 }) {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        `PRODID:${inviteProdId(options.brandName, options.locale)}`,
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
         'BEGIN:VEVENT',
@@ -298,7 +303,12 @@ export async function POST(
         const sequenceBase = new Date(latestEvent.updatedAt || new Date()).getTime();
         const computedSequence = Number.isFinite(sequenceBase) ? Math.floor(sequenceBase / 1000) : 0;
 
+        // Marca del dominio + idioma del usuario: PRODID del ICS y asunto sugerido para el correo.
+        const brand = await getRequestEmailBrand(req);
+        const locale = getRequestEmailLocale(req, brand, 'user');
         const icsContent = buildIcsFromEvent({
+            brandName: brand.name,
+            locale,
             title: latestEvent.title,
             description: latestEvent.description,
             location: latestEvent.location,
@@ -321,7 +331,7 @@ export async function POST(
             success: true,
             eventId: latestEvent.id,
             inviteUid: eventUid,
-            subject: latestEvent.title,
+            subject: emailSubject(locale, 'invitation', latestEvent.title),
             syncedAttendees: attendeeEmails.length,
             attachment: {
                 filename: `${(latestEvent.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`,

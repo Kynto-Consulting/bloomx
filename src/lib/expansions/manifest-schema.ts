@@ -7,12 +7,16 @@
  *   - bloomx/src/lib/expansions/manifest-schema.ts           (carga en el frontend)
  *
  * Solo usa sintaxis TypeScript "borrable" (sin enums ni parametros de constructor) para poder ejecutarse con
- * `node --experimental-strip-types`. No importar nada aqui.
+ * `node --experimental-strip-types`. Unico import permitido: `./ui-schema.ts` (hermano identico en las 3 copias; el catalogo
+ * de componentes se DERIVA de ahi, no se duplica). Se importa con extension `.ts` para que Node lo resuelva sin bundler
+ * (tsconfig: allowImportingTsExtensions).
  *
  * Politica:
  *  - `errors`: el manifest NO se debe cargar/publicar.
  *  - `warnings`: se carga, pero conviene corregirlo (vocabulario desconocido, version de manifest desconocida).
  */
+
+import { UI_COMPONENT_TYPES } from "./ui-schema.ts";
 
 export type ManifestIssue = { path: string; message: string };
 export type ManifestValidation = { ok: boolean; errors: ManifestIssue[]; warnings: ManifestIssue[] };
@@ -20,11 +24,18 @@ export type ManifestValidation = { ok: boolean; errors: ManifestIssue[]; warning
 export const SUPPORTED_MANIFEST_VERSIONS = ["1.0", "2.0"];
 export const AUTH_TYPES = ["NONE", "OAUTH2", "API_KEY", "WEBHOOK_SECRET", "BASIC_AUTH"];
 
-/** Puntos de montaje consumidos (o reservados) por el frontend. */
+/**
+ * Puntos de montaje consumidos (o reservados) por el frontend. El contexto que recibe cada uno esta documentado en
+ * bloomx/src/lib/expansions/mount-points.ts (MOUNT_POINT_CONTEXT).
+ */
 export const KNOWN_MOUNT_POINTS = [
     "EMAIL_TOOLBAR", "EMAIL_FOOTER", "EMAIL_HEADER",
-    "SIDEBAR_HEADER", "SIDEBAR_FOOTER",
-    "COMPOSER_TOOLBAR", "COMPOSER_INIT",
+    "EMAIL_READER_SIDEBAR", "EMAIL_LIST_ROW_ACTION", "CONTEXT_MENU",
+    "SIDEBAR_HEADER", "SIDEBAR_FOOTER", "SIDEBAR_PANEL",
+    "COMPOSER_TOOLBAR", "COMPOSER_INIT", "COMPOSER_SIDEBAR",
+    "CALENDAR_TOOLBAR", "CALENDAR_EVENT_PANEL",
+    "CONTACTS_TOOLBAR", "CONTACT_CARD_PANEL",
+    "SETTINGS_PANEL",
     "EVENT_LOCATION_BUILDER",
     "CALENDAR_HEADER", "CALENDAR_SIDEBAR", "CALENDAR_SIDEBAR_BOTTOM", "CALENDAR_ADD_SOURCES",
     "CONTACTS_HEADER", "CONTACTS_SIDEBAR", "CONTACTS_SIDEBAR_BOTTOM",
@@ -32,20 +43,70 @@ export const KNOWN_MOUNT_POINTS = [
     "BEFORE_SEND_HANDLER", "ON_BODY_CHANGE_HANDLER", "ON_SUBJECT_CHANGE_HANDLER", "ON_RECIPIENTS_CHANGE_HANDLER",
 ];
 
-/** Eventos de servidor que ejecuta /api/extension/hooks. */
-export const INTERCEPT_POINTS = ["EMAIL_PRE_SEND", "EMAIL_RECEIVED", "CRON"];
+/**
+ * Eventos de ciclo de vida (no bloqueantes, contexto minimo). Se disparan desde el servidor del frontend o desde la UI,
+ * y solo llegan a extensiones de dominios FIRMADOS. Un handler no puede bloquear ni modificar nada en estos eventos.
+ */
+export const LIFECYCLE_EVENTS = [
+    "EMAIL_OPENED", "EMAIL_SENT", "COMPOSE_OPENED",
+    "CALENDAR_EVENT_CREATED", "CALENDAR_EVENT_UPDATED", "CALENDAR_EVENT_CANCELLED",
+    "CONTACT_SAVED", "CONTACT_DELETED", "APPOINTMENT_BOOKED",
+];
+
+/** Eventos de servidor que ejecuta /api/extension/hooks (manifest `intercepts` o su alias `hooks`). */
+export const INTERCEPT_POINTS = ["EMAIL_PRE_SEND", "EMAIL_RECEIVED", "CRON", ...LIFECYCLE_EVENTS];
 export const INTERCEPT_PRIORITIES = ["HIGH", "NORMAL", "LOW", "MONITOR"];
 export const CRON_SCHEDULES = ["hourly", "daily"];
 
-/** Componentes que implementa JsonRenderer. */
-export const KNOWN_COMPONENT_TYPES = [
-    "BUTTON", "TEXT", "INPUT", "CARD", "ROW", "COLUMN", "CONDITIONAL", "LINK", "TABS", "MODAL", "HEADLESS",
-    "WIZARD", "SELECT", "FORM", "LIST", "IMAGE_BUTTON", "FOR_EACH", "SWITCH", "CHECKBOX", "TOGGLE", "TEXTAREA",
-    "BADGE", "DIVIDER", "SPACER", "PROGRESS", "SMART_REPLY_CHIPS", "LOADING", "ALERT", "ICON", "ACCORDION",
-    "GRID", "DATA_TABLE", "MARKDOWN", "FILE_UPLOAD", "BLOCK", "REPEAT", "DEBUG", "CONDITION", "CASE", "DEFAULT",
-    "SET_VAR", "DATE_PICKER", "SLIDER", "AVATAR", "TOOLTIP", "EMPTY_STATE", "IFRAME", "CODE_EDITOR",
-    "ACCORDION_ITEM", "TAB_ITEM", "CODE_BLOCK", "FLEX", "BOX", "SEPARATOR",
+/**
+ * Nombres del formato ANTIGUO de UI que el adaptador (migrateLegacyUi de ui-schema.ts) sigue entendiendo pero que ya no estan
+ * en el catalogo actual. Solo existen para no avisar de "componente desconocido" en manifests heredados.
+ */
+export const LEGACY_COMPONENT_TYPES = [
+    "COLUMN", "DATA_TABLE", "FILE_UPLOAD", "BLOCK", "IFRAME", "CODE_EDITOR", "CODE_BLOCK", "FLEX", "BOX", "SEPARATOR", "EMPTY_STATE",
 ];
+
+/** Componentes que implementa JsonRenderer: el catalogo vigente (DERIVADO de ui-schema.ts) mas los nombres del formato antiguo. */
+export const KNOWN_COMPONENT_TYPES: string[] = Array.from(new Set([...UI_COMPONENT_TYPES, ...LEGACY_COMPONENT_TYPES]));
+
+/** Categorias de la pagina /extensions (`manifest.category`) y alias es/en aceptados. */
+export const CATEGORY_IDS = ["mail", "composer", "calendar", "contacts", "automation", "ai", "integrations", "settings", "other"];
+export const CATEGORY_ALIASES: Record<string, string> = {
+    mail: "mail", email: "mail", correo: "mail", communication: "mail", communications: "mail", inbox: "mail",
+    composer: "composer", compose: "composer", redactor: "composer", writing: "composer", redaccion: "composer",
+    calendar: "calendar", calendario: "calendar", meetings: "calendar", meeting: "calendar", reuniones: "calendar",
+    contacts: "contacts", contactos: "contacts", crm: "contacts",
+    automation: "automation", automatizacion: "automation", automatizaciones: "automation", workflow: "automation", productivity: "automation", productividad: "automation",
+    ai: "ai", ia: "ai", "artificial-intelligence": "ai",
+    integrations: "integrations", integration: "integrations", integraciones: "integrations", storage: "integrations",
+    settings: "settings", ajustes: "settings", configuracion: "settings",
+};
+
+/** Limites de los campos de catalogo del manifest (pagina /extensions). */
+export const MANIFEST_LIMITS = {
+    maxBytes: 1048576,
+    maxTags: 12,
+    maxTag: 30,
+    maxScreenshots: 6,
+    maxScreenshotUrl: 2000,
+    maxChangelog: 20,
+    maxChangelogNotes: 1000,
+    maxConferencingProviders: 10,
+    /** Tope de objetos/arreglos visitados por el recorrido (un manifest es dato controlado por quien lo publica). */
+    maxWalkNodes: 50000,
+} as const;
+
+/** Handlers estandar de un proveedor de videollamada (ver _shared/CONFERENCING-CONTRACT.md). */
+export const CONFERENCING_HANDLERS = ["status", "testConnection", "createMeeting", "updateMeeting", "deleteMeeting"];
+export const EXTENSION_KINDS = ["conferencing-provider", "calendar-provider"];
+
+/**
+ * `mandatory: true` en el manifest = extension OBLIGATORIA para todos los usuarios del dominio (DLP, seguridad): el usuario no
+ * puede desactivarla y sus hooks de servidor se ejecutan siempre. El dominio tambien puede marcarla (politica del admin).
+ */
+export function isMandatoryManifest(manifest: unknown): boolean {
+    return isObject(manifest) && manifest.mandatory === true;
+}
 
 /** Acciones que implementa JsonRenderer. */
 export const KNOWN_ACTIONS = [
@@ -58,11 +119,53 @@ export const KNOWN_ACTIONS = [
     "OAUTH_CONNECT", "OAUTH_DISCONNECT",
 ];
 
-const KNOWN_PERMISSIONS = [
-    "READ_EMAIL", "READ_USER", "READ_USER_NAME", "AI_GENERATE", "HTTP_REQUEST", "OAUTH_READ", "OAUTH_WRITE",
-    "API_ROUTE_CREATE", "PAGE_ROUTE_CREATE", "DB_READ", "DB_WRITE", "local:secure-storage",
-    "MAIL_LABEL",
-];
+export type PermissionRisk = "low" | "medium" | "high";
+export type PermissionInfo = { label: string; description: string; risk: PermissionRisk };
+
+/**
+ * Catalogo de permisos: lo que ve el admin al instalar una extension (lista legible) y la base de la validacion.
+ * Los `services.*` de calendario, contactos, formatos, almacenamiento y avisos solo existen en dominios FIRMADOS.
+ */
+export const PERMISSION_CATALOG: Record<string, PermissionInfo> = {
+    READ_EMAIL: { label: "Leer correo", description: "Lee remitente, asunto y fragmento de los correos de la bandeja del usuario.", risk: "high" },
+    MAIL_LABEL: { label: "Etiquetar correo", description: "Aplica o deshace etiquetas de categoria en correos del usuario (no mueve, borra ni envia).", risk: "medium" },
+    READ_USER: { label: "Ver datos del usuario", description: "Ve el identificador y el correo del usuario que ejecuta la extension.", risk: "low" },
+    READ_USER_NAME: { label: "Ver nombre del usuario", description: "Ve el nombre del usuario.", risk: "low" },
+    AI_GENERATE: { label: "Usar IA", description: "Envia texto al proveedor de IA de la plataforma (con limite de llamadas).", risk: "medium" },
+    HTTP_REQUEST: { label: "Llamadas HTTP externas", description: "Hace peticiones HTTPS a servicios externos (filtradas contra SSRF).", risk: "high" },
+    OAUTH_READ: { label: "Leer tokens OAuth", description: "Usa los tokens de las cuentas conectadas del dominio.", risk: "high" },
+    OAUTH_WRITE: { label: "Gestionar conexiones OAuth", description: "Conecta o desconecta cuentas de terceros.", risk: "high" },
+    API_ROUTE_CREATE: { label: "Crear rutas de API", description: "Declara rutas de API propias (reservado).", risk: "medium" },
+    PAGE_ROUTE_CREATE: { label: "Crear paginas", description: "Declara paginas propias (reservado).", risk: "medium" },
+    DB_READ: { label: "Leer base de datos", description: "Lectura de datos de la extension (reservado).", risk: "medium" },
+    DB_WRITE: { label: "Escribir base de datos", description: "Escritura de datos de la extension (reservado).", risk: "medium" },
+    "local:secure-storage": { label: "Almacenamiento seguro del navegador", description: "Guarda datos cifrados en el navegador del usuario.", risk: "low" },
+    CALENDAR_READ: { label: "Leer calendario", description: "Lista y consulta eventos y huecos libres de los calendarios del usuario (sin tokens de Google).", risk: "medium" },
+    CALENDAR_WRITE: { label: "Modificar calendario", description: "Crea, edita, cancela eventos e invita asistentes en calendarios del usuario.", risk: "high" },
+    CONTACTS_READ: { label: "Leer contactos", description: "Busca y lista los contactos del usuario y sugiere duplicados.", risk: "medium" },
+    CONTACTS_WRITE: { label: "Modificar contactos", description: "Crea, edita y fusiona contactos del usuario.", risk: "high" },
+    FORMATS: { label: "Formatos", description: "Usa utilidades puras de fechas, numeros, ICS, vCard, plantillas y saneo de HTML (sin acceso a datos).", risk: "low" },
+    STORAGE: { label: "Almacenamiento propio", description: "Guarda hasta 256 KB de estado de la extension por usuario en el servidor.", risk: "low" },
+    NOTIFY: { label: "Notificaciones", description: "Muestra avisos (toast) al usuario dentro de la aplicacion.", risk: "low" },
+};
+
+const KNOWN_PERMISSIONS = Object.keys(PERMISSION_CATALOG);
+
+/** Lista legible de los permisos de un manifest (pantalla de instalacion). Los desconocidos se marcan `known: false`. */
+export function describePermissions(permissions: unknown): Array<{ permission: string; label: string; description: string; risk: PermissionRisk; known: boolean }> {
+    const list = Array.isArray(permissions) ? permissions.filter((p): p is string => typeof p === "string") : [];
+    return list.map((permission) => {
+        if (permission.startsWith("ENV_READ:")) {
+            const key = permission.slice("ENV_READ:".length).trim();
+            const known = ENV_RE.test(key) && !RESERVED_ENV_RE.test(key);
+            return { permission, label: `Variable ${key}`, description: `Lee la credencial o variable ${key} configurada para este dominio.`, risk: "high" as PermissionRisk, known };
+        }
+        const info = PERMISSION_CATALOG[permission];
+        return info
+            ? { permission, ...info, known: true }
+            : { permission, label: permission, description: "Permiso desconocido: la plataforma lo ignora.", risk: "high" as PermissionRisk, known: false };
+    });
+}
 
 /**
  * Variables de plataforma que ninguna extension puede pedir con ENV_READ:* (el runtime las deniega tambien).
@@ -130,7 +233,16 @@ export function normalizeMount(mount: any): any {
 // Validacion
 // ---------------------------------------------------------------------------------------------------------------
 
-export function validateManifest(input: unknown): ManifestValidation {
+export type ValidateManifestOptions = {
+    /**
+     * true = los problemas de los campos de CATALOGO (category, tags, screenshots, changelog, mandatory) son AVISOS y no errores.
+     * Es lo que usa el frontend al CARGAR una extension ya publicada: un enlace de captura malo no debe apagar la extension (la
+     * pagina /extensions ya saniza lo que muestra). La publicacion (backend, sync, admin) valida en modo estricto (por defecto).
+     */
+    lenientCatalog?: boolean;
+};
+
+export function validateManifest(input: unknown, options: ValidateManifestOptions = {}): ManifestValidation {
     const errors: ManifestIssue[] = [];
     const warnings: ManifestIssue[] = [];
     const err = (path: string, message: string) => { errors.push({ path, message }); };
@@ -155,6 +267,14 @@ export function validateManifest(input: unknown): ManifestValidation {
     if (m.status !== undefined && m.status !== "active" && m.status !== "disabled") {
         err("status", 'Debe ser "active" o "disabled"');
     }
+
+    // Tamano total: un manifest es dato controlado por quien lo publica (se guarda en BD y se sirve en /api/config).
+    let manifestBytes = 0;
+    try { manifestBytes = JSON.stringify(m)?.length ?? 0; } catch { err("$", "El manifest no es JSON serializable (referencias circulares o valores no validos)"); return { ok: false, errors, warnings }; }
+    if (manifestBytes > MANIFEST_LIMITS.maxBytes) err("$", `El manifest pesa ${Math.round(manifestBytes / 1024)} KB; maximo ${Math.round(MANIFEST_LIMITS.maxBytes / 1024)} KB`);
+
+    // --- Campos de catalogo (pagina /extensions) ---------------------------------------------------------------
+    validateCatalogFields(m, options.lenientCatalog ? warn : err, warn);
 
     // --- Permisos ----------------------------------------------------------------------------------------------
     if (m.permissions !== undefined) {
@@ -222,9 +342,40 @@ export function validateManifest(input: unknown): ManifestValidation {
         if (!functionNames.has(name)) err(at, `"${name}" no esta declarada en api.functions`);
     };
 
+    // --- Proveedores de videollamada (kind conferencing-provider) -----------------------------------------------
+    if (m.kind !== undefined && !EXTENSION_KINDS.includes(String(m.kind))) warn("kind", `Tipo de extension desconocido; conocidos: ${EXTENSION_KINDS.join(", ")}`);
+    if (m.conferencingProviders !== undefined) {
+        if (!Array.isArray(m.conferencingProviders)) {
+            err("conferencingProviders", "Debe ser un arreglo");
+        } else {
+            if (m.conferencingProviders.length > MANIFEST_LIMITS.maxConferencingProviders) err("conferencingProviders", `Maximo ${MANIFEST_LIMITS.maxConferencingProviders} proveedores`);
+            const seenProviders = new Set<string>();
+            m.conferencingProviders.slice(0, MANIFEST_LIMITS.maxConferencingProviders).forEach((provider: unknown, index: number) => {
+                const at = `conferencingProviders[${index}]`;
+                if (!isObject(provider)) return err(at, "Debe ser un objeto");
+                if (typeof provider.id !== "string" || !ID_RE.test(provider.id)) err(`${at}.id`, "Requerido: [A-Za-z0-9._:-] (max 100)");
+                else if (seenProviders.has(provider.id)) err(`${at}.id`, `Proveedor duplicado: ${provider.id}`);
+                else seenProviders.add(provider.id);
+                if (typeof provider.name !== "string" || !provider.name.trim() || provider.name.length > 60) err(`${at}.name`, "Requerido: texto no vacio (max 60)");
+                if (provider.icon !== undefined && (typeof provider.icon !== "string" || provider.icon.length > 40)) err(`${at}.icon`, "Debe ser texto (max 40)");
+                if (!isObject(provider.handlers)) return err(`${at}.handlers`, "Requerido: objeto {handler estandar: funcion de api.functions}");
+                for (const [handlerKey, fn] of Object.entries(provider.handlers)) {
+                    if (!CONFERENCING_HANDLERS.includes(handlerKey)) warn(`${at}.handlers.${handlerKey}`, `Handler no estandar; los estandar son ${CONFERENCING_HANDLERS.join(", ")}`);
+                    checkFunctionRef(`${at}.handlers.${handlerKey}`, fn);
+                }
+                if (provider.handlers.createMeeting === undefined) err(`${at}.handlers.createMeeting`, "Un proveedor de videollamada debe implementar createMeeting");
+            });
+        }
+    }
+
     // --- Recorrido de componentes / acciones -------------------------------------------------------------------
+    let walked = 0;
     const walk = (node: unknown, at: string, depth: number) => {
         if (depth > MAX_DEPTH) return err(at, "Anidamiento demasiado profundo");
+        if (++walked > MANIFEST_LIMITS.maxWalkNodes) {
+            if (walked === MANIFEST_LIMITS.maxWalkNodes + 1) err(at, `Demasiados nodos en el manifest (maximo ${MANIFEST_LIMITS.maxWalkNodes})`);
+            return;
+        }
         if (Array.isArray(node)) {
             node.forEach((item, index) => walk(item, `${at}[${index}]`, depth + 1));
             return;
@@ -285,13 +436,15 @@ export function validateManifest(input: unknown): ManifestValidation {
         else walk(m.overlays, "overlays", 0);
     }
 
-    // --- Intercepts (hooks de servidor) ---------------------------------------------------------------------------
-    if (m.intercepts !== undefined) {
-        if (!Array.isArray(m.intercepts)) {
-            err("intercepts", "Debe ser un arreglo");
+    // --- Intercepts (hooks de servidor; `hooks` es un alias con la misma forma) ------------------------------------
+    for (const listKey of ["intercepts", "hooks"]) {
+        const list = m[listKey];
+        if (list === undefined) continue;
+        if (!Array.isArray(list)) {
+            err(listKey, "Debe ser un arreglo");
         } else {
-            m.intercepts.forEach((item: unknown, index: number) => {
-                const at = `intercepts[${index}]`;
+            list.forEach((item: unknown, index: number) => {
+                const at = `${listKey}[${index}]`;
                 if (!isObject(item)) return err(at, "Debe ser un objeto");
                 if (typeof item.point !== "string" || !INTERCEPT_POINTS.includes(item.point)) {
                     err(`${at}.point`, `Debe ser uno de ${INTERCEPT_POINTS.join(", ")}`);
@@ -305,6 +458,9 @@ export function validateManifest(input: unknown): ManifestValidation {
                 }
                 if (item.schedule !== undefined && !CRON_SCHEDULES.includes(String(item.schedule))) {
                     err(`${at}.schedule`, `Debe ser ${CRON_SCHEDULES.join(" o ")}`);
+                }
+                if (typeof item.point === "string" && LIFECYCLE_EVENTS.includes(item.point) && item.onError === "block") {
+                    warn(`${at}.onError`, "Los eventos de ciclo de vida no bloquean: onError=block se ignora");
                 }
             });
         }
@@ -341,6 +497,71 @@ export function validateManifest(input: unknown): ManifestValidation {
     }
 
     return { ok: errors.length === 0, errors, warnings };
+}
+
+type IssueSink = (path: string, message: string) => void;
+
+const strip = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
+
+/** URL de captura valida: absoluta, https, sin credenciales embebidas y de longitud acotada. */
+export function isSafeScreenshotUrl(value: unknown): boolean {
+    if (typeof value !== "string" || value.length === 0 || value.length > MANIFEST_LIMITS.maxScreenshotUrl) return false;
+    try {
+        const url = new URL(value);
+        return url.protocol === "https:" && url.hostname.length > 0 && !url.username && !url.password;
+    } catch {
+        return false;
+    }
+}
+
+/** `category`, `tags`, `screenshots`, `changelog` y `mandatory`: campos que lee la pagina /extensions y la politica del dominio. */
+function validateCatalogFields(m: Record<string, any>, err: IssueSink, warn: IssueSink) {
+    if (m.category !== undefined) {
+        if (typeof m.category !== "string" || !m.category.trim() || m.category.length > 40) err("category", "Debe ser texto no vacio (max 40)");
+        else if (!Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, strip(m.category))) warn("category", `Categoria desconocida "${m.category}": se derivara de los mounts/permisos. Validas: ${CATEGORY_IDS.join(", ")}`);
+    }
+
+    if (m.tags !== undefined) {
+        if (!Array.isArray(m.tags)) err("tags", "Debe ser un arreglo de textos");
+        else {
+            if (m.tags.length > MANIFEST_LIMITS.maxTags) err("tags", `Maximo ${MANIFEST_LIMITS.maxTags} etiquetas`);
+            m.tags.slice(0, MANIFEST_LIMITS.maxTags + 1).forEach((tag: unknown, index: number) => {
+                if (typeof tag !== "string" || !tag.trim() || tag.length > MANIFEST_LIMITS.maxTag || /[<>\u0000-\u001f]/.test(tag)) {
+                    err(`tags[${index}]`, `Debe ser texto sin HTML ni saltos de linea (1-${MANIFEST_LIMITS.maxTag} caracteres)`);
+                }
+            });
+        }
+    }
+
+    if (m.screenshots !== undefined) {
+        if (!Array.isArray(m.screenshots)) err("screenshots", "Debe ser un arreglo de URLs https");
+        else {
+            if (m.screenshots.length > MANIFEST_LIMITS.maxScreenshots) err("screenshots", `Maximo ${MANIFEST_LIMITS.maxScreenshots} capturas`);
+            m.screenshots.slice(0, MANIFEST_LIMITS.maxScreenshots + 1).forEach((src: unknown, index: number) => {
+                if (!isSafeScreenshotUrl(src)) err(`screenshots[${index}]`, `Debe ser una URL absoluta https (sin usuario/clave, max ${MANIFEST_LIMITS.maxScreenshotUrl} caracteres)`);
+            });
+        }
+    }
+
+    if (m.changelog !== undefined) {
+        if (!Array.isArray(m.changelog)) err("changelog", "Debe ser un arreglo [{version, date?, notes?}]");
+        else {
+            if (m.changelog.length > MANIFEST_LIMITS.maxChangelog) err("changelog", `Maximo ${MANIFEST_LIMITS.maxChangelog} entradas`);
+            m.changelog.slice(0, MANIFEST_LIMITS.maxChangelog + 1).forEach((entry: unknown, index: number) => {
+                const at = `changelog[${index}]`;
+                if (!isObject(entry)) return err(at, "Debe ser un objeto {version, date?, notes?}");
+                if (typeof entry.version !== "string" || !entry.version.trim() || entry.version.length > 40) err(`${at}.version`, "Requerido: texto (max 40)");
+                if (entry.date !== undefined && (typeof entry.date !== "string" || entry.date.length > 40)) err(`${at}.date`, "Debe ser texto (max 40)");
+                if (entry.notes !== undefined) {
+                    const notes = Array.isArray(entry.notes) ? entry.notes : [entry.notes];
+                    const total = notes.reduce((n: number, item: unknown) => n + (typeof item === "string" ? item.length : MANIFEST_LIMITS.maxChangelogNotes + 1), 0);
+                    if (notes.length > 50 || total > MANIFEST_LIMITS.maxChangelogNotes) err(`${at}.notes`, `Debe ser texto (o lista de textos) de hasta ${MANIFEST_LIMITS.maxChangelogNotes} caracteres`);
+                }
+            });
+        }
+    }
+
+    if (m.mandatory !== undefined && typeof m.mandatory !== "boolean") err("mandatory", "Debe ser true o false (obligatoria para todos los usuarios del dominio)");
 }
 
 /** Texto legible de los errores (para logs y respuestas 400). */

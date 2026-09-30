@@ -1,7 +1,17 @@
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
+import { getRequestEmailBrand, getRequestEmailLocale } from '@/lib/calendar/email-brand-server';
 import { uploadToStorage } from '@/lib/storage';
-import { buildCalendarInviteHtml, resolveTimeZone } from '@/lib/calendar/email-templates';
+import { inviteProdId } from '@/lib/calendar/invite-template.js';
+import {
+    buildEmailHtml,
+    buildEmailText,
+    calendarInviteOptions,
+    emailSubject,
+    resolveTimeZone,
+    type EmailBrand,
+    type EmailLocale,
+} from '@/lib/calendar/email-templates';
 
 type EventForInvite = {
     id: string;
@@ -32,11 +42,11 @@ function formatIcsDate(value: string | Date) {
     return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
-function buildRequestIcs(event: EventForInvite, uid: string, sequence: number, organizer: { email: string; name: string }) {
+function buildRequestIcs(event: EventForInvite, uid: string, sequence: number, organizer: { email: string; name: string }, brandName: string, locale: EmailLocale) {
     const lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        `PRODID:-//${process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom'}//Calendar//EN`,
+        `PRODID:${inviteProdId(brandName, locale)}`,
         'CALSCALE:GREGORIAN',
         'METHOD:REQUEST',
         'BEGIN:VEVENT',
@@ -76,6 +86,11 @@ export async function sendEventInvites(options: {
     event: EventForInvite;
     recipients: string[];
     timezone?: string | null;
+    /** Marca de la empresa y idioma (getRequestEmailBrand / getRequestEmailLocale). Sin ellos: marca por defecto, es. */
+    brand?: EmailBrand | null;
+    locale?: EmailLocale;
+    /** Peticion que origina el envio: si no se pasan `brand`/`locale`, se resuelven a partir de ella (dominio, cookie, Accept-Language). */
+    request?: Request | null;
 }): Promise<number> {
     try {
         const tz = resolveTimeZone(options.timezone);
@@ -95,40 +110,36 @@ export async function sendEventInvites(options: {
         const sequenceBase = new Date(options.event.updatedAt || new Date()).getTime();
         const sequence = Number.isFinite(sequenceBase) ? Math.floor(sequenceBase / 1000) : 0;
 
-        const icsContent = buildRequestIcs(options.event, uid, sequence, { email: organizerEmail, name: organizerName });
+        // Marca + idioma primero: el PRODID del ICS lleva la marca del dominio.
+        const brand = options.brand ?? (options.request ? await getRequestEmailBrand(options.request) : null);
+        const locale = options.locale ?? (options.request ? getRequestEmailLocale(options.request, brand, 'user') : brand?.locale ?? 'es');
+        const icsContent = buildRequestIcs(options.event, uid, sequence, { email: organizerEmail, name: organizerName }, brand?.name || process.env.NEXT_PUBLIC_BRAND_NAME || 'Bloom', locale);
         const icsBuffer = Buffer.from(icsContent, 'utf8');
         const formattedFrom = `${organizerName} <${organizerEmail}>`;
 
-        const html = buildCalendarInviteHtml({
-            title: options.event.title || 'New Event',
+        // UNA sola plantilla (marca + idioma de la empresa) para el HTML y el texto plano: mismos datos, mismo idioma
+        // (una discrepancia texto/HTML es senal de spam y algunos clientes solo muestran el texto).
+        const templateOptions = calendarInviteOptions({
+            title: options.event.title || '',
             startsAt: options.event.startsAt,
             endsAt: options.event.endsAt,
             timezone: tz,
             location: options.event.location || null,
             description: options.event.description || null,
             organizer: { email: organizerEmail, name: organizerName },
+            brand,
+            locale,
         });
-
-        // Keep the plain-text part in the same language and with the same facts as
-        // the HTML part. A text/HTML mismatch (English text + Spanish HTML) is a
-        // spam-filter signal, and some clients only ever show this version.
-        const text = [
-            `${organizerName} te invitó a: ${options.event.title || 'Nuevo evento'}`,
-            '',
-            `Cuándo: ${new Date(options.event.startsAt).toLocaleString('es-PE', { timeZone: tz })} — ${new Date(options.event.endsAt).toLocaleString('es-PE', { timeZone: tz })}`,
-            options.event.location ? `Enlace/Lugar: ${options.event.location}` : '',
-            `Organizador: ${organizerName} (${organizerEmail})`,
-            options.event.description ? `Notas: ${options.event.description}` : '',
-            '',
-            'El archivo .ics está adjunto para agregar esta invitación a tu calendario.',
-        ].filter(Boolean).join('\n');
+        const html = buildEmailHtml(templateOptions);
+        const text = buildEmailText(templateOptions);
+        const subject = emailSubject(locale, 'invitation', options.event.title || '');
 
         const filename = `${(options.event.title || 'event').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'event'}.ics`;
 
         const { error } = await resend.emails.send({
             from: formattedFrom,
             to: recipients,
-            subject: `Invitación: ${options.event.title || 'Nuevo evento'}`,
+            subject,
             html,
             text,
             attachments: [{ filename, content: icsBuffer }],
@@ -151,7 +162,6 @@ export async function sendEventInvites(options: {
         // recipient (Gmail) saw the real HTML.
         try {
             const timestamp = Date.now();
-            const subject = `Invitación: ${options.event.title || 'Nuevo evento'}`;
             const safeSubject = subject.replace(/[^a-zA-Z0-9-_]/g, '_').substring(0, 50);
 
             const key = `attachments/${organizerEmail}/${timestamp}-${filename}`;

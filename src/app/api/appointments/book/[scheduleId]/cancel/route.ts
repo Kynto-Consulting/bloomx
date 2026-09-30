@@ -2,8 +2,14 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { verifyCancelToken } from '@/lib/appointments/cancel-token';
-import { escapeHtmlText, formatFromHeader } from '@/lib/mail-validation';
+import { formatFromHeader } from '@/lib/mail-validation';
+import { buildEmailText, emailSubject, hostCancellationOptions, buildEmailHtml } from '@/lib/calendar/email-templates';
+import { getEmailBrand, resolveEmailLocale } from '@/lib/calendar/email-brand';
+import { fetchDomainEmailContext, resolveEmailHost } from '@/lib/calendar/email-brand-server';
 import { getClientIp, rateLimitAsync, safeEqual } from '@/lib/security';
+import { deleteMeeting as deleteConferenceMeeting } from '@/lib/conferencing/service';
+import { resolveDomain } from '@/lib/conferencing/http';
+import { isConferencingProviderId } from '@/lib/conferencing/types';
 
 /**
  * Cancelacion de una cita desde el enlace del correo de confirmacion:
@@ -97,6 +103,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
 
     // Liberar el hueco en el calendario de la anfitriona.
     if (booking.calendarEventId) {
+        // La reunion de Zoom/Meet creada para la cita se cancela en el proveedor (best-effort; el registro exige que sea de la anfitriona).
+        const ev = await prisma.calendarEvent
+            .findFirst({ where: { id: booking.calendarEventId }, select: { conferenceProvider: true, conferenceMeetingId: true } })
+            .catch(() => null);
+        if (ev?.conferenceMeetingId && isConferencingProviderId(ev.conferenceProvider)) {
+            const host = booking.schedule.user;
+            await deleteConferenceMeeting({ userId: host.id, email: host.email || null, domain: resolveDomain(req) }, ev.conferenceProvider, ev.conferenceMeetingId).catch(() => undefined);
+        }
         await prisma.calendarEvent.deleteMany({ where: { id: booking.calendarEventId } }).catch((err) => {
             console.error('Could not delete calendar event for cancelled booking:', err);
         });
@@ -105,16 +119,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
     // Aviso a la anfitriona (mejor esfuerzo, sin bloquear la respuesta).
     const host = booking.schedule.user;
     if (host.email) {
+        const emailHost = resolveEmailHost(req);
         const notify = async () => {
-            const when = new Intl.DateTimeFormat('en-US', {
-                timeZone: booking.schedule.timezone || 'UTC', weekday: 'short', month: 'short', day: 'numeric',
-                hour: '2-digit', minute: '2-digit', timeZoneName: 'short',
-            }).format(booking.startsAt);
+            // Mismo sistema de plantilla y marca que el resto de correos de citas; idioma: el de la empresa (o es).
+            const brand = getEmailBrand(await fetchDomainEmailContext(emailHost));
+            const locale = resolveEmailLocale({ brand, audience: 'user' });
+            const options = hostCancellationOptions({
+                guestName: booking.guestName,
+                guestEmail: booking.guestEmail,
+                scheduleName: booking.schedule.name,
+                startsAt: booking.startsAt,
+                endsAt: booking.endsAt,
+                timezone: booking.schedule.timezone || 'UTC',
+                brand,
+                locale,
+            });
             const { error } = await resend.emails.send({
                 from: formatFromHeader(host.name, host.email as string),
                 to: [host.email as string],
-                subject: `Cancelled: ${booking.guestName} — ${booking.schedule.name}`,
-                html: `<p><strong>${escapeHtmlText(booking.guestName)}</strong> (${escapeHtmlText(booking.guestEmail)}) cancelled their appointment <strong>${escapeHtmlText(booking.schedule.name)}</strong> scheduled for ${escapeHtmlText(when)}.</p>`,
+                subject: emailSubject(locale, 'hostCancellation', `${booking.guestName} — ${booking.schedule.name}`),
+                html: buildEmailHtml(options),
+                text: buildEmailText(options),
             });
             if (error) console.error('Cancellation notice failed:', error);
         };

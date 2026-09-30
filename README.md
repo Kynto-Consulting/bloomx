@@ -1,144 +1,109 @@
-# 🌸 Bloomx
+# Bloomx
 
-> **The Headless AI Email Engine.**
-> 100% Open Source. Serverless. Extensible.
+> Multi-company web mail on **Resend**, with per-domain branding, a shared multi-tenant backend and an extension engine.
+> Correo web multi-empresa sobre **Resend**, con marca por dominio, backend compartido multi-tenant y motor de extensiones.
 
-Bloomx is not just a mail client. It's a **programmable messaging infrastructure** designed for developers who want full control over their email experience. Built for the **Vercel** ecosystem (but deployable anywhere), it combines modern stack choices with powerful AI capabilities to give you:
+The full, verified documentation (bilingual es/en, searchable) ships **inside the app** at `/docs` (source: `src/app/docs/_content`). This README is the short version.
+La documentación completa y verificada (bilingüe es/en, con buscador) va **dentro de la app** en `/docs` (fuente: `src/app/docs/_content`). Este README es la versión corta.
 
-- **Universal Inbox**: Clean, unified interface for all your emails.
-- **AI-Powered**: Auto-categorization, summarization, smart replies, and more.
-- **Headless & API-First**: Build your own frontend or use our robust API.
-- **Expansion Engine**: Plugin system to hook into email events (webhooks, cron, UI buttons).
+| Topic / Tema | Page / Página |
+|---|---|
+| Architecture (N frontends, one shared backend) / Arquitectura | `/docs/architecture` |
+| Getting started, environment variables, deployment / Puesta en marcha, variables, despliegue | `/docs/getting-started`, `/docs/env-variables`, `/docs/deployment` |
+| Resend webhooks and DNS (SPF/DKIM/DMARC/MTA-STS) / Resend y DNS | `/docs/email-setup` (extended guide: [DNS_SETUP.md](./DNS_SETUP.md)) |
+| Enterprise themes, landing/login, hide docs / Temas, landing, ocultar docs | `/docs/themes`, `/docs/landing`, `/docs/hide-docs` |
+| Features, Elixir (Liquid), Sealer, Organizer, AI, storage / Funciones | `/docs/features`, `/docs/elixir`, `/docs/sealer`, `/docs/ai`, `/docs/storage` |
+| Security and CIS/NIST/ISO mapping / Seguridad y mapeo | `/docs/security`, `/docs/compliance` |
+| Extensions and API / Extensiones y API | `/docs/expansions`, `/docs/create-extension`, `/docs/api`, `/docs/api-backend` |
+| Operations, tests, troubleshooting, FAQ / Operación | `/docs/operations`, `/docs/faq` |
 
-![Bloomx Banner](bloomx_banner.png)
+## What it is / Qué es
 
-## 🚀 Features
+- **N frontends, one backend.** Each company runs its own Next.js frontend (own database, own `NEXTAUTH_SECRET`). A shared backend (`bloomx-backend`) provides brand config, domain registration, extension execution and payments. **No secret is shared** between them: each frontend signs its requests with its own Ed25519 key (`BLOOMX_DOMAIN_PRIVATE_KEY`); the internal server-to-server key is derived from `NEXTAUTH_SECRET` with HKDF.
+- **Mail in and out through Resend**: inbound by webhook (`/api/webhooks/resend`), outbound by API. There is no IMAP/SMTP.
+- **Brand**: per-mode palette (49 tokens), radius, fonts, allowed themes, configurable login landing; WCAG AA contrast guaranteed by default.
+- **Mail features**: operator search (`from: to: subject: label: has:attachment is:unread|read|starred`), labels and rules, contacts, calendar and appointments, PWA, shortcuts, es/en.
+- **Elixir**: bulk sending with Liquid templates, background campaigns, quotas and one-click unsubscribe.
+- **Extensions**: `handler(ctx)` contract, manifest schema, per-domain encrypted credentials, hooks (`EMAIL_PRE_SEND` DLP, `EMAIL_RECEIVED`, `CRON`), sandboxed in `worker_threads` (not a strong boundary).
 
-- **📨 Headless Email**: Send and receive via simple REST APIs.
-- **🧠 AI Core**: Plug-and-play support for OpenAI, Gemini, Anthropic, and Cohere.
-- **🔌 Expansions**: Create custom workflows (e.g., "Add to Notion", "Slack Alert") with full UI/Backend access.
-- **📏 Resizable UI**: A premium, customizable desktop experience with resizable composer windows.
-- **🛡️ Privacy Focused**: Your data, your database (Postgres), your storage (S3/R2).
-- **⚡ Serverless Ready**: Optimized for Next.js 15+ App Router.
-- **🔍 Full Text Search**: PostgreSQL-based search for instant results.
-- **🎉 Context Actions**: Integrated "Confetti", "Toast", and "Live Recipient" manipulation for expansions.
+Honest limits are documented on every page (for example: no undo-send, snooze without UI, Elixir without a scheduled cron in `vercel.json`, Sealer key travels in the link unless a password is used).
 
-## 🛠️ Stack
+## Quick start / Inicio rápido
 
-- **Framework**: Next.js 14+ (App Router)
-- **Language**: TypeScript
-- **Styling**: TailwindCSS + shadcn/ui
-- **Database**: PostgreSQL (Prisma ORM)
-- **Storage**: S3-compatible (AWS S3, Cloudflare R2, Backblaze B2, MinIO)
-- **Email Provider**: Resend (Inbound Webhooks + Outbound API)
-- **AI SDK**: Vercel AI SDK
-
-## 📦 One-Click Deploy
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Farubiku%2Fbloomx&env=DATABASE_URL,RESEND_API_KEY,REGISTRATION_KEY,AI_KEY)
-
-## 🔧 Configuration
-
-Bloomx is configured entirely via Environment Variables. See `.env.example` for details.
-
-### Required
-- `DATABASE_URL`: Connection string for PostgreSQL.
-- `RESEND_API_KEY`: API Key from Resend.com.
-- `REGISTRATION_KEY`: Secret token to allow new user registration.
-- `TOP_DOMAIN`: Primary domain Bloomx should treat as the active tenant/domain in local setups and for system-generated mail such as undeliverable notices. Example: `mail.example.com` or `example.com`.
-
-### App URLs and Domain Resolution
-- `NEXT_PUBLIC_APP_URL`: Public URL of the Bloomx frontend, used in OAuth callback URLs.
-- `TOP_DOMAIN`: In development or proxy-based setups, this overrides the incoming host so Bloomx resolves the correct tenant/domain configuration. It should match the domain you expect users to receive mail on and the domain verified in Resend if you want automated bounce notices to be sent from `noreply@<TOP_DOMAIN>`.
-
-### Storage (S3 Compatible, B2 Compatible)
-- `S3_ENDPOINT` || `B2_ENDPOINT`
-- `S3_REGION` || `B2_REGION`
-- `S3_ACCESS_KEY` || `B2_ACCESS_KEY`
-- `S3_SECRET_KEY` || `B2_SECRET_KEY`
-- `S3_BUCKET` || `B2_BUCKET`
-
-### Shared backend (`bloomx-backend`) authentication — no shared secrets
-The backend is **shared** by many Bloomx frontends, so nothing global is shared with it.
-
-**Do NOT configure:** `INTERNAL_SECRET`, `EXTENSION_HOOKS_SECRET`, `FRONTEND_INTERNAL_URL`, nor share `NEXTAUTH_SECRET` with the backend. The frontend's internal server-to-server key (Resend webhook -> `process-attachments`, cron chaining) is **derived from this instance's own `NEXTAUTH_SECRET`** with HKDF-SHA256 (info `bloomx-internal-v1`, `src/lib/internal-auth.ts`); `INTERNAL_SECRET` is accepted only if you still define it. The session JWT is no longer forwarded to the backend.
-
-**Optional variables:**
-- `BLOOMX_DOMAIN_PRIVATE_KEY`: this instance's Ed25519 private key (PEM PKCS8 or base64). When set, requests to the backend (`extension/execute`, hooks, handler listing) are signed (`X-BloomX-Signature/Timestamp/Nonce`). When unset, the legacy header protocol is used and the backend treats the domain in *legacy mode* (no domain credentials, no `services.mail`, no `EMAIL_RECEIVED`/`CRON` hooks; response header `X-BloomX-Auth: legacy`).
-  Generate it with `node scripts/gen-domain-keypair.mjs`, then register the **public** key in the backend (`signingPublicKey` in `POST /api/auth/verify-domain`, or `POST /api/manager/domain-key` with the domain manager's session). Once registered, the backend *requires* signatures for the domain.
-- `BLOOMX_BACKEND_PUBLIC_KEY`: the backend's Ed25519 public key, used to verify its signed calls to `/api/internal/mail` (Organizer / `services.mail`). If unset it is discovered (cached) at `NEXT_PUBLIC_BACKEND_URL/.well-known/bloomx-backend-key.json`. If the backend has no key, that bridge is simply unavailable (the Organizer falls back to heuristics).
-
-### AI Capabilities
-- `AI_PROVIDER`: `openai`, `gemini`, `anthropic`, `cohere`
-- `AI_KEY`: Your API Key.
-
-### Resend Inbound Webhook
-Bloomx receives inbound email and status updates from Resend at:
-
-```text
-POST /api/webhooks/resend
+```bash
+npm install                 # postinstall runs prisma generate
+cp .env.example .env        # fill the minimum below
+npm run db:ensure           # idempotent, additive schema (also runs on predev/prebuild/prestart)
+npm run dev                 # http://localhost:3000
 ```
 
-For local development, if Bloomx runs at `http://localhost:3000`, expose it with a tunnel and register this URL in Resend:
+Minimum `.env` (placeholders only; never commit real values) / `.env` mínimo:
 
-```text
-https://your-public-host.example/api/webhooks/resend
+```bash
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/bloomx"
+NEXTAUTH_SECRET="<long random string owned by this instance>"
+RESEND_API_KEY="re_xxxxxxxx"
+NEXT_PUBLIC_APP_URL="https://mail.your-domain.com"
+NEXT_PUBLIC_BACKEND_URL="https://backend.your-domain.com"
+TOP_DOMAIN="your-domain.com"
+REGISTRATION_KEY="<key for user sign-up>"     # in production sign-up is closed if missing or "dev-secret"
+ADMIN_EMAILS="admin@your-domain.com"          # admins must enable TOTP MFA
 ```
 
-Recommended webhook events:
-- `email.received`
-- Delivery/status events used by Resend for sent mail lifecycle updates
+All variables (required vs optional, defaults) are in `/docs/env-variables` and `.env.example`. Notes that commonly trip people up / Notas frecuentes:
 
-Optional environment variables for webhook processing:
-- `WEBHOOK_SECRET` (optional, each organizer decides): Resend/Svix signing secret (`whsec_...`) for `/api/webhooks/resend`. When set, a valid signature is required; when omitted, the webhook is accepted unsigned and a warning is logged. Recommended in production so nobody can inject inbound mail.
-- `RESEND_WEBHOOK_SECRET` (optional, same rule): signing secret of the second Resend webhook that delivers bounce/complaint events to `/api/webhooks/resend-events`.
-- `TOP_DOMAIN`: Used when Bloomx sends the automatic undeliverable reply for unknown recipients.
+- **Do NOT configure** `INTERNAL_SECRET`, `EXTENSION_HOOKS_SECRET` or `FRONTEND_INTERNAL_URL`, and do not share `NEXTAUTH_SECRET` with the backend.
+- **AI** uses `AI_KEY` (+ `AI_PROVIDER`, `AI_MODEL`) on the **backend**. There are no per-provider keys.
+- **`WEBHOOK_SECRET` and `RESEND_WEBHOOK_SECRET` are optional** (each organizer decides): with them a valid Svix signature is required on `/api/webhooks/resend` and `/api/webhooks/resend-events`; without them requests are accepted unsigned and a warning is logged. Recommended in production.
+- **Signed mode** (recommended): `node scripts/gen-domain-keypair.mjs`, keep `BLOOMX_DOMAIN_PRIVATE_KEY` secret and register the public key on the backend (`/docs/api-backend#register-key`). Without it the backend treats your domain in *legacy mode* (`X-BloomX-Auth: legacy`, reduced privileges).
+- **Cron**: set `CRON_SECRET`. `vercel.json` declares only `/api/cron/run` (daily). Elixir campaigns need a cron or external pinger on `/api/cron/elixir` (`Authorization: Bearer <CRON_SECRET>`).
+- **Rate limit** is per instance unless you set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
 
-Inbound behavior worth knowing:
-- Recipients are resolved from `to`, `cc` and `bcc`, so a mailbox that is only in CC/BCC still receives the message.
-- The webhook is idempotent. If Resend retries a delivery (timeouts, 5xx, concurrent attempts) the already-stored copy is kept and the endpoint answers `2xx`; storage keys derive from the inbound email id, so retries overwrite instead of leaving orphans.
+## Resend webhooks
 
-## Build, database and maintenance scripts
+Register **two** webhooks in Resend (public https URLs):
 
-`npm run build` runs only `prebuild` = `db:ensure`, which applies idempotent, additive DDL (`IF NOT EXISTS`) so new tables and indexes exist after every deploy. It never modifies rows. Everything that changes data is a manual, explicit script:
+```text
+POST https://your-host/api/webhooks/resend          # email.received + delivery states
+POST https://your-host/api/webhooks/resend-events   # bounces and complaints (feeds the suppression list)
+```
 
-| Command | What it does | When to run it |
-|---|---|---|
-| `npm run db:ensure` | Applies the idempotent, additive DDL in `src/lib/db/schema.ts` (`CREATE TABLE/INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`). Also runs automatically in `predev`, `prestart` and `prebuild`. | Runs on every build; run it by hand only to apply schema changes without deploying. |
-| `npm run meet:fix -- --yes` | Patches existing Google Meet rooms so they have no waiting room (uses every user's Google refresh token). | Only once, on demand. Refuses to run without `--yes`. |
-| `npm run attachments:reprocess -- --yes` | Backfills attachments stored as `PENDING`/0-byte from the raw MIME (and regenerates `.ics` from our own events). | Only on demand, to repair old emails. Refuses to run without `--yes`. |
-| `npm run icons:generate` | Rasterizes `public/icon*.svg` into the PNG icons required by the PWA manifest (`sharp`, already bundled with Next.js). | Only when the icon SVGs change. The PNGs are committed. |
-| `npm test` | Unit tests (vitest). | CI and local. |
+Inbound behaviour: recipients are resolved from `to`, `cc` and `bcc`; the webhook is idempotent (Resend retries do not duplicate). DNS (SPF, DKIM, DMARC, MX, MTA-STS, TLS-RPT): [DNS_SETUP.md](./DNS_SETUP.md).
 
-None of the maintenance scripts runs in `build`, `dev` or `start`. `DATABASE_URL` decides which database they touch: double-check it before running them.
+## Scripts
 
-Additive indexes (safe to re-run) are part of `db:ensure`: `Attachment(emailId)`, `Attachment(draftId)`, `Account(userId)`, `EmailEvent(emailId)`, `Email(userId, folder, createdAt DESC)`, `Email(userId, folder, read)`, `Email(userId, scheduledAt)`, `CalendarEvent(userId, startsAt)`, `CalendarEvent(calendarId, externalId)` and a partial unique index `AppointmentBooking(scheduleId, startsAt) WHERE status = 'confirmed'` (double-booking backstop; skipped with a notice if duplicates already exist).
+| Command | What it does |
+|---|---|
+| `npm run db:ensure` | Idempotent, additive DDL from `src/lib/db/schema.ts` (`IF NOT EXISTS`). Not a versioned migration system: it does not change column types. It drops the legacy `Email.accountEmail` column. Runs automatically on `predev`, `prebuild` and `prestart`. |
+| `npm test` | Unit tests (vitest): no network, real database blocked. |
+| `npm run test:pg` | Tests against an embedded ephemeral PostgreSQL (`*.pg.test.ts`). Never touches your database. |
+| `npm run test:db:setup` | Creates `prisma/test.db` (SQLite) used by a few tests. |
+| `npm run check:themes` | WCAG AA contrast of the generic themes and the company fixtures (`src/lib/theme-fixtures.ts`). |
+| `npm run meet:fix -- --yes` | One-off: patches existing Google Meet rooms (uses every user's Google refresh token). |
+| `npm run attachments:reprocess -- --yes` | Backfills attachments stored as `PENDING`/0-byte from the raw MIME. |
+| `npm run icons:generate` | Rasterizes `public/icon*.svg` into the PWA PNG icons (committed). |
+
+Maintenance scripts never run in build/dev/start; `DATABASE_URL` decides which database they touch. A manual local E2E environment (embedded Postgres, fake Resend and backend) is described in `scripts/e2e-README.md`.
 
 ## Offline, realtime and PWA
 
-- **Service worker** (`public/sw.js`): caches only the static shell (`/_next/static/*`, icons, `/offline.html`). It never caches `/api/*`, RSC/Server Action requests, requests with `Authorization`, or HTML pages (they are per-session). A failed navigation falls back to `/offline.html`. Bump `CACHE_VERSION` to invalidate.
-- **Offline queue** (`src/contexts/OfflineContext.tsx`, logic in `src/lib/offline-queue.ts`): mutations made offline are queued and replayed sequentially, with exponential backoff, on the account that originated them (the queue stores the account, never the token). Non-retryable 4xx responses are dropped; 401/408/425/429/5xx are retried up to 8 times. Each operation carries an `Idempotency-Key` header and duplicates are collapsed. Composing/sending a message while offline queues the send.
-- **Realtime** (`/api/sse`): one connection per tab, at most 3 per user, polling backs off from 5 s to 30 s while idle, and each connection is closed cleanly after ~50 s so the browser reconnects with `Last-Event-ID` (the timestamp of the last notified email) and receives anything it missed.
-- **Public booking**: `/book/<scheduleId>/cancel/<token>` cancels an appointment from the link in the confirmation email. Tokens are HMAC-signed (`APPOINTMENT_CANCEL_SECRET`, falls back to `NEXTAUTH_SECRET`), expire when the appointment starts, and must match the token stored with the booking.
+- **Service worker** (`public/sw.js`): caches only static assets (`/_next/static/*`, icons, `/offline.html`). Never `/api/*`, `Authorization` requests or HTML pages.
+- **Offline queue** (`src/lib/offline-queue.ts`): list batch actions (`/api/emails/batch`, `/api/drafts/batch`) are queued (max 200, up to 8 attempts) and replayed with `Idempotency-Key`. **Sending a message offline is not queued.**
+- **Realtime** (`/api/sse`): at most 3 connections per user, ~50 s lifetime, reconnect with `Last-Event-ID`.
+- **Public booking**: `/book/<scheduleId>` and `/book/<scheduleId>/cancel/<token>` (HMAC token, expires when the appointment starts).
 
-### DNS and Deliverability
-If you need to configure SPF, DKIM, DMARC, MX, and inbound webhook DNS so mail is less likely to land in spam, see [DNS_SETUP.md](./DNS_SETUP.md).
+## Extensions
 
-## 🧩 Expansions
+Extensions live in `bloomx-extensions` (manifest + `server.js`), are published to the backend with `node --env-file=.env sync-extensions.mjs` (run from `bloomx-backend`) and each domain installs its own. Catalogue and status: [expansions.md](./expansions.md); how to build one: [expansions/howto.md](./expansions/howto.md) and `/docs/create-extension`.
 
-Expansions are the heart of Bloomx. They allow you to:
-1. **Intercept** events (email received, cron job, UI interaction).
-2. **Execute** custom logic (call fetch, db, AI).
-3. **Render** custom UI (buttons, sidebars, modals).
+## Security
 
-[View Full List of Expansions & Configuration](./expansions.md)
+TOTP MFA (mandatory for `ADMIN_EMAILS`), revocable sessions, AES-256-GCM encryption at rest with key rotation, signed asset URLs, optional antivirus, audit log, retention and rate limiting. Full model and an honest CIS/NIST/ISO mapping: `/docs/security`, `/docs/compliance`. Known limits are listed there (for instance the extension sandbox is not a strong boundary, and `requireAdmin` currently also accepts any backend manager session).
 
-Located in `src/lib/expansions`.
+## Tests of this documentation
 
-## 🤝 Contributing
+`src/app/docs/_content/__tests__/docs.test.ts` fails if a documented link or anchor is broken, if es/en diverge, if a documented environment variable does not exist in a `.env.example` or in the code, if a documented default differs from the code, or if the docs pages use raw palette classes.
 
-We love open source! Please read `CONTRIBUTING.md` (coming soon) for details.
-
-## 📄 License
+## License / Licencia
 
 MIT © Kynto Group

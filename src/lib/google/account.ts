@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { GoogleAuthError, classifyGoogleApiError } from './errors';
 import { pickGoogleAccount } from './pick-account';
+import { apiBase } from '@/lib/conferencing/api-bases';
 
 export { GoogleAuthError, isGoogleAuthError, googleAuthErrorToResponse } from './errors';
 
@@ -8,6 +9,8 @@ type GoogleTokenResult = {
     accessToken: string;
     refreshToken?: string | null;
     accountId: string;
+    /** Scopes concedidos (Account.scope): el contexto de extensiones los usa para elegir la API de Meet. */
+    scope?: string | null;
 };
 
 async function refreshGoogleAccessToken(refreshToken: string) {
@@ -18,7 +21,7 @@ async function refreshGoogleAccessToken(refreshToken: string) {
         throw new Error('Google OAuth is not configured');
     }
 
-    const response = await fetch('https://oauth2.googleapis.com/token', {
+    const response = await fetch(apiBase('GOOGLE_TOKEN_URL'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
@@ -77,6 +80,7 @@ export async function getGoogleAccessToken(userId: string): Promise<GoogleTokenR
             accessToken: account.access_token,
             refreshToken: account.refresh_token,
             accountId: account.id,
+            scope: account.scope,
         };
     }
 
@@ -117,6 +121,7 @@ export async function getGoogleAccessToken(userId: string): Promise<GoogleTokenR
             accessToken: updated.access_token || refreshed.access_token,
             refreshToken: updated.refresh_token,
             accountId: updated.id,
+            scope: updated.scope,
         };
     })().finally(() => {
         refreshInFlight.delete(account.id);

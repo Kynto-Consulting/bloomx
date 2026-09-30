@@ -28,6 +28,12 @@ export interface ExtensionAction {
     key?: string;
     value?: any;
     emitEvent?: string;
+    /** CALL_BACKEND/CALL_API: reintento declarativo (max 5 intentos). */
+    retry?: { attempts?: number; delayMs?: number; backoff?: 'none' | 'linear' | 'exponential' };
+    /** CALL_BACKEND/CALL_API: guarda el resultado en state[resultKey]. */
+    resultKey?: string;
+    /** false = no mostrar aviso cuando falla y no hay onError. */
+    toastOnError?: boolean;
     onSuccess?: ExtensionAction | ExtensionAction[] | { actions: ExtensionAction[] };
     onError?: ExtensionAction | ExtensionAction[] | { actions: ExtensionAction[] };
     [extra: string]: any;
@@ -48,7 +54,10 @@ export interface ExtensionMount {
 }
 
 export interface ExtensionIntercept {
-    point: 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON';
+    point: 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON'
+        | 'EMAIL_OPENED' | 'EMAIL_SENT' | 'COMPOSE_OPENED'
+        | 'CALENDAR_EVENT_CREATED' | 'CALENDAR_EVENT_UPDATED' | 'CALENDAR_EVENT_CANCELLED'
+        | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED';
     handler: string;
     priority?: 'HIGH' | 'NORMAL' | 'LOW' | 'MONITOR' | number;
     /** EMAIL_PRE_SEND: "block" impide el envio si el handler falla (p.ej. DLP). */
@@ -69,4 +78,13 @@ export interface ExtensionManifest {
     api?: { runtime?: 'nodejs'; entry?: string; functions?: Record<string, { handler: string; timeout?: number }> };
     mounts?: ExtensionMount[];
     intercepts?: ExtensionIntercept[];
+    /** Alias de `intercepts` (misma forma). */
+    hooks?: ExtensionIntercept[];
+    /** Estado inicial de cada mount/overlay (`${state.x}`); objeto pequeno (max 50 KB). */
+    state?: Record<string, any>;
+    /** Pagina /extensions: categoria, etiquetas de busqueda, capturas (URLs https) e historial de versiones. */
+    category?: string;
+    tags?: string[];
+    screenshots?: string[];
+    changelog?: Array<{ version: string; date?: string; notes?: string }>;
 }

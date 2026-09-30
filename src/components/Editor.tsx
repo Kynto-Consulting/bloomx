@@ -460,10 +460,10 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
 
                 {!simple && (
                     <div className="relative group">
-                        <button type="button" aria-label="Color de texto" aria-haspopup="true" title="Color de texto" className={cn("p-1.5 rounded hover:bg-secondary text-foreground/80", editor?.isActive('textStyle') && "bg-secondary")}>
+                        <button type="button" aria-label="Color de texto" aria-haspopup="true" title="Color de texto" className={cn("p-1.5 rounded hover:bg-secondary text-foreground", editor?.isActive('textStyle') && "bg-secondary")}>
                             <Palette className="w-4 h-4" style={{ color: editor?.getAttributes('textStyle')?.color }} />
                         </button>
-                        <div className="absolute top-full left-0 mt-1 p-2 bg-card border border-border shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid group-focus-within:grid z-50">
+                        <div className="absolute top-full left-0 mt-1 p-2 bg-card text-card-foreground border border-border shadow-lg rounded-md grid grid-cols-10 gap-1 w-[200px] hidden group-hover:grid group-focus-within:grid z-50">
                             {colors.map(color => (
                                 <button
                                     key={color}

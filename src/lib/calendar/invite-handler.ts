@@ -1,6 +1,41 @@
 import { prisma } from '@/lib/prisma';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { ParsedInvite } from '@/lib/calendar/ics';
+import {
+    conferenceFieldsFor,
+    normalizeSequence,
+    shouldApplyInvite,
+    summarizeKnownState,
+    type KnownInviteState,
+} from '@/lib/calendar/invite-state';
+
+// SEQUENCE ya aplicado por UID (registro 'invite.sequence' en EmailEvent: no requiere columnas nuevas). Si la lectura o
+// la escritura fallan, se aplica la invitacion igualmente (la consistencia nunca debe perder un evento).
+async function loadKnownInviteState(userId: string, uid: string): Promise<KnownInviteState | null> {
+    try {
+        const rows = await prisma.emailEvent.findMany({
+            where: { type: 'invite.sequence', email: { userId }, data: { path: ['uid'], equals: uid } },
+            select: { data: true },
+            take: 200,
+        });
+        return summarizeKnownState(
+            rows.map((r) => {
+                const d = (r.data || {}) as { sequence?: unknown; method?: unknown };
+                return { sequence: d.sequence, method: d.method };
+            }),
+        );
+    } catch {
+        return null;
+    }
+}
+
+async function recordInviteState(emailId: string, uid: string, method: string, sequence: number) {
+    try {
+        await prisma.emailEvent.create({ data: { emailId, type: 'invite.sequence', data: { uid, method, sequence } } });
+    } catch {
+        // best effort
+    }
+}
 
 function normalizeInviteStatus(value?: string | null): 'accepted' | 'tentative' | 'declined' | 'needsAction' {
     const normalized = String(value || '').toLowerCase();
@@ -32,6 +67,12 @@ export async function handleInboundCalendarInvite(options: {
             return;
         }
 
+        // Cancelacion antigua o ya aplicada con un SEQUENCE mayor: no tocar. Una cancelacion NUNCA crea eventos.
+        const known = await loadKnownInviteState(options.userId, inviteUid);
+        if (!shouldApplyInvite('CANCEL', options.invite.sequence, known)) {
+            return;
+        }
+
         await prisma.calendarEvent.updateMany({
             where: {
                 userId: options.userId,
@@ -44,6 +85,7 @@ export async function handleInboundCalendarInvite(options: {
                 calendarId: sharedCalendar.id,
             }
         });
+        await recordInviteState(options.emailId, inviteUid, 'CANCEL', normalizeSequence(options.invite.sequence));
         return;
     }
 
@@ -124,6 +166,15 @@ export async function handleInboundCalendarInvite(options: {
         return;
     }
 
+    // Una actualizacion con SEQUENCE menor, o una invitacion vieja sobre un evento cancelado, no se aplica.
+    if (inviteUid) {
+        const known = await loadKnownInviteState(options.userId, inviteUid);
+        if (!shouldApplyInvite(method, options.invite.sequence, known)) {
+            return;
+        }
+    }
+
+    // Mismo UID => se ACTUALIZA el evento existente (nunca se duplica).
     const existingEvent = await prisma.calendarEvent.findFirst({
         where: {
             userId: options.userId,
@@ -169,6 +220,8 @@ export async function handleInboundCalendarInvite(options: {
         title: options.invite.summary || 'Invitation',
         description: options.invite.description || null,
         location: options.invite.meetUrl || options.invite.location || null,
+        // Columnas de conferencia solo con enlace RECONOCIDO (https + host de proveedor); si no, null.
+        ...conferenceFieldsFor(options.invite.meetUrl || options.invite.location),
         startsAt,
         endsAt,
         source: 'shared',
@@ -201,5 +254,9 @@ export async function handleInboundCalendarInvite(options: {
                 }
             }
         });
+    }
+
+    if (inviteUid) {
+        await recordInviteState(options.emailId, inviteUid, method, normalizeSequence(options.invite.sequence));
     }
 }

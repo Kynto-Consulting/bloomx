@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
+import { canAccessEmail } from '@/lib/mailbox-access';
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const user = await getCurrentUser();
@@ -28,18 +29,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
             return NextResponse.json({ error: 'Email not found' }, { status: 404 });
         }
 
-        // Check ownership? existing code implies userId handling is messy but let's assume we can query by ID
-        // Ideally we check User ID match.
-        const existingUser = await prisma.user.findUnique({ where: { email: user.email }, select: { id: true } });
-        if (!existingUser || existingUser.id !== email.userId) {
-            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        // Anti-IDOR: buzones accesibles del usuario; 404 (no 401) para no confirmar correos ajenos.
+        if (!(await canAccessEmail(user.id, email.userId))) {
+            return NextResponse.json({ error: 'Email not found' }, { status: 404 });
+        }
+
+        const until = new Date(snoozeUntil);
+        if (typeof snoozeUntil !== 'string' && typeof snoozeUntil !== 'number') {
+            return NextResponse.json({ error: 'Invalid snoozeUntil' }, { status: 400 });
+        }
+        if (Number.isNaN(until.getTime())) {
+            return NextResponse.json({ error: 'Invalid snoozeUntil' }, { status: 400 });
         }
 
         const updated = await prisma.email.update({
             where: { id },
             data: {
                 folder: 'snoozed',
-                scheduledAt: new Date(snoozeUntil)
+                scheduledAt: until
             }
         });
 

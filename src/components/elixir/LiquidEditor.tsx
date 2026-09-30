@@ -276,7 +276,7 @@ function buildLiquidTheme(dark: boolean): Extension {
         border: '1px solid var(--color-border)',
         backgroundColor: 'var(--color-popover)',
         borderRadius: '10px',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+        boxShadow: '0 8px 24px color-mix(in srgb, var(--color-foreground) 14%, transparent)',
         overflow: 'hidden',
         minWidth: '260px',
         maxWidth: '380px',

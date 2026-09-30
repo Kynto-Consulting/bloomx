@@ -27,7 +27,7 @@ function DrawerPanel({ onClose, label, side = 'left', className, children }: Omi
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onMouseDown={onClose}
-                className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm"
+                className="fixed inset-0 z-[60] bg-overlay backdrop-blur-sm"
             />
             <motion.div
                 ref={ref}
@@ -38,7 +38,7 @@ function DrawerPanel({ onClose, label, side = 'left', className, children }: Omi
                 initial={{ x: offscreen }}
                 animate={{ x: 0 }}
                 exit={{ x: offscreen }}
-                className={cn('fixed inset-y-0 z-[70] bg-background text-foreground shadow-2xl outline-none', side === 'left' ? 'left-0' : 'right-0', className)}
+                className={cn('fixed inset-y-0 z-[70] bg-card text-card-foreground shadow-2xl outline-none', side === 'left' ? 'left-0' : 'right-0', className)}
             >
                 {children}
             </motion.div>

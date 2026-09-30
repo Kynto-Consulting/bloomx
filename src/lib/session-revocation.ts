@@ -110,7 +110,7 @@ export async function purgeExpiredRevocations(): Promise<number> {
 
 export interface SessionCheck {
     valid: boolean;
-    reason?: "legacy_expired" | "legacy_disabled" | "revoked" | "version_mismatch" | "user_missing" | "error";
+    reason?: "legacy_expired" | "legacy_disabled" | "disabled" | "revoked" | "version_mismatch" | "user_missing" | "error";
 }
 
 /**
@@ -139,11 +139,14 @@ export async function checkSessionNotRevoked(payload: PayloadLike): Promise<Sess
         let tv: number | null = null;
         let revoked = false;
         try {
-            const rows = await prisma.$queryRaw<Array<{ tv: number | null; revoked: boolean }>>`
+            const rows = await prisma.$queryRaw<Array<{ tv: number | null; revoked: boolean; disabled?: boolean }>>`
                 SELECT u."tokenVersion" AS tv,
-                       EXISTS (SELECT 1 FROM "RevokedSession" r WHERE r."jti" = ${jti ?? ""}) AS revoked
+                       EXISTS (SELECT 1 FROM "RevokedSession" r WHERE r."jti" = ${jti ?? ""}) AS revoked,
+                       EXISTS (SELECT 1 FROM "UserAdminState" d WHERE d."userId" = u."id" AND d."disabled" = TRUE) AS disabled
                 FROM "User" u WHERE u."id" = ${sub}`;
             if (!rows?.length) return { valid: false, reason: "user_missing" }; // usuario inexistente
+            // Cuenta deshabilitada desde la consola de administracion: ninguna sesion vale (ni las nuevas).
+            if (Boolean(rows[0].disabled)) return { valid: false, reason: "disabled" };
             tv = Number(rows[0].tv ?? 0);
             revoked = Boolean(rows[0].revoked);
         } catch (e: any) {

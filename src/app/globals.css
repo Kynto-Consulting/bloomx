@@ -102,6 +102,19 @@
 }
 
 @layer base {
+  /*
+   * Tailwind v4 pinta `border`/`divide-*` sin color con currentColor (texto), no con un gris.
+   * Sin esto, un `border` a secas seria del color del texto en cualquier paleta. Los utilitarios
+   * con color (border-input, border-primary...) siguen ganando (capa utilities).
+   */
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+
   html {
     background-color: var(--color-background);
     color: var(--color-foreground);

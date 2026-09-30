@@ -230,6 +230,7 @@ export default function ContactsPage() {
 
                     <div className="flex items-center gap-2">
                         <ExtensionLoader mountPoint="CONTACTS_HEADER" context={{ isGoogleLinked, contactCount: total }} />
+                        <ExtensionLoader mountPoint="CONTACTS_TOOLBAR" context={{ isGoogleLinked, contactCount: total, selectedIds: [] }} />
                         <button type="button" onClick={openCreate} aria-label={t('contacts.create')} className="p-2.5 hover:bg-muted rounded-full transition-colors text-foreground lg:hidden">
                             <Plus className="w-5 h-5" aria-hidden="true" />
                         </button>

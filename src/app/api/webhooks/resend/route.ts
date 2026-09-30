@@ -18,7 +18,7 @@ import { uniqueAttachmentKey } from '@/lib/attachment-keys';
 import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { normalizeContentId } from '@/lib/email-utils';
 import { validateAttachment } from '@/lib/file-type';
-import { runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
+import { buildEmailSentContext, fireLifecycleHook, runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
 import { internalSecretToSend } from '@/lib/internal-auth';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
 
@@ -672,6 +672,23 @@ async function handleEmailStatusEvent(type: string, data: any) {
         }
 
         if (newStatus) {
+            // Un programado que el proveedor ya envio (sent/delivered/bounced/complained) deja de estar "programado": pasa a
+            // Enviados y se dispara EMAIL_SENT UNA sola vez (la condicion folder='scheduled' de la actualizacion lo garantiza
+            // aunque lleguen varios eventos o reintentos del webhook).
+            const leftSchedule = email.folder === 'scheduled' && newStatus !== 'delayed';
+            if (leftSchedule) {
+                const moved = await prisma.email.updateMany({
+                    where: { id: email.id, folder: 'scheduled' },
+                    data: { status: newStatus, folder: 'sent' },
+                });
+                if (moved.count > 0) {
+                    const list = (v: string | null) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean) : []);
+                    fireLifecycleHook('EMAIL_SENT', email.userId, buildEmailSentContext({
+                        emailId: email.id, to: list(email.to), cc: list(email.cc), bcc: list(email.bcc), hasAttachments: false, sentAt: new Date(),
+                    }));
+                    return;
+                }
+            }
             await prisma.email.update({
                 where: { id: email.id },
                 data: { status: newStatus }

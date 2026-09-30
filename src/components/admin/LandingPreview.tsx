@@ -6,7 +6,8 @@ import { getTranslator, LOCALES, type Locale } from '@/lib/i18n';
 import { resolveLandingText, sanitizeLandingConfig } from '@/lib/landing-config';
 import { AuthLanding } from '@/components/landing/AuthLanding';
 import { LandingFormExtras } from '@/components/landing/FormExtras';
-import { TOKEN_KEYS, applyBrand, getTheme, type DomainThemeConfig } from '@/lib/themes';
+import type { DomainThemeConfig } from '@/lib/theme-config';
+import { previewCssVars } from './theme-editor/preview-style';
 
 export type PreviewDevice = 'desktop' | 'tablet' | 'mobile';
 export type PreviewMode = 'light' | 'dark';
@@ -23,17 +24,12 @@ const UI = {
     en: { device: 'Device', mode: 'Mode', desktop: 'Desktop', tablet: 'Tablet', mobile: 'Mobile', light: 'Light', dark: 'Dark', page: 'Screen', login: 'Sign in', register: 'Register', lang: 'Language', frame: 'Sign-in screen preview' },
 } as const;
 
-/** Variables CSS del tema (claro/oscuro) + marca de la empresa, aisladas en el contenedor de la vista previa. */
-export function previewThemeStyle(mode: PreviewMode, themeConfig?: DomainThemeConfig | null): CSSProperties {
-    const theme = getTheme(mode);
-    if (!theme) return {};
-    let tokens: Record<string, string> = { ...theme.tokens };
-    if (theme.brandable && themeConfig) {
-        try { tokens = { ...tokens, ...(applyBrand(theme, themeConfig) as Record<string, string>) }; } catch { /* marca invalida: tema base */ }
-    }
-    const style: Record<string, string> = { colorScheme: mode };
-    for (const key of TOKEN_KEYS) if (tokens[key]) style[`--color-${key}`] = tokens[key];
-    return style as CSSProperties;
+/**
+ * Variables CSS del tema (claro/oscuro) + marca de la empresa, aisladas en el contenedor de la vista previa.
+ * Usa el motor actual (buildBrandThemes): mismos tokens, radio y fuentes que la app real.
+ */
+export function previewThemeStyle(mode: PreviewMode, themeConfig?: DomainThemeConfig | null, brandName?: string): CSSProperties {
+    return previewCssVars(mode, themeConfig, brandName);
 }
 
 interface Props {
@@ -87,7 +83,7 @@ export function LandingPreview({
         return () => ro.disconnect();
     }, [dims.width]);
 
-    const themeStyle = useMemo(() => previewThemeStyle(mode, themeConfig), [mode, themeConfig]);
+    const themeStyle = useMemo(() => previewThemeStyle(mode, themeConfig, brandName), [mode, themeConfig, brandName]);
     const brand = useMemo(() => ({ name: brandName || 'Tu empresa', logo: brandLogo }), [brandName, brandLogo]);
     const setDev = (d: PreviewDevice) => { setDevice(d); onDeviceChange?.(d); };
     const setMod = (m: PreviewMode) => { setMode(m); onModeChange?.(m); };

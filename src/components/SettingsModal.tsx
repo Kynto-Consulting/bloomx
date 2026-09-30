@@ -12,6 +12,9 @@ import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 import { LabelsSettings } from '@/components/settings/LabelsSettings';
 import { OrganizerProposals } from '@/components/settings/OrganizerProposals';
 import { RulesSettings } from '@/components/settings/RulesSettings';
+import { IntegrationsSettings } from '@/components/settings/IntegrationsSettings';
+import { ManageExtensionsLink } from '@/components/settings/ManageExtensionsLink';
+import { MyMailboxTransfer } from '@/components/settings/MyMailboxTransfer';
 import { APPEARANCE_SETTINGS_KEY } from '@/lib/themes';
 import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
@@ -19,9 +22,11 @@ import { useDialog } from '@/components/ui/useDialog';
 interface SettingsModalProps {
     open: boolean;
     onClose: () => void;
+    /** Pestana a mostrar al abrir (p. ej. 'integrations' desde el selector de videoconferencia). */
+    initialTab?: 'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'extensions';
 }
 
-export function SettingsModal({ open, onClose }: SettingsModalProps) {
+export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps) {
     const { data: session, update: updateSession } = useSession();
     const { setData } = useCache();
     const { getAppearance } = useTheme();
@@ -53,7 +58,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     const [expansionSettings, setExpansionSettings] = useState<any>({});
     const mailboxSettings = expansionSettings['core-mailbox'] || {};
 
-    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'labels' | 'rules' | 'extensions'>('profile');
+    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'extensions'>(initialTab ?? 'profile');
+    useEffect(() => {
+        if (open && initialTab) setActiveTab(initialTab);
+    }, [open, initialTab]);
 
     // Password fields
     const [currentPassword, setCurrentPassword] = useState('');
@@ -151,7 +159,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 md:p-4">
             {/* Backdrop (no enfocable: se cierra con clic o Escape) */}
-            <div aria-hidden="true" className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in" onMouseDown={onClose} />
+            <div aria-hidden="true" className="absolute inset-0 bg-overlay backdrop-blur-sm animate-in fade-in" onMouseDown={onClose} />
 
             {/* Modal Content */}
             <div
@@ -172,6 +180,8 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                 ['appearance', t('settings.tabs.appearance')],
                                 ['labels', t('settings.tabs.labels')],
                                 ['rules', t('settings.tabs.rules')],
+                                ['integrations', t('conferencing.settings.tab')],
+                                ['mailbox', t('settings.tabs.mailbox')],
                             ] as const).map(([id, label]) => (
                                 <button
                                     key={id}
@@ -283,7 +293,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                                             </div>
                                             <label
                                                 title={t('settings.changeAvatarLabel')}
-                                                className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring transition-all cursor-pointer text-white font-medium text-xs rounded-full gap-1"
+                                                className="absolute inset-0 bg-foreground/70 flex flex-col items-center justify-center opacity-0 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring transition-all cursor-pointer text-background font-medium text-xs rounded-full gap-1"
                                             >
                                                 <Camera className="h-5 w-5" aria-hidden="true" />
                                                 <span>{t('settings.changeAvatar')}</span>
@@ -394,10 +404,13 @@ export function SettingsModal({ open, onClose }: SettingsModalProps) {
                     {activeTab === 'appearance' && <AppearanceSettings />}
                     {activeTab === 'labels' && <><LabelsSettings /><OrganizerProposals /></>}
                     {activeTab === 'rules' && <RulesSettings />}
+                    {activeTab === 'integrations' && <IntegrationsSettings />}
+                    {activeTab === 'mailbox' && <MyMailboxTransfer />}
 
                     {/* Generic Extensions Tab */}
                     {activeTab === 'extensions' && (
                         <div className="space-y-8 animate-in fade-in duration-300">
+                            <ManageExtensionsLink onNavigate={onClose} />
                             <div className="space-y-4">
                                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
                                     <Grid className="h-4 w-4" aria-hidden="true" /> {t('settings.attributes')}
