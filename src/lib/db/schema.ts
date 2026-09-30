@@ -43,6 +43,9 @@ const TABLES: TableSpec[] = [
             { name: 'avatar', definition: 'TEXT' },
             { name: 'signature', definition: 'TEXT' },
             { name: 'expansionSettings', definition: 'JSONB' },
+            // Revocacion global de sesiones JWT (claim `tv`). Aditivo; se lee/escribe por SQL crudo (lib/session-revocation.ts)
+            // y NO esta en schema.prisma a proposito: asi los findMany/select existentes no dependen de la columna.
+            { name: 'tokenVersion', definition: 'INTEGER NOT NULL DEFAULT 0' },
         ],
         constraints: [
             { name: 'User_pkey', statement: 'ALTER TABLE "User" ADD CONSTRAINT "User_pkey" PRIMARY KEY ("id")' },
@@ -83,6 +86,9 @@ const TABLES: TableSpec[] = [
             { name: 'Account_pkey', statement: 'ALTER TABLE "Account" ADD CONSTRAINT "Account_pkey" PRIMARY KEY ("id")' },
             { name: 'Account_provider_providerAccountId_key', statement: 'ALTER TABLE "Account" ADD CONSTRAINT "Account_provider_providerAccountId_key" UNIQUE ("provider", "providerAccountId")' },
             { name: 'Account_userId_fkey', statement: 'ALTER TABLE "Account" ADD CONSTRAINT "Account_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "Account_userId_idx" ON "Account" ("userId")',
         ],
     },
     {
@@ -143,6 +149,11 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "Email_folder_idx" ON "Email" ("folder")',
             'CREATE INDEX IF NOT EXISTS "Email_createdAt_idx" ON "Email" ("createdAt")',
             'CREATE INDEX IF NOT EXISTS "Email_userId_idx" ON "Email" ("userId")',
+            'CREATE INDEX IF NOT EXISTS "Email_userId_folder_createdAt_idx" ON "Email" ("userId", "folder", "createdAt" DESC)',
+            'CREATE INDEX IF NOT EXISTS "Email_userId_folder_read_idx" ON "Email" ("userId", "folder", "read")',
+            'CREATE INDEX IF NOT EXISTS "Email_userId_scheduledAt_idx" ON "Email" ("userId", "scheduledAt")',
+            // Full-text (busqueda). La expresion debe coincidir con FTS_EXPRESSION_SQL en src/lib/rules/search.ts
+            `CREATE INDEX IF NOT EXISTS "Email_fts_idx" ON "Email" USING GIN (to_tsvector('simple', coalesce("subject",'') || ' ' || coalesce("from",'') || ' ' || coalesce("snippet",'')))`,
         ],
     },
     {
@@ -205,6 +216,10 @@ const TABLES: TableSpec[] = [
             { name: 'Attachment_draftId_fkey', statement: 'ALTER TABLE "Attachment" ADD CONSTRAINT "Attachment_draftId_fkey" FOREIGN KEY ("draftId") REFERENCES "Draft"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
             { name: 'Attachment_emailId_fkey', statement: 'ALTER TABLE "Attachment" ADD CONSTRAINT "Attachment_emailId_fkey" FOREIGN KEY ("emailId") REFERENCES "Email"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
         ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "Attachment_emailId_idx" ON "Attachment" ("emailId")',
+            'CREATE INDEX IF NOT EXISTS "Attachment_draftId_idx" ON "Attachment" ("draftId")',
+        ],
     },
     {
         name: 'EmailEvent',
@@ -230,6 +245,7 @@ const TABLES: TableSpec[] = [
         ],
         indexes: [
             'CREATE INDEX IF NOT EXISTS "EmailEvent_resendEmailId_idx" ON "EmailEvent" ("resendEmailId")',
+            'CREATE INDEX IF NOT EXISTS "EmailEvent_emailId_idx" ON "EmailEvent" ("emailId")',
             'CREATE INDEX IF NOT EXISTS "EmailEvent_type_idx" ON "EmailEvent" ("type")',
         ],
     },
@@ -262,6 +278,60 @@ const TABLES: TableSpec[] = [
         ],
         indexes: [
             'CREATE INDEX IF NOT EXISTS "Label_userId_idx" ON "Label" ("userId")',
+        ],
+    },
+    {
+        name: 'Rule',
+        createStatement: `CREATE TABLE IF NOT EXISTS "Rule" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "name" TEXT NOT NULL,
+            "enabled" BOOLEAN NOT NULL DEFAULT TRUE,
+            "priority" INTEGER NOT NULL DEFAULT 0,
+            "conditions" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "actions" JSONB NOT NULL DEFAULT '[]'::jsonb,
+            "stopProcessing" BOOLEAN NOT NULL DEFAULT FALSE,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'name', definition: 'TEXT NOT NULL' },
+            { name: 'enabled', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
+            { name: 'priority', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'conditions', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'actions', definition: "JSONB NOT NULL DEFAULT '[]'::jsonb" },
+            { name: 'stopProcessing', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'Rule_pkey', statement: 'ALTER TABLE "Rule" ADD CONSTRAINT "Rule_pkey" PRIMARY KEY ("id")' },
+            { name: 'Rule_userId_fkey', statement: 'ALTER TABLE "Rule" ADD CONSTRAINT "Rule_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "Rule_userId_priority_idx" ON "Rule" ("userId", "priority")',
+        ],
+    },
+    {
+        name: 'RuleRun',
+        createStatement: `CREATE TABLE IF NOT EXISTS "RuleRun" (
+            "emailId" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "appliedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'emailId', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'appliedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'RuleRun_pkey', statement: 'ALTER TABLE "RuleRun" ADD CONSTRAINT "RuleRun_pkey" PRIMARY KEY ("emailId")' },
+            { name: 'RuleRun_emailId_fkey', statement: 'ALTER TABLE "RuleRun" ADD CONSTRAINT "RuleRun_emailId_fkey" FOREIGN KEY ("emailId") REFERENCES "Email"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "RuleRun_userId_idx" ON "RuleRun" ("userId")',
         ],
     },
     {
@@ -465,6 +535,8 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "CalendarEvent_startsAt_idx" ON "CalendarEvent" ("startsAt")',
             'CREATE INDEX IF NOT EXISTS "CalendarEvent_source_idx" ON "CalendarEvent" ("source")',
             'CREATE INDEX IF NOT EXISTS "CalendarEvent_inviteUid_idx" ON "CalendarEvent" ("inviteUid")',
+            'CREATE INDEX IF NOT EXISTS "CalendarEvent_userId_startsAt_idx" ON "CalendarEvent" ("userId", "startsAt")',
+            'CREATE INDEX IF NOT EXISTS "CalendarEvent_calendarId_externalId_idx" ON "CalendarEvent" ("calendarId", "externalId")',
         ],
     },
     {
@@ -604,6 +676,14 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "AppointmentBooking_startsAt_idx" ON "AppointmentBooking" ("startsAt")',
             'CREATE INDEX IF NOT EXISTS "AppointmentBooking_guestEmail_idx" ON "AppointmentBooking" ("guestEmail")',
             'CREATE INDEX IF NOT EXISTS "AppointmentBooking_cancelToken_idx" ON "AppointmentBooking" ("cancelToken")',
+            `DO $$
+            BEGIN
+                CREATE UNIQUE INDEX IF NOT EXISTS "AppointmentBooking_scheduleId_startsAt_confirmed_key"
+                    ON "AppointmentBooking" ("scheduleId", "startsAt") WHERE "status" = 'confirmed';
+            EXCEPTION
+                WHEN unique_violation THEN
+                    RAISE NOTICE 'AppointmentBooking: hay reservas confirmadas duplicadas; indice unico parcial omitido.';
+            END $$`,
         ],
     },
     {
@@ -638,6 +718,83 @@ const TABLES: TableSpec[] = [
         indexes: [
             'CREATE INDEX IF NOT EXISTS "Contact_userId_idx" ON "Contact" ("userId")',
             'CREATE INDEX IF NOT EXISTS "Contact_source_idx" ON "Contact" ("source")',
+        ],
+    },
+    // ---- Seguridad (aditivo): auditoria persistente, MFA TOTP y revocacion de sesiones. Acceso por SQL crudo. ----
+    {
+        name: 'AuditEvent',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AuditEvent" (
+            "id" TEXT NOT NULL,
+            "ts" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "event" TEXT NOT NULL,
+            "userId" TEXT,
+            "ip" TEXT,
+            "data" JSONB NOT NULL DEFAULT '{}'::jsonb
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'ts', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'event', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT' },
+            { name: 'ip', definition: 'TEXT' },
+            { name: 'data', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+        ],
+        constraints: [
+            { name: 'AuditEvent_pkey', statement: 'ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "AuditEvent_ts_idx" ON "AuditEvent" ("ts")',
+            'CREATE INDEX IF NOT EXISTS "AuditEvent_userId_ts_idx" ON "AuditEvent" ("userId", "ts")',
+            'CREATE INDEX IF NOT EXISTS "AuditEvent_event_ts_idx" ON "AuditEvent" ("event", "ts")',
+        ],
+    },
+    {
+        name: 'UserMfa',
+        createStatement: `CREATE TABLE IF NOT EXISTS "UserMfa" (
+            "userId" TEXT NOT NULL,
+            "secretEnc" TEXT NOT NULL,
+            "enabled" BOOLEAN NOT NULL DEFAULT FALSE,
+            "lastStep" BIGINT NOT NULL DEFAULT 0,
+            "recoveryHashes" JSONB NOT NULL DEFAULT '[]'::jsonb,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "confirmedAt" TIMESTAMPTZ,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'secretEnc', definition: 'TEXT NOT NULL' },
+            { name: 'enabled', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'lastStep', definition: 'BIGINT NOT NULL DEFAULT 0' },
+            { name: 'recoveryHashes', definition: "JSONB NOT NULL DEFAULT '[]'::jsonb" },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'confirmedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'UserMfa_pkey', statement: 'ALTER TABLE "UserMfa" ADD CONSTRAINT "UserMfa_pkey" PRIMARY KEY ("userId")' },
+            { name: 'UserMfa_userId_fkey', statement: 'ALTER TABLE "UserMfa" ADD CONSTRAINT "UserMfa_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+    },
+    {
+        name: 'RevokedSession',
+        createStatement: `CREATE TABLE IF NOT EXISTS "RevokedSession" (
+            "jti" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "expiresAt" TIMESTAMPTZ NOT NULL,
+            "revokedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'jti', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+            { name: 'revokedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'RevokedSession_pkey', statement: 'ALTER TABLE "RevokedSession" ADD CONSTRAINT "RevokedSession_pkey" PRIMARY KEY ("jti")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "RevokedSession_expiresAt_idx" ON "RevokedSession" ("expiresAt")',
+            'CREATE INDEX IF NOT EXISTS "RevokedSession_userId_idx" ON "RevokedSession" ("userId")',
         ],
     },
 ];

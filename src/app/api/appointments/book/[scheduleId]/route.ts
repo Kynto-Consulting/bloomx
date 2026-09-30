@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { resend } from '@/lib/resend';
 import { uploadToStorage } from '@/lib/storage';
@@ -8,6 +8,8 @@ import { buildAppointmentConfirmationHtml } from '@/lib/calendar/email-templates
 import { patchMeetSpaceOpen } from '@/lib/google/meet';
 import { formatFromHeader, isValidEmailAddress, sanitizeDisplayName } from '@/lib/mail-validation';
 import { getClientIp, rateLimit } from '@/lib/security';
+import { signCancelToken } from '@/lib/appointments/cancel-token';
+import { hasConflict, isBookableSlot, isValidTimeZone } from '@/lib/appointments/slots';
 
 // ─── ICS builder ────────────────────────────────────────────────────────────
 
@@ -304,9 +306,26 @@ async function sendAndPersistEmail({
 
 // ─── POST /api/appointments/book/[scheduleId] ────────────────────────────────
 
+class SlotTakenError extends Error {
+    constructor() {
+        super('This slot is no longer available');
+        this.name = 'SlotTakenError';
+    }
+}
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ scheduleId: string }> }) {
     const { scheduleId } = await params;
-    const body = await req.json();
+
+    // Anti-abuso, ANTES de parsear/validar: el endpoint publico envia correo a una direccion arbitraria.
+    const ipLimit = rateLimit(`book-ip:${getClientIp(req)}`, 10, 60 * 60 * 1000);
+    if (!ipLimit.ok) {
+        return NextResponse.json(
+            { error: 'Too many booking requests. Try again later.' },
+            { status: 429, headers: { 'Retry-After': String(ipLimit.retryAfter) } },
+        );
+    }
+
+    const body = await req.json().catch(() => null);
 
     // Datos del invitado (endpoint publico): sin caracteres de control y con longitud acotada
     const guestName = sanitizeDisplayName(body?.guestName).slice(0, 100);
@@ -317,11 +336,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
         return NextResponse.json({ error: 'Name, email, and slot are required' }, { status: 400 });
     }
 
-    // Anti-abuso: el endpoint publico envia correo a una direccion arbitraria (relay de spam).
-    const ipLimit = rateLimit(`book-ip:${getClientIp(req)}`, 10, 60 * 60 * 1000);
     const mailLimit = rateLimit(`book-mail:${guestEmail}`, 3, 60 * 60 * 1000);
-    if (!ipLimit.ok || !mailLimit.ok) {
-        return NextResponse.json({ error: 'Too many booking requests. Try again later.' }, { status: 429 });
+    if (!mailLimit.ok) {
+        return NextResponse.json(
+            { error: 'Too many booking requests. Try again later.' },
+            { status: 429, headers: { 'Retry-After': String(mailLimit.retryAfter) } },
+        );
     }
 
     const startsAt = new Date(slotIso);
@@ -336,26 +356,37 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
 
     if (!schedule) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
 
+    const tz = schedule.timezone && isValidTimeZone(schedule.timezone) ? schedule.timezone : 'UTC';
+
+    // El hueco debe ser uno de los que la agenda realmente ofrece (futuro, alineado a la duracion y dentro
+    // de la disponibilidad): antes se aceptaba cualquier hora.
+    if (!isBookableSlot(startsAt, { tz, availability: schedule.availability, durationMin: schedule.duration })) {
+        return NextResponse.json({ error: 'This time is not available for booking' }, { status: 400 });
+    }
+
     const endsAt = new Date(startsAt.getTime() + schedule.duration * 60 * 1000);
 
-    // Verify slot is still free
-    const busyEvent = await prisma.calendarEvent.findFirst({
-        where: {
-            userId: schedule.user.id,
-            status: { not: 'cancelled' },
-            startsAt: { lt: endsAt },
-            endsAt: { gt: startsAt },
-        },
-    });
-    const busyBooking = await prisma.appointmentBooking.findFirst({
-        where: {
-            scheduleId,
-            status: 'confirmed',
-            startsAt: { lt: endsAt },
-            endsAt: { gt: startsAt },
-        },
-    });
-    if (busyEvent || busyBooking) {
+    // Rango ocupado de la anfitriona: eventos de cualquier calendario + reservas confirmadas de esta agenda.
+    const findConflicts = async (db: Pick<typeof prisma, 'calendarEvent' | 'appointmentBooking'>) => {
+        const [events, bookings] = await Promise.all([
+            db.calendarEvent.findMany({
+                where: { userId: schedule.user.id, status: { not: 'cancelled' }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } },
+                select: { startsAt: true, endsAt: true },
+            }),
+            db.appointmentBooking.findMany({
+                where: { scheduleId, status: 'confirmed', startsAt: { lt: endsAt }, endsAt: { gt: startsAt } },
+                select: { startsAt: true, endsAt: true },
+            }),
+        ]);
+        return hasConflict(
+            [...events, ...bookings].map((r) => ({ start: r.startsAt, end: r.endsAt })),
+            startsAt,
+            endsAt,
+        );
+    };
+
+    // Comprobacion rapida (sin candado) para no crear salas de reunion inutilmente.
+    if (await findConflicts(prisma)) {
         return NextResponse.json({ error: 'This slot is no longer available' }, { status: 409 });
     }
 
@@ -399,59 +430,82 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
         }
     }
 
-    // Create CalendarEvent for host
     const calendars = await ensureDefaultCalendars(schedule.user.id);
     const targetCalendar = calendars.find(c => c.source === 'local' && !c.isReadOnly) || calendars[0];
-    let calendarEventId: string | null = null;
     const brandDomain = (process.env.NEXT_PUBLIC_BRAND_NAME || 'bloom').toLowerCase().replace(/[^a-z0-9]/g, '');
     const inviteUid = randomBytes(16).toString('hex') + `@${brandDomain}`;
 
-    if (targetCalendar) {
-        const event = await prisma.calendarEvent.create({
-            data: {
-                userId: schedule.user.id,
-                calendarId: targetCalendar.id,
-                title: `${schedule.name} — ${guestName}`,
-                description: body?.guestNotes ? String(body.guestNotes) : null,
-                location: meetUrl || null,
-                startsAt,
-                endsAt,
-                source: 'local',
-                status: 'confirmed',
-                inviteUid,
-                attendees: {
-                    create: [
-                        ...(schedule.user.email ? [{ email: schedule.user.email, name: schedule.user.name || schedule.user.email, responseStatus: 'accepted', isOrganizer: true }] : []),
-                        { email: guestEmail, name: guestName, responseStatus: 'accepted', isOrganizer: false },
-                    ],
+    // Id y token de cancelacion firmado (expira al empezar la cita). El token se guarda en la fila para
+    // poder comprobar que el enlace del correo corresponde a esta reserva y no a una version anterior.
+    const bookingId = `bk${randomBytes(12).toString('hex')}`;
+    const cancelToken = signCancelToken(bookingId, startsAt.getTime());
+    const guestNotes = body?.guestNotes ? String(body.guestNotes).trim().slice(0, 2000) : null;
+
+    // Doble reserva: comprobar-y-crear dentro de UNA transaccion con candado consultivo por anfitrion.
+    // Dos peticiones simultaneas del mismo hueco se serializan; la segunda ve la primera y recibe 409.
+    // Respaldo en BD: indice unico parcial (scheduleId, startsAt) WHERE status='confirmed' (ver ensure-schema).
+    let booking;
+    try {
+        booking = await prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`appointments:${schedule.user.id}`}))`;
+
+            if (await findConflicts(tx)) throw new SlotTakenError();
+
+            let calendarEventId: string | null = null;
+            if (targetCalendar) {
+                const event = await tx.calendarEvent.create({
+                    data: {
+                        userId: schedule.user.id,
+                        calendarId: targetCalendar.id,
+                        title: `${schedule.name} — ${guestName}`,
+                        description: body?.guestNotes ? String(body.guestNotes).slice(0, 2000) : null,
+                        location: meetUrl || null,
+                        startsAt,
+                        endsAt,
+                        source: 'local',
+                        status: 'confirmed',
+                        inviteUid,
+                        attendees: {
+                            create: [
+                                ...(schedule.user.email ? [{ email: schedule.user.email, name: schedule.user.name || schedule.user.email, responseStatus: 'accepted', isOrganizer: true }] : []),
+                                { email: guestEmail, name: guestName, responseStatus: 'accepted', isOrganizer: false },
+                            ],
+                        },
+                    },
+                });
+                calendarEventId = event.id;
+            }
+
+            return tx.appointmentBooking.create({
+                data: {
+                    id: bookingId,
+                    scheduleId,
+                    calendarEventId,
+                    guestName,
+                    guestEmail,
+                    guestNotes,
+                    startsAt,
+                    endsAt,
+                    meetUrl,
+                    cancelToken,
+                    status: 'confirmed',
                 },
-            },
-        });
-        calendarEventId = event.id;
+            });
+        }, { timeout: 15_000, maxWait: 10_000 });
+    } catch (err: any) {
+        // SlotTakenError (re-comprobacion) o P2002 (indice unico parcial): el hueco ya no esta libre.
+        if (err instanceof SlotTakenError || err?.code === 'P2002') {
+            return NextResponse.json({ error: 'This slot is no longer available' }, { status: 409 });
+        }
+        console.error('Booking failed:', err);
+        return NextResponse.json({ error: 'Could not complete the booking' }, { status: 500 });
     }
 
-    const cancelToken = randomBytes(24).toString('hex');
-    const booking = await prisma.appointmentBooking.create({
-        data: {
-            scheduleId,
-            calendarEventId,
-            guestName,
-            guestEmail,
-            guestNotes: body?.guestNotes ? String(body.guestNotes).trim().slice(0, 2000) : null,
-            startsAt,
-            endsAt,
-            meetUrl,
-            cancelToken,
-            status: 'confirmed',
-        },
-    });
-
-    // Send emails (fire-and-forget — don't fail the booking if email fails)
+    // Correos: se envian con after() para que la funcion serverless no se congele antes de terminar.
     const hostName = schedule.user.name || schedule.user.email || 'Host';
     const hostEmail = schedule.user.email;
     const origin = process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000';
     const cancelUrl = `${origin}/book/${scheduleId}/cancel/${cancelToken}`;
-    const tz = schedule.timezone || 'UTC';
     const eventTitle = `${schedule.name} — ${guestName}`;
     const icsFilename = `${slugify(schedule.name)}.ics`;
 
@@ -470,40 +524,52 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ sch
     });
 
     if (hostEmail) {
-        // Confirmation to guest
-        sendAndPersistEmail({
-            userId: schedule.user.id,
-            fromName: hostName,
-            fromEmail: hostEmail,
-            to: guestEmail,
-            subject: meetUrl ? `Confirmado: ${schedule.name} · Google Meet` : `Confirmado: ${schedule.name}`,
-            html: buildAppointmentConfirmationHtml({
-                guestName,
-                guestEmail,
-                hostName,
-                hostEmail,
-                scheduleName: schedule.name,
-                startsAt,
-                endsAt,
-                meetUrl,
-                cancelUrl,
-                timezone: tz,
-            }),
-            attachmentIcs: icsContent,
-            icsFilename,
-        }).catch(err => console.error('Guest confirmation email failed:', err));
-
-        // Notification to host
-        sendAndPersistEmail({
-            userId: schedule.user.id,
-            fromName: hostName,
-            fromEmail: hostEmail,
-            to: hostEmail,
-            subject: `New booking: ${guestName} — ${schedule.name}`,
-            html: buildHostNotificationHtml({ guestName, guestEmail, guestNotes: body?.guestNotes ? String(body.guestNotes) : null, scheduleName: schedule.name, startsAt, endsAt, timezone: tz }),
-            attachmentIcs: icsContent,
-            icsFilename,
-        }).catch(err => console.error('Host notification email failed:', err));
+        const sendEmails = async () => {
+            const results = await Promise.allSettled([
+                // Confirmation to guest
+                sendAndPersistEmail({
+                    userId: schedule.user.id,
+                    fromName: hostName,
+                    fromEmail: hostEmail,
+                    to: guestEmail,
+                    subject: meetUrl ? `Confirmado: ${schedule.name} · Google Meet` : `Confirmado: ${schedule.name}`,
+                    html: buildAppointmentConfirmationHtml({
+                        guestName,
+                        guestEmail,
+                        hostName,
+                        hostEmail,
+                        scheduleName: schedule.name,
+                        startsAt,
+                        endsAt,
+                        meetUrl,
+                        cancelUrl,
+                        timezone: tz,
+                    }),
+                    attachmentIcs: icsContent,
+                    icsFilename,
+                }),
+                // Notification to host
+                sendAndPersistEmail({
+                    userId: schedule.user.id,
+                    fromName: hostName,
+                    fromEmail: hostEmail,
+                    to: hostEmail,
+                    subject: `New booking: ${guestName} — ${schedule.name}`,
+                    html: buildHostNotificationHtml({ guestName, guestEmail, guestNotes: body?.guestNotes ? String(body.guestNotes) : null, scheduleName: schedule.name, startsAt, endsAt, timezone: tz }),
+                    attachmentIcs: icsContent,
+                    icsFilename,
+                }),
+            ]);
+            for (const r of results) {
+                if (r.status === 'rejected') console.error('Booking email failed:', r.reason);
+            }
+        };
+        try {
+            after(sendEmails);
+        } catch {
+            // Fuera de un contexto de peticion (tests/scripts): ejecutar sin bloquear la respuesta.
+            void sendEmails();
+        }
     }
 
     return NextResponse.json({

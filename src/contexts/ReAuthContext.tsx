@@ -24,6 +24,11 @@ export interface ReAuthRequirements {
     scopes: string[];
     reason: string;
     requestedBy?: string;
+    /**
+     * Saltar la verificacion de scopes. Para tokens revocados/expirados (el proveedor respondio
+     * "reconecta"): los scopes figuran concedidos en la BD pero el token ya no sirve.
+     */
+    force?: boolean;
 }
 
 interface ReAuthContextType {
@@ -49,6 +54,37 @@ function makeId(provider: string, scopes: string[]) {
     return `${provider}:${[...scopes].sort().join(',')}`;
 }
 
+// ─── Persistencia de "descartado" ───────────────────────────────────────────────
+
+const DISMISSED_KEY = 'bloomx:reauth:dismissed:v2';
+const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
+
+function loadDismissed(): Set<string> {
+    const result = new Set<string>();
+    try {
+        const stored = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '{}') as Record<string, number>;
+        const now = Date.now();
+        for (const [id, at] of Object.entries(stored)) {
+            if (typeof at === 'number' && now - at < DISMISS_TTL_MS) result.add(id);
+        }
+    } catch {
+        // almacenamiento no disponible o JSON invalido
+    }
+    return result;
+}
+
+function saveDismissed(ids: Set<string>) {
+    try {
+        const previous = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '{}') as Record<string, number>;
+        const now = Date.now();
+        const next: Record<string, number> = {};
+        for (const id of ids) next[id] = typeof previous[id] === 'number' ? previous[id] : now;
+        localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+    } catch {
+        // ignore
+    }
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 interface ReAuthProviderProps {
@@ -63,37 +99,36 @@ interface ReAuthProviderProps {
 export function ReAuthProvider({ children, initialChecks }: ReAuthProviderProps) {
     const { status } = useSession();
     const [requests, setRequests] = useState<ReAuthRequest[]>([]);
-    /** IDs dismissed during this browser session — stored in sessionStorage. */
+    /** IDs descartados: se recuerdan 24 h en localStorage (compartido entre pestanas) para no reaparecer en cada pestana nueva. */
     const dismissedRef = useRef<Set<string>>(new Set());
+    /** Aborta las verificaciones pendientes al desmontar el provider. */
+    const abortRef = useRef<AbortController | null>(null);
 
-    // Restore dismissed IDs from sessionStorage so they survive hot reloads.
     useEffect(() => {
-        try {
-            const stored = sessionStorage.getItem('bloomx:reauth:dismissed');
-            if (stored) {
-                JSON.parse(stored).forEach((id: string) => dismissedRef.current.add(id));
-            }
-        } catch {
-            // ignore
-        }
+        dismissedRef.current = loadDismissed();
+        const controller = new AbortController();
+        abortRef.current = controller;
+        return () => controller.abort();
     }, []);
 
     const requestReAuth = useCallback(async (req: ReAuthRequirements) => {
         const id = makeId(req.provider, req.scopes);
-        if (dismissedRef.current.has(id)) return;
+        if (dismissedRef.current.has(id) && !req.force) return;
 
         // Verify via API that the scopes are actually missing before showing UI.
-        try {
-            const params = new URLSearchParams({
-                provider: req.provider,
-                scopes: req.scopes.join(' '),
-            });
-            const res = await fetch(`/api/auth/check-scopes?${params}`);
-            if (!res.ok) return;
-            const { missing }: { missing: string[] } = await res.json();
-            if (!missing.length) return; // Already granted — nothing to do.
-        } catch {
-            return;
+        if (!req.force) {
+            try {
+                const params = new URLSearchParams({
+                    provider: req.provider,
+                    scopes: req.scopes.join(' '),
+                });
+                const res = await fetch(`/api/auth/check-scopes?${params}`, { signal: abortRef.current?.signal });
+                if (!res.ok) return;
+                const { missing }: { missing: string[] } = await res.json();
+                if (!missing.length) return; // Already granted — nothing to do.
+            } catch {
+                return; // Abortada o sin red.
+            }
         }
 
         setRequests(prev => {
@@ -104,14 +139,7 @@ export function ReAuthProvider({ children, initialChecks }: ReAuthProviderProps)
 
     const dismiss = useCallback((id: string) => {
         dismissedRef.current.add(id);
-        try {
-            sessionStorage.setItem(
-                'bloomx:reauth:dismissed',
-                JSON.stringify([...dismissedRef.current]),
-            );
-        } catch {
-            // ignore
-        }
+        saveDismissed(dismissedRef.current);
         setRequests(prev => prev.filter(r => r.id !== id));
     }, []);
 
@@ -120,14 +148,7 @@ export function ReAuthProvider({ children, initialChecks }: ReAuthProviderProps)
             prev.forEach(r => {
                 dismissedRef.current.add(r.id);
             });
-            try {
-                sessionStorage.setItem(
-                    'bloomx:reauth:dismissed',
-                    JSON.stringify([...dismissedRef.current]),
-                );
-            } catch {
-                // ignore
-            }
+            saveDismissed(dismissedRef.current);
             return [];
         });
     }, []);

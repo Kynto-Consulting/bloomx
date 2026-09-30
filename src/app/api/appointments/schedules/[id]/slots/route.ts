@@ -1,47 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getClientIp, rateLimit } from '@/lib/security';
+import {
+    addDaysToKey,
+    computeWeekSlots,
+    isValidDateKey,
+    isValidTimeZone,
+    localDateKey,
+    weekWindow,
+} from '@/lib/appointments/slots';
 
-function parseHHMM(time: string): { h: number; m: number } {
-    const [h, m] = time.split(':').map(Number);
-    return { h: h || 0, m: m || 0 };
-}
-
-function dateAtTimeInTz(date: Date, hhmm: string, tz: string): Date {
-    // Build an ISO string for that calendar date in the given timezone at the given HH:MM
-    const localStr = new Intl.DateTimeFormat('sv-SE', {
-        timeZone: tz,
-        year: 'numeric', month: '2-digit', day: '2-digit',
-    }).format(date);
-    const { h, m } = parseHHMM(hhmm);
-    const candidate = new Date(`${localStr}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`);
-    // candidate is local — convert to UTC by interpreting as tz
-    const formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: tz,
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: false,
-    });
-    // Use offset trick
-    const parts = formatter.formatToParts(candidate);
-    const pv = (type: string) => Number(parts.find(p => p.type === type)?.value || '0');
-    const asUtc = Date.UTC(pv('year'), pv('month') - 1, pv('day'), pv('hour'), pv('minute'), pv('second'));
-    const offset = asUtc - candidate.getTime();
-    return new Date(candidate.getTime() - offset);
-}
-
-function dayOfWeekInTz(date: Date, tz: string): number {
-    const day = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' }).format(date);
-    return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].indexOf(day);
-}
-
-function slotsOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
-    return aStart < bEnd && aEnd > bStart;
-}
+const MAX_DAYS_AHEAD = 365;
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
     const { id } = await params;
     const url = req.nextUrl;
-    const dateParam = url.searchParams.get('date'); // YYYY-MM-DD in user's local
+    const dateParam = url.searchParams.get('date'); // YYYY-MM-DD (fecha de calendario en la zona de la agenda)
+
+    // Endpoint publico: limite generoso por IP (el calendario pide una semana por navegacion).
+    const limit = rateLimit(`slots-ip:${getClientIp(req)}`, 120, 60 * 1000);
+    if (!limit.ok) {
+        return NextResponse.json(
+            { error: 'Too many requests' },
+            { status: 429, headers: { 'Retry-After': String(limit.retryAfter) } },
+        );
+    }
+
+    if (dateParam !== null && !isValidDateKey(dateParam)) {
+        return NextResponse.json({ error: 'Invalid date. Use YYYY-MM-DD.' }, { status: 400 });
+    }
 
     const schedule = await prisma.appointmentSchedule.findFirst({
         where: { id, isActive: true },
@@ -53,76 +40,54 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
 
     if (!schedule) return NextResponse.json({ error: 'Schedule not found' }, { status: 404 });
 
-    const tz = schedule.timezone || 'UTC';
+    const tz = schedule.timezone && isValidTimeZone(schedule.timezone) ? schedule.timezone : 'UTC';
     const duration = schedule.duration;
 
-    // Build week range: 7 days starting from dateParam (or today)
-    const startDate = dateParam ? new Date(`${dateParam}T00:00:00Z`) : new Date();
-    startDate.setUTCHours(0, 0, 0, 0);
-    const endDate = new Date(startDate.getTime() + 7 * 24 * 60 * 60 * 1000);
+    // Semana de 7 dias de calendario desde `date` (o desde hoy en la zona de la agenda).
+    const now = new Date();
+    const startKey = dateParam ?? localDateKey(now, tz);
+    const todayKey = localDateKey(now, tz);
+    if (startKey > addDaysToKey(todayKey, MAX_DAYS_AHEAD)) {
+        return NextResponse.json({ scheduleId: id, duration, timezone: tz, slots: {} });
+    }
+    const { from, to } = weekWindow(startKey, 7, tz);
 
-    // Fetch busy times from CalendarEvents
-    const busyEvents = await prisma.calendarEvent.findMany({
-        where: {
-            userId: schedule.user.id,
-            status: { not: 'cancelled' },
-            startsAt: { lt: endDate },
-            endsAt: { gt: startDate },
-        },
-        select: { startsAt: true, endsAt: true },
-    });
-
-    // Fetch existing bookings
-    const busyBookings = await prisma.appointmentBooking.findMany({
-        where: {
-            scheduleId: id,
-            status: 'confirmed',
-            startsAt: { lt: endDate },
-            endsAt: { gt: startDate },
-        },
-        select: { startsAt: true, endsAt: true },
-    });
+    // Ocupacion: eventos del anfitrion (todas sus agendas y calendarios) y reservas confirmadas de esta agenda.
+    const [busyEvents, busyBookings] = await Promise.all([
+        prisma.calendarEvent.findMany({
+            where: {
+                userId: schedule.user.id,
+                status: { not: 'cancelled' },
+                startsAt: { lt: to },
+                endsAt: { gt: from },
+            },
+            select: { startsAt: true, endsAt: true },
+        }),
+        prisma.appointmentBooking.findMany({
+            where: {
+                scheduleId: id,
+                status: 'confirmed',
+                startsAt: { lt: to },
+                endsAt: { gt: from },
+            },
+            select: { startsAt: true, endsAt: true },
+        }),
+    ]);
 
     const busy = [
-        ...busyEvents.map(e => ({ start: e.startsAt, end: e.endsAt })),
-        ...busyBookings.map(b => ({ start: b.startsAt, end: b.endsAt })),
+        ...busyEvents.map((e) => ({ start: e.startsAt, end: e.endsAt })),
+        ...busyBookings.map((b) => ({ start: b.startsAt, end: b.endsAt })),
     ];
 
-    const slotsByDay: Record<string, string[]> = {};
-    const now = new Date();
-
-    for (let i = 0; i < 7; i++) {
-        const day = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
-        const dow = dayOfWeekInTz(day, tz);
-        const dayAvail = schedule.availability.filter(a => a.dayOfWeek === dow && a.isEnabled);
-        if (!dayAvail.length) continue;
-
-        const dayKey = new Intl.DateTimeFormat('sv-SE', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(day);
-        slotsByDay[dayKey] = [];
-
-        for (const avail of dayAvail) {
-            const rangeStart = dateAtTimeInTz(day, avail.startTime, tz);
-            const rangeEnd = dateAtTimeInTz(day, avail.endTime, tz);
-
-            let cursor = rangeStart;
-            while (cursor < rangeEnd) {
-                const slotEnd = new Date(cursor.getTime() + duration * 60 * 1000);
-                if (slotEnd > rangeEnd) break;
-
-                if (cursor.getTime() > now.getTime() - 15 * 60 * 1000) {
-                    const overlaps = busy.some(b => slotsOverlap(cursor, slotEnd, b.start, b.end));
-                    if (!overlaps) {
-                        slotsByDay[dayKey].push(cursor.toISOString());
-                    }
-                }
-
-                cursor = slotEnd;
-            }
-        }
-
-        // Remove duplicate slots that could arise from overlapping ranges
-        slotsByDay[dayKey] = [...new Set(slotsByDay[dayKey])].sort();
-    }
+    const slotsByDay = computeWeekSlots({
+        startKey,
+        days: 7,
+        tz,
+        availability: schedule.availability,
+        durationMin: duration,
+        busy,
+        now,
+    });
 
     return NextResponse.json({ scheduleId: id, duration, timezone: tz, slots: slotsByDay });
 }

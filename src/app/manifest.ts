@@ -54,30 +54,14 @@ export default async function manifest(): Promise<MetadataRoute.Manifest> {
         display: 'standalone',
         background_color: '#ffffff',
         theme_color: themeColor,
-        icons: brandLogo ? [
-            {
-                src: brandLogo,
-                sizes: 'any',
-                purpose: 'any',
-            },
-            {
-                src: brandLogo,
-                sizes: 'any',
-                purpose: 'maskable',
-            },
-        ] : [
-            {
-                src: '/icon.svg',
-                sizes: 'any',
-                type: 'image/svg+xml',
-                purpose: 'any',
-            },
-            {
-                src: '/icon-maskable.svg',
-                sizes: 'any',
-                type: 'image/svg+xml',
-                purpose: 'maskable',
-            },
+        // Los PNG 192/512 son necesarios para que Chrome/Android ofrezca instalar la app (los genera
+        // scripts/generate-icons.mjs). Si el dominio tiene logo propio se antepone; los PNG quedan de respaldo.
+        icons: [
+            ...(brandLogo ? [{ src: brandLogo, sizes: 'any', purpose: 'any' as const }] : []),
+            { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+            { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+            { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
         ],
     };
 }

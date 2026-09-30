@@ -206,7 +206,7 @@ export function PwaManager() {
             return;
         }
 
-        navigator.serviceWorker.register('/sw.js').then((registration) => {
+        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).then((registration) => {
             registration.active?.postMessage({
                 type: 'SET_BRANDING',
                 payload: {

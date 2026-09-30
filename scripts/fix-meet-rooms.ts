@@ -1,10 +1,14 @@
 /**
  * fix-meet-rooms.ts
  * Patches all existing Google Meet rooms to be open (no waiting room).
- * Runs as part of `prebuild` — skips gracefully if credentials are missing.
+ *
+ * MANUAL: modifica datos externos (Google) con los refresh tokens de todos los usuarios, asi que NO corre
+ * en el build. Ejecutar a proposito:   npm run meet:fix -- --yes
+ * Se omite con gracia si faltan credenciales.
  */
 
 import { PrismaClient } from '@prisma/client';
+import { decrypt } from '../src/lib/encryption'; // los tokens OAuth de Account se guardan cifrados (lib/account-tokens.ts)
 
 const prisma = new PrismaClient();
 
@@ -58,6 +62,11 @@ async function patchSpaceOpen(accessToken: string, meetUrl: string): Promise<boo
 }
 
 async function main() {
+    if (!process.argv.includes('--yes')) {
+        console.error('[fix-meet-rooms] This script MODIFIES production data. It is manual-only (never part of build).');
+        console.error('[fix-meet-rooms] Re-run explicitly with:  npm run meet:fix -- --yes');
+        process.exit(1);
+    }
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
         console.warn('[fix-meet-rooms] GOOGLE_CLIENT_ID/SECRET not set — skipping.');
         return;
@@ -111,7 +120,7 @@ async function main() {
             continue;
         }
 
-        const accessToken = await refreshToken(account.refresh_token);
+        const accessToken = await refreshToken(decrypt(account.refresh_token));
         if (!accessToken) {
             console.warn(`[fix-meet-rooms] Could not get access token for user ${userId} — skipping.`);
             failed += meetUrls.size;

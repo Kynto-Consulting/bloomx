@@ -9,7 +9,9 @@
  *   2. For calendar (.ics) attachments whose MIME has already expired at Resend,
  *      REGENERATE the invite from the matching CalendarEvent we already own.
  *
- * Runs as part of `prebuild` — skips gracefully if credentials are missing.
+ * MANUAL: reescribe adjuntos en almacenamiento y BD, asi que NO corre en el build.
+ * Ejecutar a proposito:   npm run attachments:reprocess -- --yes
+ * Se omite con gracia si faltan credenciales.
  */
 
 import { PrismaClient } from '@prisma/client';
@@ -163,6 +165,11 @@ async function findMatchingEvent(email: { from: string; subject: string | null; 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+    if (!process.argv.includes('--yes')) {
+        console.error('[reprocess-attachments] This script MODIFIES production data. It is manual-only (never part of build).');
+        console.error('[reprocess-attachments] Re-run explicitly with:  npm run attachments:reprocess -- --yes');
+        process.exit(1);
+    }
     if (!process.env.DATABASE_URL) { console.warn('[reprocess-attachments] DATABASE_URL not set — skipping.'); return; }
     if (!makeS3()) { console.warn('[reprocess-attachments] Storage not configured — skipping.'); return; }
 

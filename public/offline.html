@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Offline</title>
+    <style>
+        /* Pagina estatica servida por el service worker sin red: no puede cargar el CSS de la app,
+           asi que define sus propios valores (claro/oscuro segun el sistema). */
+        :root {
+            --bg: #ffffff;
+            --fg: #09090b;
+            --muted: #52525b;
+            --border: #e4e4e7;
+            --primary: #18181b;
+            --primary-fg: #fafafa;
+            --ring: #2563eb;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0b0b0f;
+                --fg: #f4f4f5;
+                --muted: #a1a1aa;
+                --border: #27272a;
+                --primary: #f4f4f5;
+                --primary-fg: #18181b;
+                --ring: #60a5fa;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+        main { max-width: 26rem; text-align: center; }
+        img { width: 64px; height: 64px; border-radius: 16px; }
+        h1 { font-size: 1.25rem; margin: 1rem 0 0.5rem; }
+        p { color: var(--muted); line-height: 1.5; margin: 0 0 1.5rem; }
+        button {
+            font: inherit;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            background: var(--primary);
+            color: var(--primary-fg);
+            cursor: pointer;
+        }
+        button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+    </style>
+</head>
+<body>
+    <main>
+        <img src="/icon-192.png" alt="" width="64" height="64">
+        <h1>You are offline</h1>
+        <p>This page needs a connection. Actions you take in the mail app while offline are saved and sent automatically when you are back online.</p>
+        <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+    <script>
+        window.addEventListener('online', function () { location.reload(); });
+    </script>
+</body>
+</html>
