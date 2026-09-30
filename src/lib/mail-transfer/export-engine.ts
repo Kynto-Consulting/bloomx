@@ -18,6 +18,7 @@ import {
 } from './zip';
 import { buildMime, mboxFromLine, renderHeaderLines } from './mime-build';
 import { rawEmlKey, type RawMimeFetcher } from '@/lib/raw-mime';
+import { listLabels } from '@/lib/labels/store';
 import { FOLDER_EXPORT_NAMES, formatGmailLabels, gmailLabelsFor, safeArchivePath } from './formats';
 import { mboxRecord } from './mbox';
 import { parseAddressList, parseMailDate } from './mime-parse';
@@ -202,12 +203,26 @@ async function loadBatch(userId: string, folder: string, after: { ts: string; id
         const ts = new Date(after.ts);
         and.push({ OR: [{ createdAt: { gt: ts } }, { createdAt: ts, id: { gt: after.id } }] });
     }
-    return prisma.email.findMany({
+    const rows = await prisma.email.findMany({
         where: { AND: and },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: BATCH,
-        include: { attachments: true, labels: { select: { name: true } } },
+        include: { attachments: true, labels: { select: { id: true, name: true } } },
     });
+    // Etiquetas jerarquicas: se exporta la RUTA completa ("Trabajo/Proyecto A") y se marca si la etiqueta es una carpeta.
+    let info = new Map<string, { path: string; folder: boolean }>();
+    if (rows.some((r) => r.labels.length > 0)) {
+        info = new Map((await listLabels(userId).catch(() => [])).map((l) => [l.id, { path: l.fullPath, folder: l.behavior === 'folder' }]));
+    }
+    return rows.map((r) => ({ ...r, labels: r.labels.map((l) => ({ name: info.get(l.id)?.path ?? l.name, folder: info.get(l.id)?.folder === true })) }));
+}
+
+/** Directorio propio de un correo dentro de una etiqueta-carpeta (Archive/Trabajo/Proyecto A), o null. */
+export function folderLabelDir(labels: Array<{ name: string; folder: boolean }>): string | null {
+    const f = labels.find((l) => l.folder);
+    if (!f) return null;
+    const segs = f.name.split('/').map((x) => x.replace(/[\/:*?"<>| -]/g, '_').trim().slice(0, 100)).filter((x) => x && x !== '.' && x !== '..');
+    return segs.length ? segs.join('/') : null;
 }
 
 function headersOfRaw(json: string | null): Record<string, string> {
@@ -557,7 +572,8 @@ async function exportStep(job: JobRow, deps: EngineDeps): Promise<TickResult> {
                         if (!mboxMax || m.date > mboxMax) mboxMax = m.date;
                         if (mboxBytes >= PART_MAX) await flushPart();
                     } else {
-                        const name = `${dir}/${stamp(m.date)}_${slug(e.subject ?? '')}_${e.id.slice(-6)}.eml`;
+                        const labelDir = folderLabelDir(e.labels);
+                        const name = `${dir}${labelDir ? `/${labelDir}` : ''}/${stamp(m.date)}_${slug(e.subject ?? '')}_${e.id.slice(-6)}.eml`;
                         const { sha256, size } = await writer.addFile(name, m.raw, m.date);
                         await writer.addManifestFile({ path: name, mailbox: email, folder, messageId: m.messageId, date: m.date.toISOString(), bytes: size, sha256, labels: e.labels.map((l) => l.name), read: e.read, starred: e.starred });
                     }

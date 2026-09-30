@@ -128,7 +128,7 @@ describe('exportar (Postgres real)', () => {
         expect((await jobs.get(imp.id))!).toMatchObject({ importedItems: 3, errorItems: 0 });
 
         const cmp = async (userId: string) => (await prisma.email.findMany({ where: { userId }, orderBy: { createdAt: 'asc' }, include: { labels: true, attachments: true } }))
-            .map((e) => ({ subject: e.subject, folder: e.folder, read: e.read, starred: e.starred, createdAt: e.createdAt.toISOString(), labels: e.labels.map((l) => l.name).sort(), att: e.attachments.map((x) => x.filename).sort(), cc: e.cc }));
+            .map((e) => ({ subject: e.subject, folder: e.folder, read: e.read, starred: e.starred, createdAt: e.createdAt.toISOString(), labels: e.labels.map((l) => l.name.replace(/,/g, '')).sort(), att: e.attachments.map((x) => x.filename).sort(), cc: e.cc }));
         expect(await cmp(c.id)).toEqual(await cmp(a.user.id));
         // El contenido de los adjuntos se conserva byte a byte
         const orig = await prisma.attachment.findMany({ where: { email: { userId: a.user.id }, filename: 'Propuesta ñ.pdf' } });

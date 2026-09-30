@@ -34,6 +34,7 @@ interface Props {
     extra?: ReactNode;
 }
 
+const EXTENSIONS_RESERVE_PX = 48;
 const MENU_ACTIONS: MailActionId[] = ['move', 'label', 'snooze', 'reschedule'];
 
 /**
@@ -65,8 +66,9 @@ export function ReaderToolbar({
         () => getFolderActions(folder).filter((a) => a !== 'markRead' && a !== 'star'),
         [folder],
     );
-    // Fijos en la barra superior: cerrar, anterior/siguiente, destacar y "Mas" (~210 px) + 34 px por accion.
-    const limit = variant === 'bottom' ? 4 : width > 0 ? Math.max(2, Math.min(7, Math.floor((width - 215) / 34))) : 6;
+    // Fijos en la barra superior: cerrar, anterior/siguiente, destacar y "Mas" (~210 px) + 34 px por accion. Se reservan ~48 px para el
+    // boton de extensiones, asi las acciones propias nunca empujan ni tapan a las de las extensiones.
+    const limit = variant === 'bottom' ? 4 : width > 0 ? Math.max(2, Math.min(7, Math.floor((width - 215 - EXTENSIONS_RESERVE_PX) / 34))) : 6;
     const visible = actions.slice(0, limit);
     const overflow = actions.slice(limit);
 
@@ -153,10 +155,12 @@ export function ReaderToolbar({
             </div>
             <div className="mx-1 hidden h-5 w-px bg-border md:block" aria-hidden="true" />
 
-            <div className="hidden min-w-0 items-center md:flex">{actionButtons}</div>
+            <div className="hidden shrink-0 items-center md:flex">{actionButtons}</div>
 
-            <div className="ml-auto flex shrink-0 items-center">
-                {extra}
+            {/* Acciones de extensiones: ocupan SOLO el hueco que queda (min-w-0), miden su ancho y mandan lo que no cabe a su menu. */}
+            <div data-reader-extensions="" className="flex min-w-0 flex-1 items-center justify-end">{extra}</div>
+
+            <div className="flex shrink-0 items-center">
                 <IconButton
                     label={starred ? t('emailList.row.unstar') : t('emailList.row.star')}
                     pressed={starred}

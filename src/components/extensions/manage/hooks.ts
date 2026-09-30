@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { mutate as mutateSWR } from 'swr';
+import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { getExtensionErrors, subscribeExtensionErrors, type ExtensionErrorEntry } from '@/lib/expansions/client/error-log';
 import type { CatalogInfo } from '@/lib/expansions/manage/model';
 
@@ -66,4 +68,45 @@ export function useCatalogInfo(): Map<string, CatalogInfo> {
         }
         return map;
     }, [items]);
+}
+
+export type UpdateResult = { ok: true; to: string | null } | { ok: false; reason: 'invalid-catalog' | 'forbidden' | 'failed' };
+
+/**
+ * Actualizar una extension instalada a la version del catalogo (POST /api/admin/extensions/update: conserva credenciales, ajustes y
+ * estado). Solo tiene sentido para el administrador dueno del dominio: `canManage` (lo determina la presencia del catalogo, que solo
+ * devuelve la ruta de administradores) y el servidor vuelve a comprobar sesion y propiedad.
+ */
+export function useExtensionUpdater(canManage: boolean) {
+    const { config } = useDomainConfig();
+    const domainId = typeof (config as { id?: unknown })?.id === 'string' ? ((config as { id: string }).id) : null;
+    const [busyId, setBusyId] = useState<string | null>(null);
+
+    const update = useCallback(async (extensionId: string): Promise<UpdateResult> => {
+        if (!domainId) return { ok: false, reason: 'forbidden' };
+        setBusyId(extensionId);
+        try {
+            const res = await fetch('/api/admin/extensions/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                cache: 'no-store',
+                credentials: 'same-origin',
+                body: JSON.stringify({ domainId, extensionId }),
+            });
+            const data = await res.json().catch(() => null);
+            if (res.ok && data?.success === true) {
+                await mutateSWR('/api/config');
+                return { ok: true, to: typeof data.to === 'string' ? data.to : null };
+            }
+            if (data?.code === 'EXTENSION_INVALID') return { ok: false, reason: 'invalid-catalog' };
+            if (res.status === 401 || res.status === 403) return { ok: false, reason: 'forbidden' };
+            return { ok: false, reason: 'failed' };
+        } catch {
+            return { ok: false, reason: 'failed' };
+        } finally {
+            setBusyId(null);
+        }
+    }, [domainId]);
+
+    return { canUpdate: canManage && domainId !== null, busyId, update };
 }

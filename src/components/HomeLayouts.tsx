@@ -1,40 +1,37 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import { Group, Panel, Separator } from 'react-resizable-panels';
-import { Sidebar } from '@/components/Sidebar';
 import { EmailList } from '@/components/EmailList';
 import { MailView } from '@/components/MailView';
 import { Loader2 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { AnimatePresence, motion } from 'framer-motion';
 import { useI18n } from '@/components/I18nProvider';
+import { useAppSidebar } from '@/components/layout/AppShell';
+
+/**
+ * Bandeja en escritorio: lista + lector (la barra lateral y su ancho viven en el shell compartido, `layout/AppShell`).
+ * Los tamanos son EXPLICITOS: en react-resizable-panels v4 un numero son PIXELES (antes `defaultSize={20}` se leia como 20 px y
+ * `maxSize={305}` fijaba el tope de la barra en 305 px), asi que los porcentajes van como texto y los minimos en px.
+ */
+export const LIST_PANEL = { defaultSize: '40%', minSize: '320px' } as const;
+export const READER_PANEL = { defaultSize: '60%', minSize: '360px' } as const;
 
 function DesktopLayout() {
     const searchParams = useSearchParams();
     const selectedId = searchParams.get('id');
 
     return (
-        <div className="h-screen w-full hidden md:block">
-            <Group orientation="horizontal" className="h-full">
-                {/* Panel Sidebar */}
-                <Panel defaultSize={20} minSize={15} maxSize={305}>
-                    <Sidebar />
-                </Panel>
-
-                <Separator className="w-px bg-sidebar-border hover:bg-primary transition-colors cursor-col-resize active:bg-primary" />
-
-                {/* Panel Lista de Correos */}
-                <Panel defaultSize={32} minSize={30}>
+        <div className="h-full w-full">
+            <Group orientation="horizontal" className="h-full" resizeTargetMinimumSize={{ coarse: 24, fine: 8 }}>
+                <Panel id="mail-list" defaultSize={LIST_PANEL.defaultSize} minSize={LIST_PANEL.minSize}>
                     <EmailList />
                 </Panel>
 
                 {selectedId && (
                     <>
-                        <Separator className="w-px bg-border hover:bg-primary transition-colors cursor-col-resize active:bg-primary" />
-
-                        {/* Panel Vista de Mensaje */}
-                        <Panel defaultSize={48} >
+                        <Separator className="w-px bg-border outline-none transition-colors hover:bg-primary focus-visible:bg-ring data-[separator=active]:bg-primary" />
+                        <Panel id="mail-reader" defaultSize={READER_PANEL.defaultSize} minSize={READER_PANEL.minSize}>
                             <MailView />
                         </Panel>
                     </>
@@ -53,45 +50,14 @@ function MobileLayout() {
     const { t } = useI18n();
     const searchParams = useSearchParams();
     const router = useRouter();
+    const { openDrawer, drawerOpen } = useAppSidebar();
     const selectedId = searchParams.get('id');
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [showSettings, setShowSettings] = useState(false);
 
-    // Gmail Mobile Logic (Refined):
-    // 1. Mobile Header (Search/Menu Pill) persists at top.
-    // 2. Sidebar is a Drawer/Overlay.
-    // 3. Main Content switches:
-    //    - If NO ID: Show EmailList.
-    //    - If ID: Show MailView (replacing EmailList).
+    // Movil: cabecera (menu + busqueda) fija; el menu abre el cajon del shell. Sin id: lista; con id: lector en su lugar.
 
     return (
-        <div className="h-screen w-full md:hidden flex flex-col relative overflow-hidden bg-background">
-            {/* Sidebar Drawer */}
-            <AnimatePresence>
-                {isSidebarOpen && (
-                    <>
-                        {/* Backdrop */}
-                        <motion.div
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            onClick={() => setIsSidebarOpen(false)}
-                            className="absolute inset-0 bg-overlay z-40 backdrop-blur-sm"
-                        />
-                        {/* Sidebar */}
-                        <motion.div
-                            initial={{ x: '-100%' }}
-                            animate={{ x: 0 }}
-                            exit={{ x: '-100%' }}
-                            transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                            className="absolute top-0 bottom-0 left-0 w-[80%] max-w-[300px] z-50 bg-sidebar text-sidebar-foreground shadow-2xl border-r border-sidebar-border"
-                        >
-                            <Sidebar onClose={() => setIsSidebarOpen(false)} />
-                        </motion.div>
-                    </>
-                )}
-            </AnimatePresence>
-
+        <div className="h-full w-full flex flex-col relative overflow-hidden bg-background">
             {/* Persistent Mobile Header */}
             {/* When reading an email, usually header changes (Back Button), but user asked to NOT hide navbar? 
                 Actually user said "no esconda el navbar... sino que remplaze la lista". 
@@ -101,9 +67,10 @@ function MobileLayout() {
                 <div className="flex items-center gap-2 h-12 bg-header text-header-foreground border border-border rounded-full px-4 shadow-sm backdrop-blur-xl">
                     <button
                         type="button"
-                        onClick={() => setIsSidebarOpen(true)}
+                        onClick={openDrawer}
                         aria-label={t('emailList.mobile.openMenu')}
-                        aria-expanded={isSidebarOpen}
+                        aria-haspopup="dialog"
+                        aria-expanded={drawerOpen}
                         className="-ml-1 flex h-11 w-11 items-center justify-center opacity-80 hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full"
                     >
                         <Menu className="h-6 w-6" aria-hidden="true" />
@@ -154,41 +121,12 @@ function MobileLayout() {
     );
 }
 
-/** Punto de corte del layout de escritorio (Tailwind `md`). */
-export const DESKTOP_QUERY = '(min-width: 768px)';
-
-function subscribeViewport(onChange: () => void): () => void {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => undefined;
-    const mq = window.matchMedia(DESKTOP_QUERY);
-    if (typeof mq.addEventListener === 'function') {
-        mq.addEventListener('change', onChange);
-        return () => mq.removeEventListener('change', onChange);
-    }
-    mq.addListener(onChange); // Safari < 14
-    return () => mq.removeListener(onChange);
-}
-
-function viewportSnapshot(): 'desktop' | 'mobile' {
-    // Sin matchMedia (entornos sin navegador) se asume escritorio.
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'desktop';
-    return window.matchMedia(DESKTOP_QUERY).matches ? 'desktop' : 'mobile';
-}
-
-/**
- * Viewport actual. `null` en el servidor y durante la hidratacion: la pagina pinta el mismo indicador de carga que el fallback de
- * Suspense (sin salto de layout) y monta UN solo arbol cuando ya se sabe el ancho. Antes se montaban los dos a la vez (uno oculto
- * por CSS): ids `email-row-*` duplicados, atajos y escuchas por duplicado y el doble de peticiones.
- */
-export function useViewport(): 'desktop' | 'mobile' | null {
-    return useSyncExternalStore(subscribeViewport, viewportSnapshot, () => null);
-}
-
 export function LoadingScreen() {
-    return <div className="flex h-screen w-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+    return <div className="flex h-full w-full items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
 }
 
+/** Contenido de la bandeja segun el modo del shell: movil (cajon) o escritorio/riel (lista + lector). */
 export function MainApp() {
-    const viewport = useViewport();
-    if (viewport === null) return <LoadingScreen />;
-    return viewport === 'desktop' ? <DesktopLayout /> : <MobileLayout />;
+    const { mode } = useAppSidebar();
+    return mode === 'drawer' ? <MobileLayout /> : <DesktopLayout />;
 }

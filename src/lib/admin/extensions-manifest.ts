@@ -3,7 +3,7 @@
  * semver, categoria, permisos legibles + riesgo, funcion de prueba, campos de SETTINGS_PANEL, resumen acotado del manifest
  * y orden. Las comparten el servidor (proxy del catalogo), la UI y los tests.
  */
-import { describePermissions, KNOWN_MOUNT_POINTS, type PermissionRisk } from '@/lib/expansions/manifest-schema';
+import { describePermissions, KNOWN_MOUNT_POINTS, manifestIcon, type PermissionRisk } from '@/lib/expansions/manifest-schema';
 
 export type Json = Record<string, any>;
 
@@ -236,6 +236,10 @@ export interface ManifestSummary {
     version?: string;
     manifestVersion?: string;
     category?: string;
+    /** Icono declarado (brand:<slug>, lucide:<Nombre>, initials:<XY> o un nombre Lucide). */
+    icon?: string;
+    /** Nombre y descripcion por idioma (manifest.i18n), acotados. */
+    i18n?: Record<string, { name?: string; description?: string }>;
     permissions?: string[];
     auth?: { type?: string; provider?: string; scopes?: string[] };
     /** Puntos de montaje declarados (sin componentes). */
@@ -265,6 +269,18 @@ export function summarizeTemplate(template: unknown): ManifestSummary | null {
     assign('version', short(t.version, 40));
     assign('manifestVersion', short(t.manifestVersion, 10));
     assign('category', short(t.category, 40));
+    assign('icon', manifestIcon(t) ?? undefined);
+    if (t.i18n && typeof t.i18n === 'object' && !Array.isArray(t.i18n)) {
+        const table: Record<string, { name?: string; description?: string }> = {};
+        for (const lang of Object.keys(t.i18n).slice(0, 12)) {
+            const entry = t.i18n[lang];
+            if (!/^[a-z]{2}(?:-[A-Za-z]{2})?$/.test(lang) || !entry || typeof entry !== 'object') continue;
+            const name = short(entry.name, 200);
+            const description = short(entry.description, 1000);
+            if (name || description) table[lang] = { ...(name ? { name } : {}), ...(description ? { description } : {}) };
+        }
+        if (Object.keys(table).length > 0) out.i18n = table;
+    }
     if (t.mandatory === true) out.mandatory = true;
     if (Array.isArray(t.permissions)) {
         assign('permissions', t.permissions.filter((p: unknown): p is string => typeof p === 'string' && p.length <= 100).slice(0, 60));

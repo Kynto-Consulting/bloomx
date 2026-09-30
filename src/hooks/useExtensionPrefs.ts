@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useSession } from '@/components/SessionProvider';
 import {
-    EMPTY_PREFS, activatePrefsUser, getPrefs, isExtensionEnabled, orderIds, pullPrefsFromServer, setPrefs, subscribePrefs, withEnabled, withMoved,
+    EMPTY_PREFS, activatePrefsUser, getPrefs, isExtensionEnabled, orderIds, pullPrefsFromServer, setPrefs, subscribePrefs, withEnabled, withMoved, withPinned,
     type ExtensionPrefs,
 } from '@/lib/expansions/client/prefs';
 
@@ -30,8 +30,9 @@ export function useExtensionPrefs() {
 
     const setEnabled = useCallback((id: string, enabled: boolean) => setPrefs(withEnabled(getPrefs(), id, enabled)), []);
     const move = useCallback((allIds: string[], id: string, direction: -1 | 1) => setPrefs(withMoved(getPrefs(), allIds, id, direction)), []);
+    const setPinned = useCallback((key: string, pinned: boolean | null) => setPrefs(withPinned(getPrefs(), key, pinned)), []);
     const isEnabled = useCallback((id: string) => isExtensionEnabled(prefs, id), [prefs]);
     const order = useCallback((ids: string[]) => orderIds(ids, prefs), [prefs]);
 
-    return useMemo(() => ({ prefs: prefs as ExtensionPrefs, isEnabled, setEnabled, move, order }), [prefs, isEnabled, setEnabled, move, order]);
+    return useMemo(() => ({ prefs: prefs as ExtensionPrefs, isEnabled, setEnabled, setPinned, move, order }), [prefs, isEnabled, setEnabled, setPinned, move, order]);
 }

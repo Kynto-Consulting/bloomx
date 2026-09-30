@@ -1,6 +1,7 @@
 'use client';
 
-import { KeyRound, Puzzle } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { Badge, btnDangerOutline, btnOutline, btnPrimary } from '@/components/admin/console';
 import { useI18n } from '@/components/I18nProvider';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
@@ -74,7 +75,7 @@ export function ExtensionCard({ row, actions, onOpen }: { row: ExtensionRow; act
         <li>
             <article aria-label={row.name} className="flex h-full flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
                 <div className="flex items-start gap-3">
-                    <span aria-hidden="true" className="rounded-lg bg-primary/10 p-2 text-primary"><Puzzle className="h-5 w-5" /></span>
+                    <ExtensionIcon icon={row.icon} label={row.name} size={32} />
                     <div className="min-w-0 flex-1">
                         <h3 className="break-words text-sm font-semibold text-foreground">{row.name}</h3>
                         <p className="mt-0.5 text-xs text-muted-foreground">

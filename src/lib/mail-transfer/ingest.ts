@@ -19,8 +19,11 @@ import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { normalizeContentId, normalizeEmailAddress } from '@/lib/email-utils';
 import { sanitizeSubject } from '@/lib/mail-validation';
 import { stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
+import { assignThread, headersOfInbound } from '@/lib/thread-store';
+import { threadInfoFromParsedHeaders } from '@/lib/thread-headers';
 import type { Address, ParsedMail } from './mime-parse';
 import type { MessagePlacement } from './formats';
+import { LabelError, ensureLabelPath } from '@/lib/labels/store';
 import type { TransferStorage } from './source';
 
 export type IngestStatus = 'imported' | 'duplicate' | 'error';
@@ -39,7 +42,7 @@ export interface IngestContext {
     now?: () => Date;
 }
 
-const KEEP_HEADERS = ['date', 'message-id', 'in-reply-to', 'references', 'reply-to', 'list-id', 'list-unsubscribe', 'authentication-results', 'received-spf', 'importance', 'x-priority'];
+const KEEP_HEADERS = ['date', 'message-id', 'in-reply-to', 'references', 'reply-to', 'list-id', 'list-unsubscribe', 'thread-index', 'thread-topic', 'auto-submitted', 'precedence', 'authentication-results', 'received-spf', 'importance', 'x-priority'];
 
 function fmt(a: Address | null): string {
     if (!a) return '';
@@ -85,23 +88,28 @@ async function hasPreviousFolder(): Promise<boolean> {
 /** Solo para pruebas. */
 export function __resetIngestCaches() { previousFolderColumn = null; }
 
-async function ensureLabels(ctx: IngestContext, userId: string, names: string[]): Promise<string[]> {
+/**
+ * Etiquetas del origen -> etiquetas de Bloomx. Las rutas con "/" ("Trabajo/Proyecto A") crean JERARQUIA; las que vienen de una
+ * carpeta del origen (folderNames: Outlook/Thunderbird/ZIP) se crean con comportamiento 'folder'. Si la BD aun no tiene
+ * jerarquia, cae a etiquetas planas por nombre.
+ */
+async function ensureLabels(ctx: IngestContext, userId: string, names: string[], folderNames: string[] = []): Promise<string[]> {
     const ids: string[] = [];
+    const asFolder = new Set(folderNames.map((n) => n.trim().slice(0, 80)));
     for (const raw of names) {
         const name = raw.trim().slice(0, 80);
         if (!name) continue;
-        const key = `${userId}\n${name}`;
+        const key = `${userId}
+${asFolder.has(name) ? 'f' : 't'}
+${name}`;
         let id = ctx.labelCache.get(key);
         if (!id) {
-            const found = await prisma.label.findUnique({ where: { userId_name: { userId, name } }, select: { id: true } });
-            if (found) id = found.id;
-            else {
-                try {
-                    id = (await prisma.label.create({ data: { userId, name }, select: { id: true } })).id;
-                } catch (e) {
-                    if ((e as { code?: string })?.code !== 'P2002') throw e;
-                    id = (await prisma.label.findUnique({ where: { userId_name: { userId, name } }, select: { id: true } }))?.id;
-                }
+            try {
+                id = (await ensureLabelPath(userId, name, { behavior: asFolder.has(name) ? 'folder' : 'tag' })).id;
+            } catch (e) {
+                if (e instanceof LabelError) continue; // limite de etiquetas o nombre invalido: el correo se importa sin ella
+                const found = await prisma.label.findFirst({ where: { userId, name }, select: { id: true } });
+                id = found?.id ?? (await prisma.label.create({ data: { userId, name }, select: { id: true } }).catch(() => null))?.id;
             }
             if (!id) continue;
             if (ctx.labelCache.size > 5000) ctx.labelCache.clear();
@@ -251,7 +259,7 @@ export async function ingestMessage(
         return { status: 'error', error: 'storage_failed', messageIdKey: storedMessageId };
     }
 
-    const labelIds = await ensureLabels(ctx, userId, placement.labels);
+    const labelIds = await ensureLabels(ctx, userId, placement.labels, placement.folderLabels ?? []);
     const from = fmt(parsed.from) || 'unknown@unknown.local';
     const toAddrs = parsed.to.length ? parsed.to : parsed.cc;
     const toField = fmtList(toAddrs) || input.userEmail;
@@ -290,6 +298,19 @@ export async function ingestMessage(
     }
 
     if (contentIds.length) await saveAttachmentContentIds(contentIds.map((c) => ({ emailId: created.id, ...c })));
+    // Hilo por cabeceras (Message-ID / In-Reply-To / References del archivo). Tolerante: nunca hace fallar la importacion.
+    try {
+        const info = threadInfoFromParsedHeaders(parsed.headers);
+        await assignThread({
+            userId, emailId: created.id, headers: headersOfInbound(info), date: date.getTime(), subject,
+            from, to: toField, cc: parsed.cc.length && parsed.to.length ? fmtList(parsed.cc) : null, own: [input.userEmail],
+            noFallback: info.autoSubmitted || info.bulk || Boolean(info.listId),
+        });
+    } catch { /* se agrupara con la clave heuristica heredada */ }
+    // Carpeta de Outlook/Thunderbird importada como etiqueta-carpeta: el correo "vive" ahi y al quitarla vuelve a Entrada.
+    if (placement.folder === 'archive' && (placement.folderLabels?.length ?? 0) > 0 && !placement.previousFolder && (await hasPreviousFolder())) {
+        await execute(`UPDATE "Email" SET "previousFolder" = 'inbox' WHERE "id" = $1`, created.id).catch(() => undefined);
+    }
     if (placement.previousFolder && (await hasPreviousFolder())) {
         await execute(`UPDATE "Email" SET "previousFolder" = $2 WHERE "id" = $1`, created.id, placement.previousFolder).catch(() => undefined);
     }

@@ -36,6 +36,7 @@ import {
     buildQuickReply,
     nextFocusIndex,
 } from '@/lib/mail-list';
+import { makeReplyDeps } from '@/lib/reply-deps';
 import {
     type QuickFilter,
     attachmentSummary,
@@ -88,14 +89,6 @@ const ACCOUNT_FILTER_STORAGE_KEY = 'bloomx:mailbox:account-filter:v1';
 // Los campos extra (to, cc, attachments, ...) viven en el index signature de ListEmail.
 type Email = ListEmail;
 
-/** Fecha + hora corta con el idioma de la interfaz (cita de respuesta rapida). */
-function formatMobileDate(date: string, locale: string) {
-    if (!date) return '';
-    const parsed = new Date(date);
-    if (Number.isNaN(parsed.getTime())) return '';
-    return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(parsed);
-}
-
 /** Nombre de carpeta traducido (inbox -> Bandeja de entrada); carpetas desconocidas se muestran tal cual. */
 function folderLabel(t: (key: string) => string, folder: string) {
     const key = `sidebar.folders.${folder}`;
@@ -139,8 +132,8 @@ export function EmailList() {
     const { getData, setData, subscribe, invalidate } = useCache();
     const { data: session } = useSession();
     const { isOnline } = useOffline();
-    const openDraft = useCallback((d: { id: string; from?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; attachments?: unknown[] }) => {
-        openCompose({ id: d.id, draftId: d.id, from: d.from, to: d.to || '', cc: d.cc || '', bcc: d.bcc || '', subject: d.subject || '', body: d.body || '', minimized: false, attachments: (d.attachments as any[]) || [] });
+    const openDraft = useCallback((d: { id: string; from?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; attachments?: unknown[]; inReplyToEmailId?: string | null; replyMode?: 'reply' | 'replyAll' | 'forward' | null }) => {
+        openCompose({ id: d.id, draftId: d.id, from: d.from, to: d.to || '', cc: d.cc || '', bcc: d.bcc || '', subject: d.subject || '', body: d.body || '', minimized: false, attachments: (d.attachments as any[]) || [], ...(d.inReplyToEmailId ? { inReplyToEmailId: d.inReplyToEmailId, replyMode: d.replyMode || undefined } : {}) });
     }, [openCompose]);
     const actions = useMailActions({ openDraft });
     const actionsRef = useRef(actions);
@@ -681,10 +674,11 @@ export function EmailList() {
             const reply = buildQuickReply(
                 data.email,
                 data.content || '',
-                formatMobileDate(data.email.createdAt, loc),
+                '', // fecha larga con zona (reply-builder), no la corta de la lista
                 (date, from) => tr('emailList.quoteHeader', { date, from }),
+                makeReplyDeps({ t: tr, intlLocale: loc }),
             );
-            openCompose({ id: crypto.randomUUID(), ...reply, minimized: false });
+            openCompose({ id: crypto.randomUUID(), ...reply, inReplyToEmailId: data.email.id, replyMode: 'reply', minimized: false });
         } catch (err) {
             console.error('Quick reply failed', err);
             toast.error(latest.current.t('emailList.toast.replyFailed'));

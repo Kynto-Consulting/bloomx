@@ -8,7 +8,7 @@ import type { ExtensionRow } from '@/lib/admin/extensions-view';
 
 const BACKEND_CODES = new Set([
     'manager_session_required', 'domain_mismatch', 'instance_unavailable', 'PAYMENT_REQUIRED', 'not_installed',
-    'extension_not_found', 'backend_unavailable', 'backend_error', 'rate_limited', 'EXTENSION_NOT_ENABLED',
+    'extension_not_found', 'backend_unavailable', 'backend_error', 'rate_limited', 'EXTENSION_NOT_ENABLED', 'EXTENSION_INVALID',
 ]);
 
 /** Clave i18n del error: codigo propio de la seccion si lo hay; si no, los errores comunes de la consola. */
@@ -39,6 +39,8 @@ export interface ExtensionActions {
     error: string | null;
     clearError: () => void;
     install: (row: ExtensionRow) => Promise<boolean>;
+    /** Aplica la version del catalogo a una extension instalada (conserva credenciales, ajustes y estado). */
+    update: (row: ExtensionRow) => Promise<boolean>;
     uninstall: (row: ExtensionRow) => Promise<boolean>;
     toggle: (row: ExtensionRow, enabled: boolean) => Promise<boolean>;
     /** Politica "obligatoria para todos" del dominio (el usuario no podra desactivarla; el servidor la ejecuta siempre). */
@@ -107,6 +109,16 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
         [domainId, run, t],
     );
 
+    const update = useCallback(
+        (row: ExtensionRow) =>
+            run(row.id, async () => {
+                if (!domainId) return null;
+                await adminFetch('/api/admin/extensions/update', { body: { domainId, extensionId: row.id } });
+                return t('admin.console.extensions.live.updated', { name: row.name, version: row.version ?? '' });
+            }),
+        [domainId, run, t],
+    );
+
     const uninstall = useCallback(
         (row: ExtensionRow) =>
             run(row.id, async () => {
@@ -158,5 +170,5 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
         }
     }, []);
 
-    return { busyId, live, error, clearError: () => setError(null), install, uninstall, toggle, setMandatory, reorder, test };
+    return { busyId, live, error, clearError: () => setError(null), install, update, uninstall, toggle, setMandatory, reorder, test };
 }

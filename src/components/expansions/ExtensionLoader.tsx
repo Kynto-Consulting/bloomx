@@ -1,14 +1,17 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import React, { useMemo } from 'react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { useExtensionPrefs } from '@/hooks/useExtensionPrefs';
 import { JsonRenderer } from './renderer/JsonRenderer';
-import { Popover } from '@/components/ui/Popover';
+import { ExtensionToolbar } from './toolbar/ExtensionToolbar';
+import { isToolbarMountPoint } from '@/lib/expansions/client/toolbar';
 import { buildMountContext } from '@/lib/expansions/context';
 import { describeProblems, getPreparedManifest, type PreparedManifest } from '@/lib/expansions/prepare-manifest';
 import { applyPrefsToExtensions } from '@/lib/expansions/client/prefs';
+import { localizeUi } from '@/lib/expansions/ui-schema';
+import { manifestIcon, manifestTexts } from '@/lib/expansions/manifest-schema';
+import { useI18n } from '@/components/I18nProvider';
 import { reportExtensionError } from '@/lib/expansions/client/error-log';
 import { ExtensionsLoadError } from './ExtensionsLoadError';
 
@@ -47,6 +50,10 @@ function loadPrepared(extensionId: string, template: any): PreparedManifest | nu
             console.warn(`[Extensions] Manifest de "${extensionId}" invalido, no se carga: ${describeProblems(prepared.errors, 5)}`);
             for (const problem of prepared.errors.slice(0, 20)) reportExtensionError({ extensionId, kind: 'manifest', message: problem.message, path: problem.path });
         } else {
+            // Degradacion POR MOUNT: cada elemento descartado (o que se resolvera al ejecutar) queda registrado con su ruta y motivo.
+            if (prepared.droppedCount > 0) {
+                console.warn(`[Extensions] "${extensionId}" v${template.version ?? '?'}: se descartaron ${prepared.droppedCount} elemento(s) con errores; el resto de la extension se carga. ${describeProblems(prepared.errors, 5)}`);
+            }
             for (const problem of prepared.errors.slice(0, 20)) reportExtensionError({ extensionId, kind: 'validation', message: problem.message, path: problem.path });
             if (prepared.warnings.length > 0 && process.env.NODE_ENV !== 'production') {
                 console.info(`[Extensions] ${extensionId}: ${prepared.warnings.length} aviso(s) de UI (formato obsoleto). Ver el playground de extensiones.`);
@@ -72,12 +79,9 @@ interface ExtensionLoaderProps {
 export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, context: rawContext }) => {
     const { extensions, isLoading, isError, extensionsLoaded, retry, isRetrying } = useDomainConfig();
     const { prefs } = useExtensionPrefs();
+    const { locale } = useI18n();
     // Correo abierto (MailView pasa el objeto email): se completan emailContent y fromContact como en el composer.
     const context = useMemo(() => buildMountContext(mountPoint, rawContext), [mountPoint, rawContext]);
-    const containerRef = useRef<HTMLDivElement>(null);
-    const overflowTriggerRef = useRef<HTMLButtonElement>(null);
-    const [containerWidth, setContainerWidth] = useState(0);
-    const [overflowOpen, setOverflowOpen] = useState(false);
 
     const normalizedExtensions = useMemo(() => {
         const uniqueExtensions = new Map<string, any>();
@@ -89,12 +93,12 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
             const prepared = loadPrepared(canonicalId, extension.template);
             if (!prepared) continue;
 
-            uniqueExtensions.set(canonicalId, { ...extension, id: canonicalId, template: prepared.template });
+            uniqueExtensions.set(canonicalId, { ...extension, id: canonicalId, template: localizeUi(prepared.template, locale) });
         }
 
         // Preferencias del usuario: extensiones desactivadas fuera y orden propio de botones/paneles.
         return applyPrefsToExtensions(Array.from(uniqueExtensions.values()), prefs);
-    }, [extensions, prefs]);
+    }, [extensions, prefs, locale]);
 
     // Find all mounts matching this point
     const mounts = useMemo(() => {
@@ -111,9 +115,13 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
             const initialState = initialStateOf(extension.template);
 
             for (const mount of extension.template.mounts.filter((item: any) => item.point === mountPoint)) {
+                const texts = manifestTexts(extension.template, locale);
                 const preparedMount = {
                     ...mount,
                     extensionId: extension.id,
+                    extensionName: texts.name || extension.id,
+                    extensionDescription: texts.description || undefined,
+                    extensionIcon: manifestIcon(extension.template) ?? undefined,
                     initialState,
                     overlays: { ...(extension.template.overlays || {}), ...overlays },
                 };
@@ -124,52 +132,18 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
         }
 
         return Array.from(uniqueMounts.values());
-    }, [mountPoint, normalizedExtensions]);
+    }, [mountPoint, normalizedExtensions, locale]);
 
-    useEffect(() => {
-        if (mountPoint !== 'COMPOSER_TOOLBAR' || !containerRef.current) return;
-
-        const element = containerRef.current;
-        const updateWidth = () => setContainerWidth(element.clientWidth);
-        updateWidth();
-
-        const observer = new ResizeObserver(updateWidth);
-        observer.observe(element);
-
-        return () => observer.disconnect();
-    }, [mountPoint, mounts.length]);
-
-    useEffect(() => {
-        setOverflowOpen(false);
-    }, [mounts.length, containerWidth]);
-
-    const composerOverflow = useMemo(() => {
-        if (mountPoint !== 'COMPOSER_TOOLBAR') return { visible: mounts, overflow: [] };
-        if (!containerWidth || mounts.length === 0) return { visible: mounts, overflow: [] };
-
-        const buttonWidth = 40;
-        const gapWidth = 8;
-        const inlineSlotWidth = buttonWidth + gapWidth;
-        const overflowSlotWidth = buttonWidth + gapWidth;
-        const totalInlineCapacity = Math.max(1, Math.floor((containerWidth + gapWidth) / inlineSlotWidth) - 1);
-
-        if (mounts.length <= totalInlineCapacity) return { visible: mounts, overflow: [] };
-
-        const visibleCount = Math.max(1, Math.floor((containerWidth - overflowSlotWidth + gapWidth) / inlineSlotWidth));
-        return { visible: mounts.slice(0, visibleCount), overflow: mounts.slice(visibleCount) };
-    }, [containerWidth, mountPoint, mounts]);
-
-    const renderMount = (mount: any, index: number, toolbarButtonMode?: 'compact' | 'menu') => (
+    const renderMount = (mount: any, index: number) => (
         mount.component ? (
             <JsonRenderer
-                key={`${mount.extensionId}-${index}-${toolbarButtonMode || 'default'}`}
+                key={`${mount.extensionId}-${index}`}
                 component={mount.component}
                 initialState={mount.initialState}
                 context={{
                     ...context,
                     extensionId: mount.extensionId,
                     overlays: mount.overlays,
-                    toolbarButtonMode,
                 }}
             />
         ) : null
@@ -208,41 +182,9 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
         return <ExtensionsLoadError variant="inline" onRetry={retry} retrying={isRetrying} />;
     }
 
-    if (mountPoint === 'COMPOSER_TOOLBAR') {
-        return (
-            <div ref={containerRef} className="flex min-w-0 flex-1 items-center justify-end gap-2 overflow-hidden">
-                {composerOverflow.visible.map((mount: any, i: number) => renderMount(mount, i, 'compact'))}
-
-                {composerOverflow.overflow.length > 0 && (
-                    <>
-                        <button
-                            ref={overflowTriggerRef}
-                            type="button"
-                            title="More actions"
-                            aria-label="More actions"
-                            aria-expanded={overflowOpen}
-                            onClick={() => setOverflowOpen((current) => !current)}
-                            className="inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-transparent bg-transparent text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                            <Plus className="h-5 w-5" />
-                        </button>
-
-                        <Popover
-                            trigger={overflowTriggerRef}
-                            isOpen={overflowOpen}
-                            onClose={() => setOverflowOpen(false)}
-                            width={220}
-                            header={false}
-                            className="rounded-2xl border border-border bg-card p-2 shadow-2xl"
-                        >
-                            <div className="flex flex-col gap-1">
-                                {composerOverflow.overflow.map((mount: any, i: number) => renderMount(mount, i, 'menu'))}
-                            </div>
-                        </Popover>
-                    </>
-                )}
-            </div>
-        );
+    // Barras de acciones: presentacion compacta unica (iconos anclados + menu "Extensiones"), ver toolbar/ExtensionToolbar.
+    if (isToolbarMountPoint(mountPoint)) {
+        return <ExtensionToolbar mountPoint={mountPoint} mounts={mounts} context={context} />;
     }
 
     if (mountPoint === 'EVENT_LOCATION_BUILDER') {

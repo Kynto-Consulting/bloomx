@@ -1,4 +1,4 @@
-import { normalizeMount } from '@/lib/expansions/manifest-schema';
+import { manifestIcon, normalizeMount } from '@/lib/expansions/manifest-schema';
 
 /**
  * Comandos con barra ("/") del editor de correo, declarados por las extensiones instaladas en
@@ -15,6 +15,8 @@ export interface SlashCommand {
     arguments?: string;
     extensionId?: string;
     extensionName?: string;
+    /** Icono de la extension (manifest.icon), para el menu. */
+    extensionIcon?: string;
     /** Accion declarativa del manifest (la ejecuta SlashActionRunner con JsonRenderer). */
     action?: unknown;
     /** Ejecuta el comando; `args` es el texto escrito tras la clave. */
@@ -133,6 +135,7 @@ export function collectSlashCommands(extensions: readonly any[] | null | undefin
                 arguments: typeof raw.arguments === 'string' ? raw.arguments : undefined,
                 extensionId,
                 extensionName: typeof template.name === 'string' ? template.name : undefined,
+                extensionIcon: manifestIcon(template) ?? undefined,
                 action: raw.action,
             });
         }

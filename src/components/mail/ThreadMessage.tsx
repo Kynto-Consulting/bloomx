@@ -18,7 +18,10 @@ import { JoinMeetingButton, MeetingLocationLine } from '@/components/MeetingJoin
 import type { JoinLinkResult } from '@/lib/calendar/join-link';
 import { Avatar } from './ui';
 import { AttachmentList } from './AttachmentList';
-import { splitQuotedHtml } from './quoted-html';
+import { useMessageSpam } from '@/components/spam/useMessageSpam';
+import { SpamReaderNotices } from '@/components/spam/SpamReaderNotices';
+import { htmlHasVisibleContent, splitQuotedHtml } from './quoted-html';
+import type { DedupeResult } from './thread-dedupe';
 import type { EmailDetails, InvitePreview } from './reader-types';
 
 const VERDICT_KEYS: Record<AuthVerdict, string> = {
@@ -94,15 +97,21 @@ interface Props {
     own: Set<string>;
     /** Decide boton / texto / nada para el enlace de reunion de una invitacion (ver lib/calendar/join-link). */
     resolveJoin: (invite: InvitePreview) => JoinLinkResult;
+    /** Resultado del deduplicado del historial en el hilo (ver thread-dedupe.ts). Sin el, el historial siempre va plegado. */
+    dedupe?: DedupeResult;
+    /** Interruptor "ocultar historial repetido": con el, un historial que NO coincide con el hilo se muestra abierto y marcado. */
+    hideDuplicates?: boolean;
+    /** Accion existente del lector "No es spam" (la usa el banner "Por que" de la carpeta spam). */
+    onNotSpam?: () => void;
 }
 
 function ThreadMessageInner({
     item, index, expanded, wasUnread, imagePolicy, onImagePolicy, onToggle, onReply, onReplyAll, onForward,
-    inviteBusy, calendarBusy, onInvite, onAddToCalendar, own, resolveJoin,
+    inviteBusy, calendarBusy, onInvite, onAddToCalendar, own, resolveJoin, dedupe, hideDuplicates, onNotSpam,
 }: Props) {
     const { t, intlLocale } = useI18n();
     const [details, setDetails] = useState(false);
-    const [showQuoted, setShowQuoted] = useState(false);
+    const [quotedOverride, setQuotedOverride] = useState<boolean | null>(null);
     const email = item.email;
 
     const fullDate = useMemo(() => {
@@ -124,7 +133,17 @@ function ThreadMessageInner({
     // --- Contenido (solo si esta expandido) ---
     const cleanHtml = useMemo(() => (expanded ? sanitizeHtml(item.content || '') : ''), [expanded, item.content]);
     const split = useMemo(() => (expanded ? splitQuotedHtml(cleanHtml) : null), [expanded, cleanHtml]);
+    // Abierto por decision del usuario; si no, solo cuando el interruptor de duplicados esta apagado o el historial no coincide con el hilo.
+    const autoOpen = hideDuplicates !== undefined && (!hideDuplicates || dedupe?.status === 'unmatched');
+    const showQuoted = quotedOverride ?? autoOpen;
+    const unmatchedNote = Boolean(split) && hideDuplicates === true && dedupe?.status === 'unmatched';
     const shownHtml = split && !showQuoted ? split.main : cleanHtml;
+    // Regla de oro: nunca un area en blanco. Si el HTML no tiene nada visible se muestra el extracto o un aviso.
+    const emptyBody = useMemo(() => expanded && !htmlHasVisibleContent(cleanHtml), [expanded, cleanHtml]);
+    const bodyLabels = useMemo(() => ({
+        title: t('mailView.body.title'), loading: t('mailView.body.loading'), failed: t('mailView.body.failed'),
+        retry: t('mailView.body.retry'), viewText: t('mailView.body.viewText'), viewHtml: t('mailView.body.viewHtml'),
+    }), [t]);
     const remoteAllowed = isRemoteImagesAllowed(imagePolicy, email.id, email.from);
     const remoteBlocked = expanded && !remoteAllowed && hasRemoteImages(shownHtml);
     // `cid:` -> URL firmada del adjunto inline. Se calcula DESPUES de hasRemoteImages: las imagenes propias no cuentan como remotas.
@@ -142,6 +161,7 @@ function ThreadMessageInner({
         return new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
     };
 
+    const spam = useMessageSpam({ id: email.id, from: email.from, folder: email.folder, own, expanded });
     const attachmentCount = Array.isArray(email.attachments) ? email.attachments.length : 0;
     const headerId = `msg-head-${email.id}`;
     const bodyId = `msg-body-${email.id}`;
@@ -214,6 +234,8 @@ function ThreadMessageInner({
                         {item.authentication && <div className="mt-2"><AuthBadge auth={item.authentication} /></div>}
                     </div>
 
+                    <SpamReaderNotices id={email.id} from={email.from} folder={email.folder} spam={spam} onNotSpam={onNotSpam} />
+
                     {invite && (
                         <div className="mb-6 rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-foreground">
                             <div className="flex flex-col items-start gap-4 sm:flex-row sm:justify-between">
@@ -250,7 +272,17 @@ function ThreadMessageInner({
                         </div>
                     )}
 
-                    <SafeIframe html={cidResolved.html} blockRemoteImages={!remoteAllowed} trustedImageSources={cidResolved.sources} />
+                    {emptyBody ? (
+                        <p data-mail-empty className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-4 text-sm text-muted-foreground">
+                            {email.snippet && email.snippet !== '(No content)' ? email.snippet : t('mailView.body.empty')}
+                        </p>
+                    ) : (
+                        <SafeIframe html={cidResolved.html} blockRemoteImages={!remoteAllowed} trustedImageSources={cidResolved.sources} labels={bodyLabels} linkGuard={spam.linkGuard} onGuardedLink={spam.onGuardedLink} />
+                    )}
+
+                    {unmatchedNote && (
+                        <p role="note" data-quote-unmatched className="mt-2 text-xs text-muted-foreground">{t('mailView.quote.unmatched')}</p>
+                    )}
 
                     {split && (
                         <button
@@ -258,7 +290,7 @@ function ThreadMessageInner({
                             aria-expanded={showQuoted}
                             aria-label={showQuoted ? t('mailView.quote.hide') : t('mailView.quote.show')}
                             title={showQuoted ? t('mailView.quote.hide') : t('mailView.quote.show')}
-                            onClick={() => setShowQuoted((v) => !v)}
+                            onClick={() => setQuotedOverride(!showQuoted)}
                             data-quote-toggle
                             className="mt-2 inline-flex h-6 min-w-8 items-center justify-center rounded border border-border bg-chip px-2 text-xs font-bold tracking-widest text-chip-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
@@ -266,7 +298,7 @@ function ThreadMessageInner({
                         </button>
                     )}
 
-                    <AttachmentList attachments={email.attachments || []} />
+                    <AttachmentList attachments={email.attachments || []} confirmDownload={spam.confirmDownload} />
 
                     {index > 0 && (
                         <div className="mt-6 flex flex-wrap gap-2">
@@ -277,6 +309,7 @@ function ThreadMessageInner({
                     )}
                 </div>
             )}
+            {spam.dialogs}
         </article>
     );
 }

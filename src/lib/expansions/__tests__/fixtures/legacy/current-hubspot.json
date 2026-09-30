@@ -1,0 +1,199 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-hubspot",
+    "version": "1.1.0",
+    "name": "HubSpot CRM",
+    "description": "Create and manage HubSpot contacts from emails",
+    "permissions": [
+        "READ_EMAIL",
+        "READ_USER_NAME",
+        "ENV_READ:HUBSPOT_ACCESS_TOKEN",
+        "ENV_READ:HUBSPOT_PORTAL_ID",
+        "HTTP_REQUEST",
+        "CONTACTS_READ",
+        "STORAGE"
+    ],
+    "auth": {
+        "type": "OAUTH2",
+        "provider": "hubspot",
+        "scopes": [
+            "crm.objects.contacts.read",
+            "crm.objects.contacts.write"
+        ]
+    },
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {
+            "checkContact": {
+                "handler": "checkContact"
+            },
+            "createContact": {
+                "handler": "createContact"
+            },
+            "syncContact": {
+                "handler": "syncContact"
+            },
+            "onContactSaved": {
+                "handler": "onContactSaved"
+            }
+        }
+    },
+    "mounts": [
+        {
+            "point": "EMAIL_TOOLBAR",
+            "component": {
+                "type": "BUTTON",
+                "props": {
+                    "label": "HubSpot",
+                    "icon": "Users",
+                    "variant": "ghost",
+                    "onClick": {
+                        "action": "OPEN_OVERLAY",
+                        "targetId": "hubspot-modal"
+                    }
+                }
+            }
+        },
+        {
+            "point": "OVERLAY",
+            "id": "hubspot-modal",
+            "component": {
+                "type": "MODAL",
+                "props": {
+                    "title": "HubSpot CRM",
+                    "onLoad": [
+                        {
+                            "action": "SECURE_READ",
+                            "key": "hubspot_contact_cache",
+                            "targetState": "contact",
+                            "onSuccess": {
+                                "action": "TOAST",
+                                "message": "Loaded from Secure Cache"
+                            }
+                        },
+                        {
+                            "action": "CALL_BACKEND",
+                            "function": "checkContact",
+                            "args": {
+                                "email": "${context.fromContact.email}"
+                            },
+                            "onSuccess": [
+                                {
+                                    "action": "SET_STATE",
+                                    "key": "contact",
+                                    "value": "${result.contact}"
+                                },
+                                {
+                                    "action": "SET_STATE",
+                                    "key": "portalId",
+                                    "value": "${result.portalId}"
+                                },
+                                {
+                                    "action": "SECURE_SAVE",
+                                    "key": "hubspot_contact_cache",
+                                    "value": "${result.contact}"
+                                }
+                            ]
+                        }
+                    ],
+                    "children": [
+                        {
+                            "type": "CONDITIONAL",
+                            "props": {
+                                "condition": "${state.contact != null}",
+                                "true": [
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "Contact Exists",
+                                            "variant": "h4"
+                                        }
+                                    },
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "${state.contact.properties.firstname} ${state.contact.properties.lastname}"
+                                        }
+                                    },
+                                    {
+                                        "type": "CONDITIONAL",
+                                        "props": {
+                                            "condition": "${state.portalId}",
+                                            "true": [
+                                                {
+                                                    "type": "LINK",
+                                                    "props": {
+                                                        "label": "View in HubSpot",
+                                                        "url": "https://app.hubspot.com/contacts/${state.portalId}/contact/${state.contact.id}"
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ],
+                                "false": [
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "Create New Contact",
+                                            "variant": "h4"
+                                        }
+                                    },
+                                    {
+                                        "type": "FORM",
+                                        "props": {
+                                            "onSubmit": {
+                                                "action": "CALL_BACKEND",
+                                                "function": "createContact",
+                                                "onSuccess": {
+                                                    "action": "TOAST",
+                                                    "message": "Contact created!"
+                                                },
+                                                "args": {
+                                                    "email": "${formData.email}",
+                                                    "firstname": "${formData.firstname}",
+                                                    "lastname": "${formData.lastname}",
+                                                    "phone": "${formData.phone}"
+                                                }
+                                            },
+                                            "fields": [
+                                                {
+                                                    "name": "firstname",
+                                                    "label": "First Name",
+                                                    "defaultValue": "${context.fromContact.firstName}"
+                                                },
+                                                {
+                                                    "name": "lastname",
+                                                    "label": "Last Name",
+                                                    "defaultValue": "${context.fromContact.lastName}"
+                                                },
+                                                {
+                                                    "name": "email",
+                                                    "label": "Email",
+                                                    "defaultValue": "${context.fromContact.email}",
+                                                    "readOnly": true
+                                                },
+                                                {
+                                                    "name": "phone",
+                                                    "label": "Phone"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ],
+    "hooks": [
+        {
+            "point": "CONTACT_SAVED",
+            "handler": "onContactSaved",
+            "onError": "continue"
+        }
+    ]
+}

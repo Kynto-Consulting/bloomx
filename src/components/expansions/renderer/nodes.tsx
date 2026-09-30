@@ -14,6 +14,7 @@ import { Table, List, ListItem } from '../kit/Data';
 import { Tabs, Accordion, Wizard } from '../kit/Navigation';
 import { ExtensionErrorState } from '../kit/ExtensionError';
 import { FOCUS_RING_CLASS } from '../kit/tokens';
+import { ToolbarIconButton, ToolbarMenuRow, glyphFor } from '../toolbar/ToolbarButtons';
 import { primaryLoadingKey, type ActionRunner } from './actions';
 import { ExtensionStateContext, WizardContext, getPath, useExtensionState, type WizardContextType } from './state';
 import { FieldNode, FIELD_TYPES, FormNode } from './forms';
@@ -89,11 +90,13 @@ function ButtonNode({ r, raw, env, a11y, onPressExtra, forceLoading }: { r: Reco
     const loading = forceLoading ?? (r.loading !== undefined ? Boolean(r.loading) : key ? Boolean(getPath(env.state, `$loading.${key}`)) : false);
     const label = text(r.label) ?? 'Action';
     const onPress = () => { onPressExtra?.(); if (raw.onClick) void env.run(raw.onClick, null); };
-    if (mode === 'compact') {
-        return <IconButton icon={text(r.icon) || 'Puzzle'} label={label} tone={r.tone} variant="ghost" size="md" loading={loading} disabled={r.disabled} onPress={onPress} a11y={a11y} />;
-    }
-    if (mode === 'menu') {
-        return <Button label={label} icon={text(r.icon)} tone="neutral" variant="ghost" size="md" fullWidth align="start" loading={loading} disabled={r.disabled} onPress={onPress} a11y={a11y} />;
+    // Barras de acciones (EMAIL/COMPOSER/CALENDAR/CONTACTS_TOOLBAR): presentacion compacta unica, sin tono primario (ver toolbar/).
+    if (mode === 'compact' || mode === 'menu') {
+        const meta = (env.context?.toolbarMeta ?? {}) as { label?: string; description?: string; extensionIcon?: string; dot?: boolean };
+        const shown = meta.label || label;
+        const glyph = glyphFor(text(r.icon) || meta.extensionIcon, shown);
+        if (mode === 'menu') return <ToolbarMenuRow label={shown} description={meta.description} glyph={glyph} loading={loading} disabled={r.disabled} onPress={onPress} />;
+        return <ToolbarIconButton label={shown} hint={meta.description} glyph={glyph} loading={loading} disabled={r.disabled} dot={meta.dot} onPress={onPress} a11y={a11y} />;
     }
     return (
         <Button
@@ -193,6 +196,7 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
         // --- acciones
         case 'BUTTON': return <ButtonNode r={r} raw={raw} env={env} />;
         case 'ICON_BUTTON': {
+            if (ctx?.toolbarButtonMode) return <ButtonNode r={r} raw={raw} env={env} />;
             const key = primaryLoadingKey(raw.onClick);
             return <IconButton icon={text(r.icon)} label={text(r.label) ?? 'Action'} tone={r.tone} variant={r.variant} size={r.size} loading={r.loading !== undefined ? Boolean(r.loading) : key ? Boolean(getPath(env.state, `$loading.${key}`)) : false} disabled={r.disabled} onPress={press(raw.onClick)} />;
         }
@@ -202,7 +206,9 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
                 label: text(item?.label), icon: text(item?.icon), tone: item?.tone, disabled: Boolean(item?.disabled), separator: Boolean(item?.separator),
                 onPress: item?.onClick ? () => { void env.run(item.onClick, null); } : undefined,
             }));
-            return <Menu label={text(r.label)} icon={text(r.icon)} tone={r.tone} variant={r.variant} size={r.size} showLabel={r.showLabel} align={r.align} items={items} />;
+            // En una barra de acciones el menu es un boton de icono ghost y neutro, como el resto.
+            const bar = Boolean(ctx?.toolbarButtonMode);
+            return <Menu label={text(r.label)} icon={text(r.icon)} tone={bar ? 'neutral' : r.tone} variant={bar ? 'ghost' : r.variant} size={bar ? 'sm' : r.size} showLabel={bar ? false : r.showLabel} align={bar ? 'end' : r.align} items={items} />;
         }
         case 'IMAGE_BUTTON': return <ImageButton r={r} raw={raw} env={env} />;
         case 'SMART_REPLY_CHIPS': {

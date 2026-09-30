@@ -1,0 +1,158 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-sealer",
+    "version": "1.0.0",
+    "name": "Sealer Encryption",
+    "description": "End-to-end encrypt emails using RSA+AES hybrid encryption",
+    "permissions": [
+        "READ_EMAIL",
+        "local:secure-storage"
+    ],
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {}
+    },
+    "mounts": [
+        {
+            "point": "COMPOSER_TOOLBAR",
+            "component": {
+                "type": "BUTTON",
+                "props": {
+                    "label": "Encrypt",
+                    "icon": "Lock",
+                    "onClick": {
+                        "action": "OPEN_OVERLAY",
+                        "targetId": "sealer-popover"
+                    }
+                }
+            }
+        },
+        {
+            "point": "OVERLAY",
+            "id": "sealer-popover",
+            "component": {
+                "type": "MODAL",
+                "props": {
+                    "title": "Sealer Encryption",
+                    "onLoad": {
+                        "action": "SECURE_READ",
+                        "key": "sealer-keys",
+                        "targetState": "sealers"
+                    },
+                    "children": [
+                        {
+                            "type": "TEXT",
+                            "props": {
+                                "content": "Select a Sealer to encrypt this email. The recipient will need the Reader Key to decrypt.",
+                                "className": "text-sm text-gray-500 mb-3"
+                            }
+                        },
+                        {
+                            "type": "CONDITIONAL",
+                            "props": {
+                                "condition": "${state.sealers != null && state.sealers.length > 0}",
+                                "true": [
+                                    {
+                                        "type": "LIST",
+                                        "props": {
+                                            "items": "${state.sealers}",
+                                            "itemTemplate": {
+                                                "type": "BUTTON",
+                                                "props": {
+                                                    "label": "${item.name}",
+                                                    "variant": "outline",
+                                                    "onClick": {
+                                                        "action": "SET_STATE",
+                                                        "key": "activeSealer",
+                                                        "value": "${item}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                ],
+                                "false": [
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "No sealers configured. Go to Settings to create one.",
+                                            "variant": "muted"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "point": "CUSTOM_SETTINGS_TAB",
+            "component": "MODAL",
+            "props": {
+                "title": "Sealer Encryption",
+                "icon": "KeyRound",
+                "onLoad": {
+                    "action": "SECURE_READ",
+                    "key": "sealer-keys",
+                    "targetState": "sealers"
+                },
+                "children": [
+                    {
+                        "type": "TEXT",
+                        "props": {
+                            "content": "Manage your encryption key pairs. Each sealer has a public key (for encrypting) and a private Reader Key (for decrypting).",
+                            "className": "text-sm text-gray-500 mb-4"
+                        }
+                    },
+                    {
+                        "type": "FORM",
+                        "props": {
+                            "onSubmit": {
+                                "action": "SECURE_SAVE",
+                                "key": "sealer-keys",
+                                "value": "${state.sealers}",
+                                "onSuccess": {
+                                    "action": "TOAST",
+                                    "message": "Sealers saved"
+                                }
+                            },
+                            "fields": [
+                                {
+                                    "name": "name",
+                                    "label": "Sealer Name",
+                                    "placeholder": "My Sealer"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "point": "CUSTOM_ROUTE",
+            "routePath": "decrypt",
+            "component": {
+                "type": "CARD",
+                "props": {
+                    "title": "Decrypt Message",
+                    "children": [
+                        {
+                            "type": "TEXT",
+                            "props": {
+                                "content": "Upload your Reader Key (.pem) file to decrypt this message.",
+                                "className": "text-sm text-gray-500 mb-4"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "point": "BEFORE_SEND_HANDLER",
+            "handler": "encryptEmail",
+            "priority": "LOW"
+        }
+    ]
+}

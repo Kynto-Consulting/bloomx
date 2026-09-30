@@ -1,5 +1,6 @@
 'use client';
 
+import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { Check, Languages, Monitor, Moon, Sun } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useTheme } from '@/components/ThemeProvider';
@@ -111,6 +112,8 @@ function ThemeOption({ value, label, description, checked, onSelect, icon, child
 
 export function AppearanceSettings() {
     const { themes, brandThemes, preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode } = useTheme();
+    const { config: domainConfig } = useDomainConfig();
+    const brandName = ((domainConfig as { displayName?: string; name?: string } | undefined)?.displayName || (domainConfig as { name?: string } | undefined)?.name || '').trim();
     const { t, locale, setLocale } = useI18n();
     // Etiquetas de tema: diccionario si existe la clave, si no el texto del registro (themes.ts).
     const tr = (key: string, fallback: string) => { const v = t(key); return v === key ? fallback : v; };
@@ -139,7 +142,7 @@ export function AppearanceSettings() {
                     <ThemeOption
                         value="system"
                         label={t('appearance.system')}
-                        description={t('appearance.systemDescription')}
+                        description={brandThemes && brandName ? t('appearance.systemDescriptionBrand', { brand: brandName }) : t('appearance.systemDescription')}
                         checked={preference === 'system'}
                         onSelect={setPreference}
                         icon={<Monitor className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}

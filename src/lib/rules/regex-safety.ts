@@ -113,14 +113,15 @@ export function validateUserRegex(pattern: unknown): RegexValidation {
 const cache = new Map<string, RegExp | null>();
 const CACHE_MAX = 500;
 
-export function compileSafeRegex(pattern: string): RegExp | null {
-    if (cache.has(pattern)) return cache.get(pattern)!;
+export function compileSafeRegex(pattern: string, flags: '' | 'i' = 'i'): RegExp | null {
+    const key = `${flags}/${pattern}`;
+    if (cache.has(key)) return cache.get(key)!;
     let compiled: RegExp | null = null;
     if (validateUserRegex(pattern).ok) {
-        try { compiled = new RegExp(pattern, 'i'); } catch { compiled = null; }
+        try { compiled = new RegExp(pattern, flags); } catch { compiled = null; }
     }
     if (cache.size >= CACHE_MAX) cache.clear();
-    cache.set(pattern, compiled);
+    cache.set(key, compiled);
     return compiled;
 }
 

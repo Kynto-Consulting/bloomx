@@ -20,8 +20,14 @@ import { sanitizeFilename } from '@/lib/mime-decode';
 import { attachSendKeyEmail, claimSendKey, markSendKeySent, releaseSendKey } from '@/lib/send-idempotency';
 import { MAIL_PAGE_SIZE, decodeCursor, encodeCursor, parseFilter, parseMailboxesParam, parseSort } from '@/lib/mail-query';
 import type { MailListScope } from '@/lib/mail-list-sql';
-import { getScopeCounts, ownAddressesOf, resolveMailboxScope, selectPageRows } from '@/lib/mail-store';
+import { getScopeCounts, ownAddressesOf, resolveMailboxScope, selectPageRows, selectThreadKeys } from '@/lib/mail-store';
 import { checkQuotaForSend, invalidateQuotaCache } from '@/lib/mail-quota';
+import { canAccessEmail } from '@/lib/mailbox-access';
+import { planOutboundThread } from '@/lib/thread-outbound';
+import { assignThread } from '@/lib/thread-store';
+import { htmlToPlainText } from '@/lib/html-to-text';
+import { hoistInlineImages } from '@/lib/outgoing-inline';
+import { rawMimeMaxBytes } from '@/lib/raw-mime';
 
 const MAX_SENDS_PER_HOUR = Number.parseInt(process.env.MAX_SENDS_PER_HOUR || '200', 10) || 200;
 const MAX_ATTACHMENTS = 25;
@@ -174,6 +180,7 @@ export async function GET(req: NextRequest) {
             userIds: mailboxUserIds,
             folder: folder || null,
             labels: labelsList,
+            labelExact: searchParams.get('subs') === '0', // ?subs=0 = sin subetiquetas (por defecto se incluyen)
             search: searching ? parseSearchQuery(q) : null,
             useFts: true,
             since: validIso(since),
@@ -201,7 +208,9 @@ export async function GET(req: NextRequest) {
                 labels: true // Include labels in response
             }
         })).map((e) => [e.id, e]));
-        const emails = keep.map((r) => byId.get(r.id)).filter((e): e is NonNullable<typeof e> => Boolean(e));
+        // threadKey (hilo por cabeceras) por SQL directo y tolerante: el cliente de Prisma puede no conocer la columna todavia.
+        const threadKeys = await selectThreadKeys(keep.map((r) => r.id));
+        const emails = keep.map((r) => byId.get(r.id)).filter((e): e is NonNullable<typeof e> => Boolean(e)).map((e) => (threadKeys.has(e.id) ? { ...e, threadKey: threadKeys.get(e.id) } : e));
         const last = keep[keep.length - 1];
         const nextCursor = hasMore && last ? encodeCursor(sort, last) : null;
 
@@ -225,6 +234,24 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch emails' }, { status: 500 });
     }
 }
+/** .eml del correo `emailId` (raw.eml guardado o reconstruido) para "Reenviar como adjunto". Acceso estricto: canAccessEmail. */
+async function buildOriginalEml(emailId: string, sessionUserId: string, sessionEmail: string): Promise<{ ok: true; raw: Buffer; filename: string } | { ok: false; status: number; error: string }> {
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(emailId)) return { ok: false, status: 400, error: 'Invalid attachOriginalEmlOf' };
+    const original = await prisma.email.findUnique({ where: { id: emailId }, include: { attachments: true, labels: true } });
+    if (!original || !(await canAccessEmail(sessionUserId, original.userId))) return { ok: false, status: 404, error: 'Original message not found' };
+    const { buildEmailMessage } = await import('@/lib/mail-transfer/export-engine');
+    const storage = {
+        get: (key: string) => getBufferFromStorage(key),
+        put: async () => undefined,
+        del: async () => undefined,
+        list: async () => [] as Array<{ key: string; size: number }>,
+    };
+    const built = await buildEmailMessage(storage, original as any, sessionEmail, { includeAttachments: true });
+    if (built.raw.length > rawMimeMaxBytes()) return { ok: false, status: 413, error: 'Original message is too large to attach' };
+    const base = (original.subject || 'message').replace(/[^\w.\- ]+/g, '_').trim().slice(0, 80) || 'message';
+    return { ok: true, raw: built.raw, filename: `${base}.eml` };
+}
+
 class AttachmentAccessError extends Error {
     constructor(public key: string, public reason: 'forbidden' | 'missing' = 'forbidden') {
         super(reason === 'missing' ? 'Attachment file not found' : 'Attachment not accessible');
@@ -244,6 +271,8 @@ export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         const { to: rawTo, subject: rawSubject, html, text, from, cc: rawCc, bcc: rawBcc, attachments, scheduledAt, replyTo, reply_to } = body;
+        // Hilo: el cliente solo indica A QUE correo responde (id); las cabeceras In-Reply-To/References se resuelven aqui, con propiedad estricta.
+        const { inReplyToEmailId, replyMode, attachOriginalEmlOf } = body;
         const timestamp = Date.now();
 
         // ---- Validacion de destinatarios / cabeceras (anti CRLF injection, anti abuso) ----
@@ -265,7 +294,7 @@ export async function POST(req: NextRequest) {
         const to = toList.valid.join(', ');
         const cc = ccList.valid.length > 0 ? ccList.valid.join(', ') : '';
         const bcc = bccList.valid.length > 0 ? bccList.valid.join(', ') : '';
-        const subject = sanitizeSubject(rawSubject);
+        const subjectInput = sanitizeSubject(rawSubject);
 
         let validatedScheduledAt: string | undefined;
         if (scheduledAt) {
@@ -477,10 +506,29 @@ export async function POST(req: NextRequest) {
         const formattedFrom = formatFromHeader(senderName, senderEmail);
 
         // ----------------------------------------------------
+        // HILOS: Message-ID propio, In-Reply-To / References del original (solo si es tuyo) y asunto con un unico prefijo (lib/thread-outbound.ts)
+        // ----------------------------------------------------
+        const threadPlan = await planOutboundThread({
+            sessionUserId: sessionUser.id, fromEmail: senderEmail, subject: subjectInput, inReplyToEmailId, replyMode,
+        });
+        if (!threadPlan.ok) return NextResponse.json({ error: threadPlan.error }, { status: threadPlan.status });
+        const plan = threadPlan.plan;
+        const subject = sanitizeSubject(plan.subject);
+
+        // ----------------------------------------------------
         // MIDDLEWARE: Pre-Send Hooks
         // ----------------------------------------------------
         // Local expansions removed.
         // ----------------------------------------------------
+
+        // "Reenviar como adjunto": el MIME original (.eml) del correo indicado, solo si es accesible para esta sesion.
+        if (typeof attachOriginalEmlOf === 'string' && attachOriginalEmlOf.trim()) {
+            const eml = await buildOriginalEml(attachOriginalEmlOf.trim(), sessionUser.id, sessionUser.email);
+            if (!eml.ok) return NextResponse.json({ error: eml.error }, { status: eml.status });
+            const emlKey = `attachments/${sessionUser.email}/${timestamp}-original-${Math.random().toString(36).slice(2, 8)}.eml`;
+            await uploadToStorage(emlKey, eml.raw, 'message/rfc822');
+            processedAttachments.push({ filename: eml.filename, mimeType: 'message/rfc822', size: eml.raw.length, key: emlKey, contentBase64: eml.raw.toString('base64') });
+        }
 
         // Prepare attachments for Resend
         const resendAttachments = processedAttachments.map((att: any) => {
@@ -537,15 +585,30 @@ export async function POST(req: NextRequest) {
         if (preSend.modify.html !== undefined) finalHtml = preSend.modify.html;
         if (preSend.modify.text !== undefined) finalText = preSend.modify.text;
 
+        // multipart/alternative coherente: si el cliente no envio texto, se genera desde el HTML (citas como "> "); asi Resend no tiene que inventarlo
+        // y el texto plano equivale al HTML (lo que ven los clientes solo-texto y el resumen de la lista).
+        if (finalHtml && !String(finalText || '').trim()) {
+            const derived = htmlToPlainText(String(finalHtml));
+            if (derived.trim()) finalText = derived;
+        }
+        // Imagenes data: -> partes inline con Content-ID (Gmail/Outlook no muestran data: URI). La copia de Enviados conserva el HTML original.
+        const inline = finalHtml ? hoistInlineImages(String(finalHtml), senderEmail.split('@')[1] || undefined) : { html: finalHtml, images: [] as Array<{ contentId: string; filename: string; contentType: string; content: Buffer }> };
+
         const payload: any = {
             from: formattedFrom,
             to: toList.valid,
             cc: ccList.valid.length > 0 ? ccList.valid : undefined,
             bcc: bccList.valid.length > 0 ? bccList.valid : undefined,
             subject: subject,
-            html: finalHtml || undefined,
+            html: (inline.html as string) || undefined,
             text: finalText || undefined,
-            attachments: resendAttachments.length > 0 ? resendAttachments : undefined
+            headers: plan.headers,
+            attachments: (resendAttachments.length > 0 || inline.images.length > 0)
+                ? [
+                    ...resendAttachments,
+                    ...inline.images.map((img) => ({ filename: img.filename, content: img.content.toString('base64'), content_id: img.contentId, content_type: img.contentType })),
+                ]
+                : undefined
         };
 
         if (preSend.modify.subject !== undefined) payload.subject = sanitizeSubject(preSend.modify.subject);
@@ -585,6 +648,11 @@ export async function POST(req: NextRequest) {
         let sendResult;
         try {
             sendResult = await resend.emails.send(payload);
+            // Si el proveedor rechaza fijar el Message-ID propio, se reintenta UNA vez sin esa cabecera (In-Reply-To/References se conservan).
+            if (sendResult?.error && /message-?id|header/i.test(String((sendResult.error as any)?.message || ''))) {
+                console.warn('[POST /api/emails] Provider rejected custom Message-ID header; retrying without it');
+                sendResult = await resend.emails.send({ ...payload, headers: Object.keys(plan.headersWithoutMessageId).length > 0 ? plan.headersWithoutMessageId : undefined });
+            }
         } catch (sendErr) {
             if (idemClaimId) await releaseSendKey(idemClaimId).catch(() => undefined);
             throw sendErr;
@@ -662,6 +730,19 @@ export async function POST(req: NextRequest) {
 
         invalidateQuotaCache(user.id);
 
+        // Hilo del correo enviado: mismas cabeceras que emitimos (rfcMessageId propio, In-Reply-To, References). Un reenvio o una respuesta cuyo
+        // original no tiene Message-ID conocido se agrupan igualmente con el original (joinKey = su clave de hilo). Tolerante: nunca falla el envio.
+        try {
+            await assignThread({
+                userId: user.id, emailId: email.id,
+                headers: { messageId: plan.messageId, inReplyTo: plan.inReplyTo, refs: plan.refs },
+                date: email.createdAt.getTime(), subject, from: formattedFrom, to, cc: cc || null, own: [user.email, senderEmail],
+                joinKey: plan.joinKey,
+            });
+        } catch (threadErr) {
+            console.error('[POST /api/emails] thread assignment failed (non-fatal):', (threadErr as Error)?.message);
+        }
+
         if (idemClaimId) {
             await attachSendKeyEmail(idemClaimId, email.id)
                 .catch((e) => console.error('[POST /api/emails] idempotency record failed:', (e as Error)?.message));
@@ -693,7 +774,7 @@ export async function POST(req: NextRequest) {
             }));
         }
 
-        return NextResponse.json({ success: true, id: data?.id, warnings: preSend.warnings.length > 0 ? preSend.warnings : undefined });
+        return NextResponse.json({ success: true, id: data?.id, emailId: email.id, messageId: plan.messageId, warnings: preSend.warnings.length > 0 ? preSend.warnings : undefined });
 
     } catch (error) {
         if (idemClaimId && !idemClaimSent) await releaseSendKey(idemClaimId).catch(() => undefined);

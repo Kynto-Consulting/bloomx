@@ -6,6 +6,7 @@ import { extensionsEn, extensionsEs } from './extensions';
 import { accountEn, accountEs } from './account';
 import { profileEn, profileEs } from './profile';
 import { transferEn, transferEs } from './transfer';
+import { spamEn, spamEs } from './spam';
 
 /**
  * Diccionario de la consola de administracion: se monta en `admin.console` de es.ts / en.ts.
@@ -23,6 +24,7 @@ export const adminConsoleEs = {
     account: accountEs,
     profile: profileEs,
     transfer: transferEs,
+    spam: spamEs,
 } as const;
 
 export const adminConsoleEn: import('./types').DeepString<typeof adminConsoleEs> = {
@@ -35,4 +37,5 @@ export const adminConsoleEn: import('./types').DeepString<typeof adminConsoleEs>
     account: accountEn,
     profile: profileEn,
     transfer: transferEn,
+    spam: spamEn,
 };

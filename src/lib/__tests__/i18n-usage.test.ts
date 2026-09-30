@@ -9,10 +9,10 @@ const ROOT = path.resolve(__dirname, '../../..');
 const FILES = [
     'src/components/Sidebar.tsx',
     'src/components/EmailList.tsx',
-    'src/app/appointments/page.tsx',
+    'src/app/(app)/appointments/page.tsx',
     'src/app/book/[scheduleId]/page.tsx',
     'src/app/book/[scheduleId]/cancel/[token]/page.tsx',
-    'src/app/calendar/page.tsx',
+    'src/app/(app)/calendar/page.tsx',
     'src/components/calendar/AddCalendarForm.tsx',
     'src/components/calendar/CreateEventForm.tsx',
     'src/lib/i18n/format.ts',

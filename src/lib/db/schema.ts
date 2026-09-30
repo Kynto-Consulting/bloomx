@@ -146,6 +146,24 @@ const TABLES: TableSpec[] = [
             // Carpeta desde la que se movio el correo a archive/trash/spam (la fija el servidor; "Restaurar" vuelve ahi).
             // Aditivo y tolerante: lib/mail-previous-folder.ts lee/escribe con SQL crudo y cae a la bandeja si la columna no existe.
             { name: 'previousFolder', definition: 'TEXT' },
+            // Spam v2 (lib/spam/*). Aditivo y tolerante: se escribe con SQL crudo tras crear el correo y NO esta en schema.prisma a proposito
+            // (asi los findMany existentes no dependen de la columna). spamScore 0-100; spamReasons = { v, d (decision), sg (senales base, <= 2 KB) };
+            // isExternal = remitente fuera de los dominios propios/internos (lo leen las reglas v2).
+            { name: 'spamScore', definition: 'INTEGER' },
+            { name: 'spamReasons', definition: 'JSONB' },
+            { name: 'isExternal', definition: 'BOOLEAN' },
+            // Hilos de conversacion (lib/threading.ts). Aditivo y tolerante: lib/thread-store.ts y mail-list-sql.ts leen/escriben con SQL crudo
+            // y, si faltan las columnas, se agrupa con la clave heuristica heredada (asunto + destinatarios).
+            //   rfcMessageId = Message-ID del correo (sin <>, dominio en minusculas); inReplyTo = su padre directo;
+            //   refs = References normalizadas separadas por espacio (raiz + las 50 mas recientes); threadKey = raiz canonica del hilo.
+            { name: 'rfcMessageId', definition: 'TEXT' },
+            { name: 'inReplyTo', definition: 'TEXT' },
+            { name: 'refs', definition: 'TEXT' },
+            { name: 'threadKey', definition: 'TEXT' },
+            // Cabeceras de la LISTA BLANCA (List-Id, List-Unsubscribe, Precedence, Auto-Submitted, X-Mailer, Reply-To,
+            // Authentication-Results, ...) como {nombre-en-minuscula: valor}, <= 4 KB (motor de reglas v2, lib/rules/headers.ts).
+            // Aditivo; se escribe por SQL best-effort en la ingesta. Correos antiguos: NULL => sus condiciones de cabecera "no coinciden".
+            { name: 'hdrs', definition: 'JSONB' },
         ],
         constraints: [
             { name: 'Email_pkey', statement: 'ALTER TABLE "Email" ADD CONSTRAINT "Email_pkey" PRIMARY KEY ("id")' },
@@ -164,6 +182,10 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "Email_userId_folder_createdAt_idx" ON "Email" ("userId", "folder", "createdAt" DESC)',
             'CREATE INDEX IF NOT EXISTS "Email_userId_folder_read_idx" ON "Email" ("userId", "folder", "read")',
             'CREATE INDEX IF NOT EXISTS "Email_userId_scheduledAt_idx" ON "Email" ("userId", "scheduledAt")',
+            // Hilos por cabeceras: miembros de un hilo, busqueda por Message-ID y por padre (respuestas llegadas antes que su original).
+            'CREATE INDEX IF NOT EXISTS "Email_userId_threadKey_idx" ON "Email" ("userId", "threadKey")',
+            'CREATE INDEX IF NOT EXISTS "Email_userId_rfcMessageId_idx" ON "Email" ("userId", "rfcMessageId")',
+            'CREATE INDEX IF NOT EXISTS "Email_userId_inReplyTo_idx" ON "Email" ("userId", "inReplyTo") WHERE "inReplyTo" IS NOT NULL',
             // Filtro "destacados" y su conteo por carpeta (parcial: solo las filas destacadas, un indice muy pequeno).
             'CREATE INDEX IF NOT EXISTS "Email_userId_folder_starred_idx" ON "Email" ("userId", "folder", "createdAt" DESC) WHERE "starred" = TRUE',
             // Full-text (busqueda). La expresion debe coincidir con FTS_EXPRESSION_SQL en src/lib/rules/search.ts
@@ -193,6 +215,10 @@ const TABLES: TableSpec[] = [
             { name: 'from', definition: 'TEXT NOT NULL' },
             { name: 'bcc', definition: 'TEXT' },
             { name: 'cc', definition: 'TEXT' },
+            // Contexto de respuesta del borrador (aditivo, SQL crudo tolerante en api/drafts): al reabrir un borrador de respuesta se conserva
+            // el vinculo con el original (In-Reply-To / References en el envio). replyMode: reply | replyAll | forward.
+            { name: 'inReplyToEmailId', definition: 'TEXT' },
+            { name: 'replyMode', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Draft_pkey', statement: 'ALTER TABLE "Draft" ADD CONSTRAINT "Draft_pkey" PRIMARY KEY ("id")' },
@@ -295,14 +321,37 @@ const TABLES: TableSpec[] = [
             { name: 'filterRegex', definition: 'TEXT' },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            // Etiquetas jerarquicas con comportamiento (aditivo; lib/labels/store.ts lee/escribe por SQL crudo y tolera su ausencia).
+            // "name" es el SEGMENTO; la ruta completa ("Trabajo/Proyecto A") es "fullPath" (NULL = igual que name, etiquetas antiguas).
+            { name: 'parentId', definition: 'TEXT' },
+            { name: 'behavior', definition: "TEXT NOT NULL DEFAULT 'tag'" },
+            { name: 'sortOrder', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'icon', definition: 'TEXT' },
+            { name: 'showInSidebar', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
+            { name: 'showUnread', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
+            { name: 'fullPath', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Label_pkey', statement: 'ALTER TABLE "Label" ADD CONSTRAINT "Label_pkey" PRIMARY KEY ("id")' },
-            { name: 'Label_userId_name_key', statement: 'ALTER TABLE "Label" ADD CONSTRAINT "Label_userId_name_key" UNIQUE ("userId", "name")' },
             { name: 'Label_userId_fkey', statement: 'ALTER TABLE "Label" ADD CONSTRAINT "Label_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+            // Si se borra el padre por SQL directo, los hijos pasan a la raiz (la API decide antes: reubicar o borrar el subarbol).
+            { name: 'Label_parentId_fkey', statement: 'ALTER TABLE "Label" ADD CONSTRAINT "Label_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "Label"("id") ON DELETE SET NULL ON UPDATE CASCADE' },
         ],
         indexes: [
             'CREATE INDEX IF NOT EXISTS "Label_userId_idx" ON "Label" ("userId")',
+            'CREATE INDEX IF NOT EXISTS "Label_userId_parentId_idx" ON "Label" ("userId", "parentId")',
+        ],
+        // La unicidad pasa de (userId, name) a (userId, padre, name): la restriccion antigua se retira y se crea el indice unico
+        // (tolerante: si hubiera duplicados historicos se omite con un aviso en vez de romper el despliegue).
+        after: [
+            'ALTER TABLE "Label" DROP CONSTRAINT IF EXISTS "Label_userId_name_key"',
+            `DO $$
+            BEGIN
+                CREATE UNIQUE INDEX IF NOT EXISTS "Label_user_parent_name_key" ON "Label" ("userId", COALESCE("parentId", ''), "name");
+            EXCEPTION
+                WHEN unique_violation THEN
+                    RAISE NOTICE 'Label: hay etiquetas duplicadas; indice unico (userId,parentId,name) omitido.';
+            END $$`,
         ],
     },
     {
@@ -330,13 +379,74 @@ const TABLES: TableSpec[] = [
             { name: 'stopProcessing', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
             { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
             { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            // Regla vinculada a una etiqueta ("Asignar automaticamente") y estadisticas de uso. Aditivo y tolerante.
+            { name: 'labelId', definition: 'TEXT' },
+            { name: 'matchedCount', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'lastMatchedAt', definition: 'TIMESTAMPTZ' },
         ],
         constraints: [
             { name: 'Rule_pkey', statement: 'ALTER TABLE "Rule" ADD CONSTRAINT "Rule_pkey" PRIMARY KEY ("id")' },
             { name: 'Rule_userId_fkey', statement: 'ALTER TABLE "Rule" ADD CONSTRAINT "Rule_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+            { name: 'Rule_labelId_fkey', statement: 'ALTER TABLE "Rule" ADD CONSTRAINT "Rule_labelId_fkey" FOREIGN KEY ("labelId") REFERENCES "Label"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
         ],
         indexes: [
             'CREATE INDEX IF NOT EXISTS "Rule_userId_priority_idx" ON "Rule" ("userId", "priority")',
+            'CREATE INDEX IF NOT EXISTS "Rule_labelId_idx" ON "Rule" ("labelId")',
+        ],
+    },
+    {
+        // Lotes de "Aplicar a existentes": cada lote guarda, por correo, el estado previo para poder DESHACERLO.
+        // (RuleRun tiene una fila por correo -idempotencia de la ingesta-: no puede representar varios lotes.)
+        name: 'RuleBatch',
+        createStatement: `CREATE TABLE IF NOT EXISTS "RuleBatch" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "ruleId" TEXT,
+            "labelId" TEXT,
+            "status" TEXT NOT NULL DEFAULT 'applied',
+            "processed" INTEGER NOT NULL DEFAULT 0,
+            "changed" INTEGER NOT NULL DEFAULT 0,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "undoneAt" TIMESTAMPTZ
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'ruleId', definition: 'TEXT' },
+            { name: 'labelId', definition: 'TEXT' },
+            { name: 'status', definition: "TEXT NOT NULL DEFAULT 'applied'" },
+            { name: 'processed', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'changed', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'undoneAt', definition: 'TIMESTAMPTZ' },
+        ],
+        constraints: [
+            { name: 'RuleBatch_pkey', statement: 'ALTER TABLE "RuleBatch" ADD CONSTRAINT "RuleBatch_pkey" PRIMARY KEY ("id")' },
+            { name: 'RuleBatch_userId_fkey', statement: 'ALTER TABLE "RuleBatch" ADD CONSTRAINT "RuleBatch_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "RuleBatch_userId_createdAt_idx" ON "RuleBatch" ("userId", "createdAt" DESC)',
+        ],
+    },
+    {
+        name: 'RuleBatchItem',
+        createStatement: `CREATE TABLE IF NOT EXISTS "RuleBatchItem" (
+            "batchId" TEXT NOT NULL,
+            "emailId" TEXT NOT NULL,
+            "prev" JSONB NOT NULL DEFAULT '{}'::jsonb
+        )`,
+        columns: [
+            { name: 'batchId', definition: 'TEXT NOT NULL' },
+            { name: 'emailId', definition: 'TEXT NOT NULL' },
+            { name: 'prev', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+        ],
+        constraints: [
+            { name: 'RuleBatchItem_pkey', statement: 'ALTER TABLE "RuleBatchItem" ADD CONSTRAINT "RuleBatchItem_pkey" PRIMARY KEY ("batchId", "emailId")' },
+            { name: 'RuleBatchItem_batchId_fkey', statement: 'ALTER TABLE "RuleBatchItem" ADD CONSTRAINT "RuleBatchItem_batchId_fkey" FOREIGN KEY ("batchId") REFERENCES "RuleBatch"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+            { name: 'RuleBatchItem_emailId_fkey', statement: 'ALTER TABLE "RuleBatchItem" ADD CONSTRAINT "RuleBatchItem_emailId_fkey" FOREIGN KEY ("emailId") REFERENCES "Email"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "RuleBatchItem_emailId_idx" ON "RuleBatchItem" ("emailId")',
         ],
     },
     {
@@ -1113,6 +1223,137 @@ const TABLES: TableSpec[] = [
         ],
         constraints: [
             { name: 'AdminSetting_pkey', statement: 'ALTER TABLE "AdminSetting" ADD CONSTRAINT "AdminSetting_pkey" PRIMARY KEY ("key")' },
+        ],
+    },
+    // Spam v2: listas de bloqueo / permitidos / externos de confianza (dominio o usuario). Ver src/lib/spam/lists-store.ts.
+    {
+        name: 'SpamList',
+        createStatement: `CREATE TABLE IF NOT EXISTS "SpamList" (
+            "id" TEXT NOT NULL,
+            "scope" TEXT NOT NULL,
+            "ownerKey" TEXT NOT NULL,
+            "kind" TEXT NOT NULL,
+            "matchType" TEXT NOT NULL,
+            "value" TEXT NOT NULL,
+            "includeSubdomains" BOOLEAN NOT NULL DEFAULT FALSE,
+            "reason" TEXT,
+            "expiresAt" TIMESTAMPTZ,
+            "createdBy" TEXT,
+            "hits" INTEGER NOT NULL DEFAULT 0,
+            "lastHitAt" TIMESTAMPTZ,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'scope', definition: 'TEXT NOT NULL' },
+            { name: 'ownerKey', definition: 'TEXT NOT NULL' },
+            { name: 'kind', definition: 'TEXT NOT NULL' },
+            { name: 'matchType', definition: 'TEXT NOT NULL' },
+            { name: 'value', definition: 'TEXT NOT NULL' },
+            { name: 'includeSubdomains', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'reason', definition: 'TEXT' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ' },
+            { name: 'createdBy', definition: 'TEXT' },
+            { name: 'hits', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'lastHitAt', definition: 'TIMESTAMPTZ' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'SpamList_pkey', statement: 'ALTER TABLE "SpamList" ADD CONSTRAINT "SpamList_pkey" PRIMARY KEY ("id")' },
+            { name: 'SpamList_scope_check', statement: 'ALTER TABLE "SpamList" ADD CONSTRAINT "SpamList_scope_check" CHECK ("scope" IN (\'domain\', \'user\'))' },
+            { name: 'SpamList_kind_check', statement: 'ALTER TABLE "SpamList" ADD CONSTRAINT "SpamList_kind_check" CHECK ("kind" IN (\'allow\', \'block\', \'external\'))' },
+            { name: 'SpamList_matchType_check', statement: 'ALTER TABLE "SpamList" ADD CONSTRAINT "SpamList_matchType_check" CHECK ("matchType" IN (\'email\', \'domain\', \'wildcard\', \'tld\', \'regex\'))' },
+        ],
+        indexes: [
+            // Una misma regla no se repite en una lista (dedupe atomico incluso con altas concurrentes).
+            'CREATE UNIQUE INDEX IF NOT EXISTS "SpamList_unique_idx" ON "SpamList" ("scope", "ownerKey", "kind", "matchType", "value", "includeSubdomains")',
+            'CREATE INDEX IF NOT EXISTS "SpamList_owner_kind_idx" ON "SpamList" ("scope", "ownerKey", "kind", "createdAt" DESC)',
+            'CREATE INDEX IF NOT EXISTS "SpamList_expiresAt_idx" ON "SpamList" ("expiresAt") WHERE "expiresAt" IS NOT NULL',
+        ],
+    },
+    // Spam v2: modelo bayesiano por usuario (tokens con hash truncado). La fila tokenHash='__n' guarda los contadores de mensajes.
+    {
+        name: 'SpamToken',
+        createStatement: `CREATE TABLE IF NOT EXISTS "SpamToken" (
+            "userId" TEXT NOT NULL,
+            "tokenHash" TEXT NOT NULL,
+            "spam" INTEGER NOT NULL DEFAULT 0,
+            "ham" INTEGER NOT NULL DEFAULT 0,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'tokenHash', definition: 'TEXT NOT NULL' },
+            { name: 'spam', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'ham', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'SpamToken_pkey', statement: 'ALTER TABLE "SpamToken" ADD CONSTRAINT "SpamToken_pkey" PRIMARY KEY ("userId", "tokenHash")' },
+            { name: 'SpamToken_userId_fkey', statement: 'ALTER TABLE "SpamToken" ADD CONSTRAINT "SpamToken_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: ['CREATE INDEX IF NOT EXISTS "SpamToken_user_updated_idx" ON "SpamToken" ("userId", "updatedAt" DESC)'],
+    },
+    // Spam v2: contadores de marcas del usuario por remitente (e:direccion) y dominio (d:dominio).
+    {
+        name: 'SpamSender',
+        createStatement: `CREATE TABLE IF NOT EXISTS "SpamSender" (
+            "userId" TEXT NOT NULL,
+            "senderKey" TEXT NOT NULL,
+            "spamCount" INTEGER NOT NULL DEFAULT 0,
+            "hamCount" INTEGER NOT NULL DEFAULT 0,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'senderKey', definition: 'TEXT NOT NULL' },
+            { name: 'spamCount', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'hamCount', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'SpamSender_pkey', statement: 'ALTER TABLE "SpamSender" ADD CONSTRAINT "SpamSender_pkey" PRIMARY KEY ("userId", "senderKey")' },
+            { name: 'SpamSender_userId_fkey', statement: 'ALTER TABLE "SpamSender" ADD CONSTRAINT "SpamSender_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+    },
+    // Spam v2: registro ligero de decisiones (sin contenido). Retencion configurable (lib/spam/events-store.ts).
+    {
+        name: 'SpamEvent',
+        createStatement: `CREATE TABLE IF NOT EXISTS "SpamEvent" (
+            "id" TEXT NOT NULL,
+            "ts" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "userId" TEXT,
+            "recipient" TEXT,
+            "sender" TEXT NOT NULL,
+            "senderDomain" TEXT,
+            "decision" TEXT NOT NULL,
+            "score" INTEGER,
+            "ruleId" TEXT,
+            "ruleLabel" TEXT,
+            "reasons" JSONB NOT NULL DEFAULT '[]'::jsonb,
+            "external" BOOLEAN NOT NULL DEFAULT FALSE
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'ts', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'userId', definition: 'TEXT' },
+            { name: 'recipient', definition: 'TEXT' },
+            { name: 'sender', definition: 'TEXT NOT NULL' },
+            { name: 'senderDomain', definition: 'TEXT' },
+            { name: 'decision', definition: 'TEXT NOT NULL' },
+            { name: 'score', definition: 'INTEGER' },
+            { name: 'ruleId', definition: 'TEXT' },
+            { name: 'ruleLabel', definition: 'TEXT' },
+            { name: 'reasons', definition: "JSONB NOT NULL DEFAULT '[]'::jsonb" },
+            { name: 'external', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+        ],
+        constraints: [
+            { name: 'SpamEvent_pkey', statement: 'ALTER TABLE "SpamEvent" ADD CONSTRAINT "SpamEvent_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "SpamEvent_ts_idx" ON "SpamEvent" ("ts" DESC)',
+            'CREATE INDEX IF NOT EXISTS "SpamEvent_decision_ts_idx" ON "SpamEvent" ("decision", "ts" DESC)',
+            'CREATE INDEX IF NOT EXISTS "SpamEvent_domain_ts_idx" ON "SpamEvent" ("senderDomain", "ts" DESC)',
         ],
     },
     // Registro de reuniones de la fachada de conferencias: idempotencia persistente + propiedad (lib/conferencing/ledger.ts).

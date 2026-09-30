@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/session';
 import { validateLabelInput } from '@/lib/rules/label-validation';
+import { deleteLabel, getLabel, planDelete, updateLabel } from '@/lib/labels/store';
+import { pullExistingIntoFolder, releaseFolderEmails } from '@/lib/labels/behavior';
+import { labelErrorResponse } from '@/lib/labels/http';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -25,43 +27,49 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     }
 
     try {
-        const existing = await prisma.label.findFirst({ where: { id, userId: user.id }, select: { id: true } });
-        if (!existing) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
+        const before = await getLabel(user.id, id);
+        if (!before) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
 
-        if (data.aliasSuffix) {
-            const clash = await prisma.label.findFirst({
-                where: { userId: user.id, aliasSuffix: data.aliasSuffix, NOT: { id } },
-                select: { id: true },
-            });
-            if (clash) return NextResponse.json({ error: 'Alias already in use' }, { status: 409 });
+        // Cambio de comportamiento: "folder" -> "tag" devuelve a Entrada los correos que solo estaban ahi;
+        // "tag" -> "folder" con moveExisting mueve los correos de Entrada con la etiqueta.
+        let released = 0;
+        let pulled = 0;
+        if (data.behavior && data.behavior !== before.behavior && before.behavior === 'folder') {
+            released = await releaseFolderEmails(user.id, [id]);
         }
-
-        // updateMany con userId: defensa en profundidad frente a carreras / IDOR.
-        const result = await prisma.label.updateMany({ where: { id, userId: user.id }, data });
-        if (result.count === 0) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
-
-        const label = await prisma.label.findFirst({ where: { id, userId: user.id } });
-        return NextResponse.json(label);
+        const label = await updateLabel(user.id, id, data);
+        if (data.behavior === 'folder' && before.behavior !== 'folder' && body?.moveExisting === true) {
+            pulled = await pullExistingIntoFolder(user.id, id);
+        }
+        const { userId: _u, ...out } = label;
+        return NextResponse.json({ ...out, ...(released ? { released } : {}), ...(pulled ? { moved: pulled } : {}) });
     } catch (error: any) {
-        if (error?.code === 'P2002') {
-            return NextResponse.json({ error: 'A label with that name already exists' }, { status: 409 });
-        }
+        const r = labelErrorResponse(error);
+        if (r) return r;
         console.error('Failed to update label:', error?.message);
         return NextResponse.json({ error: 'Failed to update label' }, { status: 500 });
     }
 }
 
-export async function DELETE(_req: NextRequest, { params }: Ctx) {
+/**
+ * Borra una etiqueta. ?children=reparent (por defecto: las subetiquetas suben un nivel) | delete (todo el subarbol).
+ * Los correos NUNCA se borran: los que estaban fuera de Entrada solo por una etiqueta-carpeta que desaparece vuelven a Entrada.
+ */
+export async function DELETE(req: NextRequest, { params }: Ctx) {
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const { id } = await params;
+    const mode = req.nextUrl?.searchParams?.get('children') === 'delete' ? 'delete' : 'reparent';
 
     try {
-        // Las filas de la relacion _EmailToLabel caen por ON DELETE CASCADE.
-        const result = await prisma.label.deleteMany({ where: { id, userId: user.id } });
-        if (result.count === 0) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
-        return NextResponse.json({ success: true });
+        const plan = await planDelete(user.id, id, { children: mode });
+        if (!plan) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
+        const released = await releaseFolderEmails(user.id, plan.deleteIds);
+        const result = await deleteLabel(user.id, id, { children: mode });
+        return NextResponse.json({ success: true, deleted: result.deleted, reparented: result.reparented, released });
     } catch (error: any) {
+        const r = labelErrorResponse(error);
+        if (r) return r;
         console.error('Failed to delete label:', error?.message);
         return NextResponse.json({ error: 'Failed to delete label' }, { status: 500 });
     }

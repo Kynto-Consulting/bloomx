@@ -11,7 +11,12 @@ import { themeEditorEs } from './theme-editor';
 import { conferencingEs } from './conferencing';
 import { legacyModeEs } from './legacy-mode';
 import { extensionStateEs } from './extension-state';
+import { mailGroupsEs } from './mail-groups';
+import { labelTreeEs } from './label-tree';
+import { ruleBuilderEs } from './rule-builder';
+import { spamListsEs } from './spam-lists';
 import { adminConsoleEs } from './admin-console';
+import { spamUserEs } from './spam-user';
 
 type DeepString<T> = { [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
 
@@ -114,6 +119,7 @@ const es = {
         themeGroupLabel: 'Tema de la aplicación',
         system: 'Sistema',
         systemDescription: 'Sigue el modo claro/oscuro de tu dispositivo.',
+        systemDescriptionBrand: 'Sigue el modo claro/oscuro de tu dispositivo con la paleta de {brand}.',
         brandNote: 'Los temas de tu empresa aparecen primero; el resto son paletas generales.',
         brandLight: '{name} · Claro',
         brandDark: '{name} · Oscuro',
@@ -526,7 +532,7 @@ const es = {
         },
     },
     sidebar: {
-        sections: { mailboxes: 'Buzones', workspace: 'Espacio de trabajo', labels: 'Etiquetas' },
+        sections: { mailboxes: 'Carpetas', workspace: 'Espacio de trabajo', labels: 'Etiquetas' },
         folders: {
             inbox: 'Bandeja de entrada',
             drafts: 'Borradores',
@@ -542,6 +548,9 @@ const es = {
         moveSectionUp: 'Subir {name}',
         moveSectionDown: 'Bajar {name}',
         close: 'Cerrar barra lateral',
+        resize: 'Redimensionar barra lateral',
+        resizeValue: '{width} px de ancho',
+        rail: 'Menú principal',
         newMessage: 'Nuevo mensaje',
         createLabel: 'Crear etiqueta',
         labelName: 'Nombre de la etiqueta',
@@ -1005,10 +1014,11 @@ const es = {
             print: 'Imprimir',
             printFailed: 'No se pudo preparar la impresión.',
         },
-        thread: { label: 'Mensajes de la conversación', expandAll: 'Expandir todo', collapseAll: 'Contraer todo' },
+        thread: { label: 'Mensajes de la conversación', expandAll: 'Expandir todo', collapseAll: 'Contraer todo', hideDuplicates: 'Ocultar historial repetido', hideDuplicatesHint: 'Pliega el texto citado que ya aparece en otros mensajes de la conversación. Sigue disponible con el botón «…».' },
         message: { aria: 'Mensaje de {name}, {date}', new: 'Nuevo', clickToExpand: 'Pulsa para ver el mensaje' },
         recipients: { from: 'De', to: 'Para', cc: 'Cc', bcc: 'Cco', date: 'Fecha', show: 'Mostrar detalles', hide: 'Ocultar detalles' },
-        quote: { show: 'Mostrar texto citado', hide: 'Ocultar texto citado' },
+        quote: { show: 'Mostrar texto citado', hide: 'Ocultar texto citado', unmatched: 'El texto citado no coincide con otros mensajes de esta conversación (puede estar incompleta), por eso se muestra completo.' },
+        body: { title: 'Contenido del correo', loading: 'Cargando el mensaje…', failed: 'No se pudo mostrar el contenido de este mensaje.', retry: 'Reintentar', viewText: 'Ver texto plano', viewHtml: 'Ver formato original', empty: 'Este mensaje no tiene contenido para mostrar.' },
         images: {
             blocked: 'Se bloquearon las imágenes remotas para proteger tu privacidad (pueden avisar al remitente de que abriste el correo).',
             load: 'Cargar imágenes remotas',
@@ -1026,7 +1036,8 @@ const es = {
             previewShort: 'Vista previa',
             previewFailed: 'No se pudo mostrar la vista previa. Descarga el archivo para verlo.',
         },
-        reply: { section: 'Responder', to: 'Responder a {name}', reply: 'Responder', replyAll: 'Responder a todos', forward: 'Reenviar' },
+        reply: { section: 'Responder', to: 'Responder a {name}', reply: 'Responder', replyAll: 'Responder a todos', forward: 'Reenviar', forwardEml: 'Reenviar como adjunto (.eml)' },
+        replyQuote: { trimmed: 'Se recortó el historial anterior', fwdTitle: 'Mensaje reenviado', from: 'De', date: 'Fecha', sent: 'Enviado el', subject: 'Asunto', to: 'Para', cc: 'Cc' },
         auth: {
             label: 'Autenticación del remitente',
             verified: 'Verificado',
@@ -1064,6 +1075,11 @@ const es = {
     conferencing: conferencingEs,
     legacyMode: legacyModeEs,
     extensionState: extensionStateEs,
+    mailGroups: mailGroupsEs,
+    labelTree: labelTreeEs,
+    ruleBuilder: ruleBuilderEs,
+    spam: { lists: spamListsEs },
+    spamUser: spamUserEs,
 } as const;
 
 export type Messages = DeepString<typeof es>;

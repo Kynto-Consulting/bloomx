@@ -21,7 +21,7 @@ import { useSession } from '@/components/SessionProvider';
 import { useOptionalExpansionUI } from '@/contexts/ExpansionUIContext';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { LAZY_KEYS, evaluateExpression, resolveDeep } from '@/lib/expansions/expressions';
-import { migrateLegacyUi } from '@/lib/expansions/ui-schema';
+import { localizeUi, migrateLegacyUi } from '@/lib/expansions/ui-schema';
 import { createActionRunner, normalizeOverlayDef, type ActionEnv, type BackendCaller, type OverlayRequest } from './actions';
 import { ExtensionStateContext, ExtensionStateProvider, WizardContext } from './state';
 import { KitNode, type NodeEnv } from './nodes';
@@ -63,11 +63,12 @@ const RootEnvContext = createContext<RootEnv | null>(null);
  * lo inicializa. Las llamadas recursivas reutilizan los mismos proveedores.
  */
 export const JsonRenderer: React.FC<{ component: JsonComponentProps; context?: any; initialState?: Record<string, any>; runtime?: RendererRuntime }> = ({ component, context, initialState, runtime }) => {
-    const migrated = useMemo(() => migrateLegacyUi(component).ui as JsonComponentProps, [component]);
+    const { locale } = useI18n();
+    // Textos por idioma ({es, en}) al idioma del usuario ANTES de adaptar el formato antiguo; un string normal no cambia.
+    const migrated = useMemo(() => migrateLegacyUi(localizeUi(component, locale)).ui as JsonComponentProps, [component, locale]);
     const { data: session } = useSession();
     const router = useRouter();
     const expansionUI = useOptionalExpansionUI();
-    const { locale } = useI18n();
     const strings = getKitStrings(locale);
     const [fallback, setFallback] = useState<{ request: OverlayRequest; context: Record<string, any> } | null>(null);
     const [confirmState, setConfirmState] = useState<{ message: string; resolve: (value: boolean) => void } | null>(null);

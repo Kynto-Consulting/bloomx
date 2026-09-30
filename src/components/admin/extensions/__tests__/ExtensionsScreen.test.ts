@@ -83,6 +83,12 @@ function route(url: string, init: any) {
         else state.installed.push(inst({ extensionId: c.id, name: c.name, installedVersion: c.version, catalogVersion: c.version, template: c.template }));
         return res(200, { success: true });
     }
+    if (p === '/api/admin/extensions/update') {
+        const c = catalog().find((x) => x.id === body.extensionId)!;
+        const existing = state.installed.find((i) => i.extensionId === body.extensionId)!;
+        Object.assign(existing, { installedVersion: c.version });
+        return res(200, { success: true, updated: true, from: '1.2.0', to: c.version });
+    }
     if (p === '/api/admin/extensions/uninstall') {
         state.installed = state.installed.filter((i) => i.extensionId !== body.extensionId);
         return res(200, { success: true });
@@ -312,12 +318,13 @@ describe('instalar, desinstalar, activar, actualizar (siempre con confirmacion)'
         expect(card('Giphy').textContent).toContain('Activada');
     });
 
-    it('actualizar: muestra v1.2.0 -> v1.3.0, confirma y re-ejecuta install; despues queda al dia', async () => {
+    it('actualizar: muestra v1.2.0 -> v1.3.0, confirma y llama a la ruta update (no reinstala); despues queda al dia', async () => {
         await render();
         await click(buttonNamed('Actualizar Notion'));
         expect(dialog()!.textContent).toContain('de la v1.2.0 a la v1.3.0');
         await click(Array.from(dialog()!.querySelectorAll('button')).find((b) => b.textContent === 'Actualizar')!);
-        expect(posts('/extensions/install')[0].body).toEqual({ domainId: 'dom1', extensionId: 'notion' });
+        expect(posts('/extensions/update')[0].body).toEqual({ domainId: 'dom1', extensionId: 'notion' });
+        expect(posts('/extensions/install')).toHaveLength(0);
         expect(live()).toContain('Notion actualizada a la versión 1.3.0');
         expect(card('Notion').textContent).not.toContain('disponible');
         expect(buttonNamed('Actualizar Notion')).toBeUndefined();

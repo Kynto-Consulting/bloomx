@@ -1,13 +1,15 @@
 // SQL de la bandeja construido a partir de un "ambito" (buzones + carpeta/etiqueta/busqueda + filtros). Solo cadenas y parametros:
 // nada de red ni Prisma (mail-store.ts los ejecuta) para poder probarlo. Todo valor del usuario viaja como parametro ($n).
 //
-// UNIDADES. La interfaz agrupa los mensajes en HILOS (lib/mail-list.ts::groupEmailsByThread): la clave es
-//   <destinatarios normalizados>::<asunto sin prefijos Re:/Fwd:/...>     (o el propio id si el asunto no llega a 3 letras).
-// `THREAD_KEY_SQL` es el espejo exacto en SQL. Un filtro rapido lista los MENSAJES que lo cumplen y el conteo del chip es el numero de
+// UNIDADES. La interfaz agrupa los mensajes en HILOS (lib/mail-list.ts::groupEmailsByThread, lib/threading.ts): la clave es
+//   Email.threadKey (raiz de la cadena Message-ID/In-Reply-To/References; se calcula al ingerir/enviar/importar), o, en correos
+//   antiguos sin ella, la heuristica heredada  h:<destinatarios normalizados>::<asunto sin prefijos Re:/Fwd:/...>  (o u:<id> si el
+//   asunto no llega a 3 letras).  `threadKeySql(opt)` es el espejo exacto en SQL (COALESCE(threadKey, heuristica)). Un filtro rapido lista los MENSAJES que lo cumplen y el conteo del chip es el numero de
 // HILOS con algun mensaje que lo cumple: coincide con las filas que dibuja la interfaz.
 import { FTS_EXPRESSION_SQL, type ParsedSearch } from '@/lib/rules/search';
 import { SENDER_KEY_FN, senderKeyExpr } from '@/lib/db/mail-sql';
 import type { MailCursor, MailFilterKey, MailSortKey } from '@/lib/mail-query';
+import { SUBJECT_PREFIX_SOURCE } from '@/lib/threading';
 
 /** Tipo REAL de Email.createdAt: `timestamptz` (DDL de ensure-schema) o `timestamp` (Prisma db push: timestamp(3)). */
 export type CreatedAtKind = 'timestamptz' | 'timestamp';
@@ -16,9 +18,13 @@ export interface SqlOptions {
     createdAtKind: CreatedAtKind;
     /** false = la funcion bloomx_sender_key aun no existe en esta BD: se usa la misma expresion en linea (sin indice). */
     senderKeyFn: boolean;
+    /** false/ausente = la columna Email.threadKey aun no existe (despliegue sin db:ensure): se agrupa solo con la clave heuristica heredada. */
+    threadKey?: boolean;
+    /** false/ausente = Label aun sin jerarquia (parentId/behavior/fullPath): las etiquetas se comparan por nombre y no hay carpetas-etiqueta. */
+    labelTree?: boolean;
 }
 
-export const DEFAULT_SQL_OPTIONS: SqlOptions = { createdAtKind: 'timestamptz', senderKeyFn: true };
+export const DEFAULT_SQL_OPTIONS: SqlOptions = { createdAtKind: 'timestamptz', senderKeyFn: true, threadKey: false };
 
 export class SqlParams {
     readonly values: unknown[] = [];
@@ -37,8 +43,10 @@ export interface MailListScope {
     userIds: string[];
     /** Vista de carpeta. Se ignora en etiquetas y busquedas (globales, sin papelera ni spam). */
     folder: string | null;
-    /** Nombres de etiqueta (?label=a,b), en cualquier caso. */
+    /** Nombres de etiqueta (?label=a,b), en cualquier caso. Con etiquetas jerarquicas: ruta completa ("Trabajo/Proyecto A"). */
     labels: string[];
+    /** true = solo la etiqueta indicada; por defecto tambien sus subetiquetas ("incluir subetiquetas"). */
+    labelExact?: boolean;
     /** q ya analizado (operadores + texto). null = sin busqueda. */
     search: ParsedSearch | null;
     /** Usar full-text para el texto libre (false = solo contiene). */
@@ -59,6 +67,16 @@ const contains = (col: string, p: SqlParams, value: string) => `strpos(lower(COA
 const stamp = (kind: CreatedAtKind, ref: string) => `${ref}::${kind}`;
 
 const ATTACHMENT_EXISTS = (alias = 'e') => `EXISTS (SELECT 1 FROM "Attachment" a WHERE a."emailId" = ${alias}."id")`;
+/** Ruta completa de la etiqueta `l` en minuscula (fullPath, o el nombre en etiquetas antiguas). */
+export const LABEL_PATH_SQL = (a = 'l') => `lower(COALESCE(${a}."fullPath", ${a}."name"))`;
+/** La etiqueta `l` es alguna de `arr` (text[] en minuscula) o, salvo `exact`, descendiente de alguna (prefijo "ruta/"). */
+export const labelPathIn = (arr: string, exact: boolean, a = 'l') =>
+    exact ? `${LABEL_PATH_SQL(a)} = ANY(${arr}::text[])`
+        : `EXISTS (SELECT 1 FROM unnest(${arr}::text[]) AS q(v) WHERE ${LABEL_PATH_SQL(a)} = q.v OR left(${LABEL_PATH_SQL(a)}, length(q.v) + 1) = q.v || '/')`;
+/** El correo `alias` esta en alguna etiqueta de tipo carpeta (no aparece en Archivo: su ubicacion es la etiqueta). */
+export const IN_LABEL_FOLDER = (alias = 'e') =>
+    `EXISTS (SELECT 1 FROM "_EmailToLabel" lf JOIN "Label" lfl ON lfl."id" = lf."B" WHERE lf."A" = ${alias}."id" AND lfl."behavior" = 'folder')`;
+
 const LABEL_EXISTS = (alias: string, cond: string) =>
     `EXISTS (SELECT 1 FROM "_EmailToLabel" el JOIN "Label" l ON l."id" = el."B" WHERE el."A" = ${alias}."id" AND ${cond})`;
 
@@ -70,7 +88,11 @@ export function scopeClauses(scope: MailListScope, p: SqlParams, opt: SqlOptions
 
     const s = scope.search;
     if (s) {
-        for (const name of s.labels) out.push(LABEL_EXISTS('e', `lower(l."name") = lower(${p.add(name)}::text)`));
+        for (const name of s.labels) {
+            out.push(LABEL_EXISTS('e', opt.labelTree
+                ? labelPathIn(p.add([name.toLowerCase()]), scope.labelExact === true)
+                : `lower(l."name") = lower(${p.add(name)}::text)`));
+        }
         for (const v of s.from) out.push(contains('e."from"', p, v));
         for (const v of s.to) { const ref = p.add(v); out.push(`(strpos(lower(e."to"), lower(${ref}::text)) > 0 OR strpos(lower(COALESCE(e."cleanTo",'')), lower(${ref}::text)) > 0)`); }
         for (const v of s.subject) out.push(contains('e."subject"', p, v));
@@ -96,12 +118,16 @@ export function scopeClauses(scope: MailListScope, p: SqlParams, opt: SqlOptions
     }
 
     if (scope.labels.length > 0) {
-        out.push(LABEL_EXISTS('e', `lower(l."name") = ANY(${p.add(scope.labels.map((l) => l.toLowerCase()))}::text[])`));
+        out.push(LABEL_EXISTS('e', opt.labelTree
+            ? labelPathIn(p.add(scope.labels.map((l) => l.toLowerCase())), scope.labelExact === true)
+            : `lower(l."name") = ANY(${p.add(scope.labels.map((l) => l.toLowerCase()))}::text[])`));
         out.push(`e."folder" NOT IN ('trash','spam')`);
     } else if (s) {
         out.push(`e."folder" NOT IN ('trash','spam')`);
     } else if (scope.folder) {
         out.push(`e."folder" = ${p.add(scope.folder)}::text`);
+        // Un correo dentro de una etiqueta-carpeta "vive" en ella: no se lista tambien en Archivo.
+        if (scope.folder === 'archive' && opt.labelTree) out.push(`NOT ${IN_LABEL_FOLDER('e')}`);
     }
     return out;
 }
@@ -190,12 +216,12 @@ LIMIT ${p.add(Math.max(1, input.take | 0))}::int OFFSET ${p.add(Math.max(0, inpu
 // Hilos y conteos
 // ---------------------------------------------------------------------------
 
-// Prefijos que la interfaz quita del asunto (mail-list.ts::normalizeSubject). Si cambia alli, cambiar aqui.
-export const SUBJECT_PREFIX_RE = '^((re|fwd|rv|enc|invitaci[oó]n|invitaci[oó]n actualizada|accepted|declined|tentative|cancelado|canceled|updated): ?)+';
+// Prefijos que la interfaz quita del asunto: UNA sola definicion (lib/threading.ts::SUBJECT_PREFIX_SOURCE), sintaxis comun a JS y a ARE de Postgres.
+export const SUBJECT_PREFIX_RE = SUBJECT_PREFIX_SOURCE;
 const WS = `E' \\t\\r\\n'`;
 
 /** LATERAL que calcula `n.norm` = asunto normalizado (igual que normalizeSubject). */
-export const NORMALIZED_SUBJECT_LATERAL = `CROSS JOIN LATERAL (SELECT btrim(regexp_replace(COALESCE(e."subject",''), '${SUBJECT_PREFIX_RE}', '', 'i'), ${WS}) AS "norm") n`;
+export const NORMALIZED_SUBJECT_LATERAL = `CROSS JOIN LATERAL (SELECT btrim(regexp_replace(COALESCE(e."subject",''), '${SUBJECT_PREFIX_RE.replace(/'/g, "''")}', '', 'i'), ${WS}) AS "norm") n`;
 
 /** Destinatarios normalizados (getRecipientThreadKey): direcciones con @ en minuscula, en orden, o el texto crudo si no hay ninguna. */
 const RECIPIENT_KEY = `(SELECT COALESCE(NULLIF(string_agg(x."addr", ', ' ORDER BY x."ord"), ''), lower(btrim(COALESCE(NULLIF(e."cleanTo",''), e."to", ''), ${WS})))
@@ -203,8 +229,13 @@ const RECIPIENT_KEY = `(SELECT COALESCE(NULLIF(string_agg(x."addr", ', ' ORDER B
            FROM regexp_split_to_table(lower(COALESCE(NULLIF(e."cleanTo",''), e."to", '')), ',') WITH ORDINALITY AS p("part", "ord")) x
      WHERE x."addr" LIKE '%@%')`;
 
-/** Clave de hilo (groupEmailsByThread). Requiere NORMALIZED_SUBJECT_LATERAL en el FROM. */
-export const THREAD_KEY_SQL = `(CASE WHEN n."norm" = '' OR char_length(n."norm") < 3 OR n."norm" = '(No Subject)' THEN 'u:' || e."id" ELSE ${RECIPIENT_KEY} || '::' || n."norm" END)`;
+/** Clave HEREDADA de hilo (correos sin threadKey; legacyThreadKey de lib/threading.ts). Requiere NORMALIZED_SUBJECT_LATERAL en el FROM. */
+export const THREAD_KEY_SQL = `(CASE WHEN n."norm" = '' OR char_length(n."norm") < 3 OR n."norm" = '(No Subject)' THEN 'u:' || e."id" ELSE 'h:' || ${RECIPIENT_KEY} || '::' || n."norm" END)`;
+
+/** Clave de hilo efectiva (effectiveThreadKey): la guardada o, si falta, la heredada. */
+export function threadKeySql(opt: SqlOptions = DEFAULT_SQL_OPTIONS): string {
+    return opt.threadKey ? `COALESCE(NULLIF(e."threadKey",''), ${THREAD_KEY_SQL})` : THREAD_KEY_SQL;
+}
 
 export interface FilterTally { all: number; unread: number; starred: number; attachments: number; from_me: number }
 export interface ScopeCounts {
@@ -229,7 +260,7 @@ export function buildScopeCountsSql(scope: MailListScope, own: string[], opt: Sq
     ]);
     const sql = `WITH b AS (
   SELECT e."read" AS "r", e."starred" AS "s", ${ATTACHMENT_EXISTS()} AS "a",
-         (${FROM_ADDRESS_SQL()} = ANY(${ownRef}::text[])) AS "f", ${THREAD_KEY_SQL} AS "tk"
+         (${FROM_ADDRESS_SQL()} = ANY(${ownRef}::text[])) AS "f", ${threadKeySql(opt)} AS "tk"
   FROM "Email" e ${NORMALIZED_SUBJECT_LATERAL}
   WHERE ${where.join('\n    AND ')}
   OFFSET 0
@@ -251,13 +282,13 @@ export function readScopeCounts(row: Record<string, unknown> | undefined | null)
  * Insignias del Sidebar por carpeta (hilos y mensajes, no leidos y total) para uno o varios buzones. Los no leidos solo recorren
  * las filas no leidas (indice Email(userId, folder, read)); los totales de hilos recorren todo el buzon.
  */
-export function buildFolderBadgesSql(userIds: string[], withTotals: boolean): { sql: string; values: unknown[] } {
+export function buildFolderBadgesSql(userIds: string[], withTotals: boolean, opt: SqlOptions = DEFAULT_SQL_OPTIONS): { sql: string; values: unknown[] } {
     const p = new SqlParams();
     const users = p.add(userIds);
     const sql = `WITH b AS (
-  SELECT e."folder" AS "folder", e."read" AS "r", ${THREAD_KEY_SQL} AS "tk"
+  SELECT e."folder" AS "folder", e."read" AS "r", ${threadKeySql(opt)} AS "tk"
   FROM "Email" e ${NORMALIZED_SUBJECT_LATERAL}
-  WHERE e."userId" = ANY(${users}::text[])${withTotals ? '' : ' AND NOT e."read"'}
+  WHERE e."userId" = ANY(${users}::text[])${withTotals ? '' : ' AND NOT e."read"'}${opt.labelTree ? ` AND NOT (e."folder" = 'archive' AND ${IN_LABEL_FOLDER('e')})` : ''}
   OFFSET 0
 )
 SELECT "folder", COUNT(*)::int AS "m_all", COUNT(*) FILTER (WHERE NOT "r")::int AS "m_unread",
@@ -267,11 +298,30 @@ FROM b GROUP BY "folder"`;
 }
 
 /** Insignias de etiquetas (nombre en minuscula): hilos y mensajes con la etiqueta, sin papelera ni spam. */
-export function buildLabelBadgesSql(userIds: string[], withTotals: boolean): { sql: string; values: unknown[] } {
+export function buildLabelBadgesSql(userIds: string[], withTotals: boolean, opt: SqlOptions = DEFAULT_SQL_OPTIONS): { sql: string; values: unknown[] } {
     const p = new SqlParams();
     const users = p.add(userIds);
+    if (opt.labelTree) {
+        // Jerarquia: cada etiqueta cuenta los hilos/mensajes de ella Y de sus descendientes (acumulado en los padres), sin
+        // contar dos veces un correo que lleve padre e hija (COUNT DISTINCT por mensaje y por hilo).
+        const sqlTree = `WITH b AS (
+  SELECT lp."id" AS "lid", ${LABEL_PATH_SQL('lp')} AS "name", e."id" AS "eid", e."read" AS "r", ${threadKeySql(opt)} AS "tk"
+  FROM "Label" lp
+  JOIN "Label" lc ON lc."userId" = lp."userId"
+    AND (${LABEL_PATH_SQL('lc')} = ${LABEL_PATH_SQL('lp')} OR left(${LABEL_PATH_SQL('lc')}, length(${LABEL_PATH_SQL('lp')}) + 1) = ${LABEL_PATH_SQL('lp')} || '/')
+  JOIN "_EmailToLabel" el ON el."B" = lc."id"
+  JOIN "Email" e ON e."id" = el."A" AND e."userId" = lp."userId" AND e."folder" NOT IN ('trash','spam')${withTotals ? '' : ' AND NOT e."read"'}
+  ${NORMALIZED_SUBJECT_LATERAL}
+  WHERE lp."userId" = ANY(${users}::text[])
+  OFFSET 0
+)
+SELECT "lid", "name", COUNT(DISTINCT "eid")::int AS "m_all", COUNT(DISTINCT "eid") FILTER (WHERE NOT "r")::int AS "m_unread",
+       COUNT(DISTINCT "tk")::int AS "t_all", COUNT(DISTINCT "tk") FILTER (WHERE NOT "r")::int AS "t_unread"
+FROM b GROUP BY "lid", "name"`;
+        return { sql: sqlTree, values: p.values };
+    }
     const sql = `WITH b AS (
-  SELECT lower(l."name") AS "name", e."read" AS "r", ${THREAD_KEY_SQL} AS "tk"
+  SELECT lower(l."name") AS "name", e."read" AS "r", ${threadKeySql(opt)} AS "tk"
   FROM "_EmailToLabel" el
   JOIN "Label" l ON l."id" = el."B" AND l."userId" = ANY(${users}::text[])
   JOIN "Email" e ON e."id" = el."A" AND e."userId" = ANY(${users}::text[]) AND e."folder" NOT IN ('trash','spam')${withTotals ? '' : ' AND NOT e."read"'}

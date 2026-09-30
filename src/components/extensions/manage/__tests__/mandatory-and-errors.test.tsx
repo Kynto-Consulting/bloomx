@@ -89,9 +89,11 @@ describe('extensiones obligatorias', () => {
         expect(q('[data-extension-id="dlp"]')!.getAttribute('data-state')).toBe('active');
         expect(q('[data-extension-id="audit"]')!.getAttribute('data-state')).toBe('active');
         expect(q('[data-extension-id="zoom"]')!.getAttribute('data-state')).toBe('user-disabled');
-        expect(byText('Boton DLP', 'button')).toBeTruthy();
-        expect(byText('Boton Auditoria', 'button')).toBeTruthy();
-        expect(byText('Boton Zoom', 'button')).toBeNull();
+        // Barra compacta: los botones son de icono (nombre en aria-label) y el menu "Extensiones" cuenta las acciones activas.
+        expect(q('[data-extension-toolbar] button[aria-label="Boton DLP"]')).toBeTruthy();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Auditoria"]')).toBeTruthy();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Zoom"]')).toBeNull();
+        expect(q('[data-extensions-menu-trigger]')!.getAttribute('aria-label')).toBe('Extensiones (2)');
     });
 
     it('el detalle tambien muestra el interruptor bloqueado con la explicacion', async () => {
@@ -159,7 +161,9 @@ describe('fallo de carga de extensiones', () => {
     it('ExtensionLoader con datos buenos previos (stale): monta las extensiones y NO el error', async () => {
         Object.assign(state, { extensions: sample(), isStale: true, extensionsLoaded: true });
         await mount(loader('EMAIL_TOOLBAR'));
-        expect(byText('Boton Zoom', 'button')).toBeTruthy();
+        // Las 3 acciones estan montadas: 2 ancladas por defecto en la barra y la tercera en el menu "Extensiones".
+        expect(q('[data-extensions-menu-trigger]')!.getAttribute('aria-label')).toBe('Extensiones (3)');
+        expect(q('[data-extension-toolbar] button[aria-label="Boton DLP"]')).toBeTruthy();
         expect(q('[data-testid="extensions-load-error"]')).toBeNull();
     });
 

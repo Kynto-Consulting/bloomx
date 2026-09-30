@@ -10,6 +10,7 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import FontFamily from '@tiptap/extension-font-family';
 import ImageExtension from '@tiptap/extension-image';
+import { quoteExtensions } from '@/components/editor/quote-extensions';
 import { Table } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -154,6 +155,8 @@ export const Editor = forwardRef<EditorHandle, EditorProps>(({ value, onChange, 
             // StarterKit 3.x ya trae link y underline: se desactivan para usar las versiones propias (evita 'Duplicate extension names').
             StarterKit.configure({ link: false, underline: false }),
             Underline,
+            // Conserva div.gmail_quote / gmail_attr y el estilo del blockquote de la cita (ver quote-extensions.ts).
+            ...quoteExtensions,
             TextStyle,
             Color,
             FontFamily,

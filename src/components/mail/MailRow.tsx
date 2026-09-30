@@ -14,6 +14,7 @@ import { createVelocityTracker, eventTime, resolveSwipe, swipeProgress } from '@
 import { densityClasses, type MailDensity, type SnippetLines } from '@/lib/mail-prefs';
 import { ACTION_META } from './action-meta';
 import { Avatar } from './ui';
+import { ExternalBadge, useRowExternal } from '@/components/spam/ExternalBadge';
 
 const LEGACY_NO_SUBJECT = '(No Subject)';
 
@@ -86,6 +87,8 @@ function MailRowInner({
     const subjectText = !email.subject || legacySubject ? t('emailList.noSubject') : email.subject;
     const isOutgoing = folder === 'drafts' || folder === 'sent' || folder === 'scheduled';
     const recipient = email.cleanTo || email.to;
+    // Externos: insignia y (si la politica lo pide) etiqueta SOLO visual en el asunto; el asunto guardado no se toca.
+    const ext = useRowExternal(email.from, subjectText, { skip: isOutgoing });
     const senderText = folder === 'drafts'
         ? (email.to ? t('emailList.toPrefix', { to: email.to }) : t('emailList.noRecipients'))
         : isOutgoing && recipient
@@ -103,7 +106,8 @@ function MailRowInner({
     const ariaLabel = [
         unread ? `${t('emailList.unread')}. ` : '',
         email.starred ? `${t('emailList.row.starredState')}. ` : '',
-        `${participantsText}. ${subjectText}`,
+        ext.srLabel ? `${ext.srLabel}. ` : '',
+        `${participantsText}. ${ext.subject}`,
         threadCount > 1 ? `. ${t('emailList.threadMessages', { n: threadCount })}` : '',
         attachmentLabel ? `. ${attachmentLabel}` : '',
     ].join('');
@@ -257,7 +261,7 @@ function MailRowInner({
                             {threadCount > 1 && <ThreadBadge n={threadCount} />}
                         </span>
                         <span className="min-w-0 flex-1 truncate">
-                            <span className={cn(unread ? 'font-semibold' : 'font-medium')}>{subjectText}</span>
+                            <span className={cn(unread ? 'font-semibold' : 'font-medium')}>{ext.show && <ExternalBadge show style={ext.policy?.style} className="mr-1 align-middle" />}{ext.subject}</span>
                             {snippetLines > 0 && email.snippet ? <span className="text-muted-foreground"> — {email.snippet}</span> : null}
                         </span>
                         {attachments.count > 0 && <AttachmentChip summary={attachments} label={attachmentLabel} compact />}
@@ -276,7 +280,7 @@ function MailRowInner({
                                 <span className="block truncate transition-opacity md:group-hover:opacity-0 md:group-focus-within:opacity-0">{dateText}</span>
                             </div>
                         </div>
-                        <div className={cn('mt-0.5 truncate text-[13px]', unread ? 'font-bold' : 'font-medium')}>{subjectText}</div>
+                        <div className={cn('mt-0.5 truncate text-[13px]', unread ? 'font-bold' : 'font-medium')}>{ext.show && <ExternalBadge show style={ext.policy?.style} className="mr-1 align-middle" />}{ext.subject}</div>
                         {snippetLines > 0 && email.snippet ? (
                             <div className={cn('mt-0.5 w-full text-xs text-muted-foreground', snippetLines === 1 ? 'truncate' : 'line-clamp-2')}>{email.snippet}</div>
                         ) : null}

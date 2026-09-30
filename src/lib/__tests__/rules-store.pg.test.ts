@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { assertLocalPg, createUser, createEmail, uid } from './helpers/pg';
 import { prisma } from '../prisma';
-import { deleteRule, insertRule, loadRules, markRuleRun, updateRule, applyRulesToEmails } from '../rules/store';
+import { deleteRule, insertRule, loadRules, markRuleRun, updateRule } from '../rules/store';
+import { applyRulesToEmails } from '../rules/apply';
+import { toV2 } from '../rules/conditions';
 
 beforeAll(() => assertLocalPg());
 afterAll(async () => { await prisma.$disconnect(); });
@@ -20,7 +22,7 @@ describe('lib/rules/store.ts contra Postgres', () => {
         expect(r1.createdAt).toBeInstanceOf(Date);
         const all = await loadRules(a.id);
         expect(all.map((r) => r.name)).toEqual(['primera', 'segunda']);
-        expect(all[0].conditions).toEqual(cond);
+        expect(all[0].conditions).toEqual(toV2(cond));
         expect(all[0].actions).toEqual([{ type: 'star' }, { type: 'moveToFolder', folder: 'archive' }]);
         expect(all[0]).toMatchObject({ enabled: false, priority: 5, stopProcessing: true, userId: a.id });
         expect((await loadRules(a.id, true)).map((r) => r.id)).toEqual([r2.id]);
@@ -76,9 +78,7 @@ describe('lib/rules/store.ts contra Postgres', () => {
             name: 'r', enabled: true, priority: 1, conditions: { match: 'all', items: [{ field: 'from', op: 'contains', value: 'news' }] },
             actions: [{ type: 'addLabel', labelId: label.id }, { type: 'markRead' }, { type: 'archive' }], stopProcessing: false,
         });
-        const res = await applyRulesToEmails(a.id, [rule], [{
-            id: e.id, from: e.from, to: e.to, subject: e.subject, snippet: e.snippet, folder: 'inbox', read: false, starred: false, labels: [], _attachments: 0,
-        }]);
+        const res = await applyRulesToEmails(a.id, [rule], [{ id: e.id }]);
         expect(res).toEqual({ processed: 1, changed: 1 });
         const after = await prisma.email.findUnique({ where: { id: e.id }, include: { labels: true } });
         expect(after).toMatchObject({ read: true, folder: 'archive' });

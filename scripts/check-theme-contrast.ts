@@ -16,6 +16,8 @@ import { contrast, hslToHex } from '../src/lib/color';
 import { CONTRAST_REQUIREMENTS, DARK_ACCENT_SHADES, HUES, THEMES, TOKEN_KEYS, type ThemeDefinition, type ThemeTokens } from '../src/lib/themes';
 import { buildBrandThemes } from '../src/lib/brand-theme';
 import { BRAND_FIXTURES } from '../src/lib/theme-fixtures';
+import { BRAND_ICONS } from '../src/lib/expansions/brand-icons';
+import { BRAND_MIN_CONTRAST, BRAND_SURFACE_TOKENS, brandGlyphColor } from '../src/lib/expansions/icon-ref';
 
 const md = process.argv.includes('--md');
 let failures = 0;
@@ -103,6 +105,19 @@ try {
 } catch (e) {
     console.warn('No se pudo leer globals.css:', (e as Error).message);
 }
+
+// --- 5. Logotipos de marca (iconos de extensiones): >= 3:1 tras la correccion ---------
+let adjusted = 0;
+for (const t of [...THEMES, ...Object.entries(BRAND_FIXTURES).flatMap(([n, cfg]) => buildBrandThemes(cfg, { name: n })?.list ?? [])]) {
+    const surfaces = BRAND_SURFACE_TOKENS.map((k) => t.tokens[k]);
+    for (const icon of Object.values(BRAND_ICONS)) {
+        const color = brandGlyphColor(icon.hex, surfaces);
+        if (color !== icon.hex) adjusted++;
+        const worst = Math.min(...surfaces.map((s) => contrast(color, s)));
+        if (worst < BRAND_MIN_CONTRAST) { failures++; console.error(`FALLA  ${t.id}: logotipo ${icon.slug} = ${worst.toFixed(2)} (< ${BRAND_MIN_CONTRAST})`); }
+    }
+}
+console.log(`\nLogotipos de marca: ${Object.keys(BRAND_ICONS).length} iconos verificados en todos los temas (${adjusted} combinaciones con color ajustado).`);
 
 console.log(failures === 0 ? '\nOK: todos los temas (genericos y de empresa) cumplen AA.' : `\n${failures} comprobacion(es) fallida(s).`);
 process.exit(failures === 0 ? 0 : 1);

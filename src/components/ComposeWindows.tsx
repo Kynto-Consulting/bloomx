@@ -21,6 +21,9 @@ export function ComposeWindows() {
                     initialMinimized={window.minimized}
                     initialDraftId={window.draftId}
                     initialAttachments={window.attachments}
+                    inReplyToEmailId={window.inReplyToEmailId}
+                    replyMode={window.replyMode}
+                    attachOriginalEmlOf={window.attachOriginalEmlOf}
                     index={index}
                 />
             ))}

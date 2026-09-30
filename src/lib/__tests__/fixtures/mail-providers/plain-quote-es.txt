@@ -1,0 +1,18 @@
+Hola Luis,
+
+Confirmo la reunión del jueves a las 10:00.
+Te envío el acta esa misma tarde.
+
+Saludos,
+Ana
+
+--
+Ana Prueba
+Analista, Example Corp
+
+El mié, 8 ene 2025 a las 9:15, Luis Ejemplo <luis@example.test> escribió:
+> ¿Podemos reunirnos el jueves para revisar el informe?
+>
+>> Adjunto el borrador del informe trimestral.
+>>
+>>> Inicio de la conversación sobre el informe.

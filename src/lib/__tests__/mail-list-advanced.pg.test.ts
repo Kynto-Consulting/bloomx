@@ -188,7 +188,8 @@ function rng(seed: number) {
 describe('conteos por HILO: coinciden con lo que la interfaz dibuja (groupEmailsByThread)', () => {
     let user: { id: string; email: string; name: string };
     const SUBJECTS = ['Hola', 'Re: Hola', 'RE: re: Hola', 'Fwd: Hola', 'Hola ', 'hola', 'Invitación: Reunión', 'Invitación actualizada: Reunión', 'Accepted: Reunión',
-        'ab', 'Re: ab', '', '(No Subject)', 'Re: (No Subject)', 'Ñandú', 'Cancelado: Ñandú', 'Factura 2033', 'Re: Factura 2033', 'Updated: Factura 2033'];
+        'ab', 'Re: ab', '', '(No Subject)', 'Re: (No Subject)', 'Ñandú', 'Cancelado: Ñandú', 'Factura 2033', 'Re: Factura 2033', 'Updated: Factura 2033',
+        'AW: Angebot', 'Angebot', 'WG: AW: Angebot', 'SV: Tilbud', 'Tilbud', 'Antw: Offerte', 'Offerte', 'TR: Devis', 'Re[2]: Devis', 'Devis', '回复: 报价', '答复：报价', '报价', 'Rif: Preventivo', 'Preventivo', 'Odp: Oferta', 'PD: Oferta', 'RV: Oferta', 'ENC: Oferta', ' Re: Espacios ', 'Espacios'];
     const TOS = ['a@x.test', 'A@X.test', 'Ana <a@x.test>', '"B, Bee" <b@x.test>, c@x.test', 'c@x.test, "B, Bee" <b@x.test>', 'sin-arroba', ''];
     const CLEAN = [null, '', 'a@x.test', 'b@x.test'];
     let rows: Array<{ id: string; from: string; to: string; cleanTo: string | null; subject: string; createdAt: string; read: boolean; starred: boolean; folder: string; hasAtt: boolean; labelled: boolean }> = [];

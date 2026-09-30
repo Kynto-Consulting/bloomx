@@ -1,0 +1,70 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-signature",
+    "version": "1.0.0",
+    "name": "Email Signature",
+    "description": "Automatically append a signature to new emails",
+    "permissions": [
+        "local:secure-storage"
+    ],
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {}
+    },
+    "mounts": [
+        {
+            "point": "COMPOSER_INIT",
+            "handler": "appendSignature",
+            "config": {
+                "storageKey": "signature-content",
+                "action": "APPEND_BODY"
+            }
+        },
+        {
+            "point": "CUSTOM_SETTINGS_TAB",
+            "component": "MODAL",
+            "props": {
+                "title": "Email Signature",
+                "icon": "PenLine",
+                "onLoad": {
+                    "action": "SECURE_READ",
+                    "key": "signature-content",
+                    "targetState": "signature"
+                },
+                "children": [
+                    {
+                        "type": "TEXT",
+                        "props": {
+                            "content": "Create your email signature. It will be automatically added to new emails.",
+                            "className": "text-sm text-gray-500 mb-4"
+                        }
+                    },
+                    {
+                        "type": "FORM",
+                        "props": {
+                            "onSubmit": {
+                                "action": "SECURE_SAVE",
+                                "key": "signature-content",
+                                "value": "${state.signature}",
+                                "onSuccess": {
+                                    "action": "TOAST",
+                                    "message": "Signature saved"
+                                }
+                            },
+                            "fields": [
+                                {
+                                    "name": "content",
+                                    "label": "Signature Content",
+                                    "type": "richtext",
+                                    "defaultValue": "${state.signature.content}",
+                                    "placeholder": "Your name, title, contact info..."
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}

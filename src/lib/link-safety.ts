@@ -14,7 +14,7 @@ const SHORTENERS = new Set([
 ]);
 
 // Sufijos de dos niveles frecuentes para comparar "dominio registrable" sin la Public Suffix List.
-const TWO_LEVEL_SUFFIXES = new Set([
+export const TWO_LEVEL_SUFFIXES = new Set([
     'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'co.jp', 'com.br', 'com.mx',
     'com.ar', 'com.co', 'com.pe', 'com.cl', 'com.ve', 'com.ec', 'com.uy', 'com.bo', 'co.za', 'co.in', 'com.tr', 'com.cn', 'com.hk',
 ]);

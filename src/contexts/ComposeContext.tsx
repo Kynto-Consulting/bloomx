@@ -13,6 +13,11 @@ interface ComposeWindow {
     minimized: boolean;
     draftId?: string;
     attachments?: any[];
+    /** Correo al que se responde / que se reenvia (el servidor lo usa para encadenar el hilo). */
+    inReplyToEmailId?: string;
+    replyMode?: 'reply' | 'replyAll' | 'forward';
+    /** Reenviar como adjunto .eml: id del correo original cuyo .eml adjunta el servidor. */
+    attachOriginalEmlOf?: string;
 }
 
 interface ComposeContextType {
@@ -56,7 +61,10 @@ export function ComposeProvider({ children }: { children: React.ReactNode }) {
                 body: draft?.body || '',
                 minimized: draft?.minimized || false,
                 attachments: draft?.attachments || [],
-                draftId: draft?.draftId
+                draftId: draft?.draftId,
+                inReplyToEmailId: draft?.inReplyToEmailId,
+                replyMode: draft?.replyMode,
+                attachOriginalEmlOf: draft?.attachOriginalEmlOf,
             };
             return [...prev, newWindow];
         });

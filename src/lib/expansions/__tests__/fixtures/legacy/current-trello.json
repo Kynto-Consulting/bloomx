@@ -1,0 +1,173 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-trello",
+    "version": "1.1.0",
+    "name": "Trello Integration",
+    "description": "Create Trello cards from emails",
+    "permissions": [
+        "READ_EMAIL",
+        "ENV_READ:TRELLO_KEY",
+        "ENV_READ:TRELLO_TOKEN",
+        "HTTP_REQUEST",
+        "FORMATS"
+    ],
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {
+            "getBoards": {
+                "handler": "getBoards"
+            },
+            "getLists": {
+                "handler": "getLists"
+            },
+            "createCard": {
+                "handler": "createCard"
+            }
+        }
+    },
+    "mounts": [
+        {
+            "point": "EMAIL_TOOLBAR",
+            "component": {
+                "type": "BUTTON",
+                "props": {
+                    "label": "Trello",
+                    "icon": "KanbanSquare",
+                    "onClick": {
+                        "action": "OPEN_OVERLAY",
+                        "targetId": "trello-modal"
+                    }
+                }
+            }
+        },
+        {
+            "point": "OVERLAY",
+            "id": "trello-modal",
+            "component": {
+                "type": "MODAL",
+                "props": {
+                    "title": "Create Trello Card",
+                    "onLoad": {
+                        "action": "CALL_BACKEND",
+                        "function": "getBoards",
+                        "onSuccess": {
+                            "action": "SET_STATE",
+                            "key": "boards",
+                            "value": "${result}"
+                        }
+                    },
+                    "children": [
+                        {
+                            "type": "WIZARD",
+                            "props": {
+                                "steps": [
+                                    {
+                                        "title": "Select Board",
+                                        "content": [
+                                            {
+                                                "type": "SELECT",
+                                                "props": {
+                                                    "label": "Board",
+                                                    "options": "${state.boards}",
+                                                    "valueKey": "id",
+                                                    "labelKey": "name",
+                                                    "onChange": {
+                                                        "action": "CALL_BACKEND",
+                                                        "function": "getLists",
+                                                        "args": {
+                                                            "boardId": "${value}"
+                                                        },
+                                                        "onSuccess": {
+                                                            "actions": [
+                                                                {
+                                                                    "action": "SET_STATE",
+                                                                    "key": "lists",
+                                                                    "value": "${result}"
+                                                                },
+                                                                {
+                                                                    "action": "SET_STATE",
+                                                                    "key": "selectedBoard",
+                                                                    "value": "${value}"
+                                                                },
+                                                                {
+                                                                    "action": "NEXT_STEP"
+                                                                }
+                                                            ]
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "title": "Select List",
+                                        "content": [
+                                            {
+                                                "type": "SELECT",
+                                                "props": {
+                                                    "label": "List",
+                                                    "options": "${state.lists}",
+                                                    "valueKey": "id",
+                                                    "labelKey": "name",
+                                                    "onChange": {
+                                                        "actions": [
+                                                            {
+                                                                "action": "SET_STATE",
+                                                                "key": "selectedList",
+                                                                "value": "${value}"
+                                                            },
+                                                            {
+                                                                "action": "NEXT_STEP"
+                                                            }
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        ]
+                                    },
+                                    {
+                                        "title": "Card Details",
+                                        "content": [
+                                            {
+                                                "type": "FORM",
+                                                "props": {
+                                                    "onSubmit": {
+                                                        "action": "CALL_BACKEND",
+                                                        "function": "createCard",
+                                                        "args": {
+                                                            "listId": "${state.selectedList}",
+                                                            "name": "${formData.name}",
+                                                            "desc": "${formData.desc}"
+                                                        },
+                                                        "onSuccess": {
+                                                            "action": "TOAST",
+                                                            "message": "Card Created!"
+                                                        }
+                                                    },
+                                                    "fields": [
+                                                        {
+                                                            "name": "name",
+                                                            "label": "Card Title",
+                                                            "defaultValue": "${context.subject}"
+                                                        },
+                                                        {
+                                                            "name": "desc",
+                                                            "label": "Description",
+                                                            "type": "textarea",
+                                                            "defaultValue": "From: ${context.from}\n\n${context.emailContent | truncate:500}"
+                                                        }
+                                                    ]
+                                                }
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

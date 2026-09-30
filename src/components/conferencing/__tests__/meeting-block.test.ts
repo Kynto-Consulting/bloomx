@@ -62,7 +62,7 @@ describe('JoinMeetingButton', () => {
         expect(a.getAttribute('rel')).toBe('noopener noreferrer');
         expect(a.getAttribute('aria-label')).toBe('Unirse a la reunión de Google Meet');
         expect(a.textContent).toBe('Unirse a la reunión');
-        expect(a.querySelector('svg')?.getAttribute('data-provider-icon')).toBe('google-meet');
+        expect(a.querySelector('[data-provider-icon]')?.getAttribute('data-provider-icon')).toBe('google-meet');
     });
 
     it('enlaces no reconocidos o inseguros no generan boton', async () => {

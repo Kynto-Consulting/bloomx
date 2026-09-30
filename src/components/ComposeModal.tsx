@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useCompose } from '@/contexts/ComposeContext';
 // Local expansions removed.
 // import { clientExpansionRegistry } from '@/lib/expansions/client/registry';
+import { cleanOutgoingHtml } from '@/lib/outgoing-html';
 // import { ensureClientExpansions } from '@/lib/expansions/client/core-expansions';
 // Initialize client expansions
 // ensureClientExpansions();
@@ -69,6 +70,11 @@ interface ComposeModalProps {
     initialMinimized?: boolean;
     initialDraftId?: string;
     initialAttachments?: any[];
+    /** Correo al que se responde / que se reenvia (encadena el hilo en el servidor). */
+    inReplyToEmailId?: string;
+    replyMode?: 'reply' | 'replyAll' | 'forward';
+    /** Reenviar como adjunto .eml: el servidor adjunta el .eml del correo con este id. */
+    attachOriginalEmlOf?: string;
     index: number;
 }
 
@@ -83,6 +89,9 @@ export function ComposeModal({
     initialMinimized = false,
     initialDraftId,
     initialAttachments = [],
+    inReplyToEmailId,
+    replyMode,
+    attachOriginalEmlOf,
     index,
 }: ComposeModalProps) {
     const { closeCompose, toggleMinimize, updateCompose, windows } = useCompose();
@@ -95,7 +104,7 @@ export function ComposeModal({
     useEffect(() => {
         const subjectHint = String(initialSubject || '').trim();
         const mode = /^(fwd?|rv):/i.test(subjectHint) ? 'forward' : /^re:/i.test(subjectHint) ? (initialCc ? 'replyAll' : 'reply') : 'new';
-        emitComposeOpened({ mode, ...(initialDraftId ? { draftId: initialDraftId } : {}) });
+        emitComposeOpened({ mode: replyMode || mode, ...(initialDraftId ? { draftId: initialDraftId } : {}), ...(inReplyToEmailId ? { inReplyToEmailId } : {}) });
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
@@ -313,6 +322,8 @@ export function ComposeModal({
             subject,
             body,
             attachments: toDraftAttachments(attachments),
+            ...(inReplyToEmailId ? { inReplyToEmailId } : {}),
+            ...(inReplyToEmailId && replyMode ? { replyMode } : {}),
         };
         // Hasta la primera edicion real (el remitente se resuelve tras montar) no se guarda nada:
         // abrir una respuesta sin escribir no debe crear un borrador.
@@ -545,9 +556,17 @@ export function ComposeModal({
 
     /** Lo que realmente viaja en el correo: el cuerpo normal, o solo el enlace si el envio es sellado (cifrado aqui, en el navegador). */
     const prepareOutgoing = async (html: string, text: string, subjectLine: string): Promise<{ html: string; text: string }> => {
+        html = cleanOutgoingHtml(html); // nunca viajan overlays/controles de extensiones en el cuerpo
         if (!sealed) return { html, text };
         const link = await createSealedLink({ subject: subjectLine, html }, { password: sealPassword || undefined, maxViews: sealMaxViews });
         return buildSealedEmailBody(link);
+    };
+
+    /** Vinculo con el correo original (hilo) y modo, solo si existen: el servidor los valida. */
+    const replyLinkFields = {
+        ...(inReplyToEmailId ? { inReplyToEmailId } : {}),
+        ...(replyMode ? { replyMode } : {}),
+        ...(attachOriginalEmlOf ? { attachOriginalEmlOf } : {}),
     };
 
     const handleSchedule = async (date: Date) => {
@@ -584,6 +603,7 @@ export function ComposeModal({
                     text: outgoing.text,
                     html: outgoing.html,
                     attachments: attachmentsForSend,
+                    ...replyLinkFields,
                     scheduledAt: date.toISOString()
                 }),
             });
@@ -645,7 +665,8 @@ export function ComposeModal({
                     subject: finalSubject,
                     text: outgoing.text,
                     html: outgoing.html,
-                    attachments: attachmentsForSend
+                    attachments: attachmentsForSend,
+                    ...replyLinkFields,
                 }),
             });
             const result = await res.json().catch(() => null);
@@ -897,14 +918,15 @@ export function ComposeModal({
         emailContent: body,
         appendBody: (content: string) => {
             const currentBody = body;
+            content = cleanOutgoingHtml(content);
             const newVal = currentBody.includes(content) ? currentBody : currentBody + (currentBody ? '<br><br>' : '') + content;
             actions.setBody(newVal);
         },
         prependBody: (content: string) => {
-            editorRef.current?.prependContent(content);
+            editorRef.current?.prependContent(cleanOutgoingHtml(content));
         },
         insertBody: (content: string) => {
-            editorRef.current?.insertContent(content);
+            editorRef.current?.insertContent(cleanOutgoingHtml(content));
         },
         openPopover: (anchor: HTMLElement | DOMRect, content: React.ReactNode, options?: { width?: number | string, header?: boolean }) => {
             setPopover({ anchor, content, width: options?.width, header: options?.header });
@@ -1000,7 +1022,7 @@ export function ComposeModal({
 
     // Reunion creada: inserta el bloque (boton "Unirse" + datos de marcacion) y adjunta el ICS si la extension lo entrego.
     const handleConferencingInsert = useCallback((insertion: ComposerInsertion) => {
-        if (insertion.html) editorRef.current?.insertContent(insertion.html);
+        if (insertion.html) editorRef.current?.insertContent(cleanOutgoingHtml(insertion.html));
         if (insertion.attachment) setAttachments((prev) => [...prev, insertion.attachment]);
     }, []);
 

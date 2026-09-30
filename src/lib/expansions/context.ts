@@ -10,7 +10,7 @@
  */
 
 const DROP_KEYS = new Set([
-    'overlays', 'toolbarButtonMode', 'auth', 'user', 'env', 'services', 'settings', 'extension', 'domain',
+    'overlays', 'toolbarButtonMode', 'toolbarMeta', 'auth', 'user', 'env', 'services', 'settings', 'extension', 'domain',
     'onClose', 'close', 'openOverlay', 'openPopover', 'uploadAttachment',
 ]);
 const MAX_STRING = 200_000;

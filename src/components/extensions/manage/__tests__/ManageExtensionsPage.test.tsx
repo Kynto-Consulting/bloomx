@@ -109,11 +109,11 @@ describe('/extensions', () => {
 
     it('desactivar persiste, cambia el estado y desaparece el mount de ExtensionLoader', async () => {
         const m = await mount(<div><ExtensionLoader mountPoint="EMAIL_TOOLBAR" /><ManageExtensionsPage /></div>);
-        expect(byText('Boton Firma', 'button')).toBeTruthy();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Firma"]')).toBeTruthy();
         expect(sw('Firma')!.getAttribute('aria-checked')).toBe('true');
         await click(sw('Firma'));
         expect(sw('Firma')!.getAttribute('aria-checked')).toBe('false');
-        expect(byText('Boton Firma', 'button')).toBeNull();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Firma"]')).toBeNull();
         expect(q('[data-extension-id="signature"]')!.getAttribute('data-state')).toBe('user-disabled');
         expect(live()).toBe('Firma desactivada.');
         expect(localStorage.getItem('bloomx:ext-prefs:v1:u1')).toContain('signature');
@@ -121,13 +121,13 @@ describe('/extensions', () => {
         expect(names()).toEqual(['Firma']);
         // Reactivar devuelve el boton
         await click(sw('Firma'));
-        expect(byText('Boton Firma', 'button')).toBeTruthy();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Firma"]')).toBeTruthy();
         expect(m.container).toBeTruthy();
     });
 
     it('una extension desactivada por la organizacion avisa y no se monta aunque este activada', async () => {
         await mount(<div><ExtensionLoader mountPoint="EMAIL_TOOLBAR" /><ManageExtensionsPage /></div>);
-        expect(byText('Boton Apagada', 'button')).toBeNull();
+        expect(q('[data-extension-toolbar] button[aria-label="Boton Apagada"]')).toBeNull();
         expect(sw('Apagada')!.getAttribute('aria-describedby')).toBeTruthy();
     });
 

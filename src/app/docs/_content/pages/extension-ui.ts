@@ -1,4 +1,5 @@
 import type { Block, DocPageContent } from '../types';
+import { iconBlocks } from '../icon-docs';
 import { GAPS, TONES, UI_ACTIONS, UI_COMPONENTS, UI_LIMITS, type PropSpec } from '@/lib/expansions/ui-schema';
 
 /**
@@ -183,6 +184,7 @@ const page: DocPageContent = {
             ['`className`, `style`, `color`, `bg`...', 'Se eliminan con aviso: usa `tone`, `variant`, `size`, `gap`'],
             ['`IFRAME` (HTML en una prop)', 'Ya no se admite: usa `MARKDOWN` o componentes'],
         ] },
+        ...iconBlocks(true),
         { t: 'callout', kind: 'note', title: 'Límites', text: 'El HTML sigue siendo texto: `MARKDOWN` solo admite un subconjunto (negrita, cursiva, código, listas, encabezados, enlaces seguros). Los gráficos son SVG propios sin ejes complejos ni animaciones. `ContactPicker` usa la libreta del usuario (`/api/contacts/suggestions`). El backend compartido valida el manifest pero **aún no** valida el UI al publicar: la comprobación de UI la hacen el validador CLI y el frontend al cargar.' },
     ],
     en: [
@@ -257,6 +259,7 @@ const page: DocPageContent = {
             ['`className`, `style`, `color`, `bg`...', 'Dropped with a warning: use `tone`, `variant`, `size`, `gap`'],
             ['`IFRAME` (HTML in a prop)', 'No longer supported: use `MARKDOWN` or components'],
         ] },
+        ...iconBlocks(false),
         { t: 'callout', kind: 'note', title: 'Limits', text: 'HTML is still text: `MARKDOWN` only supports a subset (bold, italic, code, lists, headings, safe links). Charts are own SVG with no complex axes or animations. `ContactPicker` uses the user address book (`/api/contacts/suggestions`). The shared backend validates the manifest but **does not yet** validate the UI when publishing: the UI check is done by the CLI validator and by the frontend on load.' },
     ],
 };

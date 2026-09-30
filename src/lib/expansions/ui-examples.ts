@@ -101,7 +101,7 @@ export const UI_EXAMPLES: Record<string, UiExample[]> = {
     CODE: [{ title: 'Bloque copiable', node: n('CODE', { content: '{ "action": "TOAST", "message": "Hola" }', block: true, copyable: true, language: 'json' }) }],
     LINK: [{ title: 'Enlace y enlace con accion', node: n('ROW', { gap: 4 }, [n('LINK', { label: 'Documentacion', url: 'https://example.com/docs' }), n('LINK', { label: 'Mostrar aviso', tone: 'neutral', onClick: toast('Enlace pulsado', 'info') })]) }],
     MARKDOWN: [{ title: 'Markdown seguro', node: n('MARKDOWN', { content: '**Negrita**, *cursiva* y `codigo`.\n\n- Elemento uno\n- Elemento dos\n\n[Enlace](https://example.com)' }) }],
-    ICON: [{ title: 'Iconos por tono y tamano', node: n('ROW', { gap: 3 }, [n('ICON', { name: 'Mail', size: 'lg' }), n('ICON', { name: 'Check', tone: 'success', label: 'Correcto' }), n('ICON', { name: 'AlertTriangle', tone: 'warning', size: 'xl' })]) }],
+    ICON: [{ title: 'Iconos por tono y tamano', node: n('ROW', { gap: 3 }, [n('ICON', { name: 'Mail', size: 'lg' }), n('ICON', { name: 'Check', tone: 'success', label: 'Correcto' }), n('ICON', { name: 'AlertTriangle', tone: 'warning', size: 'xl' })]) }, { title: 'Logotipos de apps (brand:) e iniciales', node: n('ROW', { gap: 3 }, [n('ICON', { name: 'brand:zoom', size: 'xl', label: 'Zoom' }), n('ICON', { name: 'brand:googlemeet', size: 'xl', label: 'Google Meet' }), n('ICON', { name: 'brand:notion', size: 'xl', label: 'Notion' }), n('ICON', { name: 'initials:AB', size: 'xl', label: 'AB' })]) }],
 
     // ---- Acciones
     BUTTON: [

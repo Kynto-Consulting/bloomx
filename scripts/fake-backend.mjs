@@ -23,7 +23,8 @@ const credentialsFile = path.join(root, '.e2e', 'ext-credentials.json');
 const extRoot = path.join(root, '..', 'bloomx-extensions');
 
 // Extensiones reales del repo hermano (solo lectura local): menu "/" del editor + Zoom / Meet / Calendar.
-const EXT_DIRS = ['slash-commands', 'zoom', 'google-meet', 'calendar'];
+// E2E_EXT_EXTRA=notion,summarizer,... anade extensiones del repo hermano (para probar barras con muchos botones).
+const EXT_DIRS = ['slash-commands', 'zoom', 'google-meet', 'calendar', ...String(process.env.E2E_EXT_EXTRA || '').split(',').map((s) => s.trim()).filter(Boolean)];
 const installed = new Map(); // id canonico -> { dir, manifest }
 let extensions = [];
 for (const dir of EXT_DIRS) {
@@ -109,7 +110,10 @@ const server = http.createServer(async (req, res) => {
         return json(out.status, out.body, { 'x-bloomx-auth': 'signed' });
     }
     if ((req.url || '').startsWith('/api/config')) {
-        return json(200, { config: { id: 'e2e', name: 'localhost', displayName: 'Bloomx E2E', theme: { primaryColor: '#4f46e5', radius: 0.5 }, logo: null }, extensions });
+        // .e2e/theme.json (opcional): tema de empresa de PRUEBA (DomainThemeConfig) leido en cada peticion para cambiar de paleta sin reiniciar.
+        let theme = { primaryColor: '#4f46e5', radius: 0.5 };
+        try { theme = JSON.parse(fs.readFileSync(path.join(root, '.e2e', 'theme.json'), 'utf8')); } catch { /* tema por defecto */ }
+        return json(200, { config: { id: 'e2e', name: 'localhost', displayName: 'Bloomx E2E', theme, logo: null }, extensions });
     }
     json(200, { ok: true, extensions: [] });
 });

@@ -5,7 +5,11 @@ import { prisma } from '@/lib/prisma';
 import { sendPushNotification } from '@/lib/notifications/web-push';
 import { decryptObject, encryptObject } from '@/lib/encryption';
 import { createHash, timingSafeEqual } from 'crypto';
-import { applyRulesToEmails, isMissingRelation, loadRules } from '@/lib/rules/store';
+import { isMissingRelation, loadRules, migrateLegacyLabelRules } from '@/lib/rules/store';
+import { applyRulesToEmailIds } from '@/lib/rules/apply';
+import { backfillThreadHeaders, usersWithPendingThreads } from '@/lib/thread-backfill';
+
+const THREAD_BACKFILL_BATCH = 40;
 
 const FULL_CRON_INTERVAL_MS = 60 * 60 * 1000;
 const EVENT_REMINDER_INTERVAL_MS = 5 * 60 * 1000;
@@ -112,6 +116,7 @@ function checkCronSecret(req: NextRequest): boolean | null {
  */
 async function runRuleCatchUp(userId: string) {
     try {
+        await migrateLegacyLabelRules(userId).catch(() => 0);
         const rules = await loadRules(userId, true);
         if (rules.length === 0) return { processed: 0, changed: 0 };
 
@@ -123,15 +128,7 @@ async function runRuleCatchUp(userId: string) {
             ORDER BY e."createdAt" DESC LIMIT ${RULE_CATCHUP_BATCH}`;
         if (pending.length === 0) return { processed: 0, changed: 0 };
 
-        const emails = await prisma.email.findMany({
-            where: { id: { in: pending.map((p) => p.id) }, userId },
-            select: {
-                id: true, from: true, to: true, subject: true, snippet: true, folder: true, read: true, starred: true,
-                labels: { select: { id: true, name: true } },
-                _count: { select: { attachments: true } },
-            },
-        });
-        return await applyRulesToEmails(userId, rules, emails.map((e) => ({ ...e, _attachments: e._count.attachments })));
+        return await applyRulesToEmailIds(userId, rules, pending.map((p) => p.id));
     } catch (e) {
         if (!isMissingRelation(e)) console.error('[Cron] rule catch-up failed:', (e as any)?.message);
         return { processed: 0, changed: 0, error: true };
@@ -142,6 +139,8 @@ async function runForUser(userId: string, rawSettings: any, now: Date) {
     const settings: any = decryptObject(rawSettings || {});
     const reminders = await runEventReminders(userId, settings, now);
     const rules = await runRuleCatchUp(userId);
+    // Relleno perezoso de las cabeceras de hilo de correos antiguos (lote pequeno por ejecucion; tolera columnas ausentes)
+    const threads = await backfillThreadHeaders(userId, THREAD_BACKFILL_BATCH).catch(() => null);
 
     const lastRun = settings.lastCronRun ? new Date(settings.lastCronRun) : new Date(0);
     const fullDue = now.getTime() - lastRun.getTime() >= FULL_CRON_INTERVAL_MS;
@@ -157,7 +156,7 @@ async function runForUser(userId: string, rawSettings: any, now: Date) {
             },
         });
     }
-    return { reminders, rules, fullRun: fullDue };
+    return { reminders, rules, threads, fullRun: fullDue };
 }
 
 async function runGlobal(now: Date) {
@@ -168,6 +167,11 @@ async function runGlobal(now: Date) {
         rows.forEach((r) => ids.add(r.userId));
     } catch (e) {
         if (!isMissingRelation(e)) console.error('[Cron] list rule users failed:', (e as any)?.message);
+    }
+    try {
+        (await usersWithPendingThreads(MAX_USERS_PER_RUN)).forEach((id) => ids.add(id));
+    } catch (e) {
+        console.error('[Cron] list thread backfill users failed:', (e as any)?.message);
     }
     try {
         const events = await prisma.calendarEvent.findMany({

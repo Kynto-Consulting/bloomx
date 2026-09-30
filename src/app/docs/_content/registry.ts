@@ -26,6 +26,7 @@ import faq from './pages/faq';
 import adminConsole from './pages/admin-console';
 import conferencing from './pages/conferencing';
 import mailTransfer from './pages/mail-transfer';
+import spam from './pages/spam';
 
 /** slug ('' = /docs) -> contenido es/en. Debe tener una entrada por cada pagina de DOC_NAV (lo comprueba el test). */
 export const DOC_CONTENT: Record<string, DocPageContent> = {
@@ -56,4 +57,5 @@ export const DOC_CONTENT: Record<string, DocPageContent> = {
     admin: adminConsole,
     conferencing,
     'mail-transfer': mailTransfer,
+    spam,
 };

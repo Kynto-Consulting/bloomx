@@ -256,6 +256,8 @@ export function flagsFromHeaders(h: Record<string, string[]>): FlagInfo {
 export interface MessagePlacement {
     folder: SystemFolder;
     labels: string[];
+    /** Subconjunto de `labels` que viene de una CARPETA del origen (Outlook, Thunderbird, ZIP/Maildir): se importan como etiquetas de comportamiento 'folder'. */
+    folderLabels?: string[];
     read: boolean;
     starred: boolean;
     /** Carpeta original si el mensaje esta en papelera/spam (para "restaurar"). */
@@ -284,7 +286,8 @@ export function decidePlacement(h: Record<string, string[]>, pathFolder?: string
 
     for (const l of gmail.userLabels) labels.add(l);
     for (const l of flags.tags) labels.add(l);
-    if (path?.label && source !== 'gmail' && source !== 'bloomx') labels.add(path.label);
+    const folderLabels: string[] = [];
+    if (path?.label && source !== 'gmail' && source !== 'bloomx' && !path.drafts) { labels.add(path.label); folderLabels.push(path.label); }
     if (path?.drafts) labels.add('Drafts');
 
     const starred = flags.starred || gmail.starred;
@@ -297,7 +300,7 @@ export function decidePlacement(h: Record<string, string[]>, pathFolder?: string
     // Un borrador en la papelera/spam de Gmail (etiquetas Drafts+Trash) sigue siendo papelera: solo cuentan los borradores "vivos"
     const bx = first('x-bloomx-draft').trim();
     const draft = (bx !== '' && bx !== '0' && bx.toLowerCase() !== 'false') || ((gmail.drafts || !!path?.drafts) && folder !== 'trash' && folder !== 'spam');
-    return { folder, labels: Array.from(labels).slice(0, 30), read, starred, previousFolder, source, draft };
+    return { folder, labels: Array.from(labels).slice(0, 30), folderLabels, read, starred, previousFolder, source, draft };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

@@ -73,6 +73,15 @@ export const UI_LIMITS = {
 const BLOCKED_KEYS = ["__proto__", "constructor", "prototype"];
 const NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
 const ICON_RE = /^[A-Za-z][A-Za-z0-9]{0,39}$/;
+/**
+ * Referencia de icono CON ESQUEMA: `brand:<slug>` (logotipo de una app integrada), `lucide:<Nombre>` (icono funcional) o
+ * `initials:<XY>` (1 a 3 letras). El nombre Lucide sin esquema sigue valiendo (compatibilidad). Los slugs de `brand:` los define
+ * bloomx/src/lib/expansions/brand-icons.ts; un slug desconocido NO invalida el manifest (se muestra una ficha con la inicial).
+ */
+export const ICON_REF_RE = /^(?:brand:[a-z][a-z0-9]{0,39}|lucide:[A-Za-z][A-Za-z0-9]{0,39}|initials:[A-Za-z0-9]{1,3})$/;
+export function isIconRef(value: unknown): value is string {
+    return typeof value === "string" && ICON_REF_RE.test(value);
+}
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const HTML_RE = /<\s*\/?\s*(?:script|style|iframe|object|embed|link|meta|img|svg|form|input|base|body|html|a\s|on\w+\s*=)/i;
 const CSS_FN_RE = /(?:url|expression|var|calc)\s*\(|javascript\s*:|data\s*:\s*text\/html/i;
@@ -115,7 +124,7 @@ const S = {
     num: (doc: string, o: SpecOpts = {}): PropSpec => ({ k: "number", doc, ...o }),
     bool: (doc: string, o: SpecOpts = {}): PropSpec => ({ k: "boolean", doc, ...o }),
     en: (values: readonly (string | number)[], doc: string, o: SpecOpts = {}): PropSpec => ({ k: "enum", values, doc, ...o }),
-    icon: (doc = "Nombre de icono Lucide (p. ej. \"Mail\"). Un nombre desconocido se muestra como icono generico."): PropSpec => ({ k: "icon", doc }),
+    icon: (doc = "Icono: nombre Lucide (p. ej. \"Mail\"), \"lucide:<Nombre>\", \"brand:<slug>\" (logotipo de una app integrada, p. ej. \"brand:zoom\") o \"initials:<XY>\". Un nombre desconocido se muestra como icono generico."): PropSpec => ({ k: "icon", doc }),
     url: (doc: string, o: SpecOpts = {}): PropSpec => ({ k: "url", doc, ...o }),
     hex: (doc: string): PropSpec => ({ k: "color", doc }),
     regex: (doc: string): PropSpec => ({ k: "regex", doc }),
@@ -127,6 +136,18 @@ const S = {
     rec: (of: PropSpec, doc: string): PropSpec => ({ k: "record", of, doc }),
     obj: (shape: Record<string, PropSpec>, doc: string): PropSpec => ({ k: "object", shape, doc }),
 };
+
+/**
+ * Pista para las BARRAS de acciones (EMAIL_TOOLBAR, COMPOSER_TOOLBAR, CALENDAR_TOOLBAR, CONTACTS_TOOLBAR): la app muestra cada accion
+ * como un boton de icono compacto y manda el resto al menu "Extensiones". `pinned` = aparece anclada por defecto (el usuario puede
+ * anclar/desanclar); `priority` ordena (menor primero); `label` sustituye al texto del tooltip; `description` es la linea corta del menu.
+ */
+const TOOLBAR_HINT = S.obj({
+    pinned: S.bool("Anclada en la barra por defecto."),
+    priority: S.num("Orden en la barra y el menu (menor primero).", { min: 0, max: 1000 }),
+    label: S.text("Nombre corto para el tooltip y el menu (por defecto, el label del boton)."),
+    description: S.text("Descripcion de una linea para el menu de extensiones."),
+}, "Como se presenta la accion en las barras.");
 
 const tone = (def = "neutral") => S.en(TONES, "Intencion semantica; el tema decide el color.", { def });
 const size = (def = "md") => S.en(SIZES, "Tamano en escala.", { def });
@@ -297,7 +318,7 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
     },
     ICON: {
         category: "typography",
-        doc: "Icono Lucide decorativo.",
+        doc: "Icono decorativo: Lucide, \"brand:<slug>\" (logotipo de una app integrada) o \"initials:<XY>\".",
         props: { name: S.icon(), size: S.en(SIZES_XL, "Tamano.", { def: "md" }), tone: tone(), label: S.text("Nombre accesible (si no es decorativo).") },
     },
 
@@ -313,12 +334,13 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
             loading: S.bool("Muestra el indicador de carga y bloquea."), disabled: S.bool("Deshabilita."),
             submit: S.bool("Envia el FORM que lo contiene."), showLabel: S.bool("false = solo icono (barras compactas).", { def: true }),
             onClick: S.action("Accion al pulsar."), menuOptions: S.arr(MENU_ITEM, "Obsoleto: usa MENU."),
+            toolbar: TOOLBAR_HINT,
         },
     },
     ICON_BUTTON: {
         category: "action",
         doc: "Boton solo con icono; `label` es obligatorio (nombre accesible y tooltip).",
-        props: { icon: S.icon(), label: S.text("Nombre accesible.", { required: true }), tone: tone(), variant: S.en(BUTTON_VARIANTS, "Aspecto.", { def: "ghost" }), size: size(), loading: S.bool("Cargando."), disabled: S.bool("Deshabilita."), onClick: S.action("Accion al pulsar.") },
+        props: { icon: S.icon(), label: S.text("Nombre accesible.", { required: true }), tone: tone(), variant: S.en(BUTTON_VARIANTS, "Aspecto.", { def: "ghost" }), size: size(), loading: S.bool("Cargando."), disabled: S.bool("Deshabilita."), onClick: S.action("Accion al pulsar."), toolbar: TOOLBAR_HINT },
     },
     BUTTON_GROUP: {
         category: "action", children: true,
@@ -332,6 +354,7 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
             label: S.text("Texto del boton."), icon: S.icon(), tone: tone(), variant: S.en(BUTTON_VARIANTS, "Aspecto.", { def: "outline" }), size: size(),
             showLabel: S.bool("false = solo icono.", { def: true }), items: S.arr(MENU_ITEM, "Elementos."),
             align: S.en(["start", "end"], "Lado por el que se abre.", { def: "start" }),
+            toolbar: TOOLBAR_HINT,
         },
     },
     IMAGE_BUTTON: {
@@ -668,6 +691,85 @@ function isObject(value: unknown): value is Record<string, any> {
     return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Textos por idioma
+// ---------------------------------------------------------------------------------------------------------------
+//
+// Cualquier prop de TEXTO (label, content, placeholder, title, message...) puede ser un objeto por idioma en lugar de un string:
+//   { "label": { "es": "Guardar", "en": "Save" } }
+// El renderer (y el frontend al cargar la extension) lo resuelve al idioma del usuario con `localizeUi`; si falta ese idioma cae a
+// en, luego es, luego el primero. Un string normal sigue funcionando igual (retrocompatible). Se valida cada variante como texto.
+
+const LANG_KEY_RE = /^[a-z]{2}(?:-[A-Za-z]{2})?$/;
+
+/** `{es: "...", en: "..."}`: objeto no vacio (max 12 idiomas) cuyas claves son codigos de idioma y cuyos valores son texto. */
+export function isI18nText(value: unknown): value is Record<string, string> {
+    if (!isObject(value)) return false;
+    const keys = Object.keys(value);
+    if (keys.length === 0 || keys.length > 12) return false;
+    for (const key of keys) if (!LANG_KEY_RE.test(key) || typeof value[key] !== "string") return false;
+    return true;
+}
+
+/** Variante para `lang` (exacta, base "es" de "es-MX", en, es, o la primera). */
+export function pickI18nText(value: Record<string, string>, lang: string): string {
+    const wanted = String(lang || "").toLowerCase();
+    const base = wanted.split("-")[0];
+    const byLower: Record<string, string> = {};
+    for (const key of Object.keys(value)) byLower[key.toLowerCase()] = value[key];
+    const hit = [wanted, base, "en", "es"].find((candidate) => candidate && typeof byLower[candidate] === "string");
+    return hit ? byLower[hit] : value[Object.keys(value)[0]];
+}
+
+/** Claves cuyo valor es TEXTO segun el catalogo (label, content, message...): solo ahi se interpretan los objetos por idioma. */
+let textKeys: Record<string, true> | null = null;
+function i18nTextKeys(): Record<string, true> {
+    if (textKeys) return textKeys;
+    const keys: Record<string, true> = {};
+    const not = ["name", "key", "id", "value", "bind", "bindTo", "function", "action", "type", "url", "href", "icon", "provider", "targetState", "targetId"];
+    const visit = (name: string | null, spec: PropSpec | undefined, depth: number) => {
+        if (!spec || depth > 6) return;
+        if (name && (spec.k === "text" || spec.k === "string") && not.indexOf(name) === -1) keys[name] = true;
+        if (spec.of) visit(null, spec.of, depth + 1);
+        if (spec.shape) for (const child of Object.keys(spec.shape)) visit(child, spec.shape[child], depth + 1);
+    };
+    for (const type of Object.keys(UI_COMPONENTS)) for (const prop of Object.keys(UI_COMPONENTS[type].props)) visit(prop, UI_COMPONENTS[type].props[prop], 0);
+    for (const prop of Object.keys(COMMON_PROPS)) visit(prop, COMMON_PROPS[prop], 0);
+    for (const action of Object.keys(UI_ACTIONS)) for (const prop of Object.keys(UI_ACTIONS[action].props)) visit(prop, UI_ACTIONS[action].props[prop], 0);
+    textKeys = keys;
+    return keys;
+}
+
+/**
+ * Resuelve los textos por idioma de un UI JSON (o de un manifest entero) al idioma `lang`. No modifica la entrada y devuelve la
+ * MISMA referencia si no hay nada que resolver (para no romper caches por identidad).
+ */
+export function localizeUi<T = any>(ui: T, lang: string): T {
+    const keys = i18nTextKeys();
+    const walk = (value: any, key: string | null, depth: number): any => {
+        if (depth > 60 || value === null || typeof value !== "object") return value;
+        if (Array.isArray(value)) {
+            let changed = false;
+            const out = value.map((item) => {
+                const next = walk(item, key, depth + 1);
+                if (next !== item) changed = true;
+                return next;
+            });
+            return changed ? out : value;
+        }
+        if (key !== null && keys[key] === true && isI18nText(value)) return pickI18nText(value, lang);
+        let changed = false;
+        const out: Record<string, any> = {};
+        for (const k of Object.keys(value)) {
+            const next = walk(value[k], k, depth + 1);
+            if (next !== value[k]) changed = true;
+            out[k] = next;
+        }
+        return changed ? out : value;
+    };
+    return walk(ui, null, 0) as T;
+}
+
 function hasExpression(value: string): boolean {
     return value.indexOf("${") !== -1;
 }
@@ -835,7 +937,8 @@ export function validateUi(input: unknown, options: UiValidateOptions = {}): UiV
             case "text": case "string": {
                 if (typeof value === "string") return checkString(spec, value, path);
                 if (typeof value === "number" || typeof value === "boolean") return;
-                return err(path, "type", `Debe ser texto (recibido ${Array.isArray(value) ? "arreglo" : typeof value})`);
+                if (isI18nText(value)) { for (const lang of Object.keys(value)) checkString(spec, value[lang], `${path}.${lang}`); return; }
+                return err(path, "type", `Debe ser texto o un objeto por idioma {es, en} (recibido ${Array.isArray(value) ? "arreglo" : typeof value})`);
             }
             case "name": {
                 if (typeof value !== "string") return err(path, "type", "Debe ser un nombre (texto)");
@@ -867,7 +970,7 @@ export function validateUi(input: unknown, options: UiValidateOptions = {}): UiV
             case "icon": {
                 if (typeof value !== "string") return err(path, "type", "Debe ser el nombre de un icono (texto)");
                 if (isExpr) return checkString(spec, value, path);
-                if (!ICON_RE.test(value) && value.length > 8) err(path, "bad-icon", `Icono invalido "${value}": usa un nombre Lucide (p. ej. "Mail")`);
+                if (!ICON_RE.test(value) && !ICON_REF_RE.test(value) && (value.length > 8 || value.indexOf(":") !== -1)) err(path, "bad-icon", `Icono invalido "${value}": usa un nombre Lucide (p. ej. "Mail"), "brand:<slug>", "lucide:<Nombre>" o "initials:<XY>"`);
                 return;
             }
             case "url": {

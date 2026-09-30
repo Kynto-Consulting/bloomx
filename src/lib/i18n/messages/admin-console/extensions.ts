@@ -156,6 +156,7 @@ export const extensionsEs = {
         backend_error: 'El servicio de extensiones devolvió un error.',
         rate_limited: 'Demasiados intentos. Espera un momento.',
         EXTENSION_NOT_ENABLED: 'Activa la extensión antes de marcarla como obligatoria.',
+        EXTENSION_INVALID: 'La versión publicada en el catálogo no es válida y no se puede aplicar todavía. Hay que republicar la extensión con "sync-extensions" y volver a intentarlo.',
         installedLoad: 'No se pudo cargar el estado de instalación.',
     },
     order: {
@@ -169,6 +170,11 @@ export const extensionsEs = {
         upShort: 'Subir',
         downShort: 'Bajar',
         needTwo: 'Instala al menos dos extensiones para poder ordenarlas.',
+    },
+    manifest: {
+        invalidTitle: 'Manifest inválido: esta extensión no se carga.',
+        degradedTitle: 'Se descartaron {count} elemento(s) de esta extensión por errores; el resto funciona.',
+        updateHint: 'Se está usando la versión {from}; el catálogo tiene la {to}: actualiza.',
     },
     detail: {
         close: 'Cerrar detalles',
@@ -468,6 +474,7 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         backend_error: 'The extensions service returned an error.',
         rate_limited: 'Too many attempts. Wait a moment.',
         EXTENSION_NOT_ENABLED: 'Enable the extension before marking it as mandatory.',
+        EXTENSION_INVALID: 'The version published in the catalog is not valid and cannot be applied yet. The extension must be republished with "sync-extensions" and then retried.',
         installedLoad: 'The installation state could not be loaded.',
     },
     order: {
@@ -481,6 +488,11 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         upShort: 'Up',
         downShort: 'Down',
         needTwo: 'Install at least two extensions to be able to order them.',
+    },
+    manifest: {
+        invalidTitle: 'Invalid manifest: this extension is not loaded.',
+        degradedTitle: '{count} element(s) of this extension were discarded because of errors; the rest works.',
+        updateHint: 'Version {from} is in use; the catalog has {to}: update.',
     },
     detail: {
         close: 'Close details',

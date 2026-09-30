@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/components/I18nProvider';
 import type { SlashCommand } from '@/lib/slash-commands';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 
 export interface SlashMenuProps {
     /** Prefijo de ids (el editor referencia `${id}-listbox` y `${id}-option-N` con aria-controls/activedescendant). */
@@ -73,7 +74,9 @@ export function SlashMenu({ id, commands, activeIndex, x, y, onSelect, onHover }
                                     active ? 'bg-primary/10 text-primary' : 'hover:bg-muted',
                                 )}
                             >
-                                <div aria-hidden="true" className="flex h-5 w-5 items-center justify-center rounded bg-secondary/50 text-[10px] font-bold text-muted-foreground">/</div>
+                                {cmd.extensionIcon
+                                    ? <ExtensionIcon icon={cmd.extensionIcon} size={20} />
+                                    : <div aria-hidden="true" className="flex h-5 w-5 items-center justify-center rounded bg-secondary/50 text-[10px] font-bold text-muted-foreground">/</div>}
                                 <div className="flex min-w-0 flex-col leading-tight">
                                     <span className="truncate text-xs font-semibold">
                                         {cmd.key}

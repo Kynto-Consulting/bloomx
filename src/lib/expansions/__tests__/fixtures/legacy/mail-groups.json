@@ -1,0 +1,75 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-mail-groups",
+    "version": "1.0.0",
+    "name": "Mail Groups",
+    "description": "Create email aliases (e.g. @team) that expand to multiple recipients.",
+    "permissions": [
+        "READ_USER",
+        "local:secure-storage"
+    ],
+    "mounts": [
+        {
+            "point": "CUSTOM_SETTINGS_TAB",
+            "component": "MODAL",
+            "props": {
+                "title": "Mail Groups",
+                "onLoad": {
+                    "action": "SECURE_READ",
+                    "key": "mail-groups-data",
+                    "targetState": "groups"
+                },
+                "children": [
+                    {
+                        "type": "TEXT",
+                        "props": {
+                            "content": "Configure your email aliases below. Use them in the composer (e.g., @group) and press Enter to expand.",
+                            "className": "text-sm text-gray-500 mb-4"
+                        }
+                    },
+                    {
+                        "type": "FORM",
+                        "props": {
+                            "onSubmit": {
+                                "action": "SECURE_SAVE",
+                                "key": "mail-groups-data",
+                                "value": "${state.groups}",
+                                "onSuccess": {
+                                    "action": "TOAST",
+                                    "message": "Groups saved locally"
+                                }
+                            },
+                            "fields": [
+                                {
+                                    "name": "groupName",
+                                    "label": "New Alias (e.g. @team)",
+                                    "placeholder": "@team"
+                                },
+                                {
+                                    "name": "emails",
+                                    "label": "Email Addresses (comma separated)",
+                                    "type": "textarea",
+                                    "placeholder": "user1@example.com, user2@example.com"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        },
+        {
+            "point": "ON_RECIPIENTS_CHANGE_HANDLER",
+            "priority": "HIGH",
+            "handler": "expandGroups"
+        }
+    ],
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {
+            "expandGroups": {
+                "handler": "expandGroups"
+            }
+        }
+    }
+}

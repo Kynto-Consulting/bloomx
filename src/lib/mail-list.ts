@@ -1,5 +1,7 @@
 // Logica pura de la lista de correo (sin React ni DOM) para poder probarla con vitest.
 import { ACCENT_FROM, ACCENT_TO } from '@/lib/db/mail-sql';
+import { buildReplyQuote, buildReplySubject, type ReplyDeps } from '@/lib/reply-builder';
+import { addressesOf, effectiveThreadKey, normalizeSubject as normalizeSubjectShared, recipientKeyOf } from '@/lib/threading';
 
 export interface LabelRef {
     id: string;
@@ -9,6 +11,15 @@ export interface LabelRef {
     count?: number;
     /** Total de correos con la etiqueta (sin contar papelera ni spam). */
     total?: number;
+    /** Jerarquia y comportamiento (etiquetas anidadas: ver lib/labels/model.ts). Ausentes en etiquetas planas antiguas. */
+    parentId?: string | null;
+    behavior?: 'tag' | 'folder';
+    /** Ruta completa ("Trabajo/Proyecto A"); `name` es solo el segmento. */
+    fullPath?: string;
+    icon?: string | null;
+    sortOrder?: number;
+    showInSidebar?: boolean;
+    showUnread?: boolean;
 }
 
 export interface ListEmail {
@@ -93,6 +104,13 @@ export function normalizeLabelList(raw: unknown): LabelRef[] {
             color: item.color ?? null,
             count: typeof item.count === 'number' ? item.count : 0,
             ...(typeof item.total === 'number' ? { total: item.total } : {}),
+            ...(typeof item.parentId === 'string' ? { parentId: item.parentId } : {}),
+            ...(item.behavior === 'folder' || item.behavior === 'tag' ? { behavior: item.behavior } : {}),
+            ...(typeof item.fullPath === 'string' && item.fullPath ? { fullPath: item.fullPath } : {}),
+            ...(typeof item.icon === 'string' ? { icon: item.icon } : {}),
+            ...(typeof item.sortOrder === 'number' ? { sortOrder: item.sortOrder } : {}),
+            ...(typeof item.showInSidebar === 'boolean' ? { showInSidebar: item.showInSidebar } : {}),
+            ...(typeof item.showUnread === 'boolean' ? { showUnread: item.showUnread } : {}),
         });
     }
     return out;
@@ -177,28 +195,15 @@ export function labelSelectionState(
 // Hilos / agrupacion
 // ---------------------------------------------------------------------------
 
-export function normalizeSubject(subject: string): string {
-    if (!subject) return '';
-    return subject
-        .replace(/^((re|fwd|rv|enc|invitaci[oó]n|invitaci[oó]n actualizada|accepted|declined|tentative|cancelado|canceled|updated): ?)+/gi, '')
-        .trim();
-}
+/** Asunto sin prefijos Re:/Fwd:/... en cualquier idioma. UNA sola definicion (lib/threading.ts), la misma que usa el SQL. */
+export const normalizeSubject = (subject: string): string => normalizeSubjectShared(subject);
 
 export function extractRecipientEmails(value?: string | null): string[] {
-    return String(value || '')
-        .split(',')
-        .map((entry) => String(entry || '').trim().toLowerCase())
-        .map((entry) => {
-            const bracketMatch = entry.match(/<([^>]+)>/);
-            return (bracketMatch?.[1] || entry).trim().toLowerCase();
-        })
-        .filter((entry) => entry.includes('@'));
+    return addressesOf(value);
 }
 
 export function getRecipientThreadKey(email: Pick<ListEmail, 'to' | 'cleanTo'>): string {
-    const normalized = extractRecipientEmails(email.cleanTo || email.to);
-    if (normalized.length > 0) return normalized.join(', ');
-    return String(email.cleanTo || email.to || '').trim().toLowerCase();
+    return recipientKeyOf(email);
 }
 
 export interface EmailGroup<T extends ListEmail = ListEmail> {
@@ -210,16 +215,14 @@ export interface EmailGroup<T extends ListEmail = ListEmail> {
 
 const time = (e: { createdAt: string }) => new Date(e.createdAt).getTime() || 0;
 
+/**
+ * Agrupa en hilos. Clave = `threadKey` guardada (cabeceras Message-ID/In-Reply-To/References, lib/threading.ts) o, en correos antiguos
+ * sin ella, la clave heuristica heredada (destinatarios + asunto normalizado). Espejo exacto en SQL: mail-list-sql.ts (THREAD_KEY_SQL).
+ */
 export function groupEmailsByThread<T extends ListEmail>(emails: T[]): EmailGroup<T>[] {
     const groups: Record<string, T[]> = {};
     for (const email of emails) {
-        const normalized = normalizeSubject(email.subject || '');
-        if (!normalized || normalized.length < 3 || normalized === '(No Subject)') {
-            groups[`__unique_${email.id}`] = [email];
-            continue;
-        }
-        const key = `${getRecipientThreadKey(email)}::${normalized}`;
-        (groups[key] ||= []).push(email);
+        (groups[effectiveThreadKey(email)] ||= []).push(email);
     }
     const list = Object.values(groups).map((g) => {
         const sorted = [...g].sort((a, b) => time(b) - time(a));
@@ -384,28 +387,31 @@ export function classifyBulkResponse(status: number): 'ok' | 'revert' {
 // Respuesta rapida desde la lista
 // ---------------------------------------------------------------------------
 
-function escapeHtmlText(value: string): string {
-    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
+/**
+ * Respuesta rapida desde la lista. La cita (estructura Gmail/Outlook, saneada, con tope de tamano) la construye
+ * lib/reply-builder.ts; aqui solo se adapta la firma historica.
+ */
 export function buildQuickReply(
     email: { from: string; replyTo?: string | null; subject?: string | null; createdAt: string },
     contentHtml: string,
+    /** Fecha ya formateada; si va vacia se usa la fecha larga con zona segun `deps.locale`. */
     formattedDate: string,
     /** Texto de la cabecera de la cita en el idioma activo (recibe fecha y remitente ya formateados). */
-    quoteHeader?: (date: string, from: string) => string
+    quoteHeader?: (date: string, from: string) => string,
+    /** Sanitizador (DOMPurify en el cliente), locale, zona... ver ReplyDeps. */
+    deps: Partial<ReplyDeps> = {},
 ) {
-    const subject = email.subject || '';
-    // El remitente ("Ana <ana@x.com>") se escapa: sin esto el "<...>" se interpretaba como una etiqueta.
-    const headerText = escapeHtmlText(quoteHeader
-        ? quoteHeader(formattedDate, email.from)
-        : `On ${formattedDate}, ${email.from} wrote:`);
-    const header = `<div dir="ltr" class="gmail_attr">${headerText}<br></div>`;
-    const quote = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${contentHtml || ''}</blockquote>`;
+    const quote = buildReplyQuote(email, contentHtml || '', {
+        ...deps,
+        t: quoteHeader
+            ? (key, params) => (key === 'emailList.quoteHeader' && params ? quoteHeader(String(params.date), String(params.from)) : (deps.t ? deps.t(key, params) : key))
+            : deps.t,
+        formatDate: formattedDate ? () => formattedDate : deps.formatDate,
+    });
     return {
         to: email.replyTo || email.from,
-        subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
-        body: `<p></p><br><div class="gmail_quote">${header}${quote}</div>`,
+        subject: buildReplySubject(email.subject),
+        body: quote.body,
     };
 }
 

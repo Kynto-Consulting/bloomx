@@ -3,7 +3,8 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-// Un solo arbol montado segun el viewport: sin ids duplicados, sin doble suscripcion (atajos / escuchas / peticiones).
+// Un solo arbol montado segun el modo del shell (barra fija / riel / movil): sin ids duplicados, sin doble suscripcion
+// (atajos / escuchas / peticiones) y con la barra lateral compartida por todas las pantallas.
 
 const mounts = vi.hoisted(() => ({ list: 0, listEver: 0, view: 0, sidebar: 0, unmounts: 0 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams('id=e1'), useRouter: () => ({ push: vi.fn() }) }));
@@ -30,43 +31,35 @@ vi.mock('@/components/MailView', async () => {
     return { MailView: () => { R.useEffect(() => { mounts.view++; return () => { mounts.view--; }; }, []); return R.createElement('article', { id: 'mail-view' }); } };
 });
 vi.mock('@/components/SettingsModal', () => ({ SettingsModal: () => null }));
-vi.mock('@/components/I18nProvider', () => ({ useI18n: () => ({ t: (k: string) => k }) }));
+vi.mock('@/contexts/ComposeContext', () => ({ useCompose: () => ({ openCompose: vi.fn() }) }));
+vi.mock('@/components/I18nProvider', () => ({ useI18n: () => ({ t: (k: string) => k, locale: 'es' }) }));
 
-import { DESKTOP_QUERY, LoadingScreen, MainApp } from '../HomeLayouts';
+import { LIST_PANEL, LoadingScreen, MainApp, READER_PANEL } from '../HomeLayouts';
+import { AppShell } from '../layout/AppShell';
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 let host: HTMLDivElement;
 let root: Root;
-let matches = true;
-const listeners = new Set<() => void>();
 
-function stubMatchMedia() {
-    vi.stubGlobal('matchMedia', (q: string) => ({
-        get matches() { return q === DESKTOP_QUERY ? matches : false; },
-        media: q,
-        addEventListener: (_: string, cb: () => void) => listeners.add(cb),
-        removeEventListener: (_: string, cb: () => void) => listeners.delete(cb),
-        addListener: (cb: () => void) => listeners.add(cb),
-        removeListener: (cb: () => void) => listeners.delete(cb),
-    }));
-    (window as any).matchMedia = (globalThis as any).matchMedia;
-}
 const duplicateIds = () => {
     const seen = new Map<string, number>();
     document.querySelectorAll('[id]').forEach((el) => seen.set(el.id, (seen.get(el.id) ?? 0) + 1));
     return Array.from(seen).filter(([, n]) => n > 1).map(([id]) => id);
 };
-const setViewport = async (desktop: boolean) => {
-    matches = desktop;
-    await act(async () => { listeners.forEach((cb) => cb()); });
+const setWidth = async (w: number) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: w });
+    await act(async () => { window.dispatchEvent(new Event('resize')); });
+};
+const app = () => React.createElement(AppShell, null, React.createElement(MainApp));
+const mountApp = async (w: number) => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: w });
+    await act(async () => { root.render(app()); });
 };
 
 beforeEach(() => {
     Object.assign(mounts, { list: 0, listEver: 0, view: 0, sidebar: 0, unmounts: 0 });
-    listeners.clear();
-    matches = true;
-    stubMatchMedia();
+    window.localStorage.clear();
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -74,47 +67,68 @@ beforeEach(() => {
 afterEach(() => {
     act(() => root.unmount());
     host.remove();
-    vi.unstubAllGlobals();
 });
 
-describe('Home: un solo arbol montado segun el viewport', () => {
-    it('escritorio: lista, lector y barra lateral UNA vez y sin ids duplicados', async () => {
-        await act(async () => { root.render(React.createElement(MainApp)); });
+describe('Home: un solo arbol montado segun el modo del shell', () => {
+    it('escritorio: barra, lista y lector UNA vez y sin ids duplicados', async () => {
+        await mountApp(1280);
         expect(mounts).toMatchObject({ list: 1, view: 1, sidebar: 1, listEver: 1 });
+        expect(document.querySelector('[data-app-sidebar]')).not.toBeNull();
         expect(document.querySelectorAll('[id^="email-row-"]')).toHaveLength(2);
         expect(duplicateIds()).toEqual([]);
     });
 
-    it('movil: solo el arbol movil (lector en lugar de la lista con ?id=), sin ids duplicados', async () => {
-        matches = false;
-        await act(async () => { root.render(React.createElement(MainApp)); });
+    it('movil: sin barra fija; el lector sustituye a la lista y el menu abre la barra en un cajon (una sola vez)', async () => {
+        await mountApp(375);
         expect(mounts).toMatchObject({ list: 0, view: 1, sidebar: 0 });
-        expect(document.querySelector('.md\\:hidden')).not.toBeNull();
+        expect(document.querySelector('[data-app-sidebar]')).toBeNull();
+        const menu = document.querySelector<HTMLButtonElement>('button[aria-label="emailList.mobile.openMenu"]')!;
+        await act(async () => { menu.click(); });
+        expect(mounts.sidebar).toBe(1);
+        expect(document.querySelector('[role="dialog"]')).not.toBeNull();
         expect(duplicateIds()).toEqual([]);
     });
 
-    it('al cruzar el punto de corte se desmonta uno y se monta el otro (sin quedar suscripciones colgadas)', async () => {
-        await act(async () => { root.render(React.createElement(MainApp)); });
+    it('riel (768-899 px): riel de iconos, lista y lector; la barra completa solo existe dentro del cajon', async () => {
+        await mountApp(800);
+        expect(document.querySelector('[data-app-rail]')).not.toBeNull();
+        expect(document.querySelector('[data-app-sidebar]')).toBeNull();
+        expect(mounts).toMatchObject({ list: 1, view: 1, sidebar: 0 });
+        const open = document.querySelector<HTMLButtonElement>('[data-app-rail] button[aria-haspopup="dialog"]')!;
+        await act(async () => { open.click(); });
+        expect(mounts.sidebar).toBe(1);
+        expect(open.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    it('al cruzar los puntos de corte se monta lo que toca y no queda nada colgado', async () => {
+        await mountApp(1280);
         expect(mounts.list).toBe(1);
-        await setViewport(false);
+        await setWidth(375);
         expect(mounts).toMatchObject({ list: 0, view: 1, sidebar: 0 });
-        expect(listeners.size).toBe(1); // una sola escucha de matchMedia
-        await setViewport(true);
+        await setWidth(800);
+        expect(mounts).toMatchObject({ list: 1, view: 1, sidebar: 0 });
+        await setWidth(1280);
         expect(mounts).toMatchObject({ list: 1, view: 1, sidebar: 1 });
-        expect(mounts.listEver).toBe(2);
         expect(duplicateIds()).toEqual([]);
         act(() => root.unmount());
-        expect(listeners.size).toBe(0);
+        expect(mounts).toMatchObject({ list: 0, view: 0, sidebar: 0 });
         root = createRoot(host);
     });
 
-    it('sin matchMedia (entorno sin navegador) se asume escritorio; el indicador de carga es el mismo del fallback', async () => {
-        (window as any).matchMedia = undefined;
-        vi.stubGlobal('matchMedia', undefined);
-        await act(async () => { root.render(React.createElement(MainApp)); });
-        expect(mounts.list).toBe(1);
-        act(() => root.render(React.createElement(LoadingScreen)));
+    it('el indicador de carga es el mismo del fallback de Suspense', async () => {
+        await act(async () => { root.render(React.createElement(LoadingScreen)); });
         expect(document.querySelector('svg.animate-spin')).not.toBeNull();
-        expect(mounts.list).toBe(0);
+    });
+});
+
+describe('Tamanos de los paneles: explicitos (en v4 un numero son PIXELES)', () => {
+    it('porcentajes como texto y minimos en px: nunca numeros sueltos', () => {
+        for (const p of [LIST_PANEL, READER_PANEL]) {
+            expect(p.defaultSize).toMatch(/^\d+%$/);
+            expect(p.minSize).toMatch(/^\d+px$/);
+        }
+        expect(parseInt(LIST_PANEL.defaultSize) + parseInt(READER_PANEL.defaultSize)).toBe(100);
+        // 900 (borde del modo fijo) - 208 (barra minima) = 692 px para lista + lector: los minimos deben caber.
+        expect(parseInt(LIST_PANEL.minSize) + parseInt(READER_PANEL.minSize)).toBeLessThanOrEqual(900 - 208);
     });
 });

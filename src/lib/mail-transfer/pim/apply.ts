@@ -18,7 +18,8 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/prisma';
 import { MAX_RULES_PER_USER, insertRule, loadRules } from '@/lib/rules/store';
-import { normalizeConditions, validateRuleInput, type Action } from '@/lib/rules/engine';
+import { validateRuleInput, type Action } from '@/lib/rules/engine';
+import { toV2 } from '@/lib/rules/conditions';
 import { MAX_LABEL_NAME } from '@/lib/rules/label-validation';
 import { buildVcf, type PimContact } from './vcard';
 import { decodeContactNotes, encodeContactNotes } from './contact-notes';
@@ -394,7 +395,7 @@ export interface ImportFiltersResult {
 export async function importFilters(userId: string, filters: GmailFilter[], opts: ImportFiltersOptions = {}): Promise<ImportFiltersResult> {
     const res: ImportFiltersResult = { created: 0, skippedExisting: 0, unmapped: [], labelsCreated: 0, limited: 0 };
     const existingRules = await loadRules(userId);
-    const sigOf = (name: string, cond: unknown) => `${name.trim().toLowerCase()}|${stableJson(normalizeConditions(cond))}`;
+    const sigOf = (name: string, cond: unknown) => `${name.trim().toLowerCase()}|${stableJson(toV2(cond))}`;
     const known = new Set(existingRules.map((r) => sigOf(r.name, r.conditions)));
     let count = existingRules.length;
     let priority = existingRules.reduce((m, r) => Math.max(m, r.priority), -1) + 1;

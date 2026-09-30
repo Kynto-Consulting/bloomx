@@ -196,6 +196,7 @@ export const shellEs = {
         audit: 'Auditoría',
         retention: 'Retención y almacenamiento',
         transfer: 'Importar / Exportar',
+        spam: 'Spam y remitentes',
         profile: 'Mi perfil',
     },
     status: {
@@ -236,6 +237,7 @@ export const shellEs = {
             sessions: 'Mis sesiones activas',
             createUser: 'Crear usuario',
             transfer: 'Importar o exportar correo',
+            spam: 'Filtro antispam y listas de remitentes',
         },
     },
     unsaved: {
@@ -282,6 +284,7 @@ export const shellEn: DeepString<typeof shellEs> = {
         audit: 'Audit log',
         retention: 'Retention and storage',
         transfer: 'Import / Export',
+        spam: 'Spam and senders',
         profile: 'My profile',
     },
     status: {
@@ -322,6 +325,7 @@ export const shellEn: DeepString<typeof shellEs> = {
             sessions: 'My active sessions',
             createUser: 'Create user',
             transfer: 'Import or export mail',
+            spam: 'Anti-spam filter and sender lists',
         },
     },
     unsaved: {

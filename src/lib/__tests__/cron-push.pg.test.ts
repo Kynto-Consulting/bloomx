@@ -52,7 +52,7 @@ describe('GET /api/cron/run contra Postgres', () => {
         const r1 = await cron('Bearer cron-secret-test');
         expect(r1.status).toBe(200);
         expect(r1.body.mode).toBe('global');
-        expect(r1.body.results[u.id].rules).toEqual({ processed: 2, changed: 2 });
+        expect(r1.body.results[u.id].rules).toMatchObject({ processed: 2, changed: 2, matched: 2 });
         const read = async (id: string) => (await prisma.email.findUnique({ where: { id } }))!.read;
         expect([await read(fresh1.id), await read(fresh2.id)]).toEqual([true, true]);
         expect([await read(already.id), await read(old.id), await read(inSent.id)]).toEqual([false, false, false]);

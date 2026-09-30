@@ -1,4 +1,8 @@
 import type { MeetingLinkProviderKey } from '@/lib/conferencing/hosts';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
+
+/** Proveedores con logotipo real en el registro de marcas (Teams no lo tiene: ficha neutra con su inicial). */
+const BRAND_OF: Partial<Record<MeetingLinkProviderKey, string>> = { 'google-meet': 'brand:googlemeet', zoom: 'brand:zoom', teams: 'brand:microsoftteams' };
 
 /**
  * Icono minimo (SVG propio, `currentColor`) del proveedor de un enlace de reunion, para el boton "Unirse" del lector.
@@ -18,32 +22,16 @@ export function MeetingProviderIcon({ provider, className }: { provider: Meeting
         focusable: false,
     };
 
+    const brand = BRAND_OF[provider];
+    if (brand) {
+        return (
+            <span data-provider-icon={provider} className={`inline-flex shrink-0 ${className ?? ''}`}>
+                <ExtensionIcon icon={brand} size={16} />
+            </span>
+        );
+    }
+
     switch (provider) {
-        case 'google-meet':
-            // Camara con lente lateral.
-            return (
-                <svg {...common}>
-                    <rect x="3" y="6.5" width="12" height="11" rx="2" />
-                    <path d="M15 10.5l5-3v9l-5-3" />
-                </svg>
-            );
-        case 'zoom':
-            // Camara dentro de un circulo.
-            return (
-                <svg {...common}>
-                    <circle cx="12" cy="12" r="9" />
-                    <rect x="6.5" y="9" width="7" height="6" rx="1.25" />
-                    <path d="M13.5 11l4-2v6l-4-2" />
-                </svg>
-            );
-        case 'teams':
-            // "T" dentro de un cuadrado.
-            return (
-                <svg {...common}>
-                    <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
-                    <path d="M8 9h8M12 9v7" />
-                </svg>
-            );
         case 'webex':
             // Arco de llamada.
             return (

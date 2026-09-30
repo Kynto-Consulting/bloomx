@@ -76,10 +76,20 @@ export function tokensUsed(html: string): Set<string> {
     return used;
 }
 
+/**
+ * El color OFICIAL de un logotipo de marca (svg[data-brand], dato del registro brand-icons.ts) es la unica excepcion legitima al
+ * "nada de color en linea": su contraste contra el tema se verifica aparte (brand-icons.test.ts / ExtensionIcon.test.tsx).
+ */
+function withoutBrandGlyphColors(root: ParentNode): Element {
+    const clone = (root as Element).cloneNode(true) as Element;
+    clone.querySelectorAll('svg[data-brand]').forEach((svg) => { svg.removeAttribute('style'); svg.removeAttribute('fill'); });
+    return clone;
+}
+
 /** Ningun `style=""` puede pintar color: solo dimensiones (width, height, gridTemplateColumns...). */
 export function colorStyles(root: ParentNode): string[] {
     const bad: string[] = [];
-    root.querySelectorAll('[style]').forEach((el) => {
+    withoutBrandGlyphColors(root).querySelectorAll('[style]').forEach((el) => {
         const style = el.getAttribute('style') || '';
         if (/(?:^|;|\s)(?:color|background|background-color|border-color|fill|stroke|outline-color|box-shadow)\s*:/i.test(style) || RAW_LITERAL.test(style)) bad.push(style);
         RAW_LITERAL.lastIndex = 0;
@@ -88,7 +98,7 @@ export function colorStyles(root: ParentNode): string[] {
 }
 
 export function assertThemeSafe(root: ParentNode, css: string) {
-    const html = (root as Element).innerHTML ?? '';
+    const html = withoutBrandGlyphColors(root).innerHTML ?? '';
     expect(html.match(RAW_CLASS) ?? [], 'paleta cruda en el marcado').toEqual([]);
     expect(html.match(RAW_LITERAL) ?? [], 'color literal en el marcado').toEqual([]);
     expect(colorStyles(root), 'estilos con color en linea').toEqual([]);

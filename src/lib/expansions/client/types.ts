@@ -63,6 +63,8 @@ export interface ClientExpansionMount {
     Component?: React.ComponentType<{ context: ClientExpansionContext }>;
     execute?: (context: ClientExpansionContext) => void;
     title?: string; // For CUSTOM_SETTINGS_TAB
+    /** Titulo por idioma ({es, en}) declarado por el manifest; SettingsModal lo resuelve al idioma del usuario. */
+    titleI18n?: Record<string, string>;
     icon?: any; // React Component for tab icon
     slashCommand?: {
         key: string;

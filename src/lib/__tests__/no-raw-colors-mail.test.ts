@@ -22,7 +22,7 @@ const MAIL_FILES = [
     ...['Sidebar', 'EmailList', 'MailView', 'ComposeModal', 'ComposeWindows', 'Editor', 'SettingsModal', 'ReAuthBanner', 'RealTimeListener', 'PwaManager', 'VirtualMailRows', 'MfaPanels', 'SlashMenu']
         .map((n) => path.join(SRC, 'components', `${n}.tsx`)),
     path.join(SRC, 'components/ui/SafeIframe.tsx'),
-    path.join(SRC, 'app/page.tsx'),
+    path.join(SRC, 'app/(app)/page.tsx'),
     ...walk(path.join(SRC, 'components/settings')),
     ...walk(path.join(SRC, 'components/mail')),
     ...walk(path.join(SRC, 'app/security')),
@@ -38,14 +38,12 @@ const RAW_COLOR = /#[0-9a-fA-F]{8}\b|#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b(?![\w-]
  *  - Logos de marca de terceros (Google, Zoom, Slack): colores oficiales, no son tema.
  *  - Colores de USUARIO: paleta de texto del editor y color por defecto de etiquetas.
  *  - QR: fondo/primer plano fijos (un QR con colores de tema puede no escanearse).
- *  - HTML SALIENTE: la cita que se envia al destinatario lleva su propio estilo inline (no es UI).
+ *  - HTML SALIENTE: la cita del correo que se envia la construye lib/reply-builder.ts con su propio estilo inline (no es UI).
  */
 const ALLOW: Record<string, string[]> = {
     'components/ReAuthBanner.tsx': ['<path fill="#', 'fill="#2D8CFF"'],
     'components/Editor.tsx': ["'#"],
-    'components/settings/LabelsSettings.tsx': ["'#6366f1'"],
     'components/MfaPanels.tsx': ["dark: '#000000'", 'bg-white p-1'],
-    'components/MailView.tsx': ['border-left:1px #999 solid'],
 };
 
 function offenders(): string[] {

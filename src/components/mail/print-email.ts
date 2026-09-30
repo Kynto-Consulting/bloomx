@@ -40,9 +40,14 @@ th{text-align:left;font-weight:600;padding:1px 12px 1px 0;vertical-align:top;whi
 td{padding:1px 0}
 hr{margin:24px 0;border:0;border-top:1px solid}
 img{max-width:100%;height:auto}
-blockquote{margin:0 0 0 .8ex;padding-left:1ex;border-left:1px solid}
+blockquote{margin:.6em 0 .6em .4em;padding:.1em 0 .1em 1em;border-left:3px solid}
+blockquote blockquote{opacity:.8}
+section{overflow-wrap:break-word}
+section table{max-width:100%}
+section p{margin:0 0 .8em}
+pre{white-space:pre-wrap;overflow-wrap:anywhere}
 a{text-decoration:underline}
-@media print{body{margin:0}}
+@media print{body{margin:0}blockquote,pre,img,tr{break-inside:avoid}}
 </style></head><body>${body}</body></html>`;
 }
 

@@ -1,12 +1,29 @@
 import React from 'react';
+import { ExtensionIcon, nearestIconSize } from '@/components/expansions/ExtensionIcon';
 
 /**
- * Iconos propios por proveedor de videoconferencia (SVG en `currentColor`: heredan el color del tema, sin colores de
- * marca fijos). Son glifos genericos de "camara de video" diferenciados por la forma, no logotipos registrados.
+ * Iconos por proveedor de videoconferencia. Zoom y Google Meet usan su logotipo real del registro de marcas (ExtensionIcon,
+ * con garantia de contraste segun el tema); el resto (enlace, desconocidos) usa un glifo propio en `currentColor`.
  */
 export type ProviderIconKey = 'google-meet' | 'zoom' | 'link' | string;
 
+/** Logotipo real (registro de marcas) de los proveedores que lo tienen; el resto usa el glifo generico de abajo. */
+const BRAND_OF: Record<string, string> = { zoom: 'brand:zoom', 'google-meet': 'brand:googlemeet' };
+
+/** Tamano en px a partir de las clases h-N del llamante (h-4 = 16 px). */
+function sizeFromClass(className: string): 16 | 20 | 24 | 32 {
+    const match = /(?:^|\s)h-(\d+)(?:\s|$)/.exec(className);
+    return nearestIconSize(match ? Number(match[1]) * 4 : 16);
+}
+
 export function ProviderIcon({ icon, className = 'h-4 w-4' }: { icon: ProviderIconKey; className?: string }) {
+    if (BRAND_OF[icon]) {
+        return (
+            <span data-provider-icon={icon} className="inline-flex shrink-0">
+                <ExtensionIcon icon={BRAND_OF[icon]} size={sizeFromClass(className)} />
+            </span>
+        );
+    }
     const common = {
         viewBox: '0 0 24 24',
         fill: 'none',

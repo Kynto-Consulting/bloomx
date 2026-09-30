@@ -8,6 +8,8 @@ import { mountLabel } from '@/lib/expansions/manage/mount-labels';
 import type { ExtensionErrorEntry } from '@/lib/expansions/client/error-log';
 import type { ExtensionRow } from '@/lib/expansions/manage/model';
 import { Alert, Badge } from '@/components/expansions/kit/Feedback';
+import { Button } from '@/components/expansions/kit/Actions';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { ExtensionSwitch } from './ExtensionItem';
 import { ExtensionPreview } from './ExtensionPreview';
 import { ErrorsPanel } from './ErrorsPanel';
@@ -25,7 +27,15 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     );
 }
 
+/** Actualizar a la version del catalogo (solo administradores; la ruta del servidor vuelve a comprobar sesion y propiedad). */
+export interface DetailUpdater {
+    canUpdate: boolean;
+    busyId: string | null;
+    onUpdate: (row: ExtensionRow) => void;
+}
+
 interface ExtensionDetailProps {
+    updater?: DetailUpdater;
     row: ExtensionRow | null;
     rows: ExtensionRow[];
     errors: ExtensionErrorEntry[];
@@ -37,16 +47,16 @@ interface ExtensionDetailProps {
 }
 
 /** Panel lateral con el detalle de una extension: foco atrapado, Escape cierra y devuelve el foco (ui/Drawer). */
-export function ExtensionDetail({ row, rows, errors, now, canOpenPlayground, announce, onToggle, onClose }: ExtensionDetailProps) {
+export function ExtensionDetail({ row, rows, errors, now, canOpenPlayground, announce, onToggle, onClose, updater }: ExtensionDetailProps) {
     const { s } = useManageStrings();
     return (
         <Drawer open={row !== null} onClose={onClose} label={row ? fmt(s.detailOf, { name: row.name }) : ''} side="right" className="flex w-full max-w-xl flex-col overflow-hidden border-l border-border">
-            {row && <DetailBody row={row} rows={rows} errors={errors} now={now} canOpenPlayground={canOpenPlayground} announce={announce} onToggle={onToggle} onClose={onClose} />}
+            {row && <DetailBody row={row} rows={rows} errors={errors} now={now} canOpenPlayground={canOpenPlayground} announce={announce} onToggle={onToggle} onClose={onClose} updater={updater} />}
         </Drawer>
     );
 }
 
-function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onToggle, onClose }: Omit<ExtensionDetailProps, 'row'> & { row: ExtensionRow }) {
+function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onToggle, onClose, updater }: Omit<ExtensionDetailProps, 'row'> & { row: ExtensionRow }) {
     const { s, lang, categoryLabel, levelLabel } = useManageStrings();
     const permissions = React.useMemo(() => describePermissions(row.permissions, lang), [row.permissions, lang]);
     const mounts = React.useMemo(() => row.mountPoints.map((point) => ({ point, label: mountLabel(point, lang) })), [row.mountPoints, lang]);
@@ -59,9 +69,12 @@ function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onTog
     return (
         <div className="flex h-full min-h-0 flex-col" data-testid="extension-detail">
             <header className="flex items-start justify-between gap-3 border-b border-border p-4">
-                <div className="min-w-0 space-y-1">
-                    <h2 className="break-words text-xl font-semibold text-foreground">{row.name}</h2>
-                    <p className="text-xs text-muted-foreground">{s.idLabel}: <code className="break-all">{row.id}</code></p>
+                <div className="flex min-w-0 items-start gap-3">
+                    <ExtensionIcon icon={row.icon} label={row.name} size={32} className="mt-0.5" />
+                    <div className="min-w-0 space-y-1">
+                        <h2 className="break-words text-xl font-semibold text-foreground">{row.name}</h2>
+                        <p className="text-xs text-muted-foreground">{s.idLabel}: <code className="break-all">{row.id}</code></p>
+                    </div>
                 </div>
                 <button
                     type="button" onClick={onClose} aria-label={s.closeDetail} title={s.closeDetail}
@@ -74,10 +87,29 @@ function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onTog
                     <Alert tone="danger" title={s.invalidTitle}>
                         <p>{s.invalidHelp}</p>
                         <ul className="list-disc space-y-0.5 pl-4">{row.invalidReasons.map((reason, i) => <li key={i} className="break-words">{reason}</li>)}</ul>
+                        {row.updateAvailable && <p className="font-medium">{fmt(s.invalidUpdateHint, { installed: row.version ?? s.unknownVersion, catalog: row.catalogVersion ?? '' })}</p>}
+                    </Alert>
+                )}
+                {row.valid && row.problems.length > 0 && (
+                    <Alert tone="warning" title={row.droppedCount > 0 ? fmt(s.degradedTitle, { n: row.droppedCount }) : s.problemsTitle}>
+                        {row.updateAvailable && <p className="font-medium">{fmt(s.invalidUpdateHint, { installed: row.version ?? s.unknownVersion, catalog: row.catalogVersion ?? '' })}</p>}
+                        <ul className="list-disc space-y-0.5 pl-4" data-testid="manifest-problems">{row.problems.slice(0, 10).map((problem, i) => <li key={i} className="break-words"><code>{problem.path}</code>: {problem.message}</li>)}</ul>
                     </Alert>
                 )}
                 {row.valid && row.orgDisabled && <Alert tone="warning" title={s.noEffect} message={s.noEffectHelp} />}
-                {row.updateAvailable && <Alert tone="info" message={fmt(s.updateAvailable, { catalog: row.catalogVersion ?? '', installed: row.version ?? s.unknownVersion })} />}
+                {row.updateAvailable && (
+                    <Alert tone="info" message={fmt(s.updateAvailable, { catalog: row.catalogVersion ?? '', installed: row.version ?? s.unknownVersion })}>
+                        {updater?.canUpdate && (
+                            <Button
+                                label={updater.busyId === row.id ? s.updating : s.updateAction}
+                                size="sm"
+                                loading={updater.busyId === row.id}
+                                disabled={updater.busyId !== null}
+                                onPress={() => updater.onUpdate(row)}
+                            ><span className="sr-only">{fmt(s.updateAria, { name: row.name, catalog: row.catalogVersion ?? '' })}</span></Button>
+                        )}
+                    </Alert>
+                )}
 
                 <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
                     <dt className="text-muted-foreground">{s.installedVersion}</dt><dd className="text-foreground">{row.version ?? s.unknownVersion}</dd>

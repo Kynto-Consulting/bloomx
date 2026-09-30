@@ -3,6 +3,8 @@
 import { prisma } from '@/lib/prisma';
 import type { FolderFilterCounts, MailFilterKey, MailSortKey, MailCursor } from '@/lib/mail-query';
 import { getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
+import { applyLearning, snapshotForLearning } from '@/lib/spam/learn-hook';
+import { dropFolderLabels } from '@/lib/labels/behavior';
 import {
     DEFAULT_SQL_OPTIONS,
     emptyScope,
@@ -63,6 +65,8 @@ export interface MoveInput {
 export async function moveEmailsTracked(input: MoveInput): Promise<number> {
     const { ids, userIds, folder, read, starred } = input;
     if (ids.length === 0 || userIds.length === 0) return 0;
+    // Spam v2: instantanea de los correos que pasan a/desde spam (aprende de la marca del usuario, en el servidor).
+    const learnRows = await snapshotForLearning(ids, userIds, folder);
     try {
         const n = await prisma.$executeRawUnsafe(
             `UPDATE "Email" SET
@@ -75,6 +79,9 @@ export async function moveEmailsTracked(input: MoveInput): Promise<number> {
              WHERE "id" = ANY($2::text[]) AND "userId" = ANY($3::text[])`,
             folder, ids, userIds, read ?? null, starred ?? null,
         );
+        // Volver a Entrada por una accion explicita saca al correo de sus etiquetas-carpeta (ya no esta "en" ellas).
+        if (folder === 'inbox') await dropFolderLabels(userIds, ids).catch(() => 0);
+        if (learnRows.length > 0) void applyLearning(learnRows, folder);
         return Number(n);
     } catch (error) {
         // Sin columna (o cliente sin SQL crudo): camino clasico, sin perder el movimiento.
@@ -83,6 +90,7 @@ export async function moveEmailsTracked(input: MoveInput): Promise<number> {
         if (read !== undefined) data.read = read;
         if (starred !== undefined) data.starred = starred;
         const r = await prisma.email.updateMany({ where: { id: { in: ids }, userId: { in: userIds } }, data });
+        if (learnRows.length > 0) void applyLearning(learnRows, folder);
         return r.count;
     }
 }
@@ -176,17 +184,21 @@ export function resetSqlOptionsCache() { sqlOptionsCache = null; }
 /** Tipo REAL de Email.createdAt (timestamptz del DDL de ensure-schema o timestamp(3) de Prisma) y si existe bloomx_sender_key. */
 export async function getSqlOptions(): Promise<SqlOptions> {
     const now = Date.now();
-    if (sqlOptionsCache && now - sqlOptionsCache.at < (sqlOptionsCache.options.senderKeyFn ? 300_000 : 20_000)) return sqlOptionsCache.options;
+    if (sqlOptionsCache && now - sqlOptionsCache.at < (sqlOptionsCache.options.senderKeyFn && sqlOptionsCache.options.threadKey ? 300_000 : 20_000)) return sqlOptionsCache.options;
     let options: SqlOptions = DEFAULT_SQL_OPTIONS;
     try {
         const rows = (await prisma.$queryRawUnsafe(
             `SELECT (SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'Email' AND column_name = 'createdAt') AS "kind",
-                    (to_regproc('bloomx_sender_key') IS NOT NULL) AS "fn"`,
-        )) as Array<{ kind: string | null; fn: boolean }>;
+                    (to_regproc('bloomx_sender_key') IS NOT NULL) AS "fn",
+                    EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'Email' AND column_name = 'threadKey') AS "tk",
+                    (SELECT COUNT(*) = 3 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'Label' AND column_name IN ('fullPath','behavior','parentId')) AS "lt"`,
+        )) as Array<{ kind: string | null; fn: boolean; tk: boolean; lt: boolean }>;
         const r = rows[0];
         options = {
             createdAtKind: r?.kind === 'timestamp without time zone' ? 'timestamp' : 'timestamptz',
             senderKeyFn: r?.fn === true,
+            threadKey: r?.tk === true,
+            labelTree: r?.lt === true,
         };
     } catch {
         options = DEFAULT_SQL_OPTIONS;
@@ -214,6 +226,23 @@ async function withOptions<T>(run: (opt: SqlOptions) => Promise<T>): Promise<T> 
 // ---------------------------------------------------------------------------
 // Lista, conteos por hilo, insignias
 // ---------------------------------------------------------------------------
+
+/**
+ * Email.threadKey de una pagina de correos (id -> clave). SQL directo y tolerante: el cliente de Prisma generado puede no conocer la
+ * columna, y en una BD sin db:ensure devuelve un mapa vacio (la interfaz cae a la clave heuristica heredada).
+ */
+export async function selectThreadKeys(ids: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    if (ids.length === 0) return out;
+    try {
+        const rows = (await prisma.$queryRawUnsafe(`SELECT "id", "threadKey" FROM "Email" WHERE "id" = ANY($1::text[]) AND "threadKey" IS NOT NULL`, ids)) as Array<{ id: string; threadKey: string }>;
+        for (const r of rows) if (r.threadKey) out.set(r.id, r.threadKey);
+    } catch (error) {
+        const m = `${(error as any)?.code ?? ''} ${(error as any)?.meta?.code ?? ''} ${(error as any)?.message ?? ''}`;
+        if (!/does not exist|42703/i.test(m)) throw error;
+    }
+    return out;
+}
 
 export interface PageRow { id: string; ct: string; sk: string | null }
 
@@ -251,9 +280,10 @@ const tally = (r: Record<string, unknown>): BadgeTally => ({
 });
 
 /** Insignias por carpeta y por etiqueta (nombre en minuscula). Sin `withTotals` solo son fiables los no leidos. */
-export async function getBadges(userIds: string[], withTotals: boolean): Promise<{ folders: Record<string, BadgeTally>; labels: Record<string, BadgeTally> }> {
-    const f = buildFolderBadgesSql(userIds, withTotals);
-    const l = buildLabelBadgesSql(userIds, withTotals);
+export async function getBadges(userIds: string[], withTotals: boolean): Promise<{ folders: Record<string, BadgeTally>; labels: Record<string, BadgeTally>; labelsById: Record<string, BadgeTally> }> {
+    const opt = await getSqlOptions();
+    const f = buildFolderBadgesSql(userIds, withTotals, opt);
+    const l = buildLabelBadgesSql(userIds, withTotals, opt);
     const [fr, lr] = await Promise.all([
         prisma.$queryRawUnsafe(f.sql, ...f.values) as Promise<Array<Record<string, unknown>>>,
         prisma.$queryRawUnsafe(l.sql, ...l.values) as Promise<Array<Record<string, unknown>>>,
@@ -261,6 +291,8 @@ export async function getBadges(userIds: string[], withTotals: boolean): Promise
     return {
         folders: Object.fromEntries(fr.map((r) => [String(r.folder), tally(r)])),
         labels: Object.fromEntries(lr.map((r) => [String(r.name), tally(r)])),
+        // Con jerarquia el acumulado viene por id de etiqueta (`lid`); sin ella queda vacio y se usa el nombre.
+        labelsById: Object.fromEntries(lr.filter((r) => typeof r.lid === 'string').map((r) => [String(r.lid), tally(r)])),
     };
 }
 
@@ -284,6 +316,17 @@ export async function selectScopeIds(scope: MailListScope, filter: MailFilterKey
  */
 export async function updateScope(scope: MailListScope, filter: MailFilterKey, own: string[], changes: { folder?: string; read?: boolean; starred?: boolean }): Promise<string[]> {
     if (changes.folder === undefined && changes.read === undefined && changes.starred === undefined) return [];
+    // Spam v2: solo si el movimiento cruza spam/no spam se toma la instantanea (acotada a 200 correos) para aprender.
+    let learnRows: Awaited<ReturnType<typeof snapshotForLearning>> = [];
+    if (changes.folder === 'spam' || changes.folder === 'inbox' || changes.folder === 'archive') {
+        try { learnRows = await snapshotForLearning((await selectScopeIds(scope, filter, own)).slice(0, 200), scope.userIds, changes.folder); } catch { learnRows = []; }
+    }
+    const moved = await updateScopeInner(scope, filter, own, changes);
+    if (learnRows.length > 0) void applyLearning(learnRows, changes.folder as string);
+    return moved;
+}
+
+async function updateScopeInner(scope: MailListScope, filter: MailFilterKey, own: string[], changes: { folder?: string; read?: boolean; starred?: boolean }): Promise<string[]> {
     return withOptions(async (opt) => {
         const build = (withPrevious: boolean) => {
             const p = new SqlParams();

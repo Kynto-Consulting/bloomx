@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { after } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { uploadToStorage } from '@/lib/storage';
+import { deleteFromStorage, uploadToStorage } from '@/lib/storage';
 import { Webhook } from 'svix';
 import { resend } from '@/lib/resend';
 import { sendNewMessagePushNotification } from '@/lib/notifications/web-push';
 import { ensureDefaultCalendars } from '@/lib/calendar/defaults';
 import { ParsedInvite, parseInviteFromIcs } from '@/lib/calendar/ics';
-import { classifySpamFromHeaders } from '@/lib/spam-headers';
+import { applyBlocklist, classifyForRecipient, persistVerdict } from '@/lib/spam/pipeline';
 import { decodeRFC2047, extractFilenameFromHeaders, extensionFromMimeType, sanitizeFilename } from '@/lib/mime-decode';
 import { handleInboundCalendarInvite } from '@/lib/calendar/invite-handler';
 import { escapeHtmlText, isValidEmailAddress, sanitizeSubject } from '@/lib/mail-validation';
 import { parseAuthenticationResults } from '@/lib/email-auth';
 import { computeInboundEffects } from '@/lib/rules/inbound';
-import { markRuleRun } from '@/lib/rules/store';
+import { bumpRuleStats, markRuleRun } from '@/lib/rules/store';
+import { saveEmailHdrs } from '@/lib/rules/headers';
+import { runForwards } from '@/lib/rules/forward';
 import { uniqueAttachmentKey } from '@/lib/attachment-keys';
 import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { normalizeContentId } from '@/lib/email-utils';
@@ -21,6 +23,9 @@ import { validateAttachment } from '@/lib/file-type';
 import { buildEmailSentContext, fireLifecycleHook, runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
 import { internalSecretToSend } from '@/lib/internal-auth';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
+import { assignThread, headersOfInbound } from '@/lib/thread-store';
+import { threadInfoFromRecord } from '@/lib/thread-headers';
+import { subjectLooksLikeReply } from '@/lib/threading';
 
 export async function POST(req: NextRequest) {
     // 1. Validate Request Signature
@@ -214,9 +219,25 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         .join(', ') || null;
 
     // Verify recipients exist in our DB
-    const users = await prisma.user.findMany({
+    const candidateUsers = await prisma.user.findMany({
         where: { email: { in: inbound.lookupKeys } }
     });
+
+    // Blocklist ("ni entra"): ANTES de guardar cuerpo, adjuntos o el crudo. Sin rebote (evita backscatter); el proveedor recibe 200.
+    const spamMail = {
+        headers: headersMap as Record<string, unknown>,
+        from: { name: senderName || '', email: senderEmail },
+        envelopeFrom: null as string | null,
+    };
+    let users = candidateUsers;
+    if (candidateUsers.length > 0) {
+        const blocked = await applyBlocklist(spamMail, candidateUsers.map((u) => ({ id: u.id, email: u.email })));
+        if (blocked.blocked.length > 0) {
+            const gone = new Set(blocked.blocked.map((b) => b.user.id));
+            users = candidateUsers.filter((u) => !gone.has(u.id));
+            if (users.length === 0) return NextResponse.json({ success: true, message: 'Blocked' });
+        }
+    }
 
     if (users.length === 0) {
         console.log(`Rejected email: no matching user found in DB.`);
@@ -294,8 +315,13 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
 
+    // Hilos por cabeceras: el payload del webhook solo trae message_id. Si parece una respuesta y no trae In-Reply-To/References se pide a
+    // Resend el correo completo (JSON pequeno con las cabeceras) para poder agruparla con su conversacion sin esperar al relleno perezoso.
+    const headerKeys = new Set(Object.keys(headersMap as Record<string, unknown>).map((k) => k.toLowerCase()));
+    const needsThreadHeaders = subjectLooksLikeReply(String(subject || '')) && !headerKeys.has('in-reply-to') && !headerKeys.has('references');
+
     let fetchedReceivingData: any = null;
-    if (webhookEmailId && (!html || !text || hasCalendarAttachmentWithoutContent || hasAttachments)) {
+    if (webhookEmailId && (!html || !text || hasCalendarAttachmentWithoutContent || hasAttachments || needsThreadHeaders)) {
         if (!html || !text) {
             console.log('[resend] Email body missing in webhook payload. Attempting Resend API fallback...');
         }
@@ -321,6 +347,21 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             }
         } catch (e) {
             console.error('Error fetching content fallback:', e);
+        }
+    }
+
+    // Segunda pasada de la blocklist: la API de Resend puede aportar cabeceras (Return-Path, firma DKIM) que el webhook no traia.
+    // Si ahora acierta, se retira lo unico subido hasta aqui (el crudo) y no se guarda nada mas.
+    if (fetchedReceivingData?.headers) {
+        const second = await applyBlocklist({ ...spamMail, headers: headersMap as Record<string, unknown> }, users.map((u) => ({ id: u.id, email: u.email })));
+        if (second.blocked.length > 0) {
+            const gone = new Set(second.blocked.map((b) => b.user.id));
+            users = users.filter((u) => !gone.has(u.id));
+            if (users.length === 0) {
+                await Promise.allSettled(uploads);
+                await deleteFromStorage(rawKey).catch(() => false);
+                return NextResponse.json({ success: true, message: 'Blocked' });
+            }
         }
     }
 
@@ -457,13 +498,16 @@ async function handleEmailReceived(data: any, rawPayload: string) {
 
     await Promise.all(uploads);
 
-    const spamThresholdRaw = Number.parseFloat(String(process.env.SPAM_SCORE_THRESHOLD || '60'));
-    const spamThreshold = Number.isFinite(spamThresholdRaw)
-        ? Math.min(100, Math.max(0, spamThresholdRaw))
-        : 60;
-    const autoSpamEnabled = String(process.env.ENABLE_AUTO_SPAM_DETECTION || 'true').toLowerCase() !== 'false';
-    const spamClassification = classifySpamFromHeaders(headersMap as Record<string, unknown>, spamThreshold);
-    const deliveryFolder = autoSpamEnabled && spamClassification.isSpam ? 'spam' : 'inbox';
+    // Motor de spam v2 (por destinatario, dentro del bucle): ver lib/spam/pipeline.ts
+    const spamMailFull = {
+        ...spamMail,
+        replyTo: replyToEmail,
+        subject: String(subject || ''),
+        text: String(text || ''),
+        html: String(html || ''),
+        attachments: attachmentMetaRecords.map((a) => ({ filename: a.filename, mimeType: a.mimeType, size: a.size, dangerous: a.key === 'BLOCKED' })),
+        recipients: inbound.all,
+    };
 
     // 4. Store in Postgres (Per User)
     for (const user of users) {
@@ -488,6 +532,9 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             continue;
         }
 
+        const spamVerdict = await classifyForRecipient({ id: user.id, email: user.email }, spamMailFull);
+        const deliveryFolder = spamVerdict.folder;
+
         // Etiquetas (alias/regex) + reglas del usuario. Tolerante a fallos: ver src/lib/rules/inbound.ts
         const inboundEffects = await computeInboundEffects({
             userId: user.id,
@@ -500,6 +547,12 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             html: String(html || ''),
             hasAttachment: attachmentMetaRecords.length > 0,
             deliveryFolder,
+            cc: ccField ?? null,
+            replyTo: replyToEmail ?? null,
+            headers: headersMap as Record<string, unknown>,
+            attachments: attachmentMetaRecords.map((a) => ({ filename: a.filename, mimeType: a.mimeType, size: a.size })),
+            spamScore: spamVerdict.score,
+            isExternal: spamVerdict.external.external,
         });
         const uniqueLabelIds = inboundEffects.labelIds.map((id) => ({ id }));
 
@@ -521,6 +574,8 @@ async function handleEmailReceived(data: any, rawPayload: string) {
                 rawKey: rawKey,
                 rawMimeUrl: rawMimeUrl,
                 folder: inboundEffects.folder,
+                ...(inboundEffects.previousFolder ? { previousFolder: inboundEffects.previousFolder } : {}),
+                ...(inboundEffects.snoozeUntil ? { scheduledAt: inboundEffects.snoozeUntil } : {}),
                 ...(inboundEffects.read ? { read: true } : {}),
                 ...(inboundEffects.starred ? { starred: true } : {}),
                 attachments: {
@@ -540,6 +595,36 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             throw createError;
         }
         void markRuleRun(createdEmail.id, user.id);
+        await persistVerdict(createdEmail.id, { id: user.id, email: user.email }, spamMailFull, spamVerdict);
+        // Reglas v2: cabeceras de la lista blanca (Email.hdrs), estadisticas de uso y reenvios permitidos (desactivados por defecto).
+        // Best-effort: nada de esto puede hacer fallar la ingesta.
+        try {
+            await saveEmailHdrs(createdEmail.id, inboundEffects.hdrs);
+            if (inboundEffects.appliedRuleIds.length > 0) {
+                await bumpRuleStats(user.id, Object.fromEntries(inboundEffects.appliedRuleIds.map((rid) => [rid, 1])));
+            }
+            if (inboundEffects.forwardTo.length > 0) {
+                await runForwards({
+                    userId: user.id, userEmail: user.email, from: formattedFrom, subject: String(subject || ''),
+                    text: String(text || ''), html: String(html || ''), hdrs: inboundEffects.hdrs,
+                }, inboundEffects.forwardTo);
+            }
+        } catch (ruleError) {
+            console.error('[webhook] Rule post-processing failed (non-fatal):', (ruleError as Error)?.message);
+        }
+
+        // Hilo por cabeceras (Message-ID / In-Reply-To / References / Thread-Index). Tolerante: nunca hace fallar la ingesta; si el MIME crudo
+        // llega despues (process-attachments) se vuelve a calcular con las cabeceras completas.
+        try {
+            const threadInfo = threadInfoFromRecord(headersMap as Record<string, unknown>, resolvedMessageId);
+            await assignThread({
+                userId: user.id, emailId: createdEmail.id, headers: headersOfInbound(threadInfo), date: createdEmail.createdAt.getTime(),
+                subject: createdEmail.subject, from: formattedFrom, to: toField, cc: ccField, own: [user.email],
+                noFallback: threadInfo.autoSubmitted || threadInfo.bulk || Boolean(threadInfo.listId),
+            });
+        } catch (threadError) {
+            console.error('[webhook] Thread assignment failed (non-fatal):', (threadError as Error)?.message);
+        }
 
         // Content-ID de imagenes inline (best-effort: si la columna aun no existe, no rompe la ingesta).
         // Los adjuntos pendientes los rellena process-attachments leyendo la cabecera del MIME.

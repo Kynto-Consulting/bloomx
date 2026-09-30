@@ -1,7 +1,8 @@
 'use client';
 
 import * as React from 'react';
-import { ChevronDown, ChevronUp, Puzzle } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import type { ExtensionRow } from '@/lib/expansions/manage/model';
 import { Button } from '@/components/expansions/kit/Actions';
 import { Badge } from '@/components/expansions/kit/Feedback';
@@ -76,7 +77,7 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
                 className={`flex h-full min-w-0 gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground ${list ? 'flex-col sm:flex-row sm:items-center' : 'flex-col'}`}
             >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
-                    <span aria-hidden="true" className="mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-foreground"><Puzzle size={18} /></span>
+                    <ExtensionIcon icon={row.icon} label={row.name} size={32} className="mt-0.5" />
                     <div className="min-w-0 flex-1 space-y-1.5">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                             {position !== null && <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-md bg-muted px-1 text-xs font-medium tabular-nums text-muted-foreground" title={fmt(s.orderPosition, { n: position })}><span aria-hidden="true">{position}</span><span className="sr-only">{fmt(s.orderPosition, { n: position })}</span></span>}
@@ -98,8 +99,10 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
                             <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-2 text-xs text-foreground">
                                 <p className="font-medium">{s.invalidTitle}</p>
                                 <p className="text-muted-foreground">{s.invalidHelp} {row.invalidReasons[0] ?? ''}</p>
+                                {row.updateAvailable && <p className="mt-1 font-medium text-foreground">{fmt(s.invalidUpdateHint, { installed: row.version ?? s.unknownVersion, catalog: row.catalogVersion ?? '' })}</p>}
                             </div>
                         )}
+                        {row.valid && row.droppedCount > 0 && <p data-testid="degraded-note" className="text-xs text-muted-foreground">{fmt(s.degradedTitle, { n: row.droppedCount })}</p>}
                         {row.valid && row.mandatory && <p id={lockId} data-testid="mandatory-note" className="text-xs text-muted-foreground">{s.mandatoryLocked}</p>}
                         {row.valid && row.orgDisabled && <p id={noteId} className="text-xs text-muted-foreground">{s.noEffect}. {s.noEffectHelp}</p>}
                     </div>

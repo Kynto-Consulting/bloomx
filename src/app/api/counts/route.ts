@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/session';
 import { getBadges, getScopeCounts, ownAddressesOf, resolveMailboxScope } from '@/lib/mail-store';
 import { emptyScope } from '@/lib/mail-list-sql';
+import { listLabels } from '@/lib/labels/store';
 import { parseMailboxesParam } from '@/lib/mail-query';
 
 /** Carpeta de la consulta `?folder=`: solo nombres simples (nada de SQL ni rutas); los borradores viven en otra tabla. */
@@ -59,7 +60,7 @@ export async function GET(req?: NextRequest) {
         const [badges, draftsCount, labels] = await Promise.all([
             getBadges(userIds, true),
             prisma.draft.count({ where: { from: { in: Array.from(new Set(owners.map((u) => u.email))) } } }),
-            prisma.label.findMany({ where: { userId: dbUser.id }, select: { id: true, name: true, color: true } }),
+            listLabels(dbUser.id),
         ]);
 
         const folderOf = (name: string) => badges.folders[name];
@@ -69,11 +70,14 @@ export async function GET(req?: NextRequest) {
         const totalMessages = (name: string) => folderOf(name)?.messages ?? 0;
         const NAMES = ['inbox', 'sent', 'archive', 'trash', 'spam', 'scheduled'] as const;
 
-        const labelCounts: Record<string, number> = {};
+        // Etiquetas jerarquicas: los contadores de un padre acumulan los de sus descendientes (hilos distintos, calculado en SQL).
         const labelList = labels.map((l) => {
-            const b = badges.labels[l.name.toLowerCase()];
-            labelCounts[l.name.toLowerCase()] = b?.unreadThreads ?? 0;
-            return { id: l.id, name: l.name, color: l.color, count: b?.unreadThreads ?? 0, total: b?.threads ?? 0, messageCount: b?.unreadMessages ?? 0, messageTotal: b?.messages ?? 0 };
+            const b = badges.labelsById[l.id] ?? badges.labels[l.fullPath.toLowerCase()];
+            return {
+                id: l.id, name: l.name, color: l.color, fullPath: l.fullPath, parentId: l.parentId, behavior: l.behavior, sortOrder: l.sortOrder,
+                icon: l.icon, showInSidebar: l.showInSidebar, showUnread: l.showUnread,
+                count: b?.unreadThreads ?? 0, total: b?.threads ?? 0, messageCount: b?.unreadMessages ?? 0, messageTotal: b?.messages ?? 0,
+            };
         });
 
         return NextResponse.json({

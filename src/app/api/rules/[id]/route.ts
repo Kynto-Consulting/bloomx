@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { deleteRule, isMissingRelation, updateRule } from '@/lib/rules/store';
-import { ownsActionLabels, parseRuleBody } from '@/lib/rules/api-helpers';
+import { forwardActionsAllowed, ownsActionLabels, parseRuleBody } from '@/lib/rules/api-helpers';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,9 +17,11 @@ export async function PATCH(req: NextRequest, { params }: Ctx) {
     if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
     try {
-        if (!(await ownsActionLabels(user.id, parsed.value.actions))) {
+        if (!(await ownsActionLabels(user.id, parsed.value.actions, parsed.value.labelId))) {
             return NextResponse.json({ error: 'Etiqueta no encontrada' }, { status: 400 });
         }
+        const fwd = await forwardActionsAllowed(user.id, parsed.value.actions);
+        if (!fwd.ok) return NextResponse.json({ error: fwd.error }, { status: 400 });
         const rule = await updateRule(user.id, id, parsed.value);
         if (!rule) return NextResponse.json({ error: 'Rule not found' }, { status: 404 });
         return NextResponse.json(rule);

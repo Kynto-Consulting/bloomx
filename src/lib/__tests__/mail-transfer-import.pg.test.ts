@@ -1,3 +1,4 @@
+import { listLabels } from '@/lib/labels/store';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -173,7 +174,8 @@ describe('importacion por lotes (Postgres real)', () => {
         expect(by['s-e1']).toMatchObject({ folder: 'inbox' });
         expect(by['s-e2']).toMatchObject({ folder: 'sent' });
         expect(by['s-e3']).toMatchObject({ folder: 'archive' });
-        expect(by['s-e3'].labels.map((l) => l.name)).toEqual(['Clientes/Alfa']);
+        const paths = new Map((await listLabels(u.id)).map((l) => [l.id, l.fullPath]));
+        expect(by['s-e3'].labels.map((l) => paths.get(l.id))).toEqual(['Clientes/Alfa']);
         expect(by['s-e4']).toMatchObject({ folder: 'trash', starred: true });
         expect(by['s-evil']).toBeUndefined();
     });

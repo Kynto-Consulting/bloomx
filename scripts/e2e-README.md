@@ -25,6 +25,8 @@ node scripts/fake-resend.mjs &
 node scripts/fake-backend.mjs &
 node scripts/e2e-dev.mjs &                # http://localhost:3100  (NO usar `npm run dev`: predev usaria el DATABASE_URL del .env)
 ```
+Variables opcionales del backend falso (solo pruebas visuales): `E2E_EXT_EXTRA=notion,summarizer,translator,trello,hubspot,giphy` monta ademas esas extensiones del repo hermano (barras con muchos botones) y `.e2e/theme.json` (un `DomainThemeConfig` de prueba) se lee en cada `/api/config` para cambiar de paleta sin reiniciar (la app cachea la config 60 s; `bloomx-theme=brand-light|brand-dark` fuerza la paleta de empresa).
+
 Usuario de prueba: `tester@bloomx.test`; la contrasena esta en `.env.e2e` (`E2E_USER_PASSWORD`). Admin: `admin@bloomx.test` (MFA obligatorio).
 Sin sesion en otro perfil: abrir el enlace sellado con `127.0.0.1:3100` (las cookies de `localhost` no viajan).
 

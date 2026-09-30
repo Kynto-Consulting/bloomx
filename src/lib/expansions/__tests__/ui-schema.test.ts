@@ -360,3 +360,20 @@ describe('paridad de las copias entre repos', () => {
         if (fs.existsSync(back)) expect(read(back), `backend ${name} difiere del frontend`).toBe(front);
     });
 });
+
+describe('toolbar: pista de presentacion en las barras de acciones', () => {
+    const button = (toolbar: unknown) => ({ type: 'BUTTON', props: { label: 'Notion', icon: 'Database', onClick: { action: 'TOAST', message: 'x' }, toolbar } });
+    it('BUTTON, ICON_BUTTON y MENU aceptan toolbar { pinned, priority, label, description }', () => {
+        const hint = { pinned: true, priority: 10, label: 'Notion', description: 'Guarda el correo en Notion' };
+        expect(errs(button(hint))).toEqual([]);
+        expect(errs({ type: 'ICON_BUTTON', props: { icon: 'Star', label: 'Estrella', onClick: { action: 'TOAST', message: 'x' }, toolbar: hint } })).toEqual([]);
+        expect(errs({ type: 'MENU', props: { label: 'Mas', items: [], toolbar: hint } })).toEqual([]);
+    });
+    it('rechaza tipos incorrectos, prioridades fuera de rango y claves desconocidas', () => {
+        expect(errs(button({ pinned: 'si' })).length).toBeGreaterThan(0);
+        expect(errs(button({ priority: -1 })).length).toBeGreaterThan(0);
+        expect(errs(button({ priority: 5000 })).length).toBeGreaterThan(0);
+        expect(errs(button('anclada')).length).toBeGreaterThan(0);
+        expect(JSON.stringify(errs(button({ className: 'bg-primary' })))).toMatch(/className|desconoc|unknown/i);
+    });
+});

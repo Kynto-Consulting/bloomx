@@ -4,6 +4,8 @@ import { useCallback, useMemo } from 'react';
 import { mutate as mutateSWR } from 'swr';
 import { useAdminQuery, type ApiError } from '@/components/admin/console';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useI18n } from '@/components/I18nProvider';
+import { manifestHealth, type ManifestHealth } from '@/lib/expansions/manage/health';
 import { buildRows, installedFromConfig, type CatalogExtension, type ExtensionRow, type InstalledExtension } from '@/lib/admin/extensions-view';
 
 export interface InstalledResponse {
@@ -37,6 +39,7 @@ export interface ExtensionsData {
 
 /** Une catalogo + instaladas (+ errores) en filas; en solo lectura usa `useDomainConfig().extensions`. */
 export function useExtensionsData(domainId: string | undefined): ExtensionsData {
+    const { locale } = useI18n();
     const catalogQ = useAdminQuery<{ extensions: CatalogExtension[] }>(CATALOG_URL);
     const installedQ = useAdminQuery<InstalledResponse>(domainId ? installedUrl(domainId) : null);
     const { extensions: configExtensions, isError: configFailed, extensionsLoaded, retry: retryConfig } = useDomainConfig();
@@ -51,9 +54,19 @@ export function useExtensionsData(domainId: string | undefined): ExtensionsData 
         [readOnly, configExtensions, installedQ.data],
     );
 
+    // Salud del manifest que se CARGA en este dominio (mounts descartados, manifest invalido...), a partir de /api/config.
+    const health = useMemo(() => {
+        const map = new Map<string, ManifestHealth>();
+        for (const extension of configExtensions) {
+            const id = typeof extension?.template?.id === 'string' && extension.template.id ? extension.template.id : typeof extension?.id === 'string' ? extension.id : '';
+            if (id && !map.has(id)) map.set(id, manifestHealth(id, extension.template));
+        }
+        return map;
+    }, [configExtensions]);
+
     const rows = useMemo(
-        () => buildRows({ catalog: catalogQ.data?.extensions ?? [], installed, errorIds: installedQ.data?.errorExtensionIds ?? [] }),
-        [catalogQ.data, installed, installedQ.data?.errorExtensionIds],
+        () => buildRows({ catalog: catalogQ.data?.extensions ?? [], installed, errorIds: installedQ.data?.errorExtensionIds ?? [], health, locale }),
+        [catalogQ.data, installed, installedQ.data?.errorExtensionIds, health, locale],
     );
 
     const { mutate: mutateCatalog } = catalogQ;

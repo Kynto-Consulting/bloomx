@@ -21,6 +21,9 @@ export type DraftPayload = {
     subject: string;
     body: string;
     attachments: DraftAttachmentRef[];
+    /** Contexto de respuesta: el borrador de una respuesta/reenvio conserva el vinculo con el original (In-Reply-To / References al enviar). */
+    inReplyToEmailId?: string;
+    replyMode?: 'reply' | 'replyAll' | 'forward';
 };
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';

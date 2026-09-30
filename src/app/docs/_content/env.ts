@@ -104,8 +104,8 @@ export const ENV_VARS: EnvVar[] = [
     v('UNSUBSCRIBE_SECRET', 'frontend', 'mail', 'optional', 'NEXTAUTH_SECRET', 'Secreto de los tokens de baja (RFC 8058).', 'Secret for unsubscribe tokens (RFC 8058).'),
     v('APPOINTMENT_CANCEL_SECRET', 'frontend', 'mail', 'optional', 'NEXTAUTH_SECRET', 'Secreto de los enlaces de cancelación de citas.', 'Secret for appointment cancellation links.'),
     v('MAX_SENDS_PER_HOUR', 'frontend', 'mail', 'optional', '200', 'Máximo de envíos normales por hora y usuario (429 si se supera).', 'Maximum normal sends per hour per user (429 when exceeded).'),
-    v('SPAM_SCORE_THRESHOLD', 'both', 'mail', 'optional', '60', 'Umbral de puntuación de spam.', 'Spam score threshold.'),
-    v('ENABLE_AUTO_SPAM_DETECTION', 'frontend', 'mail', 'optional', 'true', '`false` desactiva la detección automática de spam.', '`false` disables automatic spam detection.'),
+    v('SPAM_SCORE_THRESHOLD', 'both', 'mail', 'optional', '60', 'Umbral inicial del filtro de spam mientras no haya configuración guardada en la consola (`/admin/spam`); entonces el nivel pasa a «personalizado».', 'Initial spam filter threshold while nothing is saved in the console (`/admin/spam`); the level then becomes "custom".'),
+    v('ENABLE_AUTO_SPAM_DETECTION', 'frontend', 'mail', 'optional', 'true', '`false` desactiva el filtro de spam mientras no haya configuración guardada en la consola (la lista de bloqueo sigue activa).', '`false` turns the spam filter off while nothing is saved in the console (the blocklist stays active).'),
 
     // ---------------- Rate limit ----------------
     v('UPSTASH_REDIS_REST_URL', 'frontend', 'ratelimit', 'optional', undefined, 'URL REST de Upstash Redis. Con la URL **y** el token el rate limit es global; sin ellos es por instancia.', 'Upstash Redis REST URL. With the URL **and** token the rate limit is global; without them it is per instance.'),

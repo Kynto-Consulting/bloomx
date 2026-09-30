@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
 import { prisma } from '@/lib/prisma';
 import { extractEmailAddress, normalizeMailboxIdentity, resolveAuthorizedSenders, sanitizeDraftAttachments } from '@/lib/draft-access';
+import { loadDraftReplyContexts, parseDraftReplyContext, saveDraftReplyContext } from '@/lib/draft-reply-context';
 
 // Get all drafts
 // Get all drafts for the authenticated user
@@ -24,7 +25,9 @@ export async function GET() {
             take: 50,
             include: { attachments: true }
         });
-        return NextResponse.json({ drafts });
+        // Contexto de respuesta (SQL tolerante): al reabrir un borrador de respuesta se conserva el vinculo con el original
+        const replyCtx = await loadDraftReplyContexts(drafts.map((d) => d.id));
+        return NextResponse.json({ drafts: drafts.map((d) => (replyCtx.has(d.id) ? { ...d, ...replyCtx.get(d.id) } : d)) });
     } catch (error) {
         console.error('Failed to fetch drafts:', error);
         return NextResponse.json({ error: 'Failed to fetch drafts' }, { status: 500 });
@@ -134,7 +137,8 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        return NextResponse.json({ draft });
+        await saveDraftReplyContext(draft.id, body);
+        return NextResponse.json({ draft: { ...draft, ...(body.inReplyToEmailId !== undefined ? parseDraftReplyContext(body) : {}) } });
     } catch (error) {
         console.error('Failed to save draft:', error);
         return NextResponse.json({ error: 'Failed to save draft' }, { status: 500 });

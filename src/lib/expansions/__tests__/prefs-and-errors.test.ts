@@ -14,9 +14,9 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 
 describe('preferencias de extensiones por usuario', () => {
     it('normalizePrefs descarta basura, ids invalidos, duplicados y limita el tamano', () => {
-        expect(normalizePrefs(null)).toEqual({ disabled: [], order: [] });
-        expect(normalizePrefs('x')).toEqual({ disabled: [], order: [] });
-        expect(normalizePrefs({ disabled: ['a', 'a', 7, '<script>', 'b b', 'core-x'], order: 'no' })).toEqual({ disabled: ['a', 'core-x'], order: [] });
+        expect(normalizePrefs(null)).toEqual({ disabled: [], order: [], pins: {} });
+        expect(normalizePrefs('x')).toEqual({ disabled: [], order: [], pins: {} });
+        expect(normalizePrefs({ disabled: ['a', 'a', 7, '<script>', 'b b', 'core-x'], order: 'no' })).toEqual({ disabled: ['a', 'core-x'], order: [], pins: {} });
         expect(normalizePrefs({ disabled: Array.from({ length: 500 }, (_, i) => `e${i}`) }).disabled).toHaveLength(200);
     });
 
@@ -44,7 +44,7 @@ describe('preferencias de extensiones por usuario', () => {
         expect(getPrefs().disabled).toEqual(['core-zoom']);
         expect(JSON.parse(window.localStorage.getItem('bloomx:ext-prefs:v1:u1')!)).toMatchObject({ disabled: ['core-zoom'] });
         activatePrefsUser('u2');
-        expect(getPrefs()).toEqual({ disabled: [], order: [] }); // otro usuario: sus propias preferencias
+        expect(getPrefs()).toEqual({ disabled: [], order: [], pins: {} }); // otro usuario: sus propias preferencias
         activatePrefsUser('u1');
         expect(getPrefs().disabled).toEqual(['core-zoom']);
         off();
@@ -63,7 +63,7 @@ describe('preferencias de extensiones por usuario', () => {
         expect(body.expansionSettings[EXTENSION_PREFS_SETTINGS_KEY]).toEqual({ disabled: ['a'], order: [] });
         expect(calls[1].init!.method).toBe('POST');
         const pulled = await pullPrefsFromServer((async () => ({ ok: true, json: async () => ({ expansionSettings: { [EXTENSION_PREFS_SETTINGS_KEY]: { disabled: ['z', '<x>'] } } }) })) as any);
-        expect(pulled).toEqual({ disabled: ['z'], order: [] });
+        expect(pulled).toEqual({ disabled: ['z'], order: [], pins: {} });
         expect(await pullPrefsFromServer((async () => ({ ok: false })) as any)).toBeNull();
         expect(await pushPrefsToServer(EMPTY_PREFS, (async () => { throw new Error('offline'); }) as any)).toBe(false);
     });

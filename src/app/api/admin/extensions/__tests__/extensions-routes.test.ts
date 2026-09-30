@@ -28,6 +28,7 @@ import { POST as orderAPI } from '../order/route';
 import { POST as mandatoryAPI } from '../mandatory/route';
 import { POST as installAPI } from '../install/route';
 import { POST as uninstallAPI } from '../uninstall/route';
+import { POST as updateAPI } from '../update/route';
 import { POST as testAPI } from '../test/route';
 import { GET as statusGET } from '../[id]/status/route';
 
@@ -87,6 +88,7 @@ describe('autorizacion: sin sesion 401, sin rol 403 (todas las rutas)', () => {
         ['mandatory', () => mandatoryAPI(json('/x', { domainId: 'dom1', extensionId: 'e', mandatory: true }) as any)],
         ['install', () => installAPI(json('/x', { domainId: 'dom1', extensionId: 'e' }) as any)],
         ['uninstall', () => uninstallAPI(json('/x', { domainId: 'dom1', extensionId: 'e' }) as any)],
+        ['update', () => updateAPI(json('/x', { domainId: 'dom1', extensionId: 'e' }) as any)],
         ['test', () => testAPI(json('/x', { extensionId: 'e' }) as any)],
         ['status', () => statusGET(get('/x') as any, { params: Promise.resolve({ id: 'e' }) })],
     ];
@@ -220,6 +222,41 @@ describe('install / uninstall: no reenvian ni devuelven secretos', () => {
         const r = await uninstallAPI(json('/x', { domainId: 'otro', extensionId: 'e' }) as any);
         expect(r.status).toBe(403);
         expect(callsTo('/manager/extensions/uninstall')).toHaveLength(0);
+    });
+});
+
+describe('update: actualiza una extension instalada a la version del catalogo', () => {
+    it('reenvia solo los dos ids + cookie, audita admin.extension.update y devuelve solo versiones (nunca la fila de instalacion)', async () => {
+        backend((u) => u.includes('/manager/extensions/update'), () => res(200, { success: true, updated: true, from: '1.0.0', to: '1.1.0', authData: { accessToken: SECRET }, settings: { credentials: { K: SECRET } } }));
+        const r = await updateAPI(json('/x', { domainId: 'dom1', extensionId: 'core-signature', authData: { accessToken: SECRET }, settings: { a: SECRET } }) as any);
+        expect(r.status).toBe(200);
+        const data = await r.json();
+        expect(data).toEqual({ success: true, updated: true, from: '1.0.0', to: '1.1.0' });
+        const [, init] = callsTo('/manager/extensions/update')[0];
+        expect(JSON.parse(init.body)).toEqual({ domainId: 'dom1', extensionId: 'core-signature' });
+        expect(init.headers.Cookie).toBe('auth_session=abc');
+        const call = (auditLog as any).mock.calls.find((c: any[]) => c[0] === 'admin.extension.update');
+        expect(call[1]).toMatchObject({ extensionId: 'core-signature', domainId: 'dom1', outcome: 'ok', from: '1.0.0', to: '1.1.0' });
+        expect(JSON.stringify((auditLog as any).mock.calls)).not.toContain(SECRET);
+    });
+
+    it('rechaza un dominio ajeno a esta instancia sin llamar al backend', async () => {
+        const r = await updateAPI(json('/x', { domainId: 'otro', extensionId: 'e' }) as any);
+        expect(r.status).toBe(403);
+        expect((await r.json()).code).toBe('domain_mismatch');
+        expect(callsTo('/manager/extensions/update')).toHaveLength(0);
+    });
+
+    it('catalogo con version no valida: el codigo EXTENSION_INVALID llega al navegador; 403 => manager_session_required; 404 => not_installed', async () => {
+        backend((u) => u.includes('/manager/extensions/update'), () => res(422, { error: 'x', code: 'EXTENSION_INVALID', details: 'mounts[0].handler: ...' }));
+        const invalid = await updateAPI(json('/x', { domainId: 'dom1', extensionId: 'core-signature' }) as any);
+        expect((await invalid.json()).code).toBe('EXTENSION_INVALID');
+        handlers = handlers.slice(1);
+        backend((u) => u.includes('/manager/extensions/update'), () => res(403, { error: 'Unauthorized domain access' }));
+        expect((await (await updateAPI(json('/x', { domainId: 'dom1', extensionId: 'e' }) as any)).json()).code).toBe('manager_session_required');
+        handlers = handlers.slice(1);
+        backend((u) => u.includes('/manager/extensions/update'), () => res(404, { error: 'Extension is not installed' }));
+        expect((await (await updateAPI(json('/x', { domainId: 'dom1', extensionId: 'e' }) as any)).json()).code).toBe('not_installed');
     });
 });
 

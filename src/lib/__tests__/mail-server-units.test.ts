@@ -116,7 +116,8 @@ describe('mail-list-sql: SQL parametrizado (sin interpolar datos del usuario)', 
     });
 
     it('clave de hilo en SQL espeja la de la interfaz (prefijos, minimo 3 letras, sin asunto = hilo propio)', () => {
-        expect(SUBJECT_PREFIX_RE).toContain('re|fwd|rv|enc|invitaci');
+        expect(SUBJECT_PREFIX_RE).toContain('fwd|res|enc|wg|tr|fw|rv|aw|sv');
+        expect(SUBJECT_PREFIX_RE).toContain('invitaci[oó]n');
         expect(THREAD_KEY_SQL).toContain("'u:' || e.\"id\"");
         expect(THREAD_KEY_SQL).toContain('char_length(n."norm") < 3');
         expect(THREAD_KEY_SQL).toContain("'(No Subject)'");

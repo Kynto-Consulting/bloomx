@@ -15,6 +15,7 @@ import { escapeXml, findAll, parseXml, textOf, type XmlElement, type XmlLimits }
 import { validateUserRegex, MAX_REGEX_LENGTH } from '@/lib/rules/regex-safety';
 import { MAX_LABEL_NAME } from '@/lib/rules/label-validation';
 import type { Action, Condition, RuleConditions } from '@/lib/rules/engine';
+import { toV2, isGroup } from '@/lib/rules/conditions';
 
 export interface GmailFilter {
     from: string | null;
@@ -472,7 +473,10 @@ export function buildGmailFiltersXmlEx(rules: StoredRuleLike[], labelNameById: M
     for (const r of rules) {
         const name = String(r.name ?? 'regla');
         if (r.enabled === false) { skipped.push({ name, reason: 'regla desactivada (Gmail no tiene filtros desactivados)' }); continue; }
-        const raw: any = r.conditions;
+        // Las reglas guardadas son v2 (arbol). Gmail solo expresa una lista plana Y (o O de un mismo campo): se aplana cuando es posible.
+        const v2root = toV2(r.conditions).root;
+        if (v2root.op === 'not' || v2root.children.some((c) => isGroup(c))) { skipped.push({ name, reason: 'condiciones anidadas o negadas no expresables en Gmail' }); continue; }
+        const raw: any = { match: v2root.op === 'or' ? 'any' : 'all', items: (v2root.children as any[]).map((c) => (c.field === 'hasLabel' ? { field: 'label', value: c.value } : c)) };
         const match: 'all' | 'any' = raw && !Array.isArray(raw) && raw.match === 'any' ? 'any' : 'all';
         const items: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.items) ? raw.items : [];
         if (!items.length) { skipped.push({ name, reason: 'sin condiciones' }); continue; }

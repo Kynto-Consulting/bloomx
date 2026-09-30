@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { ChevronsDownUp, ChevronsUpDown, Forward, MousePointerClick, RefreshCw, Reply, ReplyAll } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Forward, MousePointerClick, Paperclip, RefreshCw, Reply, ReplyAll } from 'lucide-react';
 import { useCache } from '@/contexts/CacheContext';
 import { useCompose } from '@/contexts/ComposeContext';
 import { useSession } from '@/components/SessionProvider';
 import { useI18n } from '@/components/I18nProvider';
 import { cn } from '@/lib/utils';
 import { sanitizeHtml } from '@/lib/sanitizeHtml';
-import { buildForwardHeaderHtml } from '@/lib/forward-header';
+import { buildForwardQuote, buildForwardSubject, buildReplyQuote, buildReplySubject } from '@/lib/reply-builder';
+import { makeReplyDeps } from '@/lib/reply-deps';
 import { toast } from 'sonner';
 import { fetchDeduped } from '@/lib/fetchdedupe';
 import { ExtensionLoader } from './expansions/ExtensionLoader';
@@ -27,6 +28,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { mailBus, mailNav, neighbours } from '@/components/mail/mail-bus';
 import { ReaderToolbar, type ReaderMenuKind } from '@/components/mail/ReaderToolbar';
 import { ThreadMessage } from '@/components/mail/ThreadMessage';
+import { ThreadDedupeToggle, useThreadDedupe } from '@/components/mail/useThreadDedupe';
 import { MoveMenu } from '@/components/mail/MoveMenu';
 import { SnoozeMenu } from '@/components/mail/SnoozeMenu';
 import { useMailActions } from '@/components/mail/useMailActions';
@@ -112,8 +114,8 @@ export function MailView() {
     const [addCalendarEmailId, setAddCalendarEmailId] = useState<string | null>(null);
     const { getData, setData: setCacheData, invalidate } = useCache();
     const { openCompose } = useCompose();
-    const openDraft = useCallback((d: { id: string; from?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; attachments?: unknown[] }) => {
-        openCompose({ id: d.id, draftId: d.id, from: d.from, to: d.to || '', cc: d.cc || '', bcc: d.bcc || '', subject: d.subject || '', body: d.body || '', minimized: false, attachments: (d.attachments as any[]) || [] });
+    const openDraft = useCallback((d: { id: string; from?: string; to?: string; cc?: string; bcc?: string; subject?: string; body?: string; attachments?: unknown[]; inReplyToEmailId?: string | null; replyMode?: 'reply' | 'replyAll' | 'forward' | null }) => {
+        openCompose({ id: d.id, draftId: d.id, from: d.from, to: d.to || '', cc: d.cc || '', bcc: d.bcc || '', subject: d.subject || '', body: d.body || '', minimized: false, attachments: (d.attachments as any[]) || [], ...(d.inReplyToEmailId ? { inReplyToEmailId: d.inReplyToEmailId, replyMode: d.replyMode || undefined } : {}) });
     }, [openCompose]);
     const actions = useMailActions({ openDraft });
     const actionsRef = useRef(actions);
@@ -269,6 +271,7 @@ export function MailView() {
         setMenu(kind);
     };
 
+    const notSpam = useCallback(() => { void runAction('notSpam'); }, [runAction]);
     const toggleStar = () => { if (data) void runAction(data.email.starred ? 'unstar' : 'star'); };
     const toggleRead = () => { if (data) void runAction(data.email.read ? 'markUnread' : 'markRead'); };
 
@@ -371,25 +374,12 @@ export function MailView() {
         return { targetEmail: newest!.email, targetContent: newest!.content };
     };
 
-    const formatQuoteDate = (value: string) => {
-        try {
-            return new Intl.DateTimeFormat(intlLocale, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value));
-        } catch {
-            return value;
-        }
-    };
-
+    /** Cita de respuesta (estructura Gmail/Outlook, saneada y con tope de tamano): ver lib/reply-builder.ts. */
     const buildQuote = async (targetEmail: EmailDetails['email'], targetContent: string) => {
         // Las imagenes cid: solo existen dentro del correo original: se incrustan para que sigan visibles.
         const content = await inlineCidImages(targetContent || '', targetEmail.attachments);
-        const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const header = esc(t('emailList.quoteHeader', { date: formatQuoteDate(targetEmail.createdAt), from: targetEmail.from }));
-        const quoteHeader = `<div dir="ltr" class="gmail_attr">${header}<br></div>`;
-        const quoteBody = `<blockquote class="gmail_quote" style="margin:0 0 0 .8ex;border-left:1px #999 solid;padding-left:1ex">${content}</blockquote>`;
-        return `<p></p><br><div class="gmail_quote">${quoteHeader}${quoteBody}</div>`;
+        return buildReplyQuote(targetEmail, content, makeReplyDeps({ t, intlLocale })).body;
     };
-
-    const reSubject = (subject: string) => (/^re:/i.test(subject) ? subject : `Re: ${subject}`);
 
     const handleReply = async (item?: EmailDetails) => {
         if (!data) return;
@@ -398,8 +388,10 @@ export function MailView() {
             id: crypto.randomUUID(),
             from: resolveSenderFromEmail(targetEmail),
             to: targetEmail.replyTo || targetEmail.from,
-            subject: reSubject(targetEmail.subject),
+            subject: buildReplySubject(targetEmail.subject),
             body: await buildQuote(targetEmail, targetContent),
+            inReplyToEmailId: targetEmail.id,
+            replyMode: 'reply',
             minimized: false,
         });
     };
@@ -427,8 +419,10 @@ export function MailView() {
             from: replyFrom,
             to: recipients.to.join(', '),
             cc: recipients.cc.length > 0 ? recipients.cc.join(', ') : undefined,
-            subject: reSubject(targetEmail.subject),
+            subject: buildReplySubject(targetEmail.subject),
             body: await buildQuote(targetEmail, targetContent),
+            inReplyToEmailId: targetEmail.id,
+            replyMode: 'replyAll',
             minimized: false,
         });
     };
@@ -452,9 +446,28 @@ export function MailView() {
                     url: att.key ? undefined : att.url,
                     forwarded: true,
                 })),
-            subject: /^(fwd|fw):/i.test(targetEmail.subject) ? targetEmail.subject : `Fwd: ${targetEmail.subject}`,
-            // Cabecera escapada (ver lib/forward-header.ts): "Nombre <a@b.com>" no se interpreta como etiqueta HTML.
-            body: `<p></p>${buildForwardHeaderHtml({ from: targetEmail.from, date: formatQuoteDate(targetEmail.createdAt), subject: targetEmail.subject, to: targetEmail.to })}<br>${content}`,
+            subject: buildForwardSubject(targetEmail.subject),
+            // Bloque "Forwarded message" (estilo Gmail u Outlook segun preferencia), con los campos escapados.
+            body: buildForwardQuote(targetEmail, content, makeReplyDeps({ t, intlLocale })).body,
+            inReplyToEmailId: targetEmail.id,
+            replyMode: 'forward',
+            minimized: false,
+        });
+    };
+
+    /** Reenviar como adjunto: cuerpo vacio; el servidor adjunta el .eml del original (attachOriginalEmlOf). */
+    const handleForwardAsEml = (item?: EmailDetails) => {
+        if (!data) return;
+        const { targetEmail } = resolveTarget(item);
+        openCompose({
+            id: crypto.randomUUID(),
+            from: resolveSenderFromEmail(targetEmail),
+            to: '',
+            subject: buildForwardSubject(targetEmail.subject),
+            body: '<p></p>',
+            inReplyToEmailId: targetEmail.id,
+            replyMode: 'forward',
+            attachOriginalEmlOf: targetEmail.id,
             minimized: false,
         });
     };
@@ -503,6 +516,7 @@ export function MailView() {
     const menuTargets = menu ? targets() : [];
     const labelStateFor = (labelId: string) => labelSelectionState(menuTargets as any, menuTargets.map((e) => e.id), labelId);
     const participants = useMemo(() => threadParticipants(threadItems.map((m) => m.email as unknown as ListEmail), 4), [threadItems]);
+    const threadDedupe = useThreadDedupe(threadItems);
 
     if (!id) {
         return (
@@ -590,10 +604,11 @@ export function MailView() {
                                 <span>{t('emailList.threadMessages', { n: threadItems.length })}</span>
                                 <span aria-hidden="true">·</span>
                                 <span className="truncate">{participants.names.join(', ')}{participants.extra > 0 ? ` +${participants.extra}` : ''}</span>
+                                <ThreadDedupeToggle state={threadDedupe} className="ml-auto" />
                                 <button
                                     type="button"
                                     onClick={toggleExpandAll}
-                                    className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className={`${threadDedupe.relevant ? '' : 'ml-auto '}inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}
                                 >
                                     {allExpanded ? <ChevronsDownUp className="h-3.5 w-3.5" aria-hidden="true" /> : <ChevronsUpDown className="h-3.5 w-3.5" aria-hidden="true" />}
                                     {allExpanded ? t('mailView.thread.collapseAll') : t('mailView.thread.expandAll')}
@@ -623,6 +638,9 @@ export function MailView() {
                             onAddToCalendar={handleAddToCalendar}
                             own={ownAddresses}
                             resolveJoin={resolveInviteJoin}
+                            dedupe={threadDedupe.results.get(item.email.id)}
+                            hideDuplicates={threadDedupe.relevant ? threadDedupe.enabled : undefined}
+                            onNotSpam={notSpam}
                         />
                     ))}
                 </div>
@@ -637,6 +655,7 @@ export function MailView() {
                             <button type="button" data-quick-reply="reply" onClick={() => void handleReply()} className={quickBtn}><Reply className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.reply')}</button>
                             <button type="button" data-quick-reply="replyAll" onClick={() => void handleReplyAll()} className={quickBtn}><ReplyAll className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.replyAll')}</button>
                             <button type="button" data-quick-reply="forward" onClick={() => void handleForward()} className={quickBtn}><Forward className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.forward')}</button>
+                            <button type="button" data-quick-reply="forwardEml" onClick={() => handleForwardAsEml()} className={quickBtn}><Paperclip className="h-4 w-4" aria-hidden="true" /> {t('mailView.reply.forwardEml')}</button>
                         </div>
                     </section>
                 )}

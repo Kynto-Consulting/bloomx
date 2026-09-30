@@ -32,6 +32,7 @@ import { MAIL_DND_TYPE, canDropOnFolder, dragState, parseDragPayload } from '@/l
 import { useMailActions } from '@/components/mail/useMailActions';
 import { Avatar } from '@/components/mail/ui';
 import { QuotaMeter } from '@/components/mail/QuotaMeter';
+import { LabelTree } from '@/components/labels/LabelTree';
 
 // Init
 
@@ -65,7 +66,7 @@ function SidebarContent({ onClose }: SidebarProps) {
     const pathname = usePathname();
     const currentFolder = searchParams.get('folder') || 'inbox';
     const { openCompose } = useCompose();
-    const { getData, setData, subscribe } = useCache();
+    const { getData, setData, subscribe, invalidate } = useCache();
     const [counts, setCounts] = useState({
         inbox: 0,
         drafts: 0,
@@ -154,12 +155,12 @@ function SidebarContent({ onClose }: SidebarProps) {
     const [isSubmittingLabel, setIsSubmittingLabel] = useState(false);
 
     const [showSettings, setShowSettings] = useState(false);
-    const [settingsTab, setSettingsTab] = useState<'integrations' | undefined>(undefined);
+    const [settingsTab, setSettingsTab] = useState<'integrations' | 'spam' | undefined>(undefined);
     // Otros componentes (selector de videoconferencia) piden abrir Ajustes -> Integraciones con este evento.
     useEffect(() => {
         const onOpen = (event: Event) => {
             const tab = (event as CustomEvent<{ tab?: string }>).detail?.tab;
-            setSettingsTab(tab === 'integrations' ? 'integrations' : undefined);
+            setSettingsTab(tab === 'integrations' || tab === 'spam' ? tab : undefined);
             setShowSettings(true);
         };
         window.addEventListener('bloomx:open-settings', onOpen);
@@ -434,7 +435,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 </div>
                 {/* Mobile Close Button */}
                 {onClose && (
-                    <button onClick={onClose} aria-label={t('sidebar.close')} className="md:hidden p-2 text-muted-foreground hover:text-sidebar-foreground">
+                    <button onClick={onClose} aria-label={t('sidebar.close')} className="p-2 text-muted-foreground hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md">
                         <X className="h-5 w-5" />
                     </button>
                 )}
@@ -611,61 +612,21 @@ function SidebarContent({ onClose }: SidebarProps) {
                                         </motion.div>
                                     )}
 
-                                    <nav className="grid gap-0.5">
-                                        {labels.length === 0 && !isCreatingLabel && (
+                                    <nav aria-label={t('labelTree.treeLabel')}>
+                                        {labels.length === 0 && !isCreatingLabel ? (
                                             <div className="px-4 py-4 text-xs text-muted-foreground text-center border mr-2 ml-2 rounded border-dashed border-sidebar-border">{t('sidebar.noLabels')}</div>
+                                        ) : (
+                                            <LabelTree
+                                                labels={labels}
+                                                activePaths={activeLabels}
+                                                getHref={(l) => getLabelUrl(l.fullPath || l.name)}
+                                                onChanged={() => { void invalidate(LABELS_CACHE_KEY); void invalidate(COUNTS_CACHE_KEY); }}
+                                                dropTarget={dropTarget}
+                                                onMailDragOver={(e, l) => handleLabelDragOver(e, l.id)}
+                                                onMailDragLeave={(l) => handleDragLeave(`label:${l.id}`)}
+                                                onMailDrop={(e, l) => { void handleDrop(e, { kind: 'label', label: l }); }}
+                                            />
                                         )}
-                                        {labels.map((label) => {
-                                            const isActive = activeLabels.includes(label.name.toLowerCase());
-                                            const dropKey = `label:${label.id}`;
-                                            const unread = label.count ?? 0;
-                                            const total = label.total ?? 0;
-                                            const name = labelDisplayName(label.name, t);
-                                            const countLabel = unread > 0
-                                                ? t('sidebar.counts.unreadOfTotal', { unread, total: Math.max(total, unread) })
-                                                : total > 0 ? t('sidebar.counts.total', { total }) : '';
-                                            return (
-                                                <div
-                                                    key={label.id}
-                                                    className={cn('rounded-lg', dropTarget === dropKey && 'ring-2 ring-ring bg-sidebar-accent')}
-                                                    data-drop-label={label.id}
-                                                    onDragOver={(e) => handleLabelDragOver(e, label.id)}
-                                                    onDragLeave={() => handleDragLeave(dropKey)}
-                                                    onDrop={(e) => { void handleDrop(e, { kind: 'label', label }); }}
-                                                >
-                                                    <Link
-                                                        href={getLabelUrl(label.name)}
-                                                        aria-current={isActive ? 'page' : undefined}
-                                                        aria-label={countLabel ? `${name}, ${countLabel}` : undefined}
-                                                        className={cn(
-                                                            "flex min-h-10 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                                            isActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground"
-                                                        )}
-                                                    >
-                                                        <div className="flex items-center justify-center w-4 relative">
-                                                            <span
-                                                                aria-hidden="true"
-                                                                className="h-2.5 w-2.5 rounded-full ring-1 ring-sidebar-border transition-all"
-                                                                style={{ backgroundColor: label.color ?? undefined }}
-                                                            />
-                                                            {isActive && (
-                                                                <div className="absolute inset-0 flex items-center justify-center">
-                                                                    <div className="h-4 w-4 bg-primary/20 rounded-full animate-pulse" />
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                        <span className={cn("min-w-0 flex-1 truncate", isActive && "font-bold")}>{name}</span>
-                                                        {unread > 0 && (
-                                                            <span aria-hidden="true" className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">{unread}</span>
-                                                        )}
-                                                        {total > 0 && (
-                                                            <span aria-hidden="true" className={cn("min-w-[1.5rem] text-right text-xs tabular-nums", !isActive && "text-muted-foreground")}>{total}</span>
-                                                        )}
-                                                        {isActive && <Check className="h-3 w-3 ml-1" aria-hidden="true" />}
-                                                    </Link>
-                                                </div>
-                                            );
-                                        })}
                                     </nav>
                                 </>
                             )}

@@ -1,10 +1,10 @@
 import {
-    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight,
+    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight, ShieldAlert,
     type LucideIcon,
 } from 'lucide-react';
 
 /** Secciones de la consola (una sola fuente de verdad para la navegacion, el breadcrumb y la busqueda global). */
-export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'transfer' | 'profile';
+export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'transfer' | 'spam' | 'profile';
 export type NavGroup = 'overview' | 'people' | 'mail' | 'platform' | 'account';
 
 export interface NavItem {
@@ -25,6 +25,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     { id: 'audit', href: '/admin/audit', icon: FileClock, group: 'platform' },
     { id: 'retention', href: '/admin/retention', icon: Database, group: 'platform' },
     { id: 'transfer', href: '/admin/transfer', icon: ArrowLeftRight, group: 'mail' },
+    { id: 'spam', href: '/admin/spam', icon: ShieldAlert, group: 'mail' },
     { id: 'profile', href: '/admin/profile', icon: UserCircle, group: 'account' },
 ];
 
@@ -63,6 +64,7 @@ export const SEARCH_TARGETS: readonly SearchTarget[] = [
     { id: 's:dns', href: '/admin/mail#dns', labelKey: 'admin.console.shell.search.settings.dns', keywords: 'dns spf dkim dmarc', icon: Mail },
     { id: 's:retention', href: '/admin/retention', labelKey: 'admin.console.shell.search.settings.retentionPolicy', keywords: 'retencion retention spam papelera trash purgar', icon: Database },
     { id: 's:transfer', href: '/admin/transfer', labelKey: 'admin.console.shell.search.settings.transfer', keywords: 'importar exportar import export mbox eml pst takeout gmail outlook thunderbird migrar backup respaldo', icon: ArrowLeftRight },
+    { id: 's:spam', href: '/admin/spam', labelKey: 'admin.console.shell.search.settings.spam', keywords: 'spam antispam filtro filter bloqueados bloqueo permitidos remitentes senders blocklist allowlist externos external phishing suplantacion', icon: ShieldAlert },
     { id: 's:createUser', href: '/admin/users?create=1', labelKey: 'admin.console.shell.search.settings.createUser', keywords: 'crear usuario create user nuevo alta', icon: Users },
 ];
 

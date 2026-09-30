@@ -1,0 +1,115 @@
+{
+    "manifestVersion": "1.0",
+    "id": "core-notion",
+    "version": "1.1.0",
+    "name": "Notion Integration",
+    "description": "Save emails to Notion Database",
+    "permissions": [
+        "READ_EMAIL",
+        "ENV_READ:NOTION_API_KEY",
+        "ENV_READ:NOTION_DATABASE_ID",
+        "HTTP_REQUEST",
+        "FORMATS"
+    ],
+    "api": {
+        "runtime": "nodejs",
+        "entry": "server.js",
+        "functions": {
+            "getSchema": {
+                "handler": "getSchema"
+            },
+            "savePage": {
+                "handler": "savePage"
+            }
+        }
+    },
+    "mounts": [
+        {
+            "point": "EMAIL_TOOLBAR",
+            "component": {
+                "type": "BUTTON",
+                "props": {
+                    "label": "Notion",
+                    "icon": "Database",
+                    "onClick": {
+                        "action": "OPEN_OVERLAY",
+                        "targetId": "notion-modal"
+                    }
+                }
+            }
+        },
+        {
+            "point": "OVERLAY",
+            "id": "notion-modal",
+            "component": {
+                "type": "MODAL",
+                "props": {
+                    "title": "Save to Notion",
+                    "onLoad": {
+                        "action": "CALL_BACKEND",
+                        "function": "getSchema",
+                        "onSuccess": {
+                            "action": "SET_STATE",
+                            "key": "dbInfo",
+                            "value": "${result}"
+                        },
+                        "onError": {
+                            "action": "SET_STATE",
+                            "key": "error",
+                            "value": "${error}"
+                        }
+                    },
+                    "children": [
+                        {
+                            "type": "CONDITIONAL",
+                            "props": {
+                                "condition": "${state.error != null}",
+                                "true": [
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "${state.error}",
+                                            "variant": "error"
+                                        }
+                                    }
+                                ],
+                                "false": [
+                                    {
+                                        "type": "TEXT",
+                                        "props": {
+                                            "content": "Connected to: ${state.dbInfo.title}",
+                                            "variant": "success"
+                                        }
+                                    },
+                                    {
+                                        "type": "FORM",
+                                        "props": {
+                                            "onSubmit": {
+                                                "action": "CALL_BACKEND",
+                                                "function": "savePage",
+                                                "onSuccess": {
+                                                    "action": "TOAST",
+                                                    "message": "Saved to Notion"
+                                                },
+                                                "args": {
+                                                    "subject": "${formData.subject}"
+                                                }
+                                            },
+                                            "fields": [
+                                                {
+                                                    "name": "subject",
+                                                    "label": "Page Title",
+                                                    "defaultValue": "${context.subject}"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

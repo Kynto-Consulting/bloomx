@@ -12,6 +12,7 @@ import {
 } from '@/lib/admin/extensions-manifest';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
 import { ExtensionActionButtons, StatusBadges, type RowActions } from './ExtensionCard';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { PermissionsList, RISK_TONE } from './PermissionsList';
 import { TabList, panelDomId, tabDomId, type TabDef } from './Tabs';
 import type { TestResult } from './useExtensionActions';
@@ -73,6 +74,33 @@ export function ExtensionDetail({ row, onClose, actions, testSupport, onTest, on
     );
 }
 
+/** Manifest invalido (no se carga) o con elementos descartados: ruta y motivo de cada uno y, si hay version nueva, como resolverlo. */
+function ManifestHealthNotice({ row }: { row: ExtensionRow }) {
+    const { t } = useI18n();
+    if (row.manifestValid && row.manifestProblems.length === 0) return null;
+    const invalid = !row.manifestValid;
+    const dropped = row.manifestProblems.filter((p) => p.dropped).length;
+    return (
+        <div role={invalid ? 'alert' : 'note'} data-testid="manifest-health" className={`rounded-lg border p-3 text-sm ${invalid ? 'border-destructive/30 bg-destructive/10' : 'border-warning/30 bg-warning/10'} text-foreground`}>
+            <p className="font-medium">
+                {invalid
+                    ? t('admin.console.extensions.manifest.invalidTitle')
+                    : t('admin.console.extensions.manifest.degradedTitle', { count: dropped || row.manifestProblems.length })}
+            </p>
+            {row.updateAvailable && (
+                <p className="mt-1">{t('admin.console.extensions.manifest.updateHint', { from: row.installedVersion ?? '?', to: row.version ?? '?' })}</p>
+            )}
+            {row.manifestProblems.length > 0 && (
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-muted-foreground">
+                    {row.manifestProblems.slice(0, 12).map((problem, index) => (
+                        <li key={index} className="break-words"><code>{problem.path}</code>: {problem.message}</li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
 function SummaryTab({ row, actions }: { row: ExtensionRow; actions: RowActions }) {
     const { t } = useI18n();
     const tpl = row.template;
@@ -80,7 +108,11 @@ function SummaryTab({ row, actions }: { row: ExtensionRow; actions: RowActions }
     const authType = tpl?.auth?.type && tpl.auth.type.toUpperCase() !== 'NONE' ? tpl.auth.type : null;
     return (
         <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
+            <ManifestHealthNotice row={row} />
+            <div className="flex items-start gap-3">
+                <ExtensionIcon icon={row.icon} label={row.name} size={32} />
+                <p className="min-w-0 text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
+            </div>
             <DefinitionList
                 items={[
                     { label: t('admin.console.extensions.summaryTab.category'), value: t(`admin.console.extensions.filters.categories.${row.category}`) },

@@ -23,7 +23,7 @@ const FILES = [
     'src/components/ComposeModal.tsx',
     'src/components/SettingsModal.tsx',
     'src/components/calendar/CreateEventForm.tsx',
-    'src/app/appointments/page.tsx',
+    'src/app/(app)/appointments/page.tsx',
 ].map((f) => (path.isAbsolute(f) ? f : path.join(ROOT, f)));
 
 const KEY_RE = /'(conferencing\.[A-Za-z0-9_.]+)'/g;

@@ -11,6 +11,8 @@
 export interface ExtensionPrefs {
     disabled: string[];
     order: string[];
+    /** Acciones de las barras (EMAIL_TOOLBAR...) que el usuario ancla (true) o desancla (false), por clave de accion. Solo se guardan las decisiones explicitas. */
+    pins?: Record<string, boolean>;
 }
 
 export const EXTENSION_PREFS_SETTINGS_KEY = 'system:extension-prefs';
@@ -18,7 +20,20 @@ const STORAGE_PREFIX = 'bloomx:ext-prefs:v1:';
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
 const MAX_IDS = 200;
 
-export const EMPTY_PREFS: ExtensionPrefs = Object.freeze({ disabled: [], order: [] }) as ExtensionPrefs;
+const PIN_KEY_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+const MAX_PINS = 300;
+
+export const EMPTY_PREFS: ExtensionPrefs = Object.freeze({ disabled: [], order: [], pins: Object.freeze({}) }) as unknown as ExtensionPrefs;
+
+function cleanPins(value: unknown): Record<string, boolean> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [key, v] of Object.entries(value as Record<string, unknown>)) {
+        if (Object.keys(out).length >= MAX_PINS) break;
+        if (PIN_KEY_RE.test(key) && typeof v === 'boolean') out[key] = v;
+    }
+    return out;
+}
 
 function cleanIds(value: unknown): string[] {
     if (!Array.isArray(value)) return [];
@@ -32,9 +47,9 @@ function cleanIds(value: unknown): string[] {
 
 /** Sanea lo que llegue de localStorage/servidor (nunca lanza). */
 export function normalizePrefs(input: unknown): ExtensionPrefs {
-    if (!input || typeof input !== 'object' || Array.isArray(input)) return { disabled: [], order: [] };
+    if (!input || typeof input !== 'object' || Array.isArray(input)) return { disabled: [], order: [], pins: {} };
     const source = input as Record<string, unknown>;
-    return { disabled: cleanIds(source.disabled), order: cleanIds(source.order) };
+    return { disabled: cleanIds(source.disabled), order: cleanIds(source.order), pins: cleanPins(source.pins) };
 }
 
 export const isExtensionEnabled = (prefs: ExtensionPrefs, id: string): boolean => !prefs.disabled.includes(id);
@@ -60,6 +75,14 @@ export function withEnabled(prefs: ExtensionPrefs, id: string, enabled: boolean)
     if (!ID_RE.test(id)) return prefs;
     const without = prefs.disabled.filter((item) => item !== id);
     return { ...prefs, disabled: enabled ? without : [...without, id] };
+}
+
+/** Nuevas prefs con la accion anclada/desanclada en las barras (`null` = volver al valor por defecto del manifest). */
+export function withPinned(prefs: ExtensionPrefs, key: string, pinned: boolean | null): ExtensionPrefs {
+    if (!PIN_KEY_RE.test(key)) return prefs;
+    const pins = { ...(prefs.pins ?? {}) };
+    if (pinned === null) delete pins[key]; else pins[key] = pinned;
+    return { ...prefs, pins };
 }
 
 /** Mueve una extension una posicion (-1 = antes, +1 = despues) respecto a `allIds` (orden visible actual). */

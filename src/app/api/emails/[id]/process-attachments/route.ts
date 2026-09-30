@@ -11,6 +11,8 @@ import { uniqueAttachmentKey } from '@/lib/attachment-keys';
 import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { auditLog } from '@/lib/security';
 import { rawEmlKey, rawMimeMaxBytes, storeRawMimeEnabled } from '@/lib/raw-mime';
+import { assignThread, headersOfInbound } from '@/lib/thread-store';
+import { threadInfoFromRawMime } from '@/lib/thread-headers';
 
 // Large inbound attachments mean downloading the full raw MIME (all parts,
 // base64) and re-uploading to our own storage. Give the function room so big
@@ -237,6 +239,21 @@ export async function POST(
     if (emlKey && storeRawMimeEnabled() && rawBytes.length > 0 && rawBytes.length <= rawMimeMaxBytes()) {
         const stored = await uploadWithRetry(emlKey, rawBytes, 'message/rfc822');
         if (!stored) console.error(`[process-attachments] raw.eml not stored for email ${emailId}`);
+    }
+
+    // Cabeceras de hilo completas del MIME original (el webhook solo trajo message_id): recalcula el hilo. Mejor esfuerzo.
+    try {
+        const threadInfo = threadInfoFromRawMime(rawBytes.subarray(0, 256 * 1024));
+        if (threadInfo.messageId || threadInfo.inReplyTo || threadInfo.refs.length > 0 || threadInfo.hints.length > 0) {
+            const owner = await prisma.user.findUnique({ where: { id: email.userId }, select: { email: true } });
+            await assignThread({
+                userId: email.userId, emailId, headers: headersOfInbound(threadInfo), date: email.createdAt.getTime(),
+                subject: email.subject, from: email.from, to: email.to, cc: email.cc, own: owner ? [owner.email] : [],
+                noFallback: threadInfo.autoSubmitted || threadInfo.bulk || Boolean(threadInfo.listId),
+            });
+        }
+    } catch (threadError) {
+        console.error(`[process-attachments] Thread headers failed for email ${emailId}:`, (threadError as Error)?.message);
     }
 
     // Extract all attachment parts

@@ -7,6 +7,7 @@ import { formatErrorReport } from '@/lib/expansions/manage/report';
 import type { ExtensionRow } from '@/lib/expansions/manage/model';
 import { Button } from '@/components/expansions/kit/Actions';
 import { Badge } from '@/components/expansions/kit/Feedback';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { ErrorsTable } from './ErrorsTable';
 import { fmt, useManageStrings } from './strings';
 
@@ -43,6 +44,7 @@ export function ErrorsPanel({ errors, rows, now, scopeId, canOpenPlayground, ann
     const list = scopeId ? errors.filter((e) => e.extensionId === scopeId) : errors;
     const Heading = (headingLevel === 2 ? 'h2' : 'h3') as 'h2';
     const nameOf = (id: string) => rows.find((r) => r.id === id)?.name ?? id;
+    const iconOf = (id: string) => rows.find((r) => r.id === id)?.icon ?? null;
     const groups = React.useMemo(() => {
         const map = new Map<string, ExtensionErrorEntry[]>();
         for (const e of list) map.set(e.extensionId, [...(map.get(e.extensionId) ?? []), e]);
@@ -85,7 +87,7 @@ export function ErrorsPanel({ errors, rows, now, scopeId, canOpenPlayground, ann
                 groups.map(([id, entries]) => (
                     <div key={id} className="space-y-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <h3 className="text-sm font-medium text-foreground">{nameOf(id)} <code className="text-xs text-muted-foreground">{id}</code> <span className="text-muted-foreground">({entries.length === 1 ? s.errorCountOne : fmt(s.errorCount, { n: entries.length })})</span></h3>
+                            <h3 className="flex flex-wrap items-center gap-1.5 text-sm font-medium text-foreground"><ExtensionIcon icon={iconOf(id)} label={nameOf(id)} size={20} />{nameOf(id)} <code className="text-xs text-muted-foreground">{id}</code> <span className="text-muted-foreground">({entries.length === 1 ? s.errorCountOne : fmt(s.errorCount, { n: entries.length })})</span></h3>
                             <Button label={`${s.clear}: ${nameOf(id)}`} icon="Trash2" variant="ghost" size="xs" onPress={() => clear(id)} />
                         </div>
                         <ErrorsTable errors={entries} now={now} />

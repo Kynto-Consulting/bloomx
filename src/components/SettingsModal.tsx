@@ -15,22 +15,26 @@ import { RulesSettings } from '@/components/settings/RulesSettings';
 import { IntegrationsSettings } from '@/components/settings/IntegrationsSettings';
 import { ManageExtensionsLink } from '@/components/settings/ManageExtensionsLink';
 import { MyMailboxTransfer } from '@/components/settings/MyMailboxTransfer';
+import { SpamSettings } from '@/components/spam/SpamSettings';
 import { APPEARANCE_SETTINGS_KEY } from '@/lib/themes';
 import { useI18n } from '@/components/I18nProvider';
+import { pickI18nText } from '@/lib/expansions/ui-schema';
 import { useDialog } from '@/components/ui/useDialog';
 
 interface SettingsModalProps {
     open: boolean;
     onClose: () => void;
     /** Pestana a mostrar al abrir (p. ej. 'integrations' desde el selector de videoconferencia). */
-    initialTab?: 'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'extensions';
+    initialTab?: 'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'spam' | 'extensions';
 }
 
 export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps) {
     const { data: session, update: updateSession } = useSession();
     const { setData } = useCache();
     const { getAppearance } = useTheme();
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
+    /** Titulo de una pestana de extension en el idioma del usuario (los manifests pueden declarar {es, en}). */
+    const tabTitle = (tab: any): string => String((tab.titleI18n ? pickI18nText(tab.titleI18n, locale) : tab.title) || tab.id);
     // Modal accesible: foco atrapado, Escape, aria-modal, restauracion de foco y scroll bloqueado.
     const { ref: dialogRef, titleId } = useDialog<HTMLDivElement>(open, onClose);
 
@@ -58,7 +62,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
     const [expansionSettings, setExpansionSettings] = useState<any>({});
     const mailboxSettings = expansionSettings['core-mailbox'] || {};
 
-    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'extensions'>(initialTab ?? 'profile');
+    const [activeTab, setActiveTab] = useState<'profile' | 'appearance' | 'labels' | 'rules' | 'integrations' | 'mailbox' | 'spam' | 'extensions'>(initialTab ?? 'profile');
     useEffect(() => {
         if (open && initialTab) setActiveTab(initialTab);
     }, [open, initialTab]);
@@ -182,6 +186,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                                 ['rules', t('settings.tabs.rules')],
                                 ['integrations', t('conferencing.settings.tab')],
                                 ['mailbox', t('settings.tabs.mailbox')],
+                                ['spam', t('spamUser.settings.title')],
                             ] as const).map(([id, label]) => (
                                 <button
                                     key={id}
@@ -211,8 +216,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                                         className={cn("px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap flex items-center gap-1.5", activeTab === tab.id ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
                                     >
                                         {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}
-                                        {/* @ts-ignore */}
-                                        {tab.title || tab.id}
+                                        {tabTitle(tab)}
                                     </button>
                                 );
                             })}
@@ -251,7 +255,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                                 <div key={tab.id} className="space-y-6 animate-in fade-in duration-300">
                                     <div>
                                         {/* @ts-ignore */}
-                                        <h3 className="text-lg font-medium">{t('settings.extensionSettingsTitle', { name: String(tab.title || tab.id) })}</h3>
+                                        <h3 className="text-lg font-medium">{t('settings.extensionSettingsTitle', { name: tabTitle(tab) })}</h3>
                                         <p className="text-sm text-muted-foreground">{t('settings.extensionSettingsHelp')}</p>
                                     </div>
                                     <div className="bg-muted/30 rounded-xl p-4">
@@ -406,6 +410,7 @@ export function SettingsModal({ open, onClose, initialTab }: SettingsModalProps)
                     {activeTab === 'rules' && <RulesSettings />}
                     {activeTab === 'integrations' && <IntegrationsSettings />}
                     {activeTab === 'mailbox' && <MyMailboxTransfer />}
+                    {activeTab === 'spam' && <SpamSettings />}
 
                     {/* Generic Extensions Tab */}
                     {activeTab === 'extensions' && (

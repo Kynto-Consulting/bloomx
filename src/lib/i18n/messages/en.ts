@@ -3,7 +3,12 @@ import { themeEditorEn } from './theme-editor';
 import { conferencingEn } from './conferencing';
 import { legacyModeEn } from './legacy-mode';
 import { extensionStateEn } from './extension-state';
+import { mailGroupsEn } from './mail-groups';
+import { labelTreeEn } from './label-tree';
+import { ruleBuilderEn } from './rule-builder';
+import { spamListsEn } from './spam-lists';
 import { adminConsoleEn } from './admin-console';
+import { spamUserEn } from './spam-user';
 
 /** Ingles. Debe tener exactamente las mismas claves que es.ts (lo exige el tipo Messages). */
 const en: Messages = {
@@ -105,6 +110,7 @@ const en: Messages = {
         themeGroupLabel: 'Application theme',
         system: 'System',
         systemDescription: 'Follows your device light/dark mode.',
+        systemDescriptionBrand: 'Follows your device light/dark mode using the {brand} palette.',
         brandNote: 'Your organization themes come first; the rest are general palettes.',
         brandLight: '{name} · Light',
         brandDark: '{name} · Dark',
@@ -517,7 +523,7 @@ const en: Messages = {
         },
     },
     sidebar: {
-        sections: { mailboxes: 'Mailboxes', workspace: 'Workspace', labels: 'Labels' },
+        sections: { mailboxes: 'Folders', workspace: 'Workspace', labels: 'Labels' },
         folders: {
             inbox: 'Inbox',
             drafts: 'Drafts',
@@ -533,6 +539,9 @@ const en: Messages = {
         moveSectionUp: 'Move {name} up',
         moveSectionDown: 'Move {name} down',
         close: 'Close sidebar',
+        resize: 'Resize sidebar',
+        resizeValue: '{width} px wide',
+        rail: 'Main menu',
         newMessage: 'New message',
         createLabel: 'Create label',
         labelName: 'Label name',
@@ -996,10 +1005,11 @@ const en: Messages = {
             print: 'Print',
             printFailed: 'Could not prepare printing.',
         },
-        thread: { label: 'Conversation messages', expandAll: 'Expand all', collapseAll: 'Collapse all' },
+        thread: { label: 'Conversation messages', expandAll: 'Expand all', collapseAll: 'Collapse all', hideDuplicates: 'Hide repeated history', hideDuplicatesHint: 'Collapses quoted text that already appears in other messages of the conversation. Still available with the "…" button.' },
         message: { aria: 'Message from {name}, {date}', new: 'New', clickToExpand: 'Click to read the message' },
         recipients: { from: 'From', to: 'To', cc: 'Cc', bcc: 'Bcc', date: 'Date', show: 'Show details', hide: 'Hide details' },
-        quote: { show: 'Show quoted text', hide: 'Hide quoted text' },
+        quote: { show: 'Show quoted text', hide: 'Hide quoted text', unmatched: 'The quoted text does not match other messages in this conversation (it may be incomplete), so it is shown in full.' },
+        body: { title: 'Email content', loading: 'Loading message…', failed: 'This message could not be displayed.', retry: 'Retry', viewText: 'View plain text', viewHtml: 'View original formatting', empty: 'This message has no content to display.' },
         images: {
             blocked: 'Remote images were blocked to protect your privacy (they can tell the sender you opened the email).',
             load: 'Load remote images',
@@ -1017,7 +1027,8 @@ const en: Messages = {
             previewShort: 'Preview',
             previewFailed: 'Could not show the preview. Download the file to view it.',
         },
-        reply: { section: 'Reply', to: 'Reply to {name}', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward' },
+        reply: { section: 'Reply', to: 'Reply to {name}', reply: 'Reply', replyAll: 'Reply all', forward: 'Forward', forwardEml: 'Forward as attachment (.eml)' },
+        replyQuote: { trimmed: 'Earlier history was trimmed', fwdTitle: 'Forwarded message', from: 'From', date: 'Date', sent: 'Sent', subject: 'Subject', to: 'To', cc: 'Cc' },
         auth: {
             label: 'Sender authentication',
             verified: 'Verified',
@@ -1055,6 +1066,11 @@ const en: Messages = {
     conferencing: conferencingEn,
     legacyMode: legacyModeEn,
     extensionState: extensionStateEn,
+    mailGroups: mailGroupsEn,
+    labelTree: labelTreeEn,
+    ruleBuilder: ruleBuilderEn,
+    spam: { lists: spamListsEn },
+    spamUser: spamUserEn,
 };
 
 export default en;

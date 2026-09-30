@@ -7,7 +7,9 @@ import { isMandatoryExtension, orderIds, type ExtensionPrefs } from '@/lib/expan
 import type { ExtensionErrorEntry } from '@/lib/expansions/client/error-log';
 import { safeImageSrc } from '@/lib/expansions/safe-url';
 import { deriveCategory, mountPointsOf, tagsOf, type CategoryId } from './categories';
+import { manifestIcon, manifestTexts } from '@/lib/expansions/manifest-schema';
 import { hasUpdate } from './semver';
+import { manifestHealth, type ManifestProblem } from './health';
 
 export type StatusFilter = 'all' | 'active' | 'user-disabled' | 'org-disabled' | 'errors' | 'paid' | 'free';
 export const STATUS_FILTERS: StatusFilter[] = ['all', 'active', 'user-disabled', 'org-disabled', 'errors', 'paid', 'free'];
@@ -21,12 +23,18 @@ export interface ExtensionRow {
     id: string;
     name: string;
     description: string;
+    /** Icono declarado por la extension (manifest.icon): brand:<slug>, lucide:<Nombre>, initials:<XY> o un nombre Lucide. */
+    icon: string | null;
     version: string | null;
     catalogVersion: string | null;
     updateAvailable: boolean;
     /** false = manifest invalido: no se carga. */
     valid: boolean;
     invalidReasons: string[];
+    /** Elementos (mounts...) descartados o pendientes de resolver en una extension VALIDA, con ruta y motivo. */
+    problems: ManifestProblem[];
+    /** Numero de elementos descartados por errores (la extension se carga sin ellos). */
+    droppedCount: number;
     /** manifest.status === 'disabled' */
     orgDisabled: boolean;
     /** activada para ESTE usuario (prefs); una obligatoria siempre lo esta */
@@ -91,6 +99,8 @@ export interface BuildRowsInput {
     prefs: ExtensionPrefs;
     errors?: readonly ExtensionErrorEntry[];
     catalog?: ReadonlyMap<string, CatalogInfo> | Record<string, CatalogInfo>;
+    /** Idioma de la interfaz: nombre y descripcion salen de manifest.i18n[locale] (con respaldo a name/description). */
+    locale?: string;
 }
 
 function catalogFor(catalog: BuildRowsInput['catalog'], id: string): CatalogInfo | undefined {
@@ -98,7 +108,7 @@ function catalogFor(catalog: BuildRowsInput['catalog'], id: string): CatalogInfo
     return catalog instanceof Map ? catalog.get(id) : (catalog as Record<string, CatalogInfo>)[id];
 }
 
-export function buildRows({ extensions, prefs, errors = [], catalog }: BuildRowsInput): ExtensionRow[] {
+export function buildRows({ extensions, prefs, errors = [], catalog, locale }: BuildRowsInput): ExtensionRow[] {
     const rows: ExtensionRow[] = [];
     const seen = new Set<string>();
     for (const extension of extensions) {
@@ -110,6 +120,7 @@ export function buildRows({ extensions, prefs, errors = [], catalog }: BuildRows
         const prepared = getPreparedManifest(id, extension?.template);
         const raw = isRecord(prepared.template) ? prepared.template : isRecord(extension?.template) ? extension.template : {};
         const info = catalogFor(catalog, id);
+        const texts = locale ? manifestTexts(raw, locale) : { name: '', description: '' };
 
         const version = str(raw.version, 40) || str(extension?.settings?.meta?.installedVersion, 40) || str(extension?.version, 40) || null;
         const catalogVersion = str(info?.version, 40) || null;
@@ -118,6 +129,7 @@ export function buildRows({ extensions, prefs, errors = [], catalog }: BuildRows
         const userEnabled = mandatory || !prefs.disabled.includes(id);
         const valid = prepared.ok;
         const errorCount = errors.filter((e) => e.extensionId === id).length;
+        const health = manifestHealth(id, extension?.template);
 
         const paidFlag = typeof info?.isPaid === 'boolean' ? info.isPaid : typeof extension?.isPaid === 'boolean' ? extension.isPaid : null;
         const priceRaw = info?.price ?? extension?.price;
@@ -125,12 +137,15 @@ export function buildRows({ extensions, prefs, errors = [], catalog }: BuildRows
 
         rows.push({
             id,
-            name: str(raw.name, 120) || str(extension?.name, 120) || id,
-            description: str(raw.description, 2000) || str(extension?.description, 2000),
+            name: str(texts.name, 120) || str(raw.name, 120) || str(extension?.name, 120) || id,
+            description: str(texts.description, 2000) || str(raw.description, 2000) || str(extension?.description, 2000),
+            icon: manifestIcon(raw),
             version,
             catalogVersion,
             updateAvailable: hasUpdate(version, catalogVersion),
             valid,
+            problems: health.problems,
+            droppedCount: health.dropped,
             invalidReasons: valid ? [] : prepared.errors.slice(0, 6).map((p) => (p.path && p.path !== '$' ? `${p.path}: ${p.message}` : p.message)),
             orgDisabled,
             userEnabled,
@@ -144,7 +159,7 @@ export function buildRows({ extensions, prefs, errors = [], catalog }: BuildRows
             price,
             currency: str(info?.currency ?? extension?.currency, 8) || null,
             errorCount,
-            hasErrors: !valid || errorCount > 0,
+            hasErrors: !valid || errorCount > 0 || health.problems.length > 0,
             screenshots: valid ? safeScreenshots(raw.screenshots) : [],
             changelog: valid ? safeChangelog(raw.changelog) : [],
             template: valid ? prepared.template : extension?.template,

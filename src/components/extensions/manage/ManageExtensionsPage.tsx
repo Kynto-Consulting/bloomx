@@ -19,7 +19,7 @@ import { Alert, Chip, Empty, Skeleton, Spinner } from '@/components/expansions/k
 import { ExtensionItem, type ViewMode } from './ExtensionItem';
 import { ExtensionDetail } from './ExtensionDetail';
 import { ErrorsPanel } from './ErrorsPanel';
-import { useCanSeeTools, useCatalogInfo, useLiveExtensionErrors, useNow } from './hooks';
+import { useCanSeeTools, useCatalogInfo, useExtensionUpdater, useLiveExtensionErrors, useNow } from './hooks';
 import { fmt, useManageStrings } from './strings';
 
 /** En desarrollo con tema de empresa forzado la pagina se pinta sin sesion (para probarla). */
@@ -41,13 +41,15 @@ function useIsNarrow(): boolean {
 }
 
 export function ManageExtensionsPage() {
-    const { s, statusLabel, categoryLabel } = useManageStrings();
+    const { s, lang, statusLabel, categoryLabel } = useManageStrings();
     const { data: session, status: sessionStatus } = useSession();
     const { extensions, isLoading, isError, extensionsLoaded, isStale, isRetrying, retry } = useDomainConfig();
     const { prefs, setEnabled, move } = useExtensionPrefs();
     const errors = useLiveExtensionErrors();
     const catalog = useCatalogInfo();
     const canOpenPlayground = useCanSeeTools();
+    // El catalogo solo lo devuelve la ruta de administradores: si hay catalogo, este usuario puede intentar actualizar.
+    const updater = useExtensionUpdater(catalog.size > 0);
     const now = useNow();
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -70,7 +72,7 @@ export function ManageExtensionsPage() {
     }, []);
 
     // --- datos
-    const rows = React.useMemo(() => buildRows({ extensions, prefs, errors, catalog }), [extensions, prefs, errors, catalog]);
+    const rows = React.useMemo(() => buildRows({ extensions, prefs, errors, catalog, locale: lang }), [extensions, prefs, errors, catalog, lang]);
     const sorted = React.useMemo(() => sortRows(rows, prefs), [rows, prefs]);
     const ids = React.useMemo(() => orderableIds(rows, prefs), [rows, prefs]);
     const hasPrice = rows.some((r) => r.isPaid !== null);
@@ -112,6 +114,17 @@ export function ManageExtensionsPage() {
         announce(fmt(s.moved, { name: row.name, n: target + 1, total: ids.length }));
     }, [ids, move, announce, s]);
 
+    const [updateNotice, setUpdateNotice] = React.useState<{ tone: 'success' | 'danger'; text: string } | null>(null);
+    const onUpdate = React.useCallback(async (row: ExtensionRow) => {
+        setUpdateNotice(null);
+        const result = await updater.update(row.id);
+        const text = result.ok
+            ? fmt(s.updateDone, { name: row.name, catalog: result.to ?? row.catalogVersion ?? '' })
+            : result.reason === 'invalid-catalog' ? s.updateInvalidCatalog : result.reason === 'forbidden' ? s.updateAdminOnly : fmt(s.updateFailed, { name: row.name });
+        announce(text);
+        setUpdateNotice({ tone: result.ok ? 'success' : 'danger', text });
+    }, [updater, announce, s]);
+
     const resetOrder = () => { setPrefs({ ...getPrefs(), order: [] }); announce(s.resetDone); };
     const clearFilters = () => { setQuery(''); setCategory('all'); setStatus('all'); setTag(null); };
 
@@ -142,6 +155,8 @@ export function ManageExtensionsPage() {
                 <h1 className="text-2xl font-semibold tracking-tight text-foreground">{s.title}</h1>
                 <p className="max-w-2xl text-sm text-muted-foreground">{s.subtitle}</p>
             </header>
+
+            {updateNotice && <Alert tone={updateNotice.tone} message={updateNotice.text} />}
 
             {isError && (
                 <Alert tone="danger" title={s.loadErrorTitle} message={isStale ? s.loadErrorStale : s.loadError}>
@@ -218,7 +233,7 @@ export function ManageExtensionsPage() {
 
             <ErrorsPanel errors={errors} rows={rows} now={now} canOpenPlayground={canOpenPlayground} announce={announce} />
 
-            <ExtensionDetail row={opened} rows={rows} errors={errors} now={now} canOpenPlayground={canOpenPlayground} announce={announce} onToggle={onToggle} onClose={closeDetail} />
+            <ExtensionDetail row={opened} rows={rows} errors={errors} now={now} canOpenPlayground={canOpenPlayground} announce={announce} onToggle={onToggle} onClose={closeDetail} updater={{ canUpdate: updater.canUpdate, busyId: updater.busyId, onUpdate: (row) => { void onUpdate(row); } }} />
         </main>
     );
 }

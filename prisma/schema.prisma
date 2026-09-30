@@ -76,6 +76,11 @@ model Email {
   rawMimeUrl  String?      // Resend raw MIME download URL for async attachment processing
   // Carpeta de origen al mover a archive/trash/spam (aditivo: ADD COLUMN IF NOT EXISTS "previousFolder" TEXT). La fija el servidor.
   previousFolder     String?
+  // Hilos de conversacion (aditivo: ADD COLUMN IF NOT EXISTS, ver src/lib/db/schema.ts y src/lib/threading.ts). Se escriben con SQL crudo tolerante.
+  rfcMessageId String?   // Message-ID (sin <>, dominio en minusculas)
+  inReplyTo   String?    // Message-ID del padre directo
+  refs        String?    // References normalizadas separadas por espacio (raiz + 50 mas recientes)
+  threadKey   String?    // raiz canonica del hilo: m:<Message-ID> | e:<id> | h:<clave heuristica heredada>
   attachments Attachment[]
   events      EmailEvent[]
   labels      Label[]      @relation("EmailToLabel")
@@ -87,6 +92,8 @@ model Email {
   @@index([userId, folder, createdAt(sort: Desc)])
   @@index([userId, folder, read])
   @@index([userId, scheduledAt])
+  @@index([userId, threadKey])
+  @@index([userId, rfcMessageId])
 }
 
 model Attachment {
@@ -132,6 +139,9 @@ model Draft {
   from        String
   bcc         String?
   cc          String?
+  // Contexto de respuesta (aditivo: ADD COLUMN IF NOT EXISTS; se escribe con SQL crudo tolerante en api/drafts)
+  inReplyToEmailId String?
+  replyMode        String?
   attachments Attachment[]
 
   @@index([updatedAt])
@@ -150,7 +160,11 @@ model Label {
   updatedAt   DateTime @updatedAt
   emails      Email[]  @relation("EmailToLabel")
 
-  @@unique([userId, name])
+  // Columnas ADITIVAS creadas por src/lib/db/schema.ts y leidas/escritas por SQL crudo (src/lib/labels/store.ts), a proposito
+  // fuera de este modelo para que los findMany existentes no dependan de ellas: parentId TEXT (padre, mismo modelo, sin ciclos,
+  // profundidad <= 5), behavior TEXT ('tag'|'folder'), sortOrder INT, icon TEXT, showInSidebar BOOL, showUnread BOOL,
+  // fullPath TEXT (ruta calculada "Trabajo/Proyecto A"; NULL = name).
+  // "name" es el SEGMENTO. La unicidad es (userId, COALESCE(parentId,''), name): indice "Label_user_parent_name_key" (no expresable en Prisma).
   @@index([userId])
 }
 
@@ -167,6 +181,8 @@ model Rule {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  // Columnas aditivas por SQL crudo (src/lib/rules/store.ts): labelId TEXT (regla de "Asignar automaticamente" de una etiqueta),
+  // matchedCount INT, lastMatchedAt TIMESTAMPTZ. Tablas RuleBatch / RuleBatchItem: lotes de "Aplicar a existentes" con deshacer.
   @@index([userId, priority])
 }
 
@@ -460,6 +476,67 @@ model UserSession {
 
   @@index([userId, createdAt(sort: Desc)])
   @@index([expiresAt])
+}
+
+// Spam v2 (src/lib/spam/*). Tablas ADITIVAS creadas por db/schema.ts (DDL IF NOT EXISTS); el codigo las usa por SQL crudo tolerante.
+// Las columnas Email.spamScore (INTEGER), Email.spamReasons (JSONB) e Email.isExternal (BOOLEAN) tampoco figuran en el modelo Email a proposito.
+model SpamList {
+  id                String    @id
+  scope             String    // 'domain' | 'user'
+  ownerKey          String    // 'domain' o el id del usuario
+  kind              String    // 'allow' | 'block' | 'external'
+  matchType         String    // 'email' | 'domain' | 'wildcard' | 'tld' | 'regex'
+  value             String
+  includeSubdomains Boolean   @default(false)
+  reason            String?
+  expiresAt         DateTime?
+  createdBy         String?
+  hits              Int       @default(0)
+  lastHitAt         DateTime?
+  createdAt         DateTime  @default(now())
+
+  @@unique([scope, ownerKey, kind, matchType, value, includeSubdomains], map: "SpamList_unique_idx")
+  @@index([scope, ownerKey, kind, createdAt(sort: Desc)], map: "SpamList_owner_kind_idx")
+}
+
+model SpamToken {
+  userId    String
+  tokenHash String
+  spam      Int      @default(0)
+  ham       Int      @default(0)
+  updatedAt DateTime @default(now())
+
+  @@id([userId, tokenHash])
+  @@index([userId, updatedAt(sort: Desc)], map: "SpamToken_user_updated_idx")
+}
+
+model SpamSender {
+  userId    String
+  senderKey String
+  spamCount Int      @default(0)
+  hamCount  Int      @default(0)
+  updatedAt DateTime @default(now())
+
+  @@id([userId, senderKey])
+}
+
+model SpamEvent {
+  id           String   @id
+  ts           DateTime @default(now())
+  userId       String?
+  recipient    String?
+  sender       String
+  senderDomain String?
+  decision     String
+  score        Int?
+  ruleId       String?
+  ruleLabel    String?
+  reasons      Json     @default("[]")
+  external     Boolean  @default(false)
+
+  @@index([ts(sort: Desc)], map: "SpamEvent_ts_idx")
+  @@index([decision, ts(sort: Desc)], map: "SpamEvent_decision_ts_idx")
+  @@index([senderDomain, ts(sort: Desc)], map: "SpamEvent_domain_ts_idx")
 }
 
 model AdminSetting {

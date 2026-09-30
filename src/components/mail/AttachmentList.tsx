@@ -48,10 +48,30 @@ export interface AttachmentLike {
  * Adjuntos de un mensaje: icono por tipo, nombre, tamano, descarga y previsualizacion de imagenes y PDF en un dialogo.
  * Las URL ya vienen firmadas del servidor (GET /api/emails/[id]).
  */
-export function AttachmentList({ attachments }: { attachments: AttachmentLike[] }) {
+export function AttachmentList({ attachments, confirmDownload }: {
+    attachments: AttachmentLike[];
+    /** Remitente externo no confiable: pide confirmacion antes de descargar; `proceed` hace la descarga real. */
+    confirmDownload?: ((att: AttachmentLike, proceed: () => void) => void) | null;
+}) {
     const { t, intlLocale } = useI18n();
     const [preview, setPreview] = useState<AttachmentLike | null>(null);
     if (!attachments || attachments.length === 0) return null;
+
+    const guardDownload = (att: AttachmentLike) => (e: { preventDefault: () => void }) => {
+        if (!confirmDownload || !att.url) return;
+        e.preventDefault();
+        const url = att.url;
+        confirmDownload(att, () => {
+            const a = document.createElement('a');
+            a.href = url;
+            if (att.filename) a.download = att.filename;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+    };
 
     const previewKind = preview ? attachmentKind(preview.mimeType, preview.filename) : null;
     const pdf = usePdfBlobUrl(preview?.url, previewKind === 'pdf');
@@ -91,6 +111,7 @@ export function AttachmentList({ attachments }: { attachments: AttachmentLike[] 
                                 download={att.filename || undefined}
                                 target="_blank"
                                 rel="noopener noreferrer"
+                                onClick={guardDownload(att)}
                                 aria-disabled={!att.url}
                                 aria-label={t('mailView.attachments.download', { name })}
                                 title={t('mailView.attachments.downloadShort')}
@@ -118,6 +139,7 @@ export function AttachmentList({ attachments }: { attachments: AttachmentLike[] 
                                     download={preview.filename || undefined}
                                     target="_blank"
                                     rel="noopener noreferrer"
+                                    onClick={guardDownload(preview)}
                                     className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
                                     <Download className="h-4 w-4" aria-hidden="true" /> {t('mailView.attachments.downloadShort')}

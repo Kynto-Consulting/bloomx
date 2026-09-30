@@ -4,11 +4,14 @@ import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
 import { parseInviteFromIcs } from '@/lib/calendar/ics';
+import { loadStoredThreadHeaders, loadThreadMemberIds } from '@/lib/thread-store';
+import { normalizeSubject as normalizeSubjectShared } from '@/lib/threading';
 import { canAccessEmail, getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
 import { escapeHtmlText } from '@/lib/mail-validation';
 import { parseAuthenticationResults } from '@/lib/email-auth';
 import { buildEmailOpenedContext, fireLifecycleHook, shouldFireOnce } from '@/lib/expansions/server-hooks';
 import { moveEmailsTracked, restoreEmailsToPrevious } from '@/lib/mail-store';
+import { afterLabelsAdded, afterLabelsRemoved } from '@/lib/labels/behavior';
 
 function extractMailboxEmail(value: unknown): string {
     if (!value) return '';
@@ -168,14 +171,17 @@ export async function GET(
 
         // Helper to fetch content
         const fetchContent = async (e: any) => {
+            // Cadena de respaldo: HTML -> texto plano -> extracto. Un htmlKey cuyo objeto falta o esta vacio NO debe dejar el
+            // mensaje en blanco si existe el texto plano (o al menos el extracto).
             if (e.htmlKey) {
                 const storedHtml = await getFromStorage(e.htmlKey);
-                return storedHtml ?? "";
-            } else if (e.textKey) {
-                const storedText = await getFromStorage(e.textKey);
-                return storedText ? `<pre>${escapeHtmlText(storedText)}</pre>` : "";
+                if (storedHtml && storedHtml.trim()) return storedHtml;
             }
-            return e.snippet || "";
+            if (e.textKey) {
+                const storedText = await getFromStorage(e.textKey);
+                if (storedText && storedText.trim()) return `<pre>${escapeHtmlText(storedText)}</pre>`;
+            }
+            return e.snippet ? `<pre>${escapeHtmlText(String(e.snippet))}</pre>` : "";
         };
 
         // Helper to sign attachments. Skip placeholders/failures (key === 'PENDING' or a
@@ -228,12 +234,25 @@ export async function GET(
 
         let threadEmails: any[] = [];
 
-        if (fetchThread && email.subject) {
-            const normalizeSubject = (subject: string) => {
-                if (!subject) return '';
-                // Remove Re:, Fwd:, etc. (Case insensitive) - Logic matches frontend
-                return subject.replace(/^((re|fwd|fw|rv|enc|invitaci[oó]n(?: actualizada)?|invitation(?: updated| canceled| cancelled)?|accepted|declined|tentative|cancelado|canceled|cancelled|updated): ?)+/gi, '').trim();
-            };
+        // Hilo por cabeceras (Email.threadKey, lib/threading.ts): los miembros del hilo son los correos con la misma clave, aunque cambie el
+        // asunto. Correos antiguos sin clave: respaldo por asunto normalizado + destinatarios (misma normalizacion que la lista y el SQL).
+        const storedThread = fetchThread ? await loadStoredThreadHeaders(email.id) : null;
+        const memberIds = storedThread?.threadKey ? await loadThreadMemberIds(email.userId, storedThread.threadKey) : [];
+        if (fetchThread && storedThread?.threadKey && memberIds.length > 0) {
+            const members = await prisma.email.findMany({
+                where: { id: { in: memberIds }, userId: email.userId },
+                orderBy: { createdAt: 'desc' }, // Newest first
+                include: { labels: true, attachments: true },
+            });
+            threadEmails = await Promise.all(members.map(async (e) => {
+                const c = await fetchContent(e);
+                const atts = await signAttachments(e.attachments ?? []);
+                const payload = await buildEmailPayload(e, c, atts);
+                payload.email.replyTo = await resolveReplyTo(e);
+                return payload;
+            }));
+        } else if (fetchThread && email.subject) {
+            const normalizeSubject = normalizeSubjectShared;
 
             const normalized = normalizeSubject(email.subject);
             const recipientToken = extractRecipientToken(email.cleanTo || email.to);
@@ -385,11 +404,26 @@ export async function PATCH(
             delete updateData.folder;
         }
 
-        const email = await prisma.email.update({
+        let email = await prisma.email.update({
             where: { id: existing.id },
             data: updateData,
             include: { labels: true }
         });
+
+        // Etiquetas-carpeta: anadirlas saca el correo de Entrada; quitar la ultima lo devuelve (ver lib/labels/behavior.ts).
+        if (labelIds || toggleLabelId) {
+            const before = new Set(existing.labels.map((l) => l.id));
+            const after = new Set(email.labels.map((l) => l.id));
+            const added = Array.from(after).filter((x) => !before.has(x));
+            const removed = Array.from(before).filter((x) => !after.has(x));
+            let changed = 0;
+            if (added.length) changed += await afterLabelsAdded([existing.userId], [existing.id], added);
+            if (removed.length) changed += await afterLabelsRemoved([existing.userId], [existing.id], removed);
+            if (changed > 0) {
+                const fresh = await prisma.email.findUnique({ where: { id: existing.id }, include: { labels: true } });
+                if (fresh) email = fresh;
+            }
+        }
 
         return NextResponse.json(email);
 
