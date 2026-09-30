@@ -352,6 +352,10 @@ const TABLES: TableSpec[] = [
                 WHEN unique_violation THEN
                     RAISE NOTICE 'Label: hay etiquetas duplicadas; indice unico (userId,parentId,name) omitido.';
             END $$`,
+            // En bases creadas con Prisma la unicidad antigua es un indice suelto (DROP CONSTRAINT no lo quita) y bloquearia hijos con el mismo nombre.
+            'DROP INDEX IF EXISTS "Label_userId_name_key"',
+            // Prisma (@updatedAt) no deja valor por defecto: los INSERT por SQL crudo fallaban con NOT NULL.
+            'ALTER TABLE "Label" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP',
         ],
     },
     {

@@ -167,3 +167,16 @@ describe('contadores y filtros con jerarquia (espejo SQL)', () => {
         expect(buildLabelBadgesSql([u.id], true, { ...opt, labelTree: false }).sql).not.toContain('lp."id"');
     });
 });
+
+describe('esquema de Prisma sin DEFAULT en updatedAt (produccion)', () => {
+    it('crear etiqueta funciona aunque "updatedAt" no tenga valor por defecto', async () => {
+        await prisma.$executeRawUnsafe(`ALTER TABLE "Label" ALTER COLUMN "updatedAt" DROP DEFAULT`);
+        try {
+            const u = await createUser(prisma);
+            const l = await createLabel(u.id, { name: 'Sin default' });
+            expect(l.fullPath).toBe('Sin default');
+        } finally {
+            await prisma.$executeRawUnsafe(`ALTER TABLE "Label" ALTER COLUMN "updatedAt" SET DEFAULT CURRENT_TIMESTAMP`);
+        }
+    });
+});

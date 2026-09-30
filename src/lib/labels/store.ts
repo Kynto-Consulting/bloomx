@@ -125,8 +125,8 @@ export async function createLabel(userId: string, input: LabelCreateInput): Prom
         const fullPath = parentId ? `${all.find((l) => l.id === parentId)!.fullPath}${PATH_SEPARATOR}${seg.name}` : seg.name;
         try {
             await tx.$executeRawUnsafe(
-                `INSERT INTO "Label" ("id","name","color","userId","parentId","behavior","sortOrder","icon","showInSidebar","showUnread","fullPath","aliasSuffix","filterRegex")
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+                `INSERT INTO "Label" ("id","name","color","userId","parentId","behavior","sortOrder","icon","showInSidebar","showUnread","fullPath","aliasSuffix","filterRegex","createdAt","updatedAt")
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
                 id, seg.name, input.color || '#6366f1', userId, parentId, input.behavior ?? 'tag', sortOrder, input.icon ?? null,
                 input.showInSidebar !== false, input.showUnread !== false, fullPath, input.aliasSuffix ?? null, input.filterRegex ?? null,
             );
