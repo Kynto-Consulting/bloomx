@@ -20,14 +20,17 @@ export interface ContentIdEntry {
     contentId?: string | null;
 }
 
+/** Subconjunto de PrismaClient que se usa (permite pasar el cliente propio de un script). */
+export interface ContentIdDb { $executeRaw: (strings: TemplateStringsArray, ...values: any[]) => Promise<number> }
+
 /** Devuelve cuantas filas se actualizaron (0 si no hay nada valido o la columna no existe todavia). */
-export async function saveAttachmentContentIds(entries: ContentIdEntry[]): Promise<number> {
+export async function saveAttachmentContentIds(entries: ContentIdEntry[], db: ContentIdDb = prisma as unknown as ContentIdDb): Promise<number> {
     let updated = 0;
     for (const entry of entries) {
         const contentId = normalizeContentId(entry.contentId);
         if (!contentId || !entry.emailId || !entry.key || entry.key === 'PENDING' || entry.key === 'BLOCKED') continue;
         try {
-            updated += Number(await prisma.$executeRaw`
+            updated += Number(await db.$executeRaw`
                 UPDATE "Attachment" SET "contentId" = ${contentId}
                 WHERE "emailId" = ${entry.emailId} AND "key" = ${entry.key}
             `);

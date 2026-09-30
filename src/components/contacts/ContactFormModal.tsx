@@ -4,7 +4,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { FileText, Mail, User, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useI18n } from '@/components/I18nProvider';
-import { isValidContactEmail } from '@/lib/contacts';
+import { isValidContactEmail, parseContactConflict } from '@/lib/contacts';
 
 export type ContactRecord = {
     id: string;
@@ -30,11 +30,16 @@ export function ContactFormModal({
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [emailError, setEmailError] = useState<string | null>(null);
+    // Contacto que se edita realmente: el recibido por props o, tras un 409 al crear, el existente elegido por el usuario.
+    const [target, setTarget] = useState<ContactRecord | null>(contact);
+    const [conflict, setConflict] = useState<ContactRecord | null>(null);
     const ids = { name: useId(), email: useId(), notes: useId(), emailErr: useId() };
     const emailRef = useRef<HTMLInputElement>(null);
 
     useEffect(() => {
         if (!open) return;
+        setTarget(contact);
+        setConflict(null);
         setName(contact?.name ?? '');
         setEmail(contact?.email ?? '');
         setNotes(contact?.notes ?? '');
@@ -53,27 +58,44 @@ export function ContactFormModal({
         }
         setEmailError(null);
         setError(null);
+        setConflict(null);
         setSaving(true);
         try {
-            const res = await fetch(contact ? `/api/contacts/${encodeURIComponent(contact.id)}` : '/api/contacts', {
-                method: contact ? 'PUT' : 'POST',
+            const res = await fetch(target ? `/api/contacts/${encodeURIComponent(target.id)}` : '/api/contacts', {
+                method: target ? 'PUT' : 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, email, notes }),
             });
             if (!res.ok) {
-                if (res.status === 409) setEmailError(t('contacts.emailExists'));
+                if (res.status === 409) {
+                    setEmailError(t('contacts.emailExists'));
+                    // Al CREAR, el servidor devuelve el contacto existente: se ofrece editarlo (nunca se pisa en silencio).
+                    if (!target) setConflict(parseContactConflict(await res.json().catch(() => null)) as ContactRecord | null);
+                }
                 else if (res.status === 400) setEmailError(t('contacts.emailInvalid'));
                 else setError(t('contacts.saveFailed'));
                 if (res.status === 409 || res.status === 400) emailRef.current?.focus();
                 return;
             }
             const saved = (await res.json()) as ContactRecord;
-            onSaved(saved, !contact);
+            onSaved(saved, !target);
         } catch {
             setError(t('common.networkError'));
         } finally {
             setSaving(false);
         }
+    };
+
+    // Pasa a editar el contacto existente mostrando SUS datos actuales (lo escrito aqui no lo sobrescribe sin que el usuario lo vea).
+    const editExisting = () => {
+        if (!conflict) return;
+        setTarget(conflict);
+        setName(conflict.name ?? '');
+        setEmail(conflict.email);
+        setNotes(conflict.notes ?? '');
+        setConflict(null);
+        setEmailError(null);
+        setError(null);
     };
 
     const field = 'w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring';
@@ -91,7 +113,7 @@ export function ContactFormModal({
                     <div className="mb-4 flex items-center justify-between gap-3">
                         <h2 id={titleId} className="flex items-center gap-2 text-lg font-semibold text-foreground">
                             <User className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
-                            {contact ? t('contacts.editTitle') : t('contacts.createTitle')}
+                            {target ? t('contacts.editTitle') : t('contacts.createTitle')}
                         </h2>
                         <button type="button" onClick={onClose} disabled={saving} aria-label={t('common.close')} className="rounded-full p-2 text-muted-foreground hover:bg-muted">
                             <X className="h-4 w-4" aria-hidden="true" />
@@ -123,6 +145,11 @@ export function ContactFormModal({
                                 className={field}
                             />
                             {emailError && <p id={ids.emailErr} role="alert" className="mt-1 text-xs text-destructive">{emailError}</p>}
+                            {conflict && (
+                                <button type="button" onClick={editExisting} className="mt-1 text-xs font-medium text-primary underline underline-offset-2 hover:text-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm">
+                                    {t('contacts.emailExistsEdit')}
+                                </button>
+                            )}
                         </div>
                         <div>
                             <label htmlFor={ids.notes} className="mb-1 flex items-center gap-2 text-sm font-medium text-foreground">
@@ -130,7 +157,7 @@ export function ContactFormModal({
                             </label>
                             <textarea id={ids.notes} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={t('contacts.notesPlaceholder')} rows={3} maxLength={5000} className={`${field} resize-none`} />
                         </div>
-                        {contact?.source === 'google' && <p className="text-xs text-muted-foreground">{t('contacts.googleEditNote')}</p>}
+                        {target?.source === 'google' && <p className="text-xs text-muted-foreground">{t('contacts.googleEditNote')}</p>}
                     </div>
 
                     {error && <p role="alert" className="mt-4 text-sm text-destructive">{error}</p>}

@@ -6,6 +6,7 @@ import { extractAttachmentsFromRawMime } from '@/lib/mime-attachments';
 import { validateAttachment } from '@/lib/file-type';
 import { scanBuffer, avShouldBlock } from '@/lib/av-hook';
 import { uniqueAttachmentKey } from '@/lib/attachment-keys';
+import { saveAttachmentContentIds, type ContentIdEntry } from '@/lib/attachment-content-id';
 import { isAdminUserSession } from '@/lib/admin-auth';
 import { auditLog } from '@/lib/security';
 
@@ -14,10 +15,11 @@ function extractNonCalendarAttachmentsFromRawMime(rawMime: string): Array<{
     filename: string;
     contentType: string;
     buffer: Buffer;
+    contentId?: string;
 }> {
     return extractAttachmentsFromRawMime(rawMime)
         .filter(a => !a.isCalendar)
-        .map(({ filename, contentType, buffer }) => ({ filename, contentType, buffer }));
+        .map(({ filename, contentType, buffer, contentId }) => ({ filename, contentType, buffer, ...(contentId ? { contentId } : {}) }));
 }
 
 // ─── Per-email processor ─────────────────────────────────────────────────────
@@ -80,7 +82,7 @@ async function processEmail(
     if (!rawMimeUrl) return { ...base, status: 'resend_error', error: 'No download_url returned' };
 
     // 4. Download raw MIME and extract attachments.
-    let extracted: Array<{ filename: string; contentType: string; buffer: Buffer }> = [];
+    let extracted: Array<{ filename: string; contentType: string; buffer: Buffer; contentId?: string }> = [];
     try {
         const mimeRes = await fetch(rawMimeUrl);
         if (!mimeRes.ok) return { ...base, status: 'mime_error', error: `MIME download ${mimeRes.status}` };
@@ -107,9 +109,12 @@ async function processEmail(
 
     // 5. Upload, then update matching PENDING rows or create new ones (skip writes in dryRun).
     let added = 0;
+    const contentIdWrites: ContentIdEntry[] = [];
     for (const ext of extracted) {
-        // Skip if an already-ready row with this filename exists.
-        if (existing.some(a => a.status === 'ready' && a.key !== 'PENDING' && a.filename.toLowerCase() === ext.filename.toLowerCase())) {
+        // Skip if an already-ready row with this filename exists (solo se completa su Content-ID).
+        const already = existing.find(a => a.status === 'ready' && a.key !== 'PENDING' && a.filename.toLowerCase() === ext.filename.toLowerCase());
+        if (already) {
+            if (ext.contentId && !dryRun) contentIdWrites.push({ emailId: email.id, key: already.key, contentId: ext.contentId });
             continue;
         }
         // Tipo real (magic-bytes) + antivirus opcional; lo bloqueado no se sube ni se rellena
@@ -144,10 +149,14 @@ async function processEmail(
                     data: { emailId: email.id, filename: ext.filename, mimeType: ext.contentType, size: ext.buffer.byteLength, key: attKey, status: 'ready' },
                 });
             }
+            if (ext.contentId) contentIdWrites.push({ emailId: email.id, key: attKey, contentId: ext.contentId });
         }
         if (match) matchedIds.add(match.id);
         added++;
     }
+
+    // Content-ID de imagenes inline (tolerante a columna ausente: nunca hace fallar el reproceso).
+    if (!dryRun) await saveAttachmentContentIds(contentIdWrites);
 
     // Any PENDING rows we couldn't fill (no matching MIME part) → mark failed so the UI
     // stops rendering a broken `PENDING` download link.

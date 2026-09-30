@@ -5,12 +5,18 @@ import { sanitizeHtml } from '@/lib/sanitizeHtml';
 import { useTheme } from '@/components/ThemeProvider';
 import { invert, normalizeHex } from '@/lib/color';
 import { analyzeLink, describeLinkRisk } from '@/lib/link-safety';
+import { assetCspSource } from '@/lib/cid-display';
 
 interface SafeIframeProps {
     html: string;
     className?: string;
     /** Bloquea imagenes remotas (anti tracking pixel). Por defecto false para no cambiar la UX. */
     blockRemoteImages?: boolean;
+    /**
+     * Fuentes CSP (`https://origen/api/assets/`) de imagenes propias (adjuntos inline firmados) que se permiten aunque las
+     * remotas esten bloqueadas. Se validan de nuevo aqui: solo se admite el proxy /api/assets de un origen http(s).
+     */
+    trustedImageSources?: string[];
 }
 
 const IFRAME_CSS = `
@@ -196,11 +202,12 @@ function randomToken(): string {
  *  3. CSP en el documento: solo nuestro script (nonce), sin conexiones, sin
  *     frames, sin formularios, sin CSS/fuentes/imagenes fuera de HTTPS.
  */
-function buildDocument(rawHtml: string, nonce: string, token: string, blockRemoteImages: boolean, themeCss = ''): string {
+function buildDocument(rawHtml: string, nonce: string, token: string, blockRemoteImages: boolean, themeCss = '', trustedImageSources: string[] = []): string {
+    const trusted = Array.from(new Set(trustedImageSources.map((s) => assetCspSource(s)).filter((s): s is string => !!s)));
     const safeHtml = annotateSuspiciousLinks(sanitizeHtml(rawHtml));
     const csp = [
         "default-src 'none'",
-        `img-src ${blockRemoteImages ? 'data: cid:' : 'https: data: cid:'}`,
+        `img-src ${blockRemoteImages ? ['data:', 'cid:', ...trusted].join(' ') : 'https: data: cid:'}`,
         "style-src 'unsafe-inline'",
         'font-src data:',
         `script-src 'nonce-${nonce}'`,
@@ -229,7 +236,8 @@ ${IFRAME_SCRIPT}
 </html>`;
 }
 
-export function SafeIframe({ html, className, blockRemoteImages = false }: SafeIframeProps) {
+export function SafeIframe({ html, className, blockRemoteImages = false, trustedImageSources }: SafeIframeProps) {
+    const trustedKey = (trustedImageSources || []).join(' ');
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const tokenRef = useRef<string>('');
     const [height, setHeight] = useState('200px');
@@ -240,8 +248,8 @@ export function SafeIframe({ html, className, blockRemoteImages = false }: SafeI
     useEffect(() => {
         // Solo en cliente (DOMPurify necesita DOM; crypto para nonce/token).
         tokenRef.current = randomToken();
-        setSrcDoc(buildDocument(html || '', randomToken(), tokenRef.current, blockRemoteImages, buildThemeCss(invertMode)));
-    }, [html, blockRemoteImages, invertMode]);
+        setSrcDoc(buildDocument(html || '', randomToken(), tokenRef.current, blockRemoteImages, buildThemeCss(invertMode), trustedKey ? trustedKey.split(' ') : []));
+    }, [html, blockRemoteImages, invertMode, trustedKey]);
 
     useEffect(() => {
         const handleMessage = (event: MessageEvent) => {

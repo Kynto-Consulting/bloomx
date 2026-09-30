@@ -20,6 +20,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { Readable } from 'stream';
 
 import { extractAttachmentsFromRawMime } from '../src/lib/mime-attachments';
+import { saveAttachmentContentIds, type ContentIdEntry } from '../src/lib/attachment-content-id';
 
 const prisma = new PrismaClient();
 
@@ -230,10 +231,17 @@ async function main() {
             const uuid = parts[2] ?? email.id;
             const matched = new Set<string>();
             let added = 0;
+            // Content-ID de imagenes inline (para resolver `cid:` al mostrar el correo); se guarda con SQL tolerante a columna ausente.
+            const contentIdWrites: ContentIdEntry[] = [];
 
             // Fill broken rows from extracted MIME parts (calendar INCLUDED this time).
             for (const ext of extracted) {
-                if (existing.some(a => a.status === 'ready' && a.size > 0 && a.filename.toLowerCase() === ext.filename.toLowerCase())) continue;
+                const already = existing.find(a => a.status === 'ready' && a.size > 0 && a.filename.toLowerCase() === ext.filename.toLowerCase());
+                if (already) {
+                    // Ya esta bien; solo se completa su Content-ID (por si se guardo antes de existir la columna).
+                    if (ext.contentId) contentIdWrites.push({ emailId: email.id, key: already.key, contentId: ext.contentId });
+                    continue;
+                }
                 const row =
                     broken.find(a => !matched.has(a.id) && a.filename.toLowerCase() === ext.filename.toLowerCase()) ||
                     broken.find(a => !matched.has(a.id) && a.mimeType.toLowerCase() === ext.contentType.toLowerCase()) ||
@@ -253,12 +261,14 @@ async function main() {
                             data: { emailId: email.id, filename: ext.filename, mimeType: ext.contentType, size: ext.buffer.byteLength, key: attKey, status: 'ready' },
                         });
                     }
+                    if (ext.contentId) contentIdWrites.push({ emailId: email.id, key: attKey, contentId: ext.contentId });
                     added++;
                 } catch (err: any) {
                     console.warn(`[reprocess-attachments] upload failed (${ext.filename}, ${email.id}): ${err?.message}`);
                 }
             }
             if (added > 0) { fixedMime++; totalAdded += added; }
+            await saveAttachmentContentIds(contentIdWrites, prisma as any);
 
             // ── Strategy 2: regenerate any still-broken .ics from the CalendarEvent ──
             const stillBrokenCal = brokenCalendar.filter(a => !matched.has(a.id));

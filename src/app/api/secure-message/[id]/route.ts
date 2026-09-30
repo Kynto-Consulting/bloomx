@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getClientIp, rateLimit } from '@/lib/security';
+import { getClientIp, rateLimitAsync } from '@/lib/security';
 import { SECURE_ID_RE } from '@/lib/sealed/schema';
 import { consume, defaultDeps, getMeta } from '@/lib/sealed/store';
 
@@ -8,7 +8,10 @@ import { consume, defaultDeps, getMeta } from '@/lib/sealed/store';
  * va cifrado con una clave que este servidor no tiene).
  *
  *   GET  -> metadatos (sin contenido, NO cuenta vista): formato, si pide contrasena, remitente, caducidad, vistas restantes.
- *   POST -> entrega el sobre cifrado y CUENTA una vista (al agotarlas el objeto se borra).
+ *           Los escaneres/prefetch de enlaces (GET sin JS) nunca consumen vistas.
+ *   POST -> "reveal": entrega el sobre cifrado y CUENTA una vista de forma atomica en BD (al agotarlas el objeto se
+ *           borra). Solo lo llama el visor tras un gesto del usuario (o automaticamente si no hay limite de vistas) y
+ *           exige la cabecera `X-Sealed-Reveal: 1` (un formulario o <img> de terceros no puede gastar vistas).
  * Un id inexistente, caducado o agotado responde igual (404).
  */
 export const runtime = 'nodejs';
@@ -19,10 +22,10 @@ const NOT_FOUND = () => NextResponse.json({ error: 'Not found' }, { status: 404,
 
 type Ctx = { params: Promise<{ id: string }> };
 
-function limited(req: NextRequest, id: string, kind: 'meta' | 'open'): NextResponse | null {
+async function limited(req: NextRequest, id: string, kind: 'meta' | 'open'): Promise<NextResponse | null> {
     const ip = getClientIp(req);
-    const perIp = rateLimit(`secure-${kind}:ip:${ip}`, kind === 'open' ? 60 : 120, 60_000);
-    const perId = rateLimit(`secure-${kind}:id:${id}`, kind === 'open' ? 120 : 240, 60 * 60_000);
+    const perIp = await rateLimitAsync(`secure-${kind}:ip:${ip}`, kind === 'open' ? 60 : 120, 60_000);
+    const perId = await rateLimitAsync(`secure-${kind}:id:${id}`, kind === 'open' ? 120 : 240, 60 * 60_000);
     if (!perIp.ok || !perId.ok) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { ...HEADERS, 'Retry-After': String(Math.max(perIp.retryAfter, perId.retryAfter)) } });
     }
@@ -32,7 +35,7 @@ function limited(req: NextRequest, id: string, kind: 'meta' | 'open'): NextRespo
 export async function GET(req: NextRequest, { params }: Ctx) {
     const { id } = await params;
     if (!SECURE_ID_RE.test(id)) return NOT_FOUND();
-    const blocked = limited(req, id, 'meta');
+    const blocked = await limited(req, id, 'meta');
     if (blocked) return blocked;
     try {
         const meta = await getMeta(await defaultDeps(), id);
@@ -46,7 +49,10 @@ export async function GET(req: NextRequest, { params }: Ctx) {
 export async function POST(req: NextRequest, { params }: Ctx) {
     const { id } = await params;
     if (!SECURE_ID_RE.test(id)) return NOT_FOUND();
-    const blocked = limited(req, id, 'open');
+    if (req.headers.get('x-sealed-reveal') !== '1') {
+        return NextResponse.json({ error: 'Bad request' }, { status: 400, headers: HEADERS });
+    }
+    const blocked = await limited(req, id, 'open');
     if (blocked) return blocked;
     try {
         const result = await consume(await defaultDeps(), id);

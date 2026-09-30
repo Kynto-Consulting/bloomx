@@ -85,3 +85,19 @@ export function parsePageHeaders(headers: { get(name: string): string | null }, 
         hasMore: hasMoreHeader !== null ? hasMoreHeader === 'true' : false,
     };
 }
+
+/**
+ * Interpreta el cuerpo de un 409 de POST /api/contacts: devuelve el contacto existente (para ofrecer "editar el existente")
+ * o null si el cuerpo no trae uno valido. Solo se copian los campos conocidos.
+ */
+export function parseContactConflict(body: unknown): { id: string; email: string; name: string | null; notes: string | null; source: string } | null {
+    const ex = body && typeof body === 'object' ? (body as any).existing : null;
+    if (!ex || typeof ex !== 'object' || typeof ex.id !== 'string' || !ex.id || typeof ex.email !== 'string') return null;
+    return {
+        id: ex.id,
+        email: ex.email,
+        name: typeof ex.name === 'string' ? ex.name : null,
+        notes: typeof ex.notes === 'string' ? ex.notes : null,
+        source: typeof ex.source === 'string' ? ex.source : 'local',
+    };
+}

@@ -60,25 +60,28 @@ export async function POST(req: NextRequest) {
     }
     const { email, name, notes } = parsed.value as { email: string; name: string | null; notes: string | null };
 
-    const contact = await prisma.contact.upsert({
-        where: {
-            userId_email: {
-                userId: user.id,
-                email,
-            }
-        },
-        update: {
-            name,
-            notes,
-        },
-        create: {
-            userId: user.id,
-            email,
-            name,
-            notes,
-            source: 'local',
-        }
-    });
+    // Crear NO es un upsert: si el correo ya existe (unico por usuario) se responde 409 con el contacto existente
+    // para que la UI ofrezca "editar el existente" en vez de pisar sus datos en silencio. Editar es PUT /api/contacts/[id].
+    const findExisting = () => prisma.contact.findUnique({ where: { userId_email: { userId: user.id, email } } });
+    const conflict = (existing: unknown) => NextResponse.json(
+        { error: 'A contact with this email already exists', code: 'CONTACT_EXISTS', existing },
+        { status: 409 },
+    );
 
-    return NextResponse.json(contact, { status: 201 });
+    const existing = await findExisting();
+    if (existing) return conflict(existing);
+
+    try {
+        const contact = await prisma.contact.create({
+            data: { userId: user.id, email, name, notes, source: 'local' },
+        });
+        return NextResponse.json(contact, { status: 201 });
+    } catch (error: any) {
+        // Carrera: otra peticion lo creo entre la comprobacion y el INSERT (violacion de unicidad).
+        if (error?.code === 'P2002') {
+            const raced = await findExisting();
+            if (raced) return conflict(raced);
+        }
+        throw error;
+    }
 }

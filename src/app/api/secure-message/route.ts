@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
-import { rateLimit } from '@/lib/security';
+import { rateLimitAsync } from '@/lib/security';
 import { createSealedSchema, effectiveTtlDays } from '@/lib/sealed/schema';
 import { createSealed, defaultDeps } from '@/lib/sealed/store';
 
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Sealed messages are disabled' }, { status: 403, headers: NO_STORE });
     }
 
-    const rl = rateLimit(`secure-msg:${user.email}`, 30, 60 * 60 * 1000);
+    const rl = await rateLimitAsync(`secure-msg:${user.email}`, 30, 60 * 60 * 1000);
     if (!rl.ok) {
         return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: { ...NO_STORE, 'Retry-After': String(rl.retryAfter) } });
     }
@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
             sender: user.email,
             ttlDays: effectiveTtlDays(parsed.data.ttlDays),
             maxViews: parsed.data.maxViews ?? null,
+            userId: user.id,
         });
         const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || 'https://bloomx.arubik.dev').replace(/\/+$/, '');
         return NextResponse.json({ success: true, id, viewUrl: `${baseUrl}/secure/${id}`, expiresAt }, { headers: NO_STORE });
