@@ -22,7 +22,11 @@ const SessionContext = createContext<SessionContextType>({
     update: async () => { },
 });
 
-export const SessionProvider = ({ children }: { children: React.ReactNode }) => {
+/** Rutas sin sesion: no se expulsa al login desde ellas. */
+const PUBLIC_PREFIXES = ["/login", "/register", "/docs", "/book", "/secure", "/admin"];
+const isPublicPath = (pathname: string) => PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
+
+export const SessionProvider =({ children }: { children: React.ReactNode }) => {
     const [session, setSession] = useState<{ user?: User } | null>(null);
     const [status, setStatus] = useState<"authenticated" | "loading" | "unauthenticated">("loading");
 
@@ -51,6 +55,18 @@ export const SessionProvider = ({ children }: { children: React.ReactNode }) => 
 
     useEffect(() => {
         fetchSession();
+        // Pestanas largas: al volver a la ventana se revalida; si la sesion caduco/fue revocada, al login (la ruta borra la cookie vieja).
+        const onVisible = () => {
+            if (document.visibilityState !== "visible") return;
+            fetch("/api/auth/me", { cache: "no-store" })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => {
+                    if (d && d.user === null && !isPublicPath(window.location.pathname)) window.location.replace("/login/expired");
+                })
+                .catch(() => undefined);
+        };
+        document.addEventListener("visibilitychange", onVisible);
+        return () => document.removeEventListener("visibilitychange", onVisible);
     }, []);
 
     return (
