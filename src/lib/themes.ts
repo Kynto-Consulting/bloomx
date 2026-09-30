@@ -23,28 +23,19 @@
  */
 
 import { contrast, ensureContrast, mix, normalizeHex, readableOn } from './color';
+import {
+    TOKEN_KEYS, hasBrandConfig, sanitizeThemeConfig,
+    type DomainThemeConfig, type ThemeDefaultMode, type TokenKey,
+} from './theme-config';
+
+// El modelo de empresa y el registro de tokens viven en theme-config.ts (modulo compartido con el backend).
+export { TOKEN_KEYS };
+export type { DomainThemeConfig, TokenKey };
 
 // ---------------------------------------------------------------------------
 // Tipos
 // ---------------------------------------------------------------------------
 
-export const TOKEN_KEYS = [
-    'background', 'foreground',
-    'card', 'card-foreground',
-    'popover', 'popover-foreground',
-    'primary', 'primary-foreground',
-    'secondary', 'secondary-foreground',
-    'muted', 'muted-foreground',
-    'accent', 'accent-foreground',
-    'destructive', 'destructive-foreground',
-    'success', 'success-foreground',
-    'warning', 'warning-foreground',
-    'info', 'info-foreground',
-    'border', 'input', 'ring',
-    'brand-accent', 'brand-accent-foreground',
-] as const;
-
-export type TokenKey = typeof TOKEN_KEYS[number];
 export type ThemeTokens = Record<TokenKey, string>;
 export type ColorScheme = 'light' | 'dark';
 
@@ -53,8 +44,10 @@ export interface ThemeDefinition {
     label: string;
     description: string;
     scheme: ColorScheme;
-    /** Si es true, los colores de marca del dominio (config.theme) se superponen a este tema. */
+    /** Si es true, los colores de marca del dominio (config.theme) se superponen a este tema (applyBrand, legado). */
     brandable: boolean;
+    /** true en los temas de empresa generados (brand-light / brand-dark, ver brand-theme.ts). */
+    brand?: boolean;
     tokens: ThemeTokens;
 }
 
@@ -82,6 +75,16 @@ const light: ThemeDefinition = {
         'info': '#1d4ed8', 'info-foreground': '#ffffff',
         'border': '#e4e4e7', 'input': '#8f8f98', 'ring': '#2563eb',
         'brand-accent': '#4f46e5', 'brand-accent-foreground': '#ffffff',
+        'sidebar': '#f8f8f8', 'sidebar-foreground': '#09090b', 'sidebar-accent': '#dddddd', 'sidebar-accent-foreground': '#09090b', 'sidebar-border': '#dbdbdc',
+        'header': '#ffffff', 'header-foreground': '#09090b',
+        'unread': '#f3f3f4', 'unread-foreground': '#09090b', 'row-hover': '#f4f4f4',
+        'row-selected': '#dfdfdf', 'row-selected-foreground': '#09090b',
+        'link': '#4f46e5', 'link-hover': '#3a34a4',
+        'code': '#eeeeee', 'code-foreground': '#09090b',
+        'overlay': '#26262673',
+        'chip': '#e3e3e4', 'chip-foreground': '#18181b',
+        'selection': '#bababb', 'selection-foreground': '#09090b',
+        'scrollbar': '#bababb',
     },
 };
 
@@ -105,6 +108,16 @@ const dark: ThemeDefinition = {
         'info': '#60a5fa', 'info-foreground': '#04152e',
         'border': '#2b303a', 'input': '#5d6677', 'ring': '#7aa2ff',
         'brand-accent': '#818cf8', 'brand-accent-foreground': '#0f1115',
+        'sidebar': '#0b0d10', 'sidebar-foreground': '#e8eaed', 'sidebar-accent': '#2d2f32', 'sidebar-accent-foreground': '#e8eaed', 'sidebar-border': '#2e3033',
+        'header': '#171a20', 'header-foreground': '#e8eaed',
+        'unread': '#25272b', 'unread-foreground': '#e8eaed', 'row-hover': '#1c1e22',
+        'row-selected': '#333539', 'row-selected-foreground': '#e8eaed',
+        'link': '#818cf8', 'link-hover': '#a0a8f5',
+        'code': '#292b2f', 'code-foreground': '#e8eaed',
+        'overlay': '#050506b3',
+        'chip': '#3f4145', 'chip-foreground': '#e8eaed',
+        'selection': '#4c4e51', 'selection-foreground': '#e8eaed',
+        'scrollbar': '#595b5e',
     },
 };
 
@@ -128,6 +141,16 @@ const midnight: ThemeDefinition = {
         'info': '#7cc4ff', 'info-foreground': '#04152e',
         'border': '#26365f', 'input': '#5f76a8', 'ring': '#7cb1ff',
         'brand-accent': '#a5b4fc', 'brand-accent-foreground': '#0a1224',
+        'sidebar': '#080e1b', 'sidebar-foreground': '#e6ecfa', 'sidebar-accent': '#22324d', 'sidebar-accent-foreground': '#e6ecfa', 'sidebar-border': '#2c323f',
+        'header': '#111b33', 'header-foreground': '#e6ecfa',
+        'unread': '#15223a', 'unread-foreground': '#e6ecfa', 'row-hover': '#171f31',
+        'row-selected': '#253859', 'row-selected-foreground': '#e6ecfa',
+        'link': '#7cb1ff', 'link-hover': '#9cc3fe',
+        'code': '#242c3e', 'code-foreground': '#e6ecfa',
+        'overlay': '#03050bb3',
+        'chip': '#233554', 'chip-foreground': '#7cb1ff',
+        'selection': '#38527c', 'selection-foreground': '#e6ecfa',
+        'scrollbar': '#555c6d',
     },
 };
 
@@ -151,6 +174,16 @@ const amoled: ThemeDefinition = {
         'info': '#60a5fa', 'info-foreground': '#04152e',
         'border': '#2a2a2a', 'input': '#6b6b6b', 'ring': '#8ab4ff',
         'brand-accent': '#a5b4fc', 'brand-accent-foreground': '#000000',
+        'sidebar': '#000000', 'sidebar-foreground': '#f5f5f5', 'sidebar-accent': '#363636', 'sidebar-accent-foreground': '#f5f5f5', 'sidebar-border': '#272727',
+        'header': '#0a0a0a', 'header-foreground': '#f5f5f5',
+        'unread': '#191919', 'unread-foreground': '#f5f5f5', 'row-hover': '#0f0f0f',
+        'row-selected': '#292929', 'row-selected-foreground': '#f5f5f5',
+        'link': '#a5b4fc', 'link-hover': '#bdc8fa',
+        'code': '#1d1d1d', 'code-foreground': '#f5f5f5',
+        'overlay': '#000000b3',
+        'chip': '#363636', 'chip-foreground': '#f5f5f5',
+        'selection': '#626262', 'selection-foreground': '#f5f5f5',
+        'scrollbar': '#535353',
     },
 };
 
@@ -174,6 +207,16 @@ const ocean: ThemeDefinition = {
         'info': '#0369a1', 'info-foreground': '#ffffff',
         'border': '#cfe3ea', 'input': '#6a919d', 'ring': '#0e7490',
         'brand-accent': '#0369a1', 'brand-accent-foreground': '#ffffff',
+        'sidebar': '#ebf3f5', 'sidebar-foreground': '#0b2a33', 'sidebar-accent': '#d8e8ed', 'sidebar-accent-foreground': '#0b2a33', 'sidebar-border': '#d0dbde',
+        'header': '#ffffff', 'header-foreground': '#0b2a33',
+        'unread': '#e7f2f6', 'unread-foreground': '#0b2a33', 'row-hover': '#e8f0f2',
+        'row-selected': '#d2e6ec', 'row-selected-foreground': '#0b2a33',
+        'link': '#0e7490', 'link-hover': '#0d5e74',
+        'code': '#e2ebed', 'code-foreground': '#0b2a33',
+        'overlay': '#24252673',
+        'chip': '#d7e9ee', 'chip-foreground': '#0b2a33',
+        'selection': '#aed1db', 'selection-foreground': '#0b2a33',
+        'scrollbar': '#b1bfc3',
     },
 };
 
@@ -197,6 +240,16 @@ const forest: ThemeDefinition = {
         'info': '#1d4ed8', 'info-foreground': '#ffffff',
         'border': '#d3e0d0', 'input': '#76907c', 'ring': '#166534',
         'brand-accent': '#a16207', 'brand-accent-foreground': '#ffffff',
+        'sidebar': '#edf1ec', 'sidebar-foreground': '#14231a', 'sidebar-accent': '#d3e0d6', 'sidebar-accent-foreground': '#14231a', 'sidebar-border': '#d3d8d3',
+        'header': '#ffffff', 'header-foreground': '#14231a',
+        'unread': '#e9f0e9', 'unread-foreground': '#14231a', 'row-hover': '#eaede8',
+        'row-selected': '#d5e3d7', 'row-selected-foreground': '#14231a',
+        'link': '#166534', 'link-hover': '#15512c',
+        'code': '#e4e8e3', 'code-foreground': '#14231a',
+        'overlay': '#25252473',
+        'chip': '#d9e5db', 'chip-foreground': '#166534',
+        'selection': '#b1cbb9', 'selection-foreground': '#14231a',
+        'scrollbar': '#b5bcb6',
     },
 };
 
@@ -220,6 +273,16 @@ const rose: ThemeDefinition = {
         'info': '#1d4ed8', 'info-foreground': '#ffffff',
         'border': '#f3d3de', 'input': '#a97889', 'ring': '#be185d',
         'brand-accent': '#6d28d9', 'brand-accent-foreground': '#ffffff',
+        'sidebar': '#f9f0f2', 'sidebar-foreground': '#2a0f1a', 'sidebar-accent': '#f2d6e0', 'sidebar-accent-foreground': '#2a0f1a', 'sidebar-border': '#e0d5d8',
+        'header': '#ffffff', 'header-foreground': '#2a0f1a',
+        'unread': '#fcecf1', 'unread-foreground': '#2a0f1a', 'row-hover': '#f5edef',
+        'row-selected': '#f6d8e3', 'row-selected-foreground': '#2a0f1a',
+        'link': '#be185d', 'link-hover': '#921549',
+        'code': '#f0e7e9', 'code-foreground': '#2a0f1a',
+        'overlay': '#26252573',
+        'chip': '#f7dce6', 'chip-foreground': '#be185d',
+        'selection': '#ecb4ca', 'selection-foreground': '#2a0f1a',
+        'scrollbar': '#c3b6bb',
     },
 };
 
@@ -243,6 +306,16 @@ const contrastTheme: ThemeDefinition = {
         'info': '#003a99', 'info-foreground': '#ffffff',
         'border': '#4d4d4d', 'input': '#333333', 'ring': '#0033cc',
         'brand-accent': '#5b1fa8', 'brand-accent-foreground': '#ffffff',
+        'sidebar': '#ffffff', 'sidebar-foreground': '#000000', 'sidebar-accent': '#d9dff2', 'sidebar-accent-foreground': '#000000', 'sidebar-border': '#4d4d4d',
+        'header': '#ffffff', 'header-foreground': '#000000',
+        'unread': '#eef2ff', 'unread-foreground': '#000000', 'row-hover': '#e6e6e6',
+        'row-selected': '#dbe2f8', 'row-selected-foreground': '#000000',
+        'link': '#0033cc', 'link-hover': '#00248f',
+        'code': '#e6e6e6', 'code-foreground': '#000000',
+        'overlay': '#26262673',
+        'chip': '#e0e7f9', 'chip-foreground': '#0033cc',
+        'selection': '#99b0f5', 'selection-foreground': '#000000',
+        'scrollbar': '#767676',
     },
 };
 
@@ -255,20 +328,103 @@ export const THEME_IDS = THEMES.map((t) => t.id);
 export const DEFAULT_LIGHT_THEME = 'light';
 export const DEFAULT_DARK_THEME = 'dark';
 
-/** Preferencia del usuario: 'system' sigue prefers-color-scheme. */
-export type ThemePreference = 'system' | (typeof THEMES)[number]['id'];
+/** Ids de los temas de empresa generados por brand-theme.ts (siempre son "primera clase" si la empresa define colores). */
+export const BRAND_THEME_IDS = ['brand-light', 'brand-dark'] as const;
+export type BrandThemeId = typeof BRAND_THEME_IDS[number];
+
+/** Preferencia del usuario: 'system' sigue prefers-color-scheme; el resto es el id de un tema (generico o de empresa). */
+export type ThemePreference = 'system' | string;
 
 export function getTheme(id: string | null | undefined): ThemeDefinition | undefined {
     return THEMES.find((t) => t.id === id);
 }
 
-export function isThemePreference(value: unknown): value is ThemePreference {
-    return value === 'system' || (typeof value === 'string' && THEME_IDS.includes(value));
+/** Esquema de un id de tema conocido (generico o de empresa) sin necesidad de construir los temas de empresa. */
+export function getThemeScheme(id: string | null | undefined): ColorScheme | undefined {
+    if (id === 'brand-light') return 'light';
+    if (id === 'brand-dark') return 'dark';
+    return getTheme(id)?.scheme;
 }
 
+export function isThemePreference(value: unknown): value is ThemePreference {
+    return value === 'system' || (typeof value === 'string' && (THEME_IDS.includes(value) || (BRAND_THEME_IDS as readonly string[]).includes(value)));
+}
+
+/** Resolucion SIN politica de empresa (comportamiento historico). */
 export function resolveTheme(pref: ThemePreference, systemPrefersDark: boolean): ThemeDefinition {
     if (pref === 'system') return getTheme(systemPrefersDark ? DEFAULT_DARK_THEME : DEFAULT_LIGHT_THEME)!;
     return getTheme(pref) ?? getTheme(DEFAULT_LIGHT_THEME)!;
+}
+
+// ---------------------------------------------------------------------------
+// Politica de seleccion por empresa (allowedThemes / lockBrand / defaultMode)
+// ---------------------------------------------------------------------------
+
+export interface ThemePolicy {
+    /** La empresa define colores => existen brand-light / brand-dark. */
+    brand: boolean;
+    /** Modo cuando el usuario aun no eligio tema. */
+    defaultMode: ThemeDefaultMode;
+    /** Ids genericos permitidos; null = todos. */
+    allowed: string[] | null;
+    /** Solo temas de empresa (solo efectivo si brand). */
+    lock: boolean;
+}
+
+export const DEFAULT_THEME_POLICY: ThemePolicy = { brand: false, defaultMode: 'system', allowed: null, lock: false };
+
+/** Politica de una configuracion de empresa (se sanea antes). Sin configuracion = comportamiento historico. */
+export function getThemePolicy(cfgInput: unknown): ThemePolicy {
+    const cfg = sanitizeThemeConfig(cfgInput);
+    const brand = hasBrandConfig(cfg);
+    const allowed = (cfg.allowedThemes ?? []).filter((id) => THEME_IDS.includes(id));
+    return {
+        brand,
+        defaultMode: cfg.defaultMode ?? 'system',
+        allowed: allowed.length > 0 ? allowed : null,
+        lock: brand && cfg.lockBrand === true,
+    };
+}
+
+/** Ids elegibles, en orden de aparicion: empresa primero, despues los genericos permitidos. */
+export function getAvailableThemeIds(policy: ThemePolicy = DEFAULT_THEME_POLICY): string[] {
+    const out: string[] = policy.brand ? [...BRAND_THEME_IDS] : [];
+    if (policy.lock) return out;
+    for (const t of THEMES) {
+        if (policy.allowed && !policy.allowed.includes(t.id)) continue;
+        // Con empresa, los genericos Claro/Oscuro sobran (ya estan los de la empresa) salvo que se listen expresamente.
+        if (policy.brand && (t.id === DEFAULT_LIGHT_THEME || t.id === DEFAULT_DARK_THEME) && !(policy.allowed && policy.allowed.includes(t.id))) continue;
+        out.push(t.id);
+    }
+    return out;
+}
+
+/** Tema por defecto de un esquema: el de empresa, o el primer generico permitido de ese esquema (o el primero permitido). */
+export function fallbackThemeId(scheme: ColorScheme, policy: ThemePolicy = DEFAULT_THEME_POLICY): string {
+    if (policy.brand) return scheme === 'dark' ? 'brand-dark' : 'brand-light';
+    const ids = getAvailableThemeIds(policy);
+    return ids.find((id) => getTheme(id)?.scheme === scheme) ?? ids[0] ?? (scheme === 'dark' ? DEFAULT_DARK_THEME : DEFAULT_LIGHT_THEME);
+}
+
+/**
+ * Preferencia EFECTIVA a partir de la almacenada (cookie/localStorage/BD; null si nunca eligio):
+ *   'system' | id concreto elegible. Una preferencia no elegible se sustituye por el tema por defecto
+ *   de su mismo esquema (p. ej. 'dark' antiguo -> 'brand-dark' cuando la empresa define colores).
+ */
+export function resolvePreference(stored: string | null | undefined, policy: ThemePolicy = DEFAULT_THEME_POLICY): ThemePreference {
+    if (isThemePreference(stored)) {
+        if (stored === 'system') return 'system';
+        if (getAvailableThemeIds(policy).includes(stored)) return stored;
+        return fallbackThemeId(getThemeScheme(stored) ?? 'light', policy);
+    }
+    return policy.defaultMode === 'system' ? 'system' : fallbackThemeId(policy.defaultMode, policy);
+}
+
+/** Id del tema aplicado para una preferencia efectiva (resuelve 'system' con el SO). */
+export function resolveThemeId(pref: ThemePreference, systemPrefersDark: boolean, policy: ThemePolicy = DEFAULT_THEME_POLICY): string {
+    if (pref === 'system') return fallbackThemeId(systemPrefersDark ? 'dark' : 'light', policy);
+    if (getAvailableThemeIds(policy).includes(pref)) return pref;
+    return fallbackThemeId(getThemeScheme(pref) ?? 'light', policy);
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +473,7 @@ const NEUTRALS = ['gray', 'slate', 'zinc', 'neutral', 'stone'];
  */
 export const DARK_ACCENT_SHADES = { 500: { s: 92, l: 74 }, 600: { s: 90, l: 78 } } as const;
 
-function darkPaletteRemap(): string {
+export function darkPaletteRemap(): string {
     const lines: string[] = [];
     for (const [name, h] of Object.entries(HUES)) {
         lines.push(
@@ -385,35 +541,18 @@ export function buildThemeCss(): string {
 // Marca del dominio (config.theme) superpuesta a los temas "brandable"
 // ---------------------------------------------------------------------------
 
-export interface DomainThemeConfig {
-    primaryColor?: string; primaryForeground?: string;
-    secondaryColor?: string; secondaryForeground?: string;
-    accentColor?: string; accentForeground?: string;
-    backgroundColor?: string; textColor?: string;
-    mutedColor?: string; mutedForeground?: string;
-    cardColor?: string; cardForeground?: string;
-    borderColor?: string; inputColor?: string; ringColor?: string;
-    radius?: number | string;
-    titleFont?: string; bodyFont?: string;
-}
-
-const SAFE_FONT_RE = /^[A-Za-z0-9][A-Za-z0-9 \-_]{0,48}$/;
-
-function fontStack(name: unknown): string | null {
-    if (typeof name !== 'string') return null;
-    const n = name.trim();
-    if (!SAFE_FONT_RE.test(n)) return null;
-    return `"${n}",system-ui,sans-serif`;
-}
-
 /** Calcula los tokens de un tema brandable con la marca del dominio aplicada, garantizando AA. */
 export function applyBrand(theme: ThemeDefinition, cfg: DomainThemeConfig): Partial<Record<TokenKey, string>> {
     const t = { ...theme.tokens };
     const out: Partial<Record<TokenKey, string>> = {};
     const set = (k: TokenKey, v: string) => { t[k] = v; out[k] = v; };
 
-    // Neutros: solo en el tema claro (un fondo claro de marca romperia el oscuro).
-    if (theme.scheme === 'light') {
+    // Neutros: solo en el tema claro (un fondo claro de marca romperia el oscuro). Un fondo de marca OSCURO
+    // tampoco se aplica al tema claro (quedaria un lienzo oscuro con tokens y color-scheme claros): el dominio
+    // conserva su primario/acento y el usuario puede elegir un tema oscuro.
+    const brandBg = normalizeHex(cfg.backgroundColor);
+    const darkBrandBg = !!brandBg && contrast(brandBg, '#ffffff') > 3;
+    if (theme.scheme === 'light' && !darkBrandBg) {
         const bg = normalizeHex(cfg.backgroundColor);
         if (bg) {
             set('background', bg);
@@ -486,34 +625,68 @@ export function applyBrand(theme: ThemeDefinition, cfg: DomainThemeConfig): Part
     return out;
 }
 
-/** CSS de la marca del dominio (colores para temas brandable + tipografia). Vacio si no hay marca. */
-export function buildBrandCss(cfg: DomainThemeConfig | null | undefined): string {
-    if (!cfg || typeof cfg !== 'object') return '';
-    const blocks: string[] = [];
 
-    for (const theme of THEMES) {
-        if (!theme.brandable) continue;
-        const overrides = applyBrand(theme, cfg);
-        if (Object.keys(overrides).length === 0) continue;
-        const decls = tokensToDecls(overrides);
-        blocks.push(`:root[data-theme="${theme.id}"]{${decls}}`);
-        if (theme.id === DEFAULT_LIGHT_THEME) blocks.push(`:root:not([data-theme]){${decls}}`);
-        if (theme.id === DEFAULT_DARK_THEME) {
-            blocks.push(`@media (prefers-color-scheme:dark){:root[data-theme-pref="system"]:not([data-theme]){${decls}}}`);
-        }
-    }
+// ---------------------------------------------------------------------------
+// Requisitos de contraste (fuente unica: motor, tests y scripts/check-theme-contrast.ts)
+// ---------------------------------------------------------------------------
 
-    const root: string[] = [];
-    const body = fontStack(cfg.bodyFont);
-    const title = fontStack(cfg.titleFont);
-    if (body) root.push(`--font-body:${body}`);
-    if (title) root.push(`--font-title:${title}`);
-    const radius = Number(cfg.radius);
-    if (Number.isFinite(radius) && radius >= 0 && radius <= 3) root.push(`--radius:${radius}rem`);
-    if (root.length) blocks.push(`:root{${root.join(';')}}`);
+export interface ContrastRequirement { label: string; fg: TokenKey; on: TokenKey; min: number }
 
-    return blocks.join('\n');
-}
+const req = (label: string, fg: TokenKey, on: TokenKey, min = 4.5): ContrastRequirement => ({ label, fg, on, min });
+
+/** Pares (texto/control sobre superficie) que TODO tema, generico o de empresa, debe cumplir. */
+export const CONTRAST_REQUIREMENTS: readonly ContrastRequirement[] = [
+    req('texto / fondo', 'foreground', 'background'),
+    req('texto / tarjeta', 'foreground', 'card'),
+    req('texto / tarjeta (card-foreground)', 'card-foreground', 'card'),
+    req('texto / popover', 'popover-foreground', 'popover'),
+    req('atenuado / fondo', 'muted-foreground', 'background'),
+    req('atenuado / tarjeta', 'muted-foreground', 'card'),
+    req('atenuado / muted', 'muted-foreground', 'muted'),
+    req('atenuado / popover', 'muted-foreground', 'popover'),
+    req('atenuado / sidebar', 'muted-foreground', 'sidebar'),
+    req('atenuado / no leido', 'muted-foreground', 'unread'),
+    req('atenuado / fila hover', 'muted-foreground', 'row-hover'),
+    req('atenuado / fila seleccionada', 'muted-foreground', 'row-selected'),
+    req('boton primario', 'primary-foreground', 'primary'),
+    req('texto primario / fondo', 'primary', 'background'),
+    req('texto primario / tarjeta', 'primary', 'card'),
+    req('boton secundario', 'secondary-foreground', 'secondary'),
+    req('hover accent', 'accent-foreground', 'accent'),
+    req('boton peligro', 'destructive-foreground', 'destructive'),
+    req('texto peligro / fondo', 'destructive', 'background'),
+    req('texto peligro / tarjeta', 'destructive', 'card'),
+    req('boton exito', 'success-foreground', 'success'),
+    req('texto exito / fondo', 'success', 'background'),
+    req('texto exito / tarjeta', 'success', 'card'),
+    req('boton aviso', 'warning-foreground', 'warning'),
+    req('texto aviso / fondo', 'warning', 'background'),
+    req('texto aviso / tarjeta', 'warning', 'card'),
+    req('boton info', 'info-foreground', 'info'),
+    req('texto info / fondo', 'info', 'background'),
+    req('texto info / tarjeta', 'info', 'card'),
+    req('acento marca', 'brand-accent-foreground', 'brand-accent'),
+    req('texto acento marca / fondo', 'brand-accent', 'background'),
+    req('sidebar', 'sidebar-foreground', 'sidebar'),
+    req('sidebar activo', 'sidebar-accent-foreground', 'sidebar-accent'),
+    req('cabecera', 'header-foreground', 'header'),
+    req('fila no leida', 'unread-foreground', 'unread'),
+    req('texto / fila hover', 'foreground', 'row-hover'),
+    req('fila seleccionada', 'row-selected-foreground', 'row-selected'),
+    req('enlace / fondo', 'link', 'background'),
+    req('enlace / tarjeta', 'link', 'card'),
+    req('enlace / popover', 'link', 'popover'),
+    req('enlace hover / fondo', 'link-hover', 'background'),
+    req('enlace hover / tarjeta', 'link-hover', 'card'),
+    req('codigo', 'code-foreground', 'code'),
+    req('etiqueta (chip)', 'chip-foreground', 'chip'),
+    req('seleccion de texto', 'selection-foreground', 'selection'),
+    req('borde de control / fondo (3:1)', 'input', 'background', 3),
+    req('borde de control / tarjeta (3:1)', 'input', 'card', 3),
+    req('foco / fondo (3:1)', 'ring', 'background', 3),
+    req('foco / tarjeta (3:1)', 'ring', 'card', 3),
+    req('scrollbar / fondo (1.5:1)', 'scrollbar', 'background', 1.5),
+];
 
 // ---------------------------------------------------------------------------
 // Script bloqueante anti-FOUC
@@ -521,12 +694,15 @@ export function buildBrandCss(cfg: DomainThemeConfig | null | undefined): string
 
 /**
  * Se inyecta como <script> sincrono en <head>. Corre antes del primer pintado:
- * lee la preferencia (cookie -> localStorage), resuelve "system" con
- * matchMedia y fija data-theme / data-theme-pref / data-scheme / color-scheme
- * en <html>. Todo en try/catch: si algo falla queda el tema claro por defecto.
+ * lee la preferencia (cookie -> localStorage), la valida contra la politica de la empresa
+ * (mismo algoritmo que resolvePreference/resolveThemeId; hay un test de paridad), resuelve "system"
+ * con matchMedia y fija data-theme / data-theme-pref / data-scheme / color-scheme en <html>.
+ * Todo en try/catch: si algo falla queda el tema por defecto del CSS.
  */
-export function buildBootScript(): string {
-    const schemes: Record<string, ColorScheme> = {};
+export function buildBootScript(policy: ThemePolicy = DEFAULT_THEME_POLICY): string {
+    const schemes: Record<string, ColorScheme> = { 'brand-light': 'light', 'brand-dark': 'dark' };
     THEMES.forEach((t) => { schemes[t.id] = t.scheme; });
-    return `(function(){try{var d=document.documentElement,S=${JSON.stringify(schemes)},p=null,m=document.cookie.match(/(?:^|; )${THEME_COOKIE}=([^;]*)/);if(m)p=decodeURIComponent(m[1]);if(!p){try{p=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)})}catch(e){}}if(p!=='system'&&!S[p])p='system';var r=p;if(p==='system')r=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?${JSON.stringify(DEFAULT_DARK_THEME)}:${JSON.stringify(DEFAULT_LIGHT_THEME)};d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);d.setAttribute('data-scheme',S[r]);d.style.colorScheme=S[r]}catch(e){}})();`;
+    const available = getAvailableThemeIds(policy);
+    const fb = { light: fallbackThemeId('light', policy), dark: fallbackThemeId('dark', policy) };
+    return `(function(){try{var d=document.documentElement,S=${JSON.stringify(schemes)},A=${JSON.stringify(available)},F=${JSON.stringify(fb)},M=${JSON.stringify(policy.defaultMode)},p=null,m=document.cookie.match(/(?:^|; )${THEME_COOKIE}=([^;]*)/);if(m)p=decodeURIComponent(m[1]);if(!p){try{p=localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)})}catch(e){}}if(p!=='system'&&!S[p])p=null;if(p===null)p=M==='system'?'system':F[M];else if(p!=='system'&&A.indexOf(p)<0)p=F[S[p]];var r=p;if(p==='system')r=window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?F.dark:F.light;d.setAttribute('data-theme',r);d.setAttribute('data-theme-pref',p);d.setAttribute('data-scheme',S[r]);d.style.colorScheme=S[r]}catch(e){}})();`;
 }

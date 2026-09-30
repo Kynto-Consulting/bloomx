@@ -7,6 +7,9 @@ const csp = [
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline'${isProd ? '' : " 'unsafe-eval'"} https://accounts.google.com https://apis.google.com`,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    // Imagenes de la landing de cada empresa (Domain.theme.landing: hero, fondo, logos, avatares): el sanitizer
+    // (src/lib/landing-config.ts) solo acepta https:, y se pintan con <img referrerPolicy="no-referrer">, nunca con CSS url().
+    // Por eso basta el esquema https: ya permitido aqui; no se abre nada mas (ni http:, ni comodines de host).
     "img-src 'self' data: blob: https:",
     "font-src 'self' data: https://fonts.gstatic.com",
     "connect-src 'self' https: wss:",

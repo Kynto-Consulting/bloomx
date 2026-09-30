@@ -13,15 +13,17 @@ import { PwaManager } from '@/components/PwaManager'
 import { I18nProvider } from '@/components/I18nProvider'
 import { getTranslator } from '@/lib/i18n'
 import { getRequestLocale } from '@/lib/i18n/server'
-import { buildBootScript, buildBrandCss, buildThemeCss, getTheme, isThemePreference, THEME_COOKIE, type DomainThemeConfig } from '@/lib/themes'
+import { buildBootScript, buildThemeCss, getThemePolicy, getThemeScheme, resolvePreference, THEME_COOKIE } from '@/lib/themes'
+import { buildBrandCss, getThemeOverride } from '@/lib/brand-theme'
+import { sanitizeThemeConfig, type DomainThemeConfig } from '@/lib/theme-config'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter' })
 
 import { cache } from 'react';
 import { cookies, headers } from 'next/headers';
 
-/** Config de dominio (marca/tema). Misma peticion que generateMetadata: Next la deduplica. */
-const getDomainTheme = cache(async (): Promise<DomainThemeConfig | null> => {
+/** Config de dominio (marca/tema saneada + nombre). Misma peticion que generateMetadata: Next la deduplica. */
+const getDomainTheme = cache(async (): Promise<{ theme: DomainThemeConfig; name: string } | null> => {
     try {
         const headersList = await headers();
         const host = process.env.TOP_DOMAIN || headersList.get('x-forwarded-host') || headersList.get('host') || '';
@@ -34,7 +36,10 @@ const getDomainTheme = cache(async (): Promise<DomainThemeConfig | null> => {
         });
         if (!res.ok) return null;
         const data = await res.json();
-        return data?.config?.theme ?? null;
+        return {
+            theme: sanitizeThemeConfig(data?.config?.theme),
+            name: data?.config?.displayName || data?.config?.name || '',
+        };
     } catch {
         return null;
     }
@@ -105,22 +110,27 @@ export default async function RootLayout({
     const locale = await getRequestLocale();
     const tr = getTranslator(locale);
     const cookiePref = cookieStore.get(THEME_COOKIE)?.value;
-    const pref = isThemePreference(cookiePref) ? cookiePref : 'system';
-    const concrete = pref !== 'system' ? getTheme(pref) : undefined;
-    const brandCss = buildBrandCss(await getDomainTheme());
+    const domain = await getDomainTheme();
+    const themeCfg = getThemeOverride() ?? domain?.theme ?? null; // override: solo desarrollo (ver reports/theme-contract.md)
+    // Politica de la empresa (defaultMode / allowedThemes / lockBrand): el servidor resuelve el tema ya en el HTML.
+    // Con "system" el servidor no sabe si el SO es oscuro: lo resuelve el script bloqueante (y el CSS de respaldo).
+    const policy = getThemePolicy(themeCfg);
+    const pref = resolvePreference(cookiePref, policy);
+    const concreteId = pref !== 'system' ? pref : undefined;
+    const brandCss = buildBrandCss(themeCfg, { name: domain?.name });
 
     return (
         <html
             lang={locale}
             data-theme-pref={pref}
-            data-theme={concrete?.id}
-            data-scheme={concrete?.scheme}
+            data-theme={concreteId}
+            data-scheme={getThemeScheme(concreteId)}
             suppressHydrationWarning
         >
             <head>
                 <style id="bx-themes" dangerouslySetInnerHTML={{ __html: buildThemeCss() }} />
                 {brandCss ? <style id="bx-brand" dangerouslySetInnerHTML={{ __html: brandCss }} /> : null}
-                <script dangerouslySetInnerHTML={{ __html: buildBootScript() }} />
+                <script dangerouslySetInnerHTML={{ __html: buildBootScript(policy) }} />
             </head>
             <body className={`${inter.variable} font-sans antialiased bg-background text-foreground`}>
                 <I18nProvider locale={locale}>
@@ -140,7 +150,7 @@ export default async function RootLayout({
                                 <CacheProvider>
                                     <OfflineProvider>
                                         <ExpansionUIProvider>
-                                            <ThemeProvider>
+                                            <ThemeProvider initialThemeConfig={themeCfg} brandName={domain?.name}>
                                                 {children}
                                             </ThemeProvider>
                                             <PwaManager />

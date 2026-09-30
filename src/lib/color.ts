@@ -114,3 +114,34 @@ export function hslToHex(h: number, s: number, l: number): string {
     const f = (n: number) => lig - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
     return rgbToHex({ r: f(0) * 255, g: f(8) * 255, b: f(4) * 255 });
 }
+
+/** #rrggbb -> HSL (h 0-360, s/l 0-1). Inversa aproximada de hslToHex (que usa s/l 0-100). */
+export function hexToHsl(hex: string): { h: number; s: number; l: number } {
+    const { r, g, b } = hexToRgb(hex);
+    const rn = r / 255, gn = g / 255, bn = b / 255;
+    const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+    const l = (max + min) / 2;
+    const d = max - min;
+    if (d === 0) return { h: 0, s: 0, l };
+    const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    let h: number;
+    if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
+    else if (max === gn) h = ((bn - rn) / d + 2) * 60;
+    else h = ((rn - gn) / d + 4) * 60;
+    return { h, s, l };
+}
+
+/**
+ * Como readableOn pero GARANTIZA >= 4.5:1 (en grises medios #0a0a0a se queda en ~4.4;
+ * ahi se cae a negro/blanco puros).
+ */
+export function readableOnAA(bg: string): string {
+    const first = readableOn(bg);
+    if (contrast(first, bg) >= 4.5) return first;
+    return contrast('#000000', bg) >= contrast('#ffffff', bg) ? '#000000' : '#ffffff';
+}
+
+/** Clasifica un fondo: 'light' si un texto casi negro se lee mejor que uno blanco (cruce en L~0.18). */
+export function backgroundScheme(bg: string): 'light' | 'dark' {
+    return contrast(bg, '#0a0a0a') >= contrast(bg, '#ffffff') ? 'light' : 'dark';
+}

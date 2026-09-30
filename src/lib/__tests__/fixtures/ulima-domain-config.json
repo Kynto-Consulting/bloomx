@@ -1,0 +1,19 @@
+{
+  "note": "Config real (publica) de /api/config?domain=ulima.dev capturada el 2026-09-29; solo la seccion de tema",
+  "config": {
+    "name": "ulima.dev",
+    "displayName": "BloomX Mail",
+    "theme": {
+      "bodyFont": "Inter",
+      "cardColor": "#ffffff",
+      "textColor": "#111827",
+      "titleFont": "Inter",
+      "mutedColor": "#ffffff",
+      "accentColor": "#4f46e5",
+      "borderColor": "#ffffff",
+      "primaryColor": "#4f46e5",
+      "secondaryColor": "#7f5757",
+      "backgroundColor": "#ffffff"
+    }
+  }
+}

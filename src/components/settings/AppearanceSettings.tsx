@@ -26,10 +26,10 @@ function ThemeSwatch({ theme }: { theme: ThemeDefinition }) {
             className="flex h-16 w-full overflow-hidden rounded-md border"
             style={{ backgroundColor: t.background, borderColor: t.border }}
         >
-            <div className="flex w-1/4 flex-col gap-1 p-1.5" style={{ backgroundColor: t.muted }}>
-                <div className="h-1.5 w-full rounded-sm" style={{ backgroundColor: t.primary }} />
-                <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: t['muted-foreground'], opacity: 0.6 }} />
-                <div className="h-1.5 w-3/4 rounded-sm" style={{ backgroundColor: t['muted-foreground'], opacity: 0.6 }} />
+            <div className="flex w-1/4 flex-col gap-1 p-1.5" style={{ backgroundColor: t.sidebar, borderRight: `1px solid ${t['sidebar-border']}` }}>
+                <div className="h-1.5 w-full rounded-sm" style={{ backgroundColor: t['sidebar-accent'] }} />
+                <div className="h-1.5 w-2/3 rounded-sm" style={{ backgroundColor: t['sidebar-foreground'], opacity: 0.6 }} />
+                <div className="h-1.5 w-3/4 rounded-sm" style={{ backgroundColor: t['sidebar-foreground'], opacity: 0.6 }} />
             </div>
             <div className="flex flex-1 flex-col gap-1 p-1.5">
                 <div className="flex flex-col gap-1 rounded-sm p-1" style={{ backgroundColor: t.card, border: `1px solid ${t.border}` }}>
@@ -47,9 +47,9 @@ function ThemeSwatch({ theme }: { theme: ThemeDefinition }) {
 }
 
 /** Vista previa "Sistema": mitad clara, mitad oscura. */
-function SystemSwatch() {
-    const l = getTheme(DEFAULT_LIGHT_THEME)!;
-    const d = getTheme(DEFAULT_DARK_THEME)!;
+function SystemSwatch({ light, dark }: { light?: ThemeDefinition; dark?: ThemeDefinition }) {
+    const l = light ?? getTheme(DEFAULT_LIGHT_THEME)!;
+    const d = dark ?? getTheme(DEFAULT_DARK_THEME)!;
     return (
         <div aria-hidden className="relative h-16 w-full overflow-hidden rounded-md border border-border">
             <div className="absolute inset-0"><ThemeSwatch theme={l} /></div>
@@ -110,12 +110,18 @@ function ThemeOption({ value, label, description, checked, onSelect, icon, child
 }
 
 export function AppearanceSettings() {
-    const { themes, preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode } = useTheme();
+    const { themes, brandThemes, preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode } = useTheme();
     const { t, locale, setLocale } = useI18n();
     // Etiquetas de tema: diccionario si existe la clave, si no el texto del registro (themes.ts).
     const tr = (key: string, fallback: string) => { const v = t(key); return v === key ? fallback : v; };
-    const themeLabel = (id: string, fb: string) => tr(`appearance.themes.${id}.label`, fb);
-    const themeDesc = (id: string, fb: string) => tr(`appearance.themes.${id}.description`, fb);
+    // Temas de empresa: el nombre lo pone la empresa; el sufijo Claro/Oscuro sale del diccionario.
+    const companyName = (th: ThemeDefinition) => th.label.replace(/ · (Claro|Oscuro)$/, '');
+    const themeLabel = (th: Pick<ThemeDefinition, 'id' | 'label' | 'brand' | 'scheme'>) => th.brand
+        ? t(th.scheme === 'dark' ? 'appearance.brandDark' : 'appearance.brandLight', { name: companyName(th as ThemeDefinition) })
+        : tr(`appearance.themes.${th.id}.label`, th.label);
+    const themeDesc = (th: Pick<ThemeDefinition, 'id' | 'description' | 'brand' | 'scheme'>) => th.brand
+        ? t(th.scheme === 'dark' ? 'appearance.brandDarkDescription' : 'appearance.brandLightDescription')
+        : tr(`appearance.themes.${th.id}.description`, th.description);
 
     return (
         <div className="space-y-8 animate-in fade-in duration-300">
@@ -126,7 +132,7 @@ export function AppearanceSettings() {
                     </h3>
                     <p className="mt-1 text-xs text-muted-foreground">
                         {t('appearance.themeHelp')}{' '}
-                        {t('appearance.currently')} <span className="font-medium text-foreground">{preference === 'system' ? t('appearance.systemWithTheme', { theme: themeLabel(resolvedTheme.id, resolvedTheme.label) }) : themeLabel(resolvedTheme.id, resolvedTheme.label)}</span>.
+                        {t('appearance.currently')} <span className="font-medium text-foreground">{preference === 'system' ? t('appearance.systemWithTheme', { theme: themeLabel(resolvedTheme) }) : themeLabel(resolvedTheme)}</span>.
                     </p>
                 </div>
                 <div role="radiogroup" aria-label={t('appearance.themeGroupLabel')} className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -138,14 +144,14 @@ export function AppearanceSettings() {
                         onSelect={setPreference}
                         icon={<Monitor className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
                     >
-                        <SystemSwatch />
+                        <SystemSwatch light={brandThemes?.light} dark={brandThemes?.dark} />
                     </ThemeOption>
                     {themes.map((theme) => (
                         <ThemeOption
                             key={theme.id}
                             value={theme.id}
-                            label={themeLabel(theme.id, theme.label)}
-                            description={themeDesc(theme.id, theme.description)}
+                            label={themeLabel(theme)}
+                            description={themeDesc(theme)}
                             checked={preference === theme.id}
                             onSelect={setPreference}
                             icon={theme.scheme === 'dark' ? <Moon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : undefined}

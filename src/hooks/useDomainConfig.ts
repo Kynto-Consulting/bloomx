@@ -1,5 +1,7 @@
 
+import { useMemo } from 'react';
 import useSWR from 'swr';
+import { sanitizeThemeConfig, type DomainThemeConfig } from '@/lib/theme-config';
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
@@ -37,26 +39,26 @@ export const DEFAULT_CONFIG = {
         primaryColor: process.env.NEXT_PUBLIC_BRAND_COLOR || '#2563EB', // blue-600 default
     }
 };
+/**
+ * Config del dominio. `themeConfig` es config.theme YA saneado (sanitizeThemeConfig): es lo que deben usar
+ * los consumidores de tema (nunca config.theme en crudo). Mientras carga (isLoading) es el tema por defecto.
+ */
 export function useDomainConfig() {
     const { data, error, isLoading } = useSWR('/api/config', fetcher, {
         revalidateOnFocus: true
     });
 
-    if (isLoading) {
-        return {
-            config: DEFAULT_CONFIG,
-            extensions: [],
-            isLoading: true,
-            isError: false
-        }
-    }
-
     // data puede ser undefined si /api/config falla (isLoading=false y error definido).
-    const config = data?.config ?? DEFAULT_CONFIG;
+    const config = isLoading ? DEFAULT_CONFIG : (data?.config ?? DEFAULT_CONFIG);
+    const rawTheme = (config as { theme?: unknown }).theme;
+    const themeConfig = useMemo<DomainThemeConfig>(() => sanitizeThemeConfig(rawTheme), [rawTheme]);
+    const extensions = useMemo(() => (isLoading ? [] : normalizeExtensions(data?.extensions || [])), [isLoading, data]);
+
     return {
         config,
-        extensions: normalizeExtensions(data?.extensions || []),
+        themeConfig,
+        extensions,
         isLoading,
-        isError: error
+        isError: isLoading ? false : error,
     };
 }

@@ -84,9 +84,9 @@ export async function middleware(req: NextRequest) {
 
         pathname.startsWith('/api/webhooks') || // Allow cron routes
         pathname.startsWith('/api/molt') || // Allow cron routes
-        (pathname.startsWith('/api/emails/') && pathname.endsWith('/process-attachments')) || // internal async job (guarded by INTERNAL_SECRET)
+        (pathname.startsWith('/api/emails/') && pathname.endsWith('/process-attachments')) || // internal async job (guarded by the derived internal key, lib/internal-auth.ts)
         pathname.startsWith('/api/assets') || // Allow asset downloads
-        pathname.startsWith('/api/internal/') || // servidor-a-servidor (backend de extensiones); cada ruta exige x-internal-secret
+        pathname.startsWith('/api/internal/') || // servidor-a-servidor (backend de extensiones); cada ruta verifica la firma Ed25519 del backend
         pathname.startsWith('/secure/') || // mensajes sellados: el destinatario no tiene cuenta (el contenido va cifrado; la clave en el #fragmento)
         pathname.startsWith('/api/secure-message') || // crear exige sesion en la ruta; abrir/consumir es publico por id no adivinable
         pathname.startsWith('/SKILL') || // Allow cron routes

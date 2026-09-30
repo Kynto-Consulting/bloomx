@@ -7,20 +7,26 @@ import { useCache } from '@/contexts/CacheContext';
 import {
     APPEARANCE_SETTINGS_KEY,
     DEFAULT_LIGHT_THEME,
+    DEFAULT_THEME_POLICY,
     MAIL_DARK_STORAGE_KEY,
     THEMES,
     THEME_COOKIE,
     THEME_STORAGE_KEY,
     THEME_UPDATED_KEY,
-    buildBrandCss,
+    getAvailableThemeIds,
     getTheme,
+    getThemePolicy,
     isMailDarkMode,
     isThemePreference,
-    resolveTheme,
+    resolvePreference,
+    resolveThemeId,
     type MailDarkMode,
     type ThemeDefinition,
+    type ThemePolicy,
     type ThemePreference,
 } from '@/lib/themes';
+import { buildBrandCss, buildBrandThemes, getSelectableThemes, getThemeOverride, type BrandThemes } from '@/lib/brand-theme';
+import { sanitizeThemeConfig, type DomainThemeConfig } from '@/lib/theme-config';
 
 /**
  * Proveedor de temas.
@@ -31,7 +37,9 @@ import {
  *    este proveedor solo mantiene el DOM sincronizado despues.
  *  - Persistencia: cookie (para SSR) + localStorage (respaldo y sync entre pestanas)
  *    + user.expansionSettings['core-appearance'] en BD (sync entre dispositivos).
- *  - Marca del dominio: si config.theme cambia respecto al SSR, se re-inyecta el CSS de marca.
+ *  - Marca del dominio: config.theme se sanea y genera brand-light / brand-dark (brand-theme.ts). Si difiere del SSR
+ *    se re-inyecta el CSS. La politica de la empresa (defaultMode / allowedThemes / lockBrand) decide que temas se
+ *    ofrecen y cual se usa cuando el usuario aun no eligio (resolvePreference).
  */
 
 const CACHE_KEY_ALL = 'system:expansion-settings-full';
@@ -44,8 +52,12 @@ interface Appearance {
 }
 
 export interface ThemeContextValue {
-    /** Todos los temas disponibles (registro unico). */
+    /** Temas ELEGIBLES en orden: los de la empresa primero (brand-light / brand-dark) y despues los genericos permitidos. */
     themes: readonly ThemeDefinition[];
+    /** Temas de empresa generados (null si la empresa no define colores) con sus avisos de contraste. */
+    brandThemes: BrandThemes | null;
+    /** Politica vigente (defaultMode / allowedThemes / lockBrand). */
+    policy: ThemePolicy;
     /** Lo que eligio el usuario: 'system' o un id de tema. */
     preference: ThemePreference;
     /** Tema realmente aplicado (resuelve 'system'). */
@@ -63,6 +75,8 @@ const lightTheme = getTheme(DEFAULT_LIGHT_THEME)!;
 
 const ThemeContext = createContext<ThemeContextValue>({
     themes: THEMES,
+    brandThemes: null,
+    policy: DEFAULT_THEME_POLICY,
     preference: 'system',
     resolvedTheme: lightTheme,
     scheme: 'light',
@@ -115,19 +129,45 @@ function applyToDom(theme: ThemeDefinition, pref: ThemePreference, animate: bool
     }
 }
 
-function readInitialPreference(): ThemePreference {
-    const attr = document.documentElement.getAttribute('data-theme-pref');
-    return isThemePreference(attr) ? attr : 'system';
+/** Preferencia guardada por el usuario (cookie -> localStorage) o null si nunca eligio. */
+function readStoredPreference(): ThemePreference | null {
+    const m = document.cookie.match(new RegExp(`(?:^|; )${THEME_COOKIE}=([^;]*)`));
+    let v: string | null = null;
+    if (m) { try { v = decodeURIComponent(m[1]); } catch { v = null; } }
+    if (!v) v = safeGet(THEME_STORAGE_KEY);
+    return isThemePreference(v) ? v : null;
 }
 
 // ---------------------------------------------------------------------------
 // Proveedor
 // ---------------------------------------------------------------------------
 
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
+interface ThemeProviderProps {
+    children: React.ReactNode;
+    /** Tema de empresa saneado que ya uso el servidor (evita saltos mientras /api/config carga en el cliente). */
+    initialThemeConfig?: DomainThemeConfig | null;
+    /** Nombre de la empresa (etiqueta de los temas brand-*). */
+    brandName?: string;
+}
+
+export function ThemeProvider({ children, initialThemeConfig = null, brandName }: ThemeProviderProps) {
     const { config, isLoading } = useDomainConfig();
     const { status } = useSession();
     const { getData, setData } = useCache();
+
+    // Configuracion de tema efectiva: la del servidor mientras carga /api/config; despues la del cliente (saneada).
+    const themeCfg = useMemo<DomainThemeConfig | null>(
+        () => getThemeOverride() ?? (isLoading || !config ? initialThemeConfig : sanitizeThemeConfig((config as { theme?: unknown }).theme)),
+        [isLoading, config, initialThemeConfig],
+    );
+    const displayName = (!isLoading && config ? ((config as { displayName?: string; name?: string }).displayName || (config as { name?: string }).name) : '') || brandName || '';
+    const policy = useMemo(() => getThemePolicy(themeCfg), [themeCfg]);
+    const brandThemes = useMemo(() => buildBrandThemes(themeCfg, { name: displayName }), [themeCfg, displayName]);
+    const selectable = useMemo(() => getSelectableThemes(brandThemes, policy), [brandThemes, policy]);
+    const policyRef = useRef<ThemePolicy>(policy);
+    const brandRef = useRef<BrandThemes | null>(brandThemes);
+    policyRef.current = policy;
+    brandRef.current = brandThemes;
 
     const [preference, setPreferenceState] = useState<ThemePreference>('system');
     const [resolvedId, setResolvedId] = useState<string>(DEFAULT_LIGHT_THEME);
@@ -139,8 +179,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const serverLoadedFor = useRef<string | null>(null);
 
     // ---- aplicar preferencia -------------------------------------------------
-    const apply = useCallback((pref: ThemePreference, animate: boolean) => {
-        const resolved = resolveTheme(pref, systemPrefersDark());
+    /** `raw` = lo que guardo el usuario (o null): se pasa por la politica vigente antes de aplicarse. */
+    const apply = useCallback((raw: ThemePreference | null, animate: boolean) => {
+        const pol = policyRef.current;
+        const pref = resolvePreference(raw, pol);
+        const id = resolveThemeId(pref, systemPrefersDark(), pol);
+        const brand = brandRef.current;
+        const resolved = (id === 'brand-light' ? brand?.light : id === 'brand-dark' ? brand?.dark : getTheme(id)) ?? getTheme(DEFAULT_LIGHT_THEME)!;
         prefRef.current = pref;
         setPreferenceState(pref);
         setResolvedId(resolved.id);
@@ -181,6 +226,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     // ---- setters publicos ----------------------------------------------------
     const setPreference = useCallback((pref: ThemePreference) => {
         if (!isThemePreference(pref)) return;
+        if (pref !== 'system' && !getAvailableThemeIds(policyRef.current).includes(pref)) return;
         writeCookie(pref);
         safeSet(THEME_STORAGE_KEY, pref);
         safeSet(THEME_UPDATED_KEY, String(Date.now()));
@@ -208,11 +254,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         const stored = safeGet(MAIL_DARK_STORAGE_KEY);
         if (isMailDarkMode(stored)) { mailRef.current = stored; setMailDarkModeState(stored); }
 
-        const initial = readInitialPreference();
-        apply(initial, false);
+        const storedPref = readStoredPreference();
+        apply(storedPref, false);
         // Si la preferencia vive solo en localStorage (cookie borrada), restaurar cookie para el proximo SSR.
         const ls = safeGet(THEME_STORAGE_KEY);
-        if (isThemePreference(ls) && ls === initial) writeCookie(initial);
+        if (isThemePreference(ls) && ls === storedPref) writeCookie(ls);
     }, [apply]);
 
     // ---- seguir cambios del SO cuando la preferencia es "system" -------------
@@ -282,31 +328,36 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         return () => { cancelled = true; };
     }, [status, getData, setData, apply]);
 
-    // ---- marca del dominio: reinyectar CSS si difiere del SSR ----------------
+    // ---- marca del dominio: reinyectar CSS si difiere del SSR y re-resolver el tema -------
     useEffect(() => {
-        if (isLoading || !config?.theme) return;
-        const css = buildBrandCss(config.theme);
-        const ssr = document.getElementById('bx-brand');
+        if (isLoading) return;
+        const css = buildBrandCss(themeCfg, { name: displayName });
+        const ssr = document.getElementById('bx-brand') as HTMLStyleElement | null;
         let live = document.getElementById('bx-brand-live') as HTMLStyleElement | null;
-        if (ssr && ssr.textContent === css) {
+        if ((ssr?.textContent ?? '') === css) {
             live?.remove();
-            return;
+            if (ssr) ssr.media = '';
+        } else {
+            // El CSS de la empresa cambio respecto al SSR (o la empresa ya no define marca): el SSR se desactiva y manda el vivo.
+            if (ssr) ssr.media = 'not all';
+            if (!live) {
+                live = document.createElement('style');
+                live.id = 'bx-brand-live';
+                document.head.appendChild(live);
+            }
+            if (live.textContent !== css) live.textContent = css;
         }
-        if (!live) {
-            live = document.createElement('style');
-            live.id = 'bx-brand-live';
-            document.head.appendChild(live);
-        }
-        if (live.textContent !== css) live.textContent = css;
-        // El fondo pudo cambiar (tema claro con neutros de marca): refrescar theme-color.
-        applyToDom(resolveTheme(prefRef.current, systemPrefersDark()), prefRef.current, false);
-    }, [config, isLoading]);
+        // La politica pudo cambiar (defaultMode / allowedThemes / lockBrand / marca): re-resolver desde lo guardado.
+        apply(readStoredPreference(), false);
+    }, [themeCfg, displayName, isLoading, apply]);
 
     useEffect(() => () => { if (syncTimer.current) clearTimeout(syncTimer.current); }, []);
 
-    const resolvedTheme = getTheme(resolvedId) ?? lightTheme;
+    const resolvedTheme = (resolvedId === 'brand-light' ? brandThemes?.light : resolvedId === 'brand-dark' ? brandThemes?.dark : getTheme(resolvedId)) ?? lightTheme;
     const value = useMemo<ThemeContextValue>(() => ({
-        themes: THEMES,
+        themes: selectable,
+        brandThemes,
+        policy,
         preference,
         resolvedTheme,
         scheme: resolvedTheme.scheme,
@@ -314,7 +365,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         mailDarkMode,
         setMailDarkMode,
         getAppearance,
-    }), [preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode, getAppearance]);
+    }), [selectable, brandThemes, policy, preference, resolvedTheme, setPreference, mailDarkMode, setMailDarkMode, getAppearance]);
 
     return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }

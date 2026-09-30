@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Book, Code, Component, Layers, Home, Menu, Shield, Zap, Database, Palette, X } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useLandingConfig } from '@/hooks/useLandingConfig';
+import { DocsHidden } from '@/components/landing/DocsHidden';
 import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
 import { cn } from '@/lib/utils';
@@ -43,6 +45,7 @@ export default function DocsLayout({
 }) {
     const { config } = useDomainConfig();
     const { t } = useI18n();
+    const { docs, isLoading: landingLoading } = useLandingConfig();
     const pathname = usePathname();
     const [drawerOpen, setDrawerOpen] = useState(false);
     const { ref: drawerRef, titleId } = useDialog<HTMLDivElement>(drawerOpen, () => setDrawerOpen(false));
@@ -53,6 +56,11 @@ export default function DocsLayout({
 
     // Cierra el cajon al navegar.
     useEffect(() => { setDrawerOpen(false); }, [pathname]);
+
+    // La empresa puede ocultar la documentacion (landing.docs.visible = false): pagina amigable y sin enlaces.
+    // Mientras se carga la config no se pinta el contenido (evita un parpadeo de docs que luego se ocultan).
+    if (landingLoading) return <div role="status" aria-busy="true" className="min-h-screen bg-background" />;
+    if (!docs.visible) return <DocsHidden />;
 
     return (
         <div className="min-h-screen bg-background font-sans flex flex-col">
