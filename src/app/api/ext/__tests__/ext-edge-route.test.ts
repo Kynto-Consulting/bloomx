@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const identity = vi.hoisted(() => ({ value: null as any }));
 vi.mock('@/lib/ext-edge-identity', () => ({ resolveEdgeIdentity: vi.fn(async () => identity.value) }));
+const tpl = vi.hoisted(() => ({ map: new Map<string, any>() }));
+vi.mock('@/lib/expansions/domain-templates', () => ({ loadDomainTemplates: async () => tpl.map }));
 vi.mock('@/lib/security', () => ({
     getClientIp: (req: Request) => req.headers.get('x-forwarded-for') || 'unknown',
     rateLimitAsync: vi.fn(async () => ({ ok: true, retryAfter: 0 })),
@@ -89,6 +91,23 @@ describe('route del borde', () => {
         const h = Object.fromEntries(Object.entries(calls[0].init.headers).map(([k, v]) => [k.toLowerCase(), v]));
         expect(h.cookie).toBeUndefined(); expect(h.authorization).toBeUndefined();
         expect(h['x-user-id']).toBeUndefined();
+        expect(h['x-bloomx-grant']).toBeUndefined();
+    });
+
+    it('ext.grants.v1: con usuario y manifest conocido la peticion lleva X-BloomX-Grant (firmada por la instancia); sin usuario no', async () => {
+        const { generateEd25519KeyPair } = await import('@/lib/bloomx-signature');
+        vi.stubEnv('BLOOMX_DOMAIN_PRIVATE_KEY', generateEd25519KeyPair().privatePem);
+        vi.stubEnv('TOP_DOMAIN', 'inst.test');
+        tpl.map = new Map([['x-routes', { id: 'x-routes', version: '1.0.0', permissions: ['STORAGE'] }]]);
+        identity.value = { id: 'u1', email: 'u1@inst.test', level: null, stepUp: false };
+        await call(req('GET', '/x'));
+        const h = Object.fromEntries(Object.entries(calls[0].init.headers).map(([k, v]) => [k.toLowerCase(), v])) as Record<string, string>;
+        expect(h['x-bloomx-grant']).toMatch(/^bxg1./);
+        calls.length = 0;
+        identity.value = null;
+        await call(req('GET', '/x'));
+        expect(Object.keys(calls[0].init.headers).map((k) => k.toLowerCase())).not.toContain('x-bloomx-grant');
+        vi.unstubAllEnvs();
     });
     it('el llamador no puede suplantar la identidad: _bx_lvl/_bx_src enviados se descartan', async () => {
         await call(req('GET', '/adm?_bx_lvl=4&_bx_su=1&_bx_src=direct'));

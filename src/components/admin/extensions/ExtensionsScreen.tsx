@@ -1,3 +1,4 @@
+import { SigningNotice } from '@/components/admin/SigningNotice';
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -93,6 +94,7 @@ export function ExtensionsScreen() {
     return (
         <div className="space-y-6">
             <PageHeader title={t('admin.console.extensions.title')} description={t('admin.console.extensions.description')} />
+            <SigningNotice />
 
             {/* Resultado de la ultima accion: anunciado a lectores de pantalla y visible. */}
             <div role="status" aria-live="polite" className={actions.live ? 'rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success' : 'sr-only'}>

@@ -1,4 +1,5 @@
 import { backendUrl } from '@/lib/backend-url';
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 const BACKEND_URL = () => (backendUrl()).replace(/\/+$/, '');
 const TTL_MS = 15_000;
 const cache = new Map<string, { at: number; templates: Map<string, any> }>();
@@ -8,7 +9,7 @@ export async function loadDomainTemplates(host: string): Promise<Map<string, any
     const key = host.split(':')[0];
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < TTL_MS) return hit.templates;
-    const res = await fetch(`${BACKEND_URL()}/api/config?domain=${encodeURIComponent(key)}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+    const res = await fetch(`${BACKEND_URL()}/api/config?domain=${encodeURIComponent(key)}`, { cache: 'no-store', signal: AbortSignal.timeout(6000), headers: clientVersionHeaders() });
     if (!res.ok) throw new Error('config_unavailable');
     const cfg = await res.json();
     const templates = new Map<string, any>();

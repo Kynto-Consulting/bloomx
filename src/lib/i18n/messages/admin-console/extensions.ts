@@ -141,6 +141,12 @@ export const extensionsEs = {
         confirmOffBody: 'Cada usuario podrá desactivar esta extensión para sí mismo. Las reglas de servidor dejarán de ejecutarse para quien la desactive.',
         confirmOff: 'Quitar obligatoriedad',
     },
+    signing: {
+        title: 'Esta instancia no firma sus peticiones: {count} extensiones tienen versiones más nuevas que requieren una clave de dominio.',
+        body: 'Sigue funcionando con las versiones de siempre. Para usar GoogleLib, la IA por puente y las rutas propias de extensiones, genera la clave con `node scripts/gen-domain-keypair.mjs`, guarda la privada en BLOOMX_DOMAIN_PRIVATE_KEY y registra la pública (nivel 4, con reautenticación). Al hacerlo pasa sola a las versiones nuevas.',
+        docs: 'Ver los pasos en la documentación',
+        register: 'Registrar la clave pública',
+    },
     dependencies: {
         pausedBy: 'Pausada: falta {names}',
         pausedReason: 'Esta extensión está pausada porque depende de {names}, que no está instalada, activa o en una versión compatible. No se ha borrado nada: volverá a funcionar al activar la dependencia.',
@@ -633,6 +639,12 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         confirmOffTitle: 'Remove the mandatory status of {name}',
         confirmOffBody: 'Each user will be able to turn this extension off for themselves. Server rules will stop running for anyone who does.',
         confirmOff: 'Remove mandatory status',
+    },
+    signing: {
+        title: 'This instance does not sign its requests: {count} extensions have newer versions that require a domain key.',
+        body: 'It keeps working with the versions it has always had. To use GoogleLib, bridged AI and extension routes, generate the key with `node scripts/gen-domain-keypair.mjs`, store the private key in BLOOMX_DOMAIN_PRIVATE_KEY and register the public one (level 4, with re-authentication). It then moves to the new versions by itself.',
+        docs: 'See the steps in the documentation',
+        register: 'Register the public key',
     },
     dependencies: {
         pausedBy: 'Paused: {names} missing',

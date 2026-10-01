@@ -1,3 +1,4 @@
+import { SigningNotice } from '@/components/admin/SigningNotice';
 'use client';
 
 import * as React from 'react';
@@ -89,6 +90,7 @@ export function AccountsPage() {
     return (
         <div>
             <PageHeader title={t('admin.console.users.accounts.title')} description={t('admin.console.users.accounts.description')} />
+            <SigningNotice />
             <FilterBar label={t('admin.console.users.accounts.filtersLabel')} className="mb-3">
                 <SearchInput value={qInput} onChange={setQInput} label={t('admin.console.users.accounts.searchLabel')} placeholder={t('admin.console.users.accounts.searchPlaceholder')} />
                 <FilterSelect

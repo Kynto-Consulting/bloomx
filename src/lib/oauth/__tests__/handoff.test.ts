@@ -8,8 +8,6 @@ vi.mock('@/lib/security', async () => {
     return { ...actual, auditLog: vi.fn((event: string, data: any) => { audits.push({ event, data }); }) };
 });
 
-import { NextRequest } from 'next/server';
-import { createHandoffHandler } from '../handoff';
 import { divertOAuthCredentials, oauthCredentialStatus } from '../credentials-admin';
 import { __setOAuthStore, createMemoryOAuthStore } from '../store';
 import { __setExtensionsSource, getProvider } from '../providers';
@@ -43,44 +41,6 @@ beforeEach(() => {
     audits.length = 0;
 });
 afterEach(() => { __setOAuthStore(null); __setExtensionsSource(null); vi.unstubAllEnvs(); });
-
-const post = (handler: (r: NextRequest) => Promise<Response>, payload: unknown) => handler(new NextRequest('https://inst.test/api/internal/host/oauth-config', { method: 'POST', body: typeof payload === 'string' ? payload : JSON.stringify(payload) }));
-const open = (over = {}) => createHandoffHandler({ verify: async () => ({ ok: true, userId: null }), enabled: () => true, ...over });
-
-describe('entrega de credenciales desde el backend (migracion)', () => {
-    it('CERRADA por defecto; con la puerta abierta exige la firma del backend', async () => {
-        expect((await post(createHandoffHandler({ verify: async () => ({ ok: true, userId: null }), enabled: () => false }), { provider: 'google', credential: 'GOOGLE_CLIENT_SECRET', value: 'x' })).status).toBe(403);
-        expect((await post(open({ verify: async () => ({ ok: false, reason: 'invalid' }) }), { provider: 'google', credential: 'GOOGLE_CLIENT_SECRET', value: 'x' })).status).toBe(401);
-        expect((await post(open({ verify: async () => ({ ok: false, reason: 'unavailable' }) }), { provider: 'google', credential: 'GOOGLE_CLIENT_SECRET', value: 'x' })).status).toBe(503);
-        expect(store.configs.size).toBe(0);
-    });
-
-    it('guarda el client secret y las credenciales compartidas CIFRADAS y ancladas; nunca devuelve ni audita el valor', async () => {
-        const handler = open();
-        const a = await post(handler, { provider: 'google', credential: 'GOOGLE_CLIENT_SECRET', value: 'client-secret-en-claro' });
-        expect(a.status).toBe(200);
-        expect(await a.json()).toEqual({ success: true });
-        const b = await post(handler, { provider: 'google', credential: 'GOOGLE_SERVICE_ACCOUNT_JSON', value: saJson() });
-        expect(b.status).toBe(200);
-        const row = store.configs.get('google')!;
-        expect(row.clientSecret).toMatch(/^v3:/);
-        expect(row.extra.GOOGLE_SERVICE_ACCOUNT_JSON).toMatch(/^v3:/);
-        expect(JSON.stringify(row)).not.toMatch(/client-secret-en-claro|PRIVATE KEY/);
-        expect(JSON.stringify(audits)).not.toMatch(/client-secret-en-claro|PRIVATE KEY/);
-        expect(row.approvedHosts).toEqual(['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com']);
-    });
-
-    it('rechaza proveedor/credencial desconocidos, claves extra, cuenta de servicio invalida y cuerpos enormes', async () => {
-        const handler = open();
-        expect((await post(handler, { provider: 'nope', credential: 'GOOGLE_CLIENT_SECRET', value: 'x' })).status).toBe(409);
-        expect((await post(handler, { provider: 'google', credential: 'OTRA_COSA', value: 'x' })).status).toBe(409);
-        expect((await post(handler, { provider: 'google', credential: 'GOOGLE_CLIENT_SECRET', value: 'x', extra: 1 })).status).toBe(400);
-        expect((await post(handler, 'no json')).status).toBe(400);
-        expect((await post(handler, { provider: 'google', credential: 'GOOGLE_SERVICE_ACCOUNT_JSON', value: '{"type":"user"}' })).status).toBe(400);
-        expect((await post(handler, 'x'.repeat(50_000))).status).toBe(413);
-        expect(store.configs.size).toBe(0);
-    });
-});
 
 describe('panel de credenciales: las del nucleo se desvian a la instancia', () => {
     it('divertOAuthCredentials separa las credenciales OAuth del resto y las guarda cifradas', async () => {

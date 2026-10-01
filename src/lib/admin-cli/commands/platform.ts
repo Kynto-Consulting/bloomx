@@ -286,6 +286,11 @@ export const platformCommands: CommandDef[] = [
         },
     }),
     def({
+        name: 'security signing', risk: 'read', summary: L('Estado de firma de esta instancia: si tiene clave de dominio, qué anuncia al backend y cuántas extensiones esperan una clave', 'Signing state of this instance: whether it has a domain key, what it announces to the backend and how many extensions wait for a key'),
+        covers: ['GET /api/admin/signing'],
+        handler: async ({ ctx }) => data((await ctx.callOk({ method: 'GET', path: '/signing' })).data),
+    }),
+    def({
         name: 'security keys', risk: 'read', summary: L('Estado de la clave de firma del dominio (solo manager)', 'Domain signing key state (manager only)'),
         managerOnly: true, covers: ['GET /api/admin/domain-key'],
         handler: async ({ ctx }) => { requireManager(ctx); return data((await ctx.callOk({ method: 'GET', path: '/domain-key', query: { domainId: await instanceDomainId() } })).data); },

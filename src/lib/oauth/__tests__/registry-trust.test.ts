@@ -40,3 +40,14 @@ describe('M4: confianza en el registro de proveedores', () => {
         expect(backendUrl({ NODE_ENV: 'production', NEXT_PUBLIC_BACKEND_URL: 'https://backend.acme.com/' })).toBe('https://backend.acme.com');
     });
 });
+
+import { validateRegistryResponse } from '../registry-trust';
+describe('registro de proveedores sin clave del backend: esquema estricto', () => {
+    it('acepta la forma esperada y rechaza todo lo demas', () => {
+        const ok = { extensions: [{ id: 'core-googlelib', template: { id: 'core-googlelib' }, settings: { config: {} } }, { id: 'x', template: '{"a":1}' }] };
+        expect(validateRegistryResponse(ok)).toHaveLength(2);
+        for (const bad of [null, [], {}, { extensions: 'x' }, { extensions: [null] }, { extensions: [{ id: '../x', template: {} }] }, { extensions: [{ id: 'a', template: 5 }] }, { extensions: [{ id: 'a', template: {}, settings: [] }] }, { extensions: Array.from({ length: 301 }, (_, i) => ({ id: `e${i}`, template: {} })) }]) {
+            expect(validateRegistryResponse(bad)).toBeNull();
+        }
+    });
+});

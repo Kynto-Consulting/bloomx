@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { KeyRound } from 'lucide-react';
 import {
     Badge, Card, DefinitionList, DetailDrawer, ErrorState, LoadingState, btnOutline, btnPrimary, formatDateTime, useAdminQuery,
@@ -497,6 +497,15 @@ function StatusTab({ row, domainId, testSupport, onTest }: { row: ExtensionRow; 
 
 /** Pestana Estado: version instalada vs disponible (resuelta y ultima), requisitos de cada una e identidad del cliente. */
 function VersionClientBlock({ row }: { row: ExtensionRow }) {
+    // Lo que ESTA instancia anuncia de verdad al backend (sin clave de dominio: solo las capacidades que funcionan sin firmar).
+    const [announced, setAnnounced] = useState<{ api: number; caps: readonly string[]; signed: boolean }>({ api: CLIENT_API_VERSION, caps: CLIENT_CAPABILITIES, signed: true });
+    useEffect(() => {
+        let alive = true;
+        fetch('/api/admin/signing', { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((d) => {
+            if (alive && d && Array.isArray(d.announcedCapabilities)) setAnnounced({ api: Number(d.announcedClientApi) || CLIENT_API_VERSION, caps: d.announcedCapabilities, signed: d.signed === true });
+        }).catch(() => undefined);
+        return () => { alive = false; };
+    }, []);
     const { t } = useI18n();
     const locale = useCompatLocale();
     const v = (x: string | null) => (x ? `v${x}` : t('admin.console.extensions.statusTab.unknown'));
@@ -517,14 +526,15 @@ function VersionClientBlock({ row }: { row: ExtensionRow }) {
                 className="sm:grid-cols-1"
             />
             <h3 className="text-sm font-semibold text-foreground">{t('admin.console.extensions.statusTab.clientTitle')}</h3>
+            {!announced.signed && <p className="text-xs text-muted-foreground">{t('admin.console.extensions.signing.body')}</p>}
             <DefinitionList
                 items={[
-                    { label: t('admin.console.extensions.statusTab.clientApi'), value: String(CLIENT_API_VERSION) },
+                    { label: t('admin.console.extensions.statusTab.clientApi'), value: String(announced.api) },
                     {
                         label: t('admin.console.extensions.statusTab.clientCapabilities'),
                         value: (
                             <ul className="list-disc space-y-0.5 pl-4">
-                                {CLIENT_CAPABILITIES.map((c) => (<li key={c}><code className="text-xs">{c}</code> — {describeCapability(c, locale)}</li>))}
+                                {announced.caps.map((c) => (<li key={c}><code className="text-xs">{c}</code> — {describeCapability(c, locale)}</li>))}
                             </ul>
                         ),
                     },

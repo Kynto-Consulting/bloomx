@@ -1,4 +1,5 @@
 import { backendUrl as defaultBackendUrl } from '@/lib/backend-url';
+import { grantsForHooks } from '@/lib/expansions/execution-grants';
 /**
  * Ejecutor (lado frontend-servidor) de los hooks de extensiones: habla con `POST {BACKEND}/api/extension/hooks`.
  *
@@ -162,7 +163,9 @@ export async function callBackendHooks(event: HookEvent, context: Record<string,
     const url = `${backendUrl}/api/extension/hooks`;
     // La lista solo viaja en dominios FIRMADOS (dentro del cuerpo firmado), con usuario y fuera de CRON (que no tiene usuario).
     const disabled = event !== 'CRON' && transport.userId && loadDomainPrivateKey() ? sanitizeDisabledForRequest(transport.disabledExtensions) : [];
-    const rawBody = JSON.stringify(disabled.length > 0 ? { event, context, disabledExtensions: disabled } : { event, context });
+    // Concesiones de ejecucion (ext.grants.v1) por extension que intercepta el evento, firmadas con la clave de ESTE dominio.
+    const executionGrants = event !== 'CRON' && transport.userId && loadDomainPrivateKey() && !transport.fetchImpl ? await grantsForHooks(transport.host || '', event, transport.userId) : {};
+    const rawBody = JSON.stringify({ event, context, ...(disabled.length > 0 ? { disabledExtensions: disabled } : {}), ...(Object.keys(executionGrants).length > 0 ? { executionGrants } : {}) });
     const headers: Record<string, string> = {
         'Content-Type': 'application/json',
         ...buildBackendHeaders({

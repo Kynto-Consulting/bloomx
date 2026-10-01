@@ -2237,6 +2237,25 @@
       "flags": []
     },
     {
+      "name": "security signing",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de firma de esta instancia: si tiene clave de dominio, qué anuncia al backend y cuántas extensiones esperan una clave",
+        "en": "Signing state of this instance: whether it has a domain key, what it announces to the backend and how many extensions wait for a key"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
       "name": "security keys",
       "category": {
         "es": "Seguridad",

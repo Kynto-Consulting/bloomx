@@ -30,7 +30,7 @@ export const SCOPE_LEVELS: Record<string, L> = {
     'ai.write': 3, 'ai.test': 3, 'ai.purge': 3,
     'permissions.read': 3, 'permissions.write': 3, 'permissions.history': 3, 'profile.password': 1, 'privileged.read': 1, 'privileged.close': 1,
     // seguridad critica / destructivo global (superadmin)
-    'users.mfa_reset': 4, 'permissions.unlock': 4, 'privileged.policy': 4, 'retention.run.dry': 4, 'extensions.mandatory': 4, 'domain-key.get': 4, 'domain-key.write': 4,
+    'users.mfa_reset': 4, 'permissions.unlock': 4, 'privileged.policy': 4, 'retention.run.dry': 4, 'extensions.mandatory': 4, 'domain-key.get': 4, 'signing.status': 1, 'domain-key.write': 4,
 };
 
 /** Un scope desconocido exige nivel 3 (equivale al antiguo requireAdmin). */
@@ -68,7 +68,7 @@ export const COMMAND_LEVELS: Record<string, L> = {
     audit: 1, 'audit events': 1, 'audit export': 3,
     'security status': 3, 'security admins': 3, 'security events': 3, 'security policies': 1,
     'security keys': 4, 'security keys register': 4, 'security keys require-signature': 4,
-    'oauth providers': 3, 'oauth approve': 3, 'oauth secret set': 4, 'oauth secret clear': 4,
+    'oauth providers': 3, 'oauth approve': 3, 'security signing': 1, 'oauth secret set': 4, 'oauth secret clear': 4,
     // retencion y cuotas
     'retention show': 1, 'retention storage': 1, 'quota show': 1, 'retention set': 3, 'quota set': 3, 'retention run': 4,
     // marca

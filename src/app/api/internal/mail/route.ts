@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { rateLimitAsync } from '@/lib/security';
-import { verifyBackendRequest } from '@/lib/backend-auth';
+import { verifyHostCall } from '@/lib/host-call-auth';
 import { internalMailRequest } from '@/lib/organizer/schemas';
 import { applyBatch, defaultDeps, getEmail, listRecent, undoRun } from '@/lib/organizer/mail-service';
 
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const raw = await req.text();
     if (raw.length > MAX_BODY_BYTES) return NextResponse.json({ error: 'Payload too large' }, { status: 413, headers: NO_STORE });
 
-    const verified = await verifyBackendRequest(req, raw);
+    const verified = await verifyHostCall(req, raw);
     if (!verified.ok) {
         return verified.reason === 'unavailable'
             ? NextResponse.json({ error: 'Backend key unavailable' }, { status: 503, headers: { ...NO_STORE, 'Retry-After': '30' } })

@@ -4,7 +4,9 @@ import { tryDecrypt, encrypt } from '@/lib/encryption';
 import { normalizeSettingsSchema } from '@/lib/expansions/settings-schema';
 import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, validateOAuthProviders, type OAuthActionDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef } from '@/lib/expansions/oauth-schema';
 import { oauthStore } from './store';
-import { pinnedBackendKey, verifyConfigSignature, type RegistryTrust } from './registry-trust';
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
+import { MAX_REGISTRY_BYTES, pinnedBackendKey, validateRegistryResponse, verifyConfigSignature } from './registry-trust';
+import { acceptsLegacyBackendSignature } from '@/lib/host-call-auth';
 
 /**
  * REGISTRO DE PROVEEDORES OAUTH del nucleo de la instancia.
@@ -265,28 +267,31 @@ export async function getSharedCredential(provider: ProviderRuntime, key: 'organ
 type ExtensionsSource = () => Promise<ExtensionLike[]>;
 const BACKEND_URL = () => (backendUrl()).replace(/\/+$/, '');
 
-let registryTrust: RegistryTrust = 'unverified';
-/** Confianza del ultimo registro leido (para avisar en el panel de administracion). */
-export function getRegistryTrust(): RegistryTrust { return registryTrust; }
-
+/**
+ * Registro de proveedores = respuesta de {backend}/api/config. Sin ninguna clave del backend: URL de backend FIJA por instancia (lib/backend-url.ts, https
+ * obligatorio en produccion), SIN redirecciones (un 3xx se rechaza), tope de tamano y esquema estricto (validateRegistryResponse). Los proveedores NO
+ * integrados exigen la aprobacion del admin (pending_approval) y los integrados (google...) solo los registra la extension oficial reservada.
+ * LEGADO DEPRECADO: si hay BLOOMX_BACKEND_PUBLIC_KEY y llega X-BloomX-Config-Sig de un backend antiguo, se verifica (y una firma invalida descarta el registro).
+ */
 const defaultSource: ExtensionsSource = async () => {
     const host = (process.env.TOP_DOMAIN || '').split(':')[0] || (process.env.NEXTAUTH_URL ? new URL(process.env.NEXTAUTH_URL).hostname : '');
     if (!host) return [];
-    // El registro de proveedores solo se lee por https en produccion.
-    try { backendUrl(); } catch { registryTrust = 'rejected'; throw new Error('insecure_backend_url'); }
-    const res = await fetch(`${BACKEND_URL()}/api/config?domain=${encodeURIComponent(host)}`, { cache: 'no-store', signal: AbortSignal.timeout(6000) });
+    const base = backendUrl(); // lanza insecure_backend_url si no es https en produccion
+    const res = await fetch(`${base}/api/config?domain=${encodeURIComponent(host)}`, { cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(6000), headers: clientVersionHeaders() });
+    if (res.status >= 300 && res.status < 400) throw new Error('config_redirect_rejected');
     if (!res.ok) throw new Error('config_unavailable');
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (declared > MAX_REGISTRY_BYTES) throw new Error('config_too_large');
     const text = await res.text();
-    const pinned = pinnedBackendKey();
-    if (pinned) {
-        // Clave fijada: sin firma valida del backend el registro se descarta (solo queda el proveedor integrado).
-        if (!verifyConfigSignature({ domain: host, body: text, header: res.headers.get('x-bloomx-config-sig'), publicKey: pinned })) { registryTrust = 'rejected'; throw new Error('config_signature_invalid'); }
-        registryTrust = 'verified';
-    } else {
-        registryTrust = 'unverified';
-    }
-    const data = JSON.parse(text);
-    return Array.isArray(data?.extensions) ? data.extensions : [];
+    if (text.length > MAX_REGISTRY_BYTES) throw new Error('config_too_large');
+    const pinned = acceptsLegacyBackendSignature() ? pinnedBackendKey() : null;
+    const sig = res.headers.get('x-bloomx-config-sig');
+    if (pinned && sig && !verifyConfigSignature({ domain: host, body: text, header: sig, publicKey: pinned })) throw new Error('config_signature_invalid');
+    let data: unknown;
+    try { data = JSON.parse(text); } catch { throw new Error('config_invalid'); }
+    const list = validateRegistryResponse(data);
+    if (!list) throw new Error('config_invalid');
+    return list;
 };
 let source: ExtensionsSource = defaultSource;
 let cache: { at: number; map: Map<string, ProviderRuntime> } | null = null;

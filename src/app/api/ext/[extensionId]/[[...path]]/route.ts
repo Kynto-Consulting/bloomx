@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildBackendHeaders } from '@/lib/backend-auth';
 import { getClientIp, rateLimitAsync } from '@/lib/security';
 import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
+import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
+import { grantForTemplate } from '@/lib/expansions/execution-grants';
+import { GRANT_HEADER } from '@/lib/exec-grant';
 import {
     EDGE_MAX_BODY_BYTES, EXTENSION_ID_RE, buildBackendRouteUrl, edgeRoutePath, forwardableHeaders, isSafeMethod, relayResponseHeaders, sanitizeEdgeQuery, sessionAllowed,
 } from '@/lib/expansions/ext-edge';
@@ -58,6 +61,11 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ extensionId: st
         fetchSite: req.headers.get('sec-fetch-site'),
     });
     const domain = process.env.TOP_DOMAIN || req.headers.get('host') || '';
+    // Concesion de ejecucion (ext.grants.v1) solo con usuario: la ruta recibe los servicios del host atados a ESE usuario y a ESTA extension.
+    let grant: string | null = null;
+    if (identity?.id) {
+        try { grant = grantForTemplate(domain, extensionId, (await loadDomainTemplates(domain)).get(extensionId), identity.id); } catch { grant = null; }
+    }
     const contentType = req.headers.get('content-type');
     const origin = req.headers.get('origin');
     try {
@@ -66,6 +74,7 @@ async function handle(req: NextRequest, ctx: { params: Promise<{ extensionId: st
             headers: {
                 ...(contentType ? { 'Content-Type': contentType } : {}),
                 ...(origin ? { Origin: origin } : {}),
+                ...(grant ? { [GRANT_HEADER]: grant } : {}),
                 ...forwardableHeaders(req.headers),
                 ...buildBackendHeaders({ method, url, body: rawBody, domain, userId: identity?.id ?? null, email: identity?.email ?? null }),
             },

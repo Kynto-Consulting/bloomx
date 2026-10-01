@@ -9,8 +9,8 @@ export const LEGACY_TOKEN_VERSIONS: Readonly<Record<string, string>> = Object.fr
     'core-calendar': '1.6.0',
     'core-google-drive': '1.0.1',
     'core-google-sync': '1.0.0',
-    'core-zoom': '1.4.0',
-    'core-hubspot': '1.2.0',
+    'core-zoom': '1.4.1',
+    'core-hubspot': '1.2.1',
 });
 
 const parse = (v: unknown): [number, number, number] | null => {

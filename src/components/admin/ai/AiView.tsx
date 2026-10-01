@@ -1,5 +1,7 @@
 'use client';
 
+import { SigningNotice } from '@/components/admin/SigningNotice';
+
 import * as React from 'react';
 import { useI18n } from '@/components/I18nProvider';
 import { ErrorState, LoadingState, useAdminQuery, useConsole } from '@/components/admin/console';
@@ -63,6 +65,7 @@ export function AiView() {
 
     return (
         <div className="space-y-4">
+            <SigningNotice />
             {stateQ.error && <p role="alert" className="text-sm text-destructive">{errorText(stateQ.error)}</p>}
             <div role="tablist" aria-label={t('admin.ai.tabsLabel')} onKeyDown={onKey} className="flex gap-1 overflow-x-auto border-b border-border">
                 {TABS.map(({ id }) => (

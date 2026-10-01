@@ -12,6 +12,7 @@ import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
 import { adminProtectedActions, mayInvokeAction } from '@/lib/expansions/page-auth';
 import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
 import { mayReceiveProviderTokens } from '@/lib/expansions/token-access';
+import { grantForTemplate } from '@/lib/expansions/execution-grants';
 
 const BACKEND_URL = backendUrl();
 
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         // Acciones que usan las paginas/mounts `auth: admin` (y las declaradas con nivel): se exige el nivel EN EL SERVIDOR, no solo ocultar la pagina.
         let sendTokens = false;
+        let executionGrant: string | null = null;
         if (typeof body?.extensionId === 'string' && typeof body?.action === 'string') {
             let protectedActions: Map<string, number>;
             try {
@@ -83,6 +85,8 @@ export async function POST(req: NextRequest) {
                 protectedActions = adminProtectedActions(template);
                 // Los tokens de las cuentas vinculadas solo se ENVIAN a extensiones con OAUTH_READ o versiones legadas conocidas (el backend vuelve a decidir).
                 sendTokens = mayReceiveProviderTokens(template, body.extensionId);
+                // Concesion de ejecucion firmada con la clave de ESTE dominio (ext.grants.v1): el backend la reenvia a los servicios del host.
+                executionGrant = grantForTemplate(host, body.extensionId, template, user.id);
             } catch { return NextResponse.json({ error: 'Config unavailable' }, { status: 503 }); }
             if (protectedActions.has(body.action)) {
                 const identity = await resolveEdgeIdentity(req).catch(() => null);
@@ -108,6 +112,7 @@ export async function POST(req: NextRequest) {
             action: body?.action,
             params: body?.params,
             context: enrichedContext,
+            ...(executionGrant ? { executionGrant } : {}),
             ...(disabledExtensions.length > 0 ? { disabledExtensions } : {}),
         };
 

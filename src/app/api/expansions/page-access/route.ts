@@ -1,3 +1,4 @@
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { backendUrl } from '@/lib/backend-url';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
@@ -27,7 +28,7 @@ export async function GET(req: NextRequest) {
     const host = (process.env.TOP_DOMAIN || req.headers.get('host') || '').split(':')[0];
     let mount: any = null;
     try {
-        const res = await fetch(`${BACKEND_URL}/api/config?domain=${encodeURIComponent(host)}`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+        const res = await fetch(`${BACKEND_URL}/api/config?domain=${encodeURIComponent(host)}`, { cache: 'no-store', signal: AbortSignal.timeout(8000), headers: clientVersionHeaders() });
         const cfg = res.ok ? await res.json() : null;
         const ext = Array.isArray(cfg?.extensions) ? cfg.extensions.find((e: any) => e?.id === extensionId) : null;
         const template = typeof ext?.template === 'string' ? JSON.parse(ext.template) : ext?.template;

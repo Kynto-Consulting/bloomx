@@ -2,14 +2,15 @@
  * Helper comun de las rutas /api/internal/{calendar,contacts,storage,notify,formats}: puente servidor-a-servidor de
  * `services.*` del sandbox de extensiones (bloomx-backend). Mismo modelo de confianza que /api/internal/mail:
  *
- *  - Auth SIN secretos compartidos: firma Ed25519 del BACKEND verificada con su clave publica (verifyBackendRequest).
- *    503 si no hay clave publica del backend; 401 si la firma es invalida.
+ *  - Auth SIN claves globales: la `executionGrant` que ESTA instancia firmo con su clave de dominio (lib/exec-grant.ts, verifyHostCall). Camino
+ *    LEGADO deprecado: firma Ed25519 del backend (apagable con BLOOMX_ACCEPT_BACKEND_SIGNATURE=false). 401 si no es valida.
  *  - `userId` del cuerpo == X-User-Id firmado (la extension nunca lo elige). `extensionId` lo fija el host.
  *  - Cuerpo estricto (zod .strict()): claves desconocidas => 400. Limite de 256 KB.
  *  - Rate limit por usuario+servicio, usuario inexistente => 404, errores tipados sin detalles internos ni PII.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { GrantClaims } from '@/lib/exec-grant';
 
 export const MAX_BODY_BYTES = 256 * 1024;
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -62,13 +63,13 @@ export interface BridgeRequest<Op extends string = string, Args = unknown> {
 }
 
 export interface BridgeDeps {
-    verify: (req: NextRequest, raw: string) => Promise<{ ok: true; userId: string | null } | { ok: false; reason: 'unavailable' | 'invalid' }>;
+    verify: (req: NextRequest, raw: string) => Promise<{ ok: true; userId: string | null; grant?: GrantClaims } | { ok: false; reason: 'unavailable' | 'invalid' }>;
     rateLimit: (key: string, limit: number, windowMs: number) => Promise<{ ok: boolean; retryAfter: number }>;
     userExists: (userId: string) => Promise<boolean>;
 }
 
 export const defaultBridgeDeps: BridgeDeps = {
-    verify: async (req, raw) => (await import('@/lib/backend-auth')).verifyBackendRequest(req, raw),
+    verify: async (req, raw) => (await import('@/lib/host-call-auth')).verifyHostCall(req, raw),
     rateLimit: async (key, limit, windowMs) => (await import('@/lib/security')).rateLimitAsync(key, limit, windowMs),
     userExists: async (userId) => {
         const { prisma } = await import('@/lib/prisma');
@@ -82,7 +83,7 @@ export interface BridgeRouteOptions<S extends z.ZodType> {
     /** Union discriminada por `op` construida con `op()`. */
     schema: S;
     /** Ejecuta la operacion ya validada. Lanza BridgeError para errores tipados. */
-    handle: (req: z.infer<S>) => Promise<unknown>;
+    handle: (req: z.infer<S>, ctx: { grant?: GrantClaims }) => Promise<unknown>;
     /** Peticiones por minuto y usuario (default 300). */
     limitPerMinute?: number;
     /** Tope del cuerpo en bytes (default 256 KB; el intermediario OAuth admite subidas de hasta ~1 MB). */
@@ -129,7 +130,7 @@ export function createBridgeHandler<S extends z.ZodType>(opts: BridgeRouteOption
 
         try {
             if (!(await deps.userExists(data.userId))) return errorResponse('not_found');
-            const result = await opts.handle(parsed.data as z.infer<S>);
+            const result = await opts.handle(parsed.data as z.infer<S>, { grant: verified.grant });
             return json({ success: true, data: result }, 200);
         } catch (e: any) {
             if (e instanceof BridgeError) return errorResponse(e.code, e.retryAfter);

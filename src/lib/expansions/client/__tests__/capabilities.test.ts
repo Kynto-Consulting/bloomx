@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CAPABILITY_REGISTRY, LEGACY_BASELINE_CAPABILITIES, parseClientIdentity } from '../../client-contract';
-import { CLIENT_API_VERSION, CLIENT_CAPABILITIES, CLIENT_IDENTITY, clientVersionHeaders, describeCapability } from '../capabilities';
+import { CAPABILITY_CLASS, CLIENT_API_VERSION, CLIENT_CAPABILITIES, CLIENT_IDENTITY, SIGNED_ONLY_CAPABILITIES, UNSIGNED_CLIENT_IDENTITY, announcedIdentity, clientVersionHeaders, currentClientIdentity, describeCapability } from '../capabilities';
+import { buildVersionPayload } from '@/lib/pwa/version-info';
 import { buildBackendHeaders } from '@/lib/backend-auth';
 import { canonicalString, generateEd25519KeyPair, parseEd25519PublicKey, sha256Hex, verifyCanonical } from '@/lib/bloomx-signature';
 
@@ -35,7 +36,7 @@ describe('capacidades del cliente (versionado de extensiones)', () => {
 
     it('la identidad incluye la linea base y las cabeceras son compactas y se leen igual en el backend', () => {
         for (const id of LEGACY_BASELINE_CAPABILITIES) expect(CLIENT_IDENTITY.capabilities).toContain(id);
-        const h = clientVersionHeaders();
+        const h = clientVersionHeaders(true);
         expect(h['X-BloomX-Client-Api']).toBe(String(CLIENT_API_VERSION));
         expect(h['X-BloomX-Client-Caps'].length).toBeLessThanOrEqual(1024);
         const parsed = parseClientIdentity(new Headers(h));
@@ -50,8 +51,10 @@ describe('las cabeceras de version van en TODAS las llamadas y dentro de la firm
 
     it('modo legado (sin clave): se envian igualmente como informativas', () => {
         const h = buildBackendHeaders({ ...base, env: {} });
-        expect(h['X-BloomX-Client-Api']).toBe(String(CLIENT_API_VERSION));
+        // Sin clave de dominio: solo lo que funciona sin firmar (ver CAPABILITY_CLASS) y el clientApi mas alto cuyo conjunto completo es anunciable.
+        expect(h['X-BloomX-Client-Api']).toBe(String(UNSIGNED_CLIENT_IDENTITY.clientApi));
         expect(h['X-BloomX-Client-Caps']).toContain('settings.schema.v1');
+        for (const c of SIGNED_ONLY_CAPABILITIES) expect(h['X-BloomX-Client-Caps']).not.toContain(c);
         expect(h['X-BloomX-Signature']).toBeUndefined();
     });
 
@@ -75,5 +78,41 @@ describe('las cabeceras de version van en TODAS las llamadas y dentro de la firm
             clientApi: '2', clientCaps: 'ai.v1,core.mounts.v1',
         });
         expect(canonical).toBe('BLOOMX-SIG-V2\nPOST\n/api/extension/execute\n3f754fd453f218e11a4467884985d632db9438914374b6e1fa968108219d1fbc\nulima.dev\n1800000000\nabcdefghijklmnop1234\nu1\na@ulima.dev\nhttps://ulima.dev\n2\nai.v1,core.mounts.v1');
+    });
+});
+
+describe('instancia SIN clave de dominio: solo anuncia lo que funciona sin firmar', () => {
+    it('clasificacion: signed-only = grants, oauth.* y rutas; el resto es unsigned-ok', () => {
+        expect([...SIGNED_ONLY_CAPABILITIES].sort()).toEqual(['ext.grants.v1', 'ext.routes.auth.v1', 'ext.routes.v1', 'oauth.broker.v1', 'oauth.provider.v1']);
+        for (const c of CLIENT_CAPABILITIES) expect(CAPABILITY_CLASS[c]).toBeDefined();
+    });
+    it('el clientApi sin clave es la mayor version cuyo conjunto completo es anunciable (justo antes de la primera signed-only) y ninguna capacidad supera esa version', () => {
+        const un = announcedIdentity(false);
+        const firstSigned = Math.min(...SIGNED_ONLY_CAPABILITIES.map((c) => CAPABILITY_REGISTRY[c].since));
+        expect(un.clientApi).toBe(firstSigned - 1);
+        expect(un.clientApi).toBeLessThan(CLIENT_API_VERSION);
+        for (const c of un.capabilities) expect(CAPABILITY_REGISTRY[c]?.since ?? 1).toBeLessThanOrEqual(un.clientApi);
+        for (const c of SIGNED_ONLY_CAPABILITIES) expect(un.capabilities).not.toContain(c);
+        expect(un.capabilities).toContain('ext.dependencies.v1');
+    });
+    it('coincide con la identidad que usa el test de catalogo de bloomx-extensions (unsigned-catalog.test.mjs): clientApi 3 + capacidades de siempre + ext.dependencies.v1', () => {
+        const prev = ['ai.json', 'ai.v1', 'conferencing.picker', 'lifecycle.events.v1', 'services.host.v1', 'settings.schema.v1', 'toolbar.compact', 'ui.input.onSubmit', 'ui.kit.v2', 'ext.dependencies.v1'];
+        const un = announcedIdentity(false);
+        expect(un.clientApi).toBe(3);
+        expect(un.capabilities.filter((c) => !LEGACY_BASELINE_CAPABILITIES.includes(c)).sort()).toEqual([...prev].sort());
+    });
+    it('con clave valida se anuncia todo y la version completa; con clave invalida cuenta como sin clave', () => {
+        const kp = generateEd25519KeyPair();
+        expect(currentClientIdentity({ BLOOMX_DOMAIN_PRIVATE_KEY: kp.privatePem })).toEqual(CLIENT_IDENTITY);
+        expect(currentClientIdentity({ BLOOMX_DOMAIN_PRIVATE_KEY: 'basura' })).toEqual(UNSIGNED_CLIENT_IDENTITY);
+        expect(currentClientIdentity({})).toEqual(UNSIGNED_CLIENT_IDENTITY);
+        const h = buildBackendHeaders({ method: 'POST', url: 'https://be.example.com/api/x', body: '{}', domain: 'acme.com', env: { BLOOMX_DOMAIN_PRIVATE_KEY: kp.privatePem } });
+        expect(h['X-BloomX-Client-Api']).toBe(String(CLIENT_API_VERSION));
+        expect(h['X-BloomX-Client-Caps']).toContain('oauth.broker.v1');
+    });
+    it('/api/version: clientApi = build; announcedClientApi/signed reflejan la clave de la instancia', () => {
+        const kp = generateEd25519KeyPair();
+        expect(buildVersionPayload({})).toMatchObject({ clientApi: CLIENT_API_VERSION, announcedClientApi: UNSIGNED_CLIENT_IDENTITY.clientApi, signed: false });
+        expect(buildVersionPayload({ BLOOMX_DOMAIN_PRIVATE_KEY: kp.privatePem })).toMatchObject({ announcedClientApi: CLIENT_API_VERSION, signed: true });
     });
 });

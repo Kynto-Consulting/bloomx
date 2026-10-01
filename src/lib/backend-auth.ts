@@ -1,3 +1,4 @@
+import { hasValidDomainKey } from '@/lib/domain-key';
 import { backendUrl } from '@/lib/backend-url';
 import type crypto from 'node:crypto';
 import {
@@ -80,7 +81,7 @@ export function buildBackendHeaders(init: BackendCallInit): Record<string, strin
 
     // Version del cliente (CLIENT_API_VERSION + capacidades): el backend sirve la version de cada extension que ESTE cliente entiende.
     // Con firma se incluye en el mensaje firmado (V2); en modo legado viaja igualmente como dato informativo.
-    const version = clientVersionHeaders();
+    const version = clientVersionHeaders(hasValidDomainKey(env));
     Object.assign(headers, version);
 
     const key = loadDomainPrivateKey(env);

@@ -40,6 +40,7 @@ export const ROUTE_TABLE: readonly Entry[] = [
     { pattern: '/mail/suppressions/bulk-delete', load: () => import('@/app/api/admin/mail/suppressions/bulk-delete/route') },
     { pattern: '/mail/suppressions/[id]', load: () => import('@/app/api/admin/mail/suppressions/[id]/route') },
     { pattern: '/domain', load: () => import('@/app/api/admin/domain/route') },
+    { pattern: '/signing', load: () => import('@/app/api/admin/signing/route') },
     { pattern: '/domain-key', load: () => import('@/app/api/admin/domain-key/route') },
     { pattern: '/oauth/providers', load: () => import('@/app/api/admin/oauth/providers/route') },
     { pattern: '/oauth/providers/[id]/approve', load: () => import('@/app/api/admin/oauth/providers/[id]/approve/route') },
