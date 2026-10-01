@@ -1,6 +1,8 @@
 import type { AdminActor } from '@/lib/admin-auth';
 import { buildBackendHeaders, loadDomainPrivateKey } from '@/lib/backend-auth';
 import { backendUrl, ownHost } from '@/lib/admin/extensions-instance';
+import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
+import { grantForTemplate } from '@/lib/expansions/execution-grants';
 
 /**
  * "Probar conexion" de una extension: ejecuta su funcion `testConnection` en el backend por la via soportada
@@ -39,7 +41,14 @@ export async function runTestConnection(args: {
     action: string;
 }): Promise<TestOutcome> {
     const url = `${backendUrl()}/api/extension/execute`;
-    const rawBody = JSON.stringify({ extensionId: args.extensionId, action: args.action, params: {}, context: {} });
+    // Concesion de ejecucion (ext.grants.v1): sin ella la funcion de prueba no accede a los servicios del host (p. ej. el intermediario OAuth).
+    let executionGrant: string | null = null;
+    try {
+        const host = ownHost(args.req);
+        const template = (await loadDomainTemplates(host)).get(args.extensionId);
+        executionGrant = grantForTemplate(host, args.extensionId, template, args.actor.id);
+    } catch { /* sin grant */ }
+    const rawBody = JSON.stringify({ extensionId: args.extensionId, action: args.action, params: {}, context: {}, ...(executionGrant ? { executionGrant } : {}) });
     let res: Response;
     try {
         res = await fetch(url, {

@@ -8,6 +8,8 @@
  *   dominio (solo puede usar la cuenta del propio usuario).
  */
 import { backendBaseUrl, buildBackendHeaders } from '@/lib/backend-auth';
+import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
+import { grantForTemplate } from '@/lib/expansions/execution-grants';
 import { parseExtensionError } from './errors';
 import { ConferencingError } from './types';
 
@@ -29,6 +31,23 @@ export interface CallExtensionInit {
     context?: Record<string, unknown>;
     timeoutMs?: number;
     fetchImpl?: typeof fetch;
+    /**
+     * Concesion de ejecucion (ext.grants.v1) firmada con la clave de ESTE dominio. Si no se pasa, se emite aqui con el manifest que el backend sirve a
+     * esta instancia; sin ella el backend no entrega servicios del host (intermediario OAuth, almacenamiento...) a la extension: Meet/Zoom/Teams
+     * 2.x dirian siempre 'no conectado'. En pruebas (fetchImpl inyectado) no se hace red para emitirla.
+     */
+    executionGrant?: string | null;
+}
+
+async function resolveExecutionGrant(init: CallExtensionInit): Promise<string | null> {
+    if (init.executionGrant !== undefined) return init.executionGrant;
+    if (init.fetchImpl) return null;
+    try {
+        const template = (await loadDomainTemplates(init.domain)).get(init.extensionId);
+        return grantForTemplate(init.domain, init.extensionId, template, init.userId);
+    } catch {
+        return null; // sin grant: los servicios del host quedan sin disponer (como antes de las concesiones)
+    }
 }
 
 function readAuthMode(res: Response): BridgeAuthMode {
@@ -39,11 +58,13 @@ function readAuthMode(res: Response): BridgeAuthMode {
 export async function callExtension(init: CallExtensionInit): Promise<BridgeResult> {
     const doFetch = init.fetchImpl ?? fetch;
     const url = `${backendBaseUrl()}/api/extension/execute`;
+    const executionGrant = await resolveExecutionGrant(init);
     const rawBody = JSON.stringify({
         extensionId: init.extensionId,
         action: init.action,
         params: init.params ?? {},
         context: init.context ?? {},
+        ...(executionGrant ? { executionGrant } : {}),
     });
 
     let res: Response;
