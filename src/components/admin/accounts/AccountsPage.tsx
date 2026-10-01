@@ -1,5 +1,5 @@
-import { SigningNotice } from '@/components/admin/SigningNotice';
 'use client';
+import { SigningNotice } from '@/components/admin/SigningNotice';
 
 import * as React from 'react';
 import { useI18n } from '@/components/I18nProvider';

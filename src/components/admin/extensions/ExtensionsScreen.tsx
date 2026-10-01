@@ -1,5 +1,5 @@
-import { SigningNotice } from '@/components/admin/SigningNotice';
 'use client';
+import { SigningNotice } from '@/components/admin/SigningNotice';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
