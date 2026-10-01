@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { requireLevel } from '@/lib/admin-auth';
 import { runRetention, getEffectiveRetentionConfig } from '@/lib/retention';
 import { safeEqual, getClientIp, auditLog } from '@/lib/security';
 
@@ -19,7 +19,7 @@ async function handle(req: NextRequest) {
     const isCron = !!cronSecret && !!bearer?.startsWith('Bearer ') && safeEqual(bearer.slice(7), cronSecret);
 
     if (!isCron) {
-        const guard = await requireAdmin(req);
+        const guard = await requireLevel(4, req); // purga real: superadmin (lib/admin-levels.ts)
         if (!guard.ok) return guard.response;
     }
 

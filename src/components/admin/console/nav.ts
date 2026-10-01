@@ -1,10 +1,10 @@
 import {
-    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight, ShieldAlert,
+    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight, ShieldAlert, Terminal, KeyRound,
     type LucideIcon,
 } from 'lucide-react';
 
 /** Secciones de la consola (una sola fuente de verdad para la navegacion, el breadcrumb y la busqueda global). */
-export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'transfer' | 'spam' | 'profile';
+export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'transfer' | 'spam' | 'profile' | 'console' | 'permissions';
 export type NavGroup = 'overview' | 'people' | 'mail' | 'platform' | 'account';
 
 export interface NavItem {
@@ -12,27 +12,33 @@ export interface NavItem {
     href: string;
     icon: LucideIcon;
     group: NavGroup;
+    /** permission_level minimo para VER la seccion (el menu oculta lo que el nivel no permite; las rutas lo rechazan igualmente). */
+    minLevel: number;
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
-    { id: 'overview', href: '/admin', icon: LayoutDashboard, group: 'overview' },
-    { id: 'users', href: '/admin/users', icon: Users, group: 'people' },
-    { id: 'accounts', href: '/admin/accounts', icon: Link2, group: 'people' },
-    { id: 'mail', href: '/admin/mail', icon: Mail, group: 'mail' },
-    { id: 'domain', href: '/admin/domain', icon: Building2, group: 'platform' },
-    { id: 'extensions', href: '/admin/extensions', icon: Puzzle, group: 'platform' },
-    { id: 'security', href: '/admin/security', icon: ShieldCheck, group: 'platform' },
-    { id: 'audit', href: '/admin/audit', icon: FileClock, group: 'platform' },
-    { id: 'retention', href: '/admin/retention', icon: Database, group: 'platform' },
-    { id: 'transfer', href: '/admin/transfer', icon: ArrowLeftRight, group: 'mail' },
-    { id: 'spam', href: '/admin/spam', icon: ShieldAlert, group: 'mail' },
-    { id: 'profile', href: '/admin/profile', icon: UserCircle, group: 'account' },
+    { id: 'overview', href: '/admin', icon: LayoutDashboard, group: 'overview', minLevel: 1 },
+    { id: 'users', href: '/admin/users', icon: Users, group: 'people', minLevel: 1 },
+    { id: 'accounts', href: '/admin/accounts', icon: Link2, group: 'people', minLevel: 1 },
+    { id: 'mail', href: '/admin/mail', icon: Mail, group: 'mail', minLevel: 1 },
+    { id: 'domain', href: '/admin/domain', icon: Building2, group: 'platform', minLevel: 3 },
+    { id: 'extensions', href: '/admin/extensions', icon: Puzzle, group: 'platform', minLevel: 3 },
+    { id: 'security', href: '/admin/security', icon: ShieldCheck, group: 'platform', minLevel: 3 },
+    { id: 'audit', href: '/admin/audit', icon: FileClock, group: 'platform', minLevel: 1 },
+    { id: 'retention', href: '/admin/retention', icon: Database, group: 'platform', minLevel: 3 },
+    { id: 'transfer', href: '/admin/transfer', icon: ArrowLeftRight, group: 'mail', minLevel: 3 },
+    { id: 'spam', href: '/admin/spam', icon: ShieldAlert, group: 'mail', minLevel: 1 },
+    { id: 'profile', href: '/admin/profile', icon: UserCircle, group: 'account', minLevel: 1 },
+    { id: 'console', href: '/admin/profile/console', icon: Terminal, group: 'account', minLevel: 1 },
+    { id: 'permissions', href: '/admin/permissions', icon: KeyRound, group: 'platform', minLevel: 3 },
 ];
 
 export const NAV_GROUP_ORDER: readonly NavGroup[] = ['overview', 'people', 'mail', 'platform', 'account'];
 
 export function isActiveHref(pathname: string, href: string): boolean {
     if (href === '/admin') return pathname === '/admin';
+    // /admin/profile/console es una seccion propia: no marca tambien "Mi perfil".
+    if (href === '/admin/profile' && (pathname === '/admin/profile/console' || pathname.startsWith('/admin/profile/console/'))) return false;
     return pathname === href || pathname.startsWith(`${href}/`);
 }
 
@@ -54,6 +60,7 @@ export interface SearchTarget {
 
 export const SEARCH_TARGETS: readonly SearchTarget[] = [
     ...NAV_ITEMS.map((n) => ({ id: `nav:${n.id}`, href: n.href, labelKey: `admin.console.shell.nav.${n.id}`, keywords: n.id, icon: n.icon })),
+    { id: 's:permissions', href: '/admin/permissions', labelKey: 'admin.console.shell.nav.permissions', keywords: 'permisos niveles permission level rol role superadmin operador soporte', icon: KeyRound },
     { id: 's:password', href: '/admin/profile#password', labelKey: 'admin.console.shell.search.settings.password', keywords: 'contrasena password clave', icon: UserCircle },
     { id: 's:mfa', href: '/admin/profile#mfa', labelKey: 'admin.console.shell.search.settings.mfa', keywords: 'mfa 2fa totp dos pasos two-factor recuperacion recovery', icon: ShieldCheck },
     { id: 's:signing', href: '/admin/profile#signing-key', labelKey: 'admin.console.shell.search.settings.signingKey', keywords: 'firma ed25519 signing key clave publica dominio', icon: ShieldCheck },

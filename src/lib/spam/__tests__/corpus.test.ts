@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { evaluateSpam } from '../engine';
 import { PRESET_THRESHOLDS, sanitizeSpamConfig, bandOf } from '../config-core';
 import { classify, tokenize, type Model } from '../bayes';
 import { extractLinks, domainOf, visibleText } from '../text';
 import { buildCorpus, type Sample } from './corpus';
+
+// Corpus grande: evaluar cientos de correos supera los 5 s por defecto cuando la maquina esta cargada.
+vi.setConfig({ testTimeout: 60_000 });
 
 // Metricas del motor sobre un corpus SINTETICO escrito por el autor del motor: sirve de red de seguridad contra regresiones y para
 // comparar niveles, NO es una estimacion de tasa de error en produccion (ver docs: "como afinar").

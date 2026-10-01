@@ -18,6 +18,23 @@ const KIND_LABEL: Record<string, string> = {
     record: 'mapa', object: 'objeto',
 };
 
+const KIND_LABEL_EN: Record<string, string> = {
+    text: 'text', string: 'text', name: 'name', number: 'number', boolean: 'boolean', icon: 'icon (Lucide)', url: 'safe URL',
+    color: 'colour (data)', regex: 'regex', action: 'action(s)', node: 'component', nodes: 'components', any: 'any', array: 'array',
+    record: 'map', object: 'object', enum: 'enum',
+};
+KIND_LABEL.enum = 'enum';
+
+export type DocLocale = 'es' | 'en';
+
+/** Etiqueta corta del TIPO de una prop (sin valores): `texto`, `enum`, `arreglo de objeto`... (docs por idioma). */
+export function kindLabel(spec: PropSpec, locale: DocLocale = 'es'): string {
+    const labels = locale === 'en' ? KIND_LABEL_EN : KIND_LABEL;
+    if (spec.k === 'array') return spec.of ? `${locale === 'en' ? 'array of' : 'arreglo de'} ${kindLabel(spec.of, locale)}` : labels.array;
+    if (spec.k === 'record') return spec.of ? `${locale === 'en' ? 'map of' : 'mapa de'} ${kindLabel(spec.of, locale)}` : labels.record;
+    return labels[spec.k] ?? spec.k;
+}
+
 const show = (value: unknown): string => (typeof value === 'string' ? JSON.stringify(value) : JSON.stringify(value) ?? String(value));
 
 /** Tipo legible de una prop: enum -> `a | b | c`; numero con rango; arreglo/objeto con su forma. */

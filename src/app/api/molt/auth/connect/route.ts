@@ -4,6 +4,7 @@ import { createMoltToken } from '@/lib/molt-auth';
 import { compare } from 'bcryptjs';
 import { auditLog, getClientIp, getDummyBcryptHash, rateLimitAsync, safeEqual } from '@/lib/security';
 import { getMfaStatus, mfaRequiredFor, verifyMfa } from '@/lib/mfa';
+import { refreshPermissions } from '@/lib/permissions';
 
 export async function POST(req: NextRequest) {
     try {
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
 
         // 2b. Segundo factor: si la cuenta tiene MFA (o el rol lo exige) la contrasena sola no basta (NIST 800-63B AAL2)
         const mfa = await getMfaStatus(user.id);
+        await refreshPermissions();
         if (mfaRequiredFor(user.email) && !mfa.enabled) {
             auditLog('auth.molt.mfa_enrollment_required', { userId: user.id, ip });
             return NextResponse.json({ error: 'MFA enrollment required. Sign in on the web app first.' }, { status: 403 });

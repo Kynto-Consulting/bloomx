@@ -1,11 +1,12 @@
 
 import { NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
-import { requireAdmin } from "@/lib/admin-auth";
+import { requireLevel } from "@/lib/admin-auth";
 import { DOMAIN_CONFIG_TAG } from "@/lib/domain-config-cache";
 
+// Niveles (lib/admin-levels.ts): lectura = 1 (support); guardar marca/tema = 3 (admin).
 export async function GET(req: Request) {
-    const guard = await requireAdmin(req);
+    const guard = await requireLevel(1, req);
     if (!guard.ok) return guard.response;
 
     try {
@@ -24,7 +25,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-    const guard = await requireAdmin(req);
+    const guard = await requireLevel(3, req);
     if (!guard.ok) return guard.response;
 
     try {

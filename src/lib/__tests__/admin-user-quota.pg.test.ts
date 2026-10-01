@@ -10,7 +10,11 @@ const audits: Array<{ event: string; data: Record<string, unknown> }> = [];
 let adminGuard: { ok: true; actor: { kind: 'user'; id: string; email: string } } | { ok: false; response: Response } = {
     ok: true, actor: { kind: 'user', id: 'admin-1', email: 'admin@pg.test' },
 };
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: vi.fn(async () => adminGuard) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = vi.fn(async () => adminGuard);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', async (orig) => {
     const actual = await orig<typeof import('@/lib/security')>();
     return {

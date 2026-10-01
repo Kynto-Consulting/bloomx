@@ -1,0 +1,5038 @@
+{
+  "commands": [
+    {
+      "name": "help",
+      "category": {
+        "es": "Ayuda",
+        "en": "Help"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista los comandos o explica uno (help <comando>)",
+        "en": "List commands or explain one (help <command>)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "command",
+          "description": {
+            "es": "Comando (varias palabras)",
+            "en": "Command (several words)"
+          },
+          "required": false,
+          "variadic": true,
+          "complete": "command"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "whoami",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cuenta, rol, dominio de la instancia y ámbitos de la sesión o token",
+        "en": "Account, role, instance domain and session/token scopes"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "domains",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Dominios de la cuenta y cuál administra esta instancia",
+        "en": "Domains of the account and which one this instance manages"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "use",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Comprueba que un dominio es el de esta sesión (la CLI cambia de perfil localmente)",
+        "en": "Check a domain is this session's (the CLI switches profile locally)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "domain",
+          "description": {
+            "es": "Dominio",
+            "en": "Domain"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "profile",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Perfil del administrador actual (identidad, MFA, sesiones activas)",
+        "en": "Current administrator profile (identity, MFA, active sessions)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "tokens list",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Tus tokens de CLI activos (nunca se muestra el valor)",
+        "en": "Your active CLI tokens (the value is never shown)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "description": {
+            "es": "Incluir caducados y revocados",
+            "en": "Include expired and revoked"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "tokens create",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "security",
+      "minLevel": 1,
+      "mfaStepUp": true,
+      "summary": {
+        "es": "Crea un token de CLI (se muestra UNA vez; defecto 12 h, máx. 30 d)",
+        "en": "Create a CLI token (shown ONCE; default 12 h, max 30 d)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "machine",
+          "type": "boolean",
+          "description": {
+            "es": "Token de automatización (cron/CI): solo lectura, 24 h por defecto (máx. 7 d), nivel <= 3, NO ocupa la sesión privilegiada",
+            "en": "Automation token (cron/CI): read-only, 24 h by default (max 7 d), level <= 3, does NOT take the privileged session slot"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "description": {
+            "es": "Nombre del token",
+            "en": "Token name"
+          },
+          "required": true,
+          "secret": false
+        },
+        {
+          "name": "scopes",
+          "type": "list",
+          "description": {
+            "es": "Ámbitos: read,write,security (defecto read)",
+            "en": "Scopes: read,write,security (default read)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "ttl",
+          "type": "number",
+          "description": {
+            "es": "Horas de vida (interactivo 0.1 .. 720; machine hasta 168)",
+            "en": "Lifetime in hours (interactive 0.1 .. 720; machine up to 168)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "tokens revoke",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "destructive",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Revoca uno de tus tokens por id (o prefijo de 6+ caracteres)",
+        "en": "Revoke one of your tokens by id (or a 6+ character prefix)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "id",
+          "description": {
+            "es": "Id del token",
+            "en": "Token id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "tokens revoke-all",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "destructive",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Revoca todos tus tokens (menos el actual con --keep-current)",
+        "en": "Revoke all your tokens (except the current one with --keep-current)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "keep-current",
+          "type": "boolean",
+          "description": {
+            "es": "Conservar el token que ejecuta el comando",
+            "en": "Keep the token running this command"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "jobs",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Trabajos por lotes: importar/exportar correo (MailTransferJob)",
+        "en": "Batch jobs: mail import/export (MailTransferJob)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "jobs show",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de un trabajo",
+        "en": "Status of a job"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "jobs watch",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Sigue un trabajo hasta que termine (el cliente repite la consulta cada 2 s)",
+        "en": "Follow a job until it finishes (the client polls every 2 s)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "jobs rules",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lotes de \"aplicar reglas a existentes\" de un usuario (con deshacer)",
+        "en": "A user's \"apply rules to existing\" batches (undoable)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "limits",
+      "category": {
+        "es": "Sesión y cuenta",
+        "en": "Session and account"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Límites del motor: línea, salida, tiempo, tasa, tokens",
+        "en": "Engine limits: line, output, time, rate, tokens"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "users list",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista usuarios con filtros",
+        "en": "List users with filters"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "users list --status disabled",
+        "users list --q ana --json"
+      ],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto en correo o nombre",
+            "en": "Text in email or name"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "values": [
+            "active",
+            "disabled"
+          ],
+          "description": {
+            "es": "Estado",
+            "en": "Status"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "role",
+          "type": "enum",
+          "values": [
+            "admin",
+            "user"
+          ],
+          "description": {
+            "es": "Rol",
+            "en": "Role"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "mfa",
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "description": {
+            "es": "Con MFA",
+            "en": "Has MFA"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "google",
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "description": {
+            "es": "Con Google vinculado",
+            "en": "Google linked"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "sort",
+          "type": "enum",
+          "values": [
+            "createdAt",
+            "email",
+            "name",
+            "lastLogin",
+            "storage"
+          ],
+          "description": {
+            "es": "Orden",
+            "en": "Sort field"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "dir",
+          "type": "enum",
+          "values": [
+            "asc",
+            "desc"
+          ],
+          "description": {
+            "es": "Direccion",
+            "en": "Direction"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Pagina (desde 1)",
+            "en": "Page (from 1)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas por pagina (max 100)",
+            "en": "Rows per page (max 100)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users show",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Detalle de un usuario (estado, MFA, cuentas, sesiones, cuota)",
+        "en": "User detail (state, MFA, accounts, sessions, quota)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users create",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "security",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Crea un usuario (si no hay contrasena se genera una temporal, se muestra una vez)",
+        "en": "Create a user (a temporary password is generated if none is given, shown once)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "email",
+          "description": {
+            "es": "Correo del nuevo usuario",
+            "en": "New user email"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": {
+            "es": "Nombre",
+            "en": "Display name"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "description": {
+            "es": "Contrasena (12+); mejor omitirla",
+            "en": "Password (12+); better omitted"
+          },
+          "required": false,
+          "secret": true
+        },
+        {
+          "name": "must-change",
+          "type": "boolean",
+          "description": {
+            "es": "Obligar a cambiarla al entrar",
+            "en": "Force a change at next login"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users rename",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia el nombre de un usuario",
+        "en": "Rename a user"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        },
+        {
+          "name": "name",
+          "description": {
+            "es": "Nuevo nombre",
+            "en": "New name"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users disable",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Deshabilita un usuario y cierra sus sesiones",
+        "en": "Disable a user and sign them out"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users enable",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Habilita un usuario",
+        "en": "Enable a user"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users bulk",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Acción masiva (hasta 100): disable, enable o revoke-sessions",
+        "en": "Bulk action (up to 100): disable, enable or revoke-sessions"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "action",
+          "description": {
+            "es": "disable | enable | revoke-sessions",
+            "en": "disable | enable | revoke-sessions"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "disable",
+            "enable",
+            "revoke-sessions"
+          ]
+        },
+        {
+          "name": "users",
+          "description": {
+            "es": "Ids o correos",
+            "en": "Ids or emails"
+          },
+          "required": true,
+          "variadic": true,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users export",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Exporta usuarios a CSV (mismos filtros que la lista)",
+        "en": "Export users to CSV (same filters as the list)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto en correo o nombre",
+            "en": "Text in email or name"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "status",
+          "type": "enum",
+          "values": [
+            "active",
+            "disabled"
+          ],
+          "description": {
+            "es": "Estado",
+            "en": "Status"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "role",
+          "type": "enum",
+          "values": [
+            "admin",
+            "user"
+          ],
+          "description": {
+            "es": "Rol",
+            "en": "Role"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "mfa",
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "description": {
+            "es": "Con MFA",
+            "en": "Has MFA"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "google",
+          "type": "enum",
+          "values": [
+            "yes",
+            "no"
+          ],
+          "description": {
+            "es": "Con Google vinculado",
+            "en": "Google linked"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "sort",
+          "type": "enum",
+          "values": [
+            "createdAt",
+            "email",
+            "name",
+            "lastLogin",
+            "storage"
+          ],
+          "description": {
+            "es": "Orden",
+            "en": "Sort field"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "dir",
+          "type": "enum",
+          "values": [
+            "asc",
+            "desc"
+          ],
+          "description": {
+            "es": "Direccion",
+            "en": "Direction"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users sessions",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista las sesiones activas de un usuario",
+        "en": "List a user's active sessions"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users sessions revoke",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cierra TODAS las sesiones de un usuario, o una con --jti",
+        "en": "Sign out all of a user's sessions, or one with --jti"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": [
+        {
+          "name": "jti",
+          "type": "string",
+          "description": {
+            "es": "Id de una sesion concreta",
+            "en": "A single session id"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users mfa-reset",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Restablece el MFA de un usuario y cierra sus sesiones",
+        "en": "Reset a user's MFA and sign them out"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users password-reset",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Genera una contraseña temporal (se muestra una vez) y cierra sesiones",
+        "en": "Generate a temporary password (shown once) and sign the user out"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users force-password-change",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Obliga a cambiar la contraseña en el próximo acceso",
+        "en": "Require a password change at next login"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": [
+        {
+          "name": "revoke-sessions",
+          "type": "boolean",
+          "description": {
+            "es": "Cerrar también las sesiones",
+            "en": "Also sign the user out"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users quota",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cuota efectiva de un usuario y su origen",
+        "en": "A user's effective quota and its source"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users quota set",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija la cuota de un usuario en MB (0 = sin límite); --reset vuelve a la del dominio",
+        "en": "Set a user's quota in MB (0 = unlimited); --reset falls back to the domain quota"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        },
+        {
+          "name": "mb",
+          "description": {
+            "es": "Megabytes",
+            "en": "Megabytes"
+          },
+          "required": false,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "reset",
+          "type": "boolean",
+          "description": {
+            "es": "Quitar la cuota propia",
+            "en": "Remove the user quota"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "users rules",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Reglas de correo de un usuario (solo lectura, sin contenido)",
+        "en": "A user's mail rules (read only, no mail content)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "users labels",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Etiquetas de un usuario (solo lectura)",
+        "en": "A user's labels (read only)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "user",
+          "description": {
+            "es": "Id o correo del usuario",
+            "en": "User id or email"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "user"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "accounts list",
+      "category": {
+        "es": "Cuentas vinculadas",
+        "en": "Linked accounts"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista cuentas OAuth vinculadas (sin tokens)",
+        "en": "List linked OAuth accounts (no tokens)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto",
+            "en": "Text"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "provider",
+          "type": "string",
+          "description": {
+            "es": "Proveedor (google, zoom...)",
+            "en": "Provider"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": {
+            "es": "Estado",
+            "en": "Status"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Pagina (desde 1)",
+            "en": "Page (from 1)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas por pagina (max 100)",
+            "en": "Rows per page (max 100)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "accounts unlink",
+      "category": {
+        "es": "Cuentas vinculadas",
+        "en": "Linked accounts"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Desvincula una cuenta OAuth",
+        "en": "Unlink an OAuth account"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "id",
+          "description": {
+            "es": "Id de la cuenta vinculada",
+            "en": "Linked account id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "accounts reconnect",
+      "category": {
+        "es": "Cuentas vinculadas",
+        "en": "Linked accounts"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Pide al usuario reconectar (o refrescar) una cuenta",
+        "en": "Ask the user to reconnect (or refresh) an account"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "id",
+          "description": {
+            "es": "Id de la cuenta vinculada",
+            "en": "Linked account id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "mode",
+          "type": "enum",
+          "values": [
+            "reconnect",
+            "refresh"
+          ],
+          "description": {
+            "es": "Modo",
+            "en": "Mode"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "search",
+      "category": {
+        "es": "Usuarios",
+        "en": "Users"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Busca usuarios por correo o nombre (máx. 8)",
+        "en": "Search users by email or name (max 8)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "query",
+          "description": {
+            "es": "Texto (2+ caracteres)",
+            "en": "Text (2+ chars)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "overview",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Resumen de la instancia (usuarios, correo, almacenamiento)",
+        "en": "Instance overview (users, mail, storage)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "system status",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Salud del sistema: base de datos, backend, límite de tasa",
+        "en": "System health: database, backend, rate limiter"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "system version",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Versión de la aplicación y del entorno",
+        "en": "Application and runtime version"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "system schema",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado del esquema de la base de datos (tablas esperadas vs. presentes)",
+        "en": "Database schema state (expected vs. present tables)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "system queues",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Colas: correos programados y trabajos de importar/exportar",
+        "en": "Queues: scheduled mail and import/export jobs"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "config list",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Claves de configuración visibles (lista blanca; los secretos solo indican si existen)",
+        "en": "Visible configuration keys (allow-list; secrets only report presence)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "config get",
+      "category": {
+        "es": "Sistema",
+        "en": "System"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Valor de una clave de configuración permitida",
+        "en": "Value of an allowed configuration key"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "key",
+          "description": {
+            "es": "Clave (ver config list)",
+            "en": "Key (see config list)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "mail metrics",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Métricas agregadas de correo",
+        "en": "Aggregated mail metrics"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "range",
+          "type": "enum",
+          "values": [
+            "24h",
+            "7d",
+            "30d"
+          ],
+          "description": {
+            "es": "Rango",
+            "en": "Range"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "mail dns",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Salud DNS del dominio: SPF, DKIM, DMARC, MX",
+        "en": "Domain DNS health: SPF, DKIM, DMARC, MX"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "selector",
+          "type": "string",
+          "description": {
+            "es": "Selector DKIM",
+            "en": "DKIM selector"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "fresh",
+          "type": "boolean",
+          "description": {
+            "es": "Saltar la cache",
+            "en": "Bypass the cache"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "mail webhooks",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de los webhooks del proveedor de correo (sin secretos)",
+        "en": "Mail provider webhook status (no secrets)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "mail queue",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cola de correos programados",
+        "en": "Scheduled mail queue"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "mail config",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Configuración de correo: cuotas, límites de envío, webhooks, DNS",
+        "en": "Mail configuration: quotas, send limits, webhooks, DNS"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "mail suppressions",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista de supresiones (bajas, rebotes, quejas)",
+        "en": "Suppression list (unsubscribes, bounces, complaints)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto",
+            "en": "Text"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "reason",
+          "type": "enum",
+          "values": [
+            "unsubscribe",
+            "bounce",
+            "complaint"
+          ],
+          "description": {
+            "es": "Motivo",
+            "en": "Reason"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Pagina (desde 1)",
+            "en": "Page (from 1)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas por pagina (max 100)",
+            "en": "Rows per page (max 100)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "mail suppressions remove",
+      "category": {
+        "es": "Correo",
+        "en": "Mail"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Quita una o varias supresiones (máx. 100)",
+        "en": "Remove one or more suppressions (max 100)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "id",
+          "description": {
+            "es": "Id(s) de supresión",
+            "en": "Suppression id(s)"
+          },
+          "required": true,
+          "variadic": true
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "audit",
+      "category": {
+        "es": "Auditoría",
+        "en": "Audit"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Consulta la auditoría (enmascarada) con filtros",
+        "en": "Query the (masked) audit log with filters"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "audit --event \"admin.users.*\" --from 2026-01-01",
+        "audit --q login --json"
+      ],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "event",
+          "type": "string",
+          "description": {
+            "es": "Evento (prefijo con * al final)",
+            "en": "Event (trailing * for prefix)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "user",
+          "type": "string",
+          "description": {
+            "es": "Id de usuario",
+            "en": "User id"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Desde (ISO)",
+            "en": "From (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": {
+            "es": "Hasta (ISO)",
+            "en": "To (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto libre",
+            "en": "Free text"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Pagina (desde 1)",
+            "en": "Page (from 1)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas por pagina (max 100)",
+            "en": "Rows per page (max 100)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": {
+            "es": "Atajo de --page-size",
+            "en": "Shortcut for --page-size"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "audit export",
+      "category": {
+        "es": "Auditoría",
+        "en": "Audit"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Exporta la auditoría a CSV (hasta 10 000 filas)",
+        "en": "Export the audit log to CSV (up to 10,000 rows)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "event",
+          "type": "string",
+          "description": {
+            "es": "Evento (prefijo con * al final)",
+            "en": "Event (trailing * for prefix)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "user",
+          "type": "string",
+          "description": {
+            "es": "Id de usuario",
+            "en": "User id"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Desde (ISO)",
+            "en": "From (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": {
+            "es": "Hasta (ISO)",
+            "en": "To (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto libre",
+            "en": "Free text"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "audit events",
+      "category": {
+        "es": "Auditoría",
+        "en": "Audit"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Tipos de evento recientes (para filtrar)",
+        "en": "Recent event types (to filter on)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "retention show",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Políticas de retención efectivas",
+        "en": "Effective retention policies"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "retention set",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia retenciones en días (\"null\" vuelve al valor del entorno)",
+        "en": "Change retention in days (\"null\" falls back to the environment value)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "spam-days",
+          "type": "string",
+          "description": {
+            "es": "Dias en spam (n | null)",
+            "en": "Days in spam (n | null)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "trash-days",
+          "type": "string",
+          "description": {
+            "es": "Dias en papelera (n | null)",
+            "en": "Days in trash (n | null)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "audit-days",
+          "type": "string",
+          "description": {
+            "es": "Dias de auditoria, 0 o >= 30 (n | null)",
+            "en": "Audit days, 0 or >= 30 (n | null)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "raw-days",
+          "type": "string",
+          "description": {
+            "es": "Dias del correo en bruto (n | null)",
+            "en": "Raw mail days (n | null)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "secure-days",
+          "type": "string",
+          "description": {
+            "es": "Dias de mensajes sellados (n | null)",
+            "en": "Sealed message days (n | null)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "batch",
+          "type": "string",
+          "description": {
+            "es": "Tamano de lote 1..1000 (n | null)",
+            "en": "Batch size 1..1000 (n | null)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "retention storage",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Uso de almacenamiento y lo que se purgaría hoy",
+        "en": "Storage usage and what would be purged today"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "retention run",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "destructive",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Ejecuta la purga de retención (por defecto simulacro; --apply borra de verdad)",
+        "en": "Run the retention purge (dry run by default; --apply really deletes)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "apply",
+          "type": "boolean",
+          "description": {
+            "es": "Aplicar de verdad (borra datos)",
+            "en": "Apply for real (deletes data)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "quota show",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cuota por usuario del dominio",
+        "en": "Domain per-user quota"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "quota set",
+      "category": {
+        "es": "Retención y cuotas",
+        "en": "Retention and quotas"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija la cuota del dominio (MB, 0 = sin límite, \"null\" = entorno) y el bloqueo de envío al 100 %",
+        "en": "Set the domain quota (MB, 0 = unlimited, \"null\" = environment) and block-at-100% sending"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "mb",
+          "type": "string",
+          "description": {
+            "es": "MB | null",
+            "en": "MB | null"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "enforce",
+          "type": "string",
+          "description": {
+            "es": "true | false | null",
+            "en": "true | false | null"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "security status",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de seguridad y hardening de la instancia",
+        "en": "Instance security and hardening status"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "group",
+          "type": "enum",
+          "values": [
+            "admins",
+            "session",
+            "config",
+            "events"
+          ],
+          "description": {
+            "es": "Grupo de comprobaciones",
+            "en": "Check group"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "failing",
+          "type": "boolean",
+          "description": {
+            "es": "Solo avisos y fallos",
+            "en": "Only warnings and failures"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "security admins",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Administradores y estado de su MFA",
+        "en": "Administrators and their MFA state"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "security events",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Eventos de seguridad recientes (inicios fallidos, accesos denegados)",
+        "en": "Recent security events (failed logins, denied access)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "security policies",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Políticas vigentes: MFA, sesión, límites de tasa y de tokens de CLI",
+        "en": "Active policies: MFA, session, rate limits and CLI tokens"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "security keys",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "read",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de la clave de firma del dominio (solo manager)",
+        "en": "Domain signing key state (manager only)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "security keys register",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Registra o rota la clave PÚBLICA de firma Ed25519 (nunca una privada)",
+        "en": "Register or rotate the Ed25519 PUBLIC signing key (never a private one)"
+      },
+      "managerOnly": true,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "public-key",
+          "type": "string",
+          "description": {
+            "es": "Clave pública PEM (o usa --stdin / --file)",
+            "en": "Public key PEM (or use --stdin / --file)"
+          },
+          "required": false,
+          "secret": true
+        }
+      ]
+    },
+    {
+      "name": "security keys require-signature",
+      "category": {
+        "es": "Seguridad",
+        "en": "Security"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Activa o desactiva \"exigir firma\" (on | off)",
+        "en": "Turn \"require signature\" on or off (on | off)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "state",
+          "description": {
+            "es": "on | off",
+            "en": "on | off"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "on",
+            "off"
+          ]
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "domain show",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Dominio de la instancia y su marca pública",
+        "en": "Instance domain and public brand"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "domain set",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia el nombre público y/o el logo (https) del dominio",
+        "en": "Change the public name and/or logo (https) of the domain"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "display-name",
+          "type": "string",
+          "description": {
+            "es": "Nombre público (máx. 120)",
+            "en": "Public name (max 120)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "logo",
+          "type": "string",
+          "description": {
+            "es": "URL https del logo (\"\" para quitar)",
+            "en": "Logo https URL (\"\" to remove)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "theme list",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Temas integrados disponibles",
+        "en": "Built-in themes available"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "theme show",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Tema actual del dominio (política, tipografía, colores de marca)",
+        "en": "Current domain theme (policy, typography, brand colours)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "theme export",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Exporta el tema (y la marca) como JSON",
+        "en": "Export the theme (and brand) as JSON"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "theme validate",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Valida un JSON de tema sin guardar (por --stdin / --file)",
+        "en": "Validate a theme JSON without saving (via --stdin / --file)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "theme import",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Importa un tema JSON y REEMPLAZA el actual (por --stdin / --file)",
+        "en": "Import a theme JSON and REPLACE the current one (via --stdin / --file)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "dry-run",
+          "type": "boolean",
+          "description": {
+            "es": "Solo validar",
+            "en": "Validate only"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "theme apply",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Aplica colores de marca (hex) manteniendo el resto del tema",
+        "en": "Apply brand colours (hex) keeping the rest of the theme"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "primary",
+          "type": "string",
+          "description": {
+            "es": "Color primario #rrggbb",
+            "en": "Primary colour #rrggbb"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "secondary",
+          "type": "string",
+          "description": {
+            "es": "Secundario",
+            "en": "Secondary"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "accent",
+          "type": "string",
+          "description": {
+            "es": "Acento",
+            "en": "Accent"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "background",
+          "type": "string",
+          "description": {
+            "es": "Fondo",
+            "en": "Background"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "description": {
+            "es": "Texto",
+            "en": "Text"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "theme policy",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Política de temas: modo por defecto, bloqueo a la marca y temas permitidos",
+        "en": "Theme policy: default mode, brand lock and allowed themes"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "default-mode",
+          "type": "enum",
+          "values": [
+            "light",
+            "dark",
+            "system"
+          ],
+          "description": {
+            "es": "Modo inicial",
+            "en": "Default mode"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "lock-brand",
+          "type": "boolean",
+          "description": {
+            "es": "Solo temas de la empresa",
+            "en": "Company themes only"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "auto-fix-contrast",
+          "type": "boolean",
+          "description": {
+            "es": "Corregir contraste AA automáticamente",
+            "en": "Auto-fix AA contrast"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "allowed",
+          "type": "list",
+          "description": {
+            "es": "Ids de temas permitidos (coma); vacío = todos",
+            "en": "Allowed theme ids (comma); empty = all"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "radius",
+          "type": "enum",
+          "values": [
+            "none",
+            "sm",
+            "md",
+            "lg",
+            "xl"
+          ],
+          "description": {
+            "es": "Radio",
+            "en": "Radius"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "font",
+          "type": "string",
+          "description": {
+            "es": "Familia tipográfica (id)",
+            "en": "Font family id"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "landing show",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Resumen de la landing / login configurada",
+        "en": "Summary of the configured landing / login page"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "landing export",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Exporta la landing como JSON",
+        "en": "Export the landing as JSON"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "landing validate",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Valida un JSON de landing sin guardar (por --stdin / --file)",
+        "en": "Validate a landing JSON without saving (via --stdin / --file)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "landing import",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Importa una landing JSON y REEMPLAZA la actual (por --stdin / --file)",
+        "en": "Import a landing JSON and REPLACE the current one (via --stdin / --file)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "dry-run",
+          "type": "boolean",
+          "description": {
+            "es": "Solo validar",
+            "en": "Validate only"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "landing set",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia el diseño de la landing",
+        "en": "Change the landing layout"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "layout",
+          "type": "enum",
+          "values": [
+            "split-left",
+            "split-right",
+            "center",
+            "fullscreen-bg",
+            "minimal"
+          ],
+          "description": {
+            "es": "Diseño",
+            "en": "Layout"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "hero-title",
+          "type": "string",
+          "description": {
+            "es": "Título del hero",
+            "en": "Hero title"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "registration",
+          "type": "boolean",
+          "description": {
+            "es": "Permitir registro",
+            "en": "Allow registration"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "landing reset",
+      "category": {
+        "es": "Dominio, marca y temas",
+        "en": "Domain, brand and themes"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Quita la landing personalizada (vuelve a la de fábrica)",
+        "en": "Remove the custom landing (back to the default)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "extensions catalog",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Catálogo de extensiones disponibles",
+        "en": "Available extensions catalog"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "fresh",
+          "type": "boolean",
+          "description": {
+            "es": "Saltar la caché",
+            "en": "Bypass the cache"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "extensions list",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Extensiones instaladas del dominio con su estado",
+        "en": "Installed extensions of the domain with their state"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "extensions install",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Instala (o actualiza, es idempotente) una extensión",
+        "en": "Install (or update; idempotent) an extension"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions update",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Actualiza una extensión instalada a la versión del catálogo",
+        "en": "Update an installed extension to the catalog version"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions uninstall",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Desinstala una extensión y BORRA sus credenciales y tokens",
+        "en": "Uninstall an extension and WIPE its credentials and tokens"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions enable",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Activa una extensión instalada",
+        "en": "Enable an installed extension"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions disable",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Desactiva una extensión sin desinstalarla",
+        "en": "Disable an extension without uninstalling"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions mandatory",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Marca una extensión como obligatoria para todos (on | off)",
+        "en": "Mark an extension mandatory for everyone (on | off)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        },
+        {
+          "name": "state",
+          "description": {
+            "es": "on | off",
+            "en": "on | off"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "on",
+            "off"
+          ]
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions order",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija el orden de paneles/botones: id=orden ...",
+        "en": "Set panel/button order: id=order ..."
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "pairs",
+          "description": {
+            "es": "id=orden (uno o varios)",
+            "en": "id=order (one or more)"
+          },
+          "required": true,
+          "variadic": true
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions test",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Prueba la conexión de una extensión (si declara testConnection)",
+        "en": "Test an extension connection (if it declares testConnection)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions status",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado y errores recientes de una extensión (24 h)",
+        "en": "Recent status and errors of an extension (24 h)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions credentials",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Credenciales de una extensión: nombres y fuente (NUNCA valores)",
+        "en": "An extension's credentials: names and source (NEVER values)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions credentials set",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija una credencial (el valor se lee con --value, --stdin o aviso interactivo; nunca se audita)",
+        "en": "Set a credential (value via --value, --stdin or a hidden prompt; never audited)"
+      },
+      "managerOnly": true,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        },
+        {
+          "name": "name",
+          "description": {
+            "es": "Nombre de la variable (MAYÚSCULAS)",
+            "en": "Variable name (UPPERCASE)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "value",
+          "type": "string",
+          "description": {
+            "es": "Valor de la credencial",
+            "en": "Credential value"
+          },
+          "required": false,
+          "secret": true
+        }
+      ]
+    },
+    {
+      "name": "extensions credentials unset",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "destructive",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Borra una credencial",
+        "en": "Delete a credential"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        },
+        {
+          "name": "name",
+          "description": {
+            "es": "Nombre de la variable",
+            "en": "Variable name"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions credentials migrate",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Copia al dominio las credenciales heredadas (cifradas en el backend)",
+        "en": "Copy legacy credentials to the domain (encrypted on the backend)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions conferencing",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de las extensiones de conferencias (Zoom, Meet, Calendar)",
+        "en": "Conferencing extensions state (Zoom, Meet, Calendar)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "spam config",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Configuración antispam efectiva y presets",
+        "en": "Effective anti-spam configuration and presets"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "spam config set",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia la configuración antispam (banderas o parche JSON)",
+        "en": "Change the anti-spam configuration (flags or a JSON patch)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "level",
+          "type": "string",
+          "description": {
+            "es": "Nivel (ver spam config)",
+            "en": "Level (see spam config)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "threshold",
+          "type": "number",
+          "description": {
+            "es": "Umbral 1..100",
+            "en": "Threshold 1..100"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "log-delivered",
+          "type": "boolean",
+          "description": {
+            "es": "Registrar también lo entregado",
+            "en": "Also log delivered mail"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "log-retention-days",
+          "type": "number",
+          "description": {
+            "es": "Días de registro 1..365",
+            "en": "Log retention days 1..365"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "allow-user-sensitivity",
+          "type": "boolean",
+          "description": {
+            "es": "Permitir sensibilidad por usuario",
+            "en": "Allow per-user sensitivity"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "external",
+          "type": "enum",
+          "values": [
+            "on",
+            "off"
+          ],
+          "description": {
+            "es": "Aviso de remitentes externos",
+            "en": "External sender banner"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam config reset",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Restablece la configuración antispam a los valores por defecto",
+        "en": "Reset the anti-spam configuration to defaults"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "spam simulate",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Simula un parche de configuración sobre los últimos correos evaluados (no cambia nada)",
+        "en": "Simulate a config patch on the latest evaluated mail (changes nothing)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "level",
+          "type": "string",
+          "description": {
+            "es": "Nivel",
+            "en": "Level"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "threshold",
+          "type": "number",
+          "description": {
+            "es": "Umbral",
+            "en": "Threshold"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam test",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Puntúa un mensaje de prueba por señal (no guarda ni envía nada)",
+        "en": "Score a test message per signal (stores and sends nothing)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Remitente",
+            "en": "From"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "subject",
+          "type": "string",
+          "description": {
+            "es": "Asunto",
+            "en": "Subject"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "text",
+          "type": "string",
+          "description": {
+            "es": "Texto",
+            "en": "Text"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "email-id",
+          "type": "string",
+          "description": {
+            "es": "Id de un correo propio",
+            "en": "Id of one of your own emails"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam events",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Registro de decisiones antispam (sin contenido)",
+        "en": "Anti-spam decision log (no content)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Desde (ISO)",
+            "en": "From (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": {
+            "es": "Hasta (ISO)",
+            "en": "To (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "decision",
+          "type": "string",
+          "description": {
+            "es": "Decisión",
+            "en": "Decision"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "sender-domain",
+          "type": "string",
+          "description": {
+            "es": "Dominio del remitente (filtro)",
+            "en": "Sender domain (filter)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Página",
+            "en": "Page"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas (máx 200)",
+            "en": "Rows (max 200)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam stats",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estadísticas antispam por día y dominios principales",
+        "en": "Anti-spam statistics per day and top domains"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "days",
+          "type": "number",
+          "description": {
+            "es": "Días (1..365)",
+            "en": "Days (1..365)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam list",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Lista una lista del dominio: bloqueo, permitidos o remitentes externos",
+        "en": "List a domain list: blocklist, allowlist or external senders"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "kind",
+          "description": {
+            "es": "block | allow | external",
+            "en": "block | allow | external"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "block",
+            "allow",
+            "external"
+          ]
+        }
+      ],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto",
+            "en": "Text"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "match-type",
+          "type": "string",
+          "description": {
+            "es": "Tipo de coincidencia",
+            "en": "Match type"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "status",
+          "type": "string",
+          "description": {
+            "es": "Estado",
+            "en": "Status"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "sort",
+          "type": "string",
+          "description": {
+            "es": "Orden",
+            "en": "Sort"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "number",
+          "description": {
+            "es": "Pagina (desde 1)",
+            "en": "Page (from 1)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page-size",
+          "type": "number",
+          "description": {
+            "es": "Filas por pagina (max 100)",
+            "en": "Rows per page (max 100)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam list add",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Añade una entrada a una lista del dominio",
+        "en": "Add an entry to a domain list"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "kind",
+          "description": {
+            "es": "block | allow | external",
+            "en": "block | allow | external"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "block",
+            "allow",
+            "external"
+          ]
+        },
+        {
+          "name": "value",
+          "description": {
+            "es": "Correo, dominio o patrón",
+            "en": "Email, domain or pattern"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "match-type",
+          "type": "string",
+          "description": {
+            "es": "email | domain | ...",
+            "en": "email | domain | ..."
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "subdomains",
+          "type": "boolean",
+          "description": {
+            "es": "Incluir subdominios",
+            "en": "Include subdomains"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "reason",
+          "type": "string",
+          "description": {
+            "es": "Motivo",
+            "en": "Reason"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "expires",
+          "type": "string",
+          "description": {
+            "es": "Caduca (ISO)",
+            "en": "Expires (ISO)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam list remove",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "destructive",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Quita entradas por id, o toda la lista con --all",
+        "en": "Remove entries by id, or the whole list with --all"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "kind",
+          "description": {
+            "es": "block | allow | external",
+            "en": "block | allow | external"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "block",
+            "allow",
+            "external"
+          ]
+        },
+        {
+          "name": "id",
+          "description": {
+            "es": "Ids de entradas",
+            "en": "Entry ids"
+          },
+          "required": false,
+          "variadic": true
+        }
+      ],
+      "flags": [
+        {
+          "name": "all",
+          "type": "boolean",
+          "description": {
+            "es": "Vaciar la lista completa",
+            "en": "Clear the whole list"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "spam list import",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "write",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Importa una lista desde CSV (por --stdin / --file)",
+        "en": "Import a list from CSV (via --stdin / --file)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "kind",
+          "description": {
+            "es": "block | allow | external",
+            "en": "block | allow | external"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "block",
+            "allow",
+            "external"
+          ]
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "spam list export",
+      "category": {
+        "es": "Spam y remitentes",
+        "en": "Spam and senders"
+      },
+      "risk": "read",
+      "minLevel": 2,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Exporta una lista a CSV",
+        "en": "Export a list to CSV"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "kind",
+          "description": {
+            "es": "block | allow | external",
+            "en": "block | allow | external"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "block",
+            "allow",
+            "external"
+          ]
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer config",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Límites y formatos de importar/exportar, y estado de re-autenticación",
+        "en": "Import/export limits, formats and re-authentication state"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "transfer mailboxes",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Buzones del dominio (para exportar o mapear al importar)",
+        "en": "Domain mailboxes (to export or map when importing)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "transfer jobs",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Historial de trabajos de importar/exportar",
+        "en": "Import/export job history"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "status",
+          "type": "enum",
+          "values": [
+            "uploading",
+            "uploaded",
+            "ready",
+            "running",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "description": {
+            "es": "Filtrar por estado",
+            "en": "Filter by status"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "transfer job",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Detalle de un trabajo (para seguirlo: `transfer job <id>` repetido o `--watch` en la CLI)",
+        "en": "Job detail (follow it by repeating `transfer job <id>` or `--watch` in the CLI)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer report",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Informe final de un trabajo",
+        "en": "Final report of a job"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer preview",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Vista previa de una importación subida (buzones detectados, conteos)",
+        "en": "Preview of an uploaded import (detected mailboxes, counts)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer cancel",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cancela un trabajo en curso",
+        "en": "Cancel a running job"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer resume",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Reanuda un trabajo interrumpido",
+        "en": "Resume an interrupted job"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer delete",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Borra un trabajo y sus archivos temporales",
+        "en": "Delete a job and its temporary files"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer export",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Crea una exportación de correo (mbox/eml). Requiere --confirm-domain con el nombre del dominio",
+        "en": "Create a mail export (mbox/eml). Requires --confirm-domain with the domain name"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "scope",
+          "type": "enum",
+          "values": [
+            "domain",
+            "selected",
+            "one"
+          ],
+          "description": {
+            "es": "Alcance",
+            "en": "Scope"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "mailboxes",
+          "type": "list",
+          "description": {
+            "es": "Buzones (coma) para selected/one",
+            "en": "Mailboxes (comma) for selected/one"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "folders",
+          "type": "list",
+          "description": {
+            "es": "Carpetas (inbox,sent,archive,spam,trash,scheduled,snoozed,drafts)",
+            "en": "Folders (inbox,sent,archive,spam,trash,scheduled,snoozed,drafts)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Desde (ISO)",
+            "en": "From (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": {
+            "es": "Hasta (ISO)",
+            "en": "To (ISO)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "attachments",
+          "type": "boolean",
+          "description": {
+            "es": "Incluir adjuntos (por defecto sí)",
+            "en": "Include attachments (default yes)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "format",
+          "type": "enum",
+          "values": [
+            "mbox",
+            "eml"
+          ],
+          "description": {
+            "es": "Formato",
+            "en": "Format"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "description": {
+            "es": "Contraseña del paquete ZIP",
+            "en": "Package ZIP password"
+          },
+          "required": false,
+          "secret": true
+        },
+        {
+          "name": "notify-users",
+          "type": "boolean",
+          "description": {
+            "es": "Avisar a los usuarios",
+            "en": "Notify users"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "confirm-domain",
+          "type": "string",
+          "description": {
+            "es": "Nombre del dominio (confirmación)",
+            "en": "Domain name (confirmation)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "transfer download-link",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Emite un enlace de descarga firmado (10 min) de una exportación terminada",
+        "en": "Issue a signed download link (10 min) for a finished export"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer import-create",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Crea un trabajo de importación (la CLI sube el archivo por trozos después)",
+        "en": "Create an import job (the CLI uploads the file in chunks afterwards)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "file-name",
+          "type": "string",
+          "description": {
+            "es": "Nombre del archivo",
+            "en": "File name"
+          },
+          "required": true,
+          "secret": false
+        },
+        {
+          "name": "size",
+          "type": "number",
+          "description": {
+            "es": "Tamaño en bytes",
+            "en": "Size in bytes"
+          },
+          "required": true,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "transfer import-complete",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Marca la subida como completa y analiza el archivo",
+        "en": "Mark the upload as complete and analyse the file"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "transfer import-password",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Contraseña de un ZIP cifrado (o --skip)",
+        "en": "Password of an encrypted ZIP (or --skip)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "password",
+          "type": "string",
+          "description": {
+            "es": "Contraseña del ZIP",
+            "en": "ZIP password"
+          },
+          "required": false,
+          "secret": true
+        },
+        {
+          "name": "skip",
+          "type": "boolean",
+          "description": {
+            "es": "Omitir las entradas cifradas",
+            "en": "Skip encrypted entries"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "transfer mailboxes-create",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Crea los buzones faltantes detectados al importar",
+        "en": "Create the missing mailboxes detected during an import"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        },
+        {
+          "name": "addresses",
+          "description": {
+            "es": "Direcciones (una o varias)",
+            "en": "Addresses (one or more)"
+          },
+          "required": true,
+          "variadic": true
+        }
+      ],
+      "flags": [
+        {
+          "name": "password-mode",
+          "type": "enum",
+          "values": [
+            "generic",
+            "random"
+          ],
+          "description": {
+            "es": "Modo de contraseña",
+            "en": "Password mode"
+          },
+          "required": true,
+          "secret": false
+        },
+        {
+          "name": "password",
+          "type": "string",
+          "description": {
+            "es": "Contraseña genérica",
+            "en": "Generic password"
+          },
+          "required": false,
+          "secret": true
+        },
+        {
+          "name": "no-must-change",
+          "type": "boolean",
+          "description": {
+            "es": "No obligar a cambiarla",
+            "en": "Do not force a change"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "confirm-domain",
+          "type": "string",
+          "description": {
+            "es": "Nombre del dominio",
+            "en": "Domain name"
+          },
+          "required": true,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "transfer import-confirm",
+      "category": {
+        "es": "Importar / exportar",
+        "en": "Import / export"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Confirma e inicia la importación (escribe el dominio para confirmar)",
+        "en": "Confirm and start the import (type the domain to confirm)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "job",
+          "description": {
+            "es": "Id del trabajo",
+            "en": "Job id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "target-mode",
+          "type": "enum",
+          "values": [
+            "auto",
+            "single"
+          ],
+          "description": {
+            "es": "auto = por destinatario; single = un solo buzón",
+            "en": "auto = per recipient; single = one mailbox"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "single-mailbox",
+          "type": "string",
+          "description": {
+            "es": "Buzón destino (modo single)",
+            "en": "Target mailbox (single mode)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "map",
+          "type": "string",
+          "description": {
+            "es": "JSON {origen:destino|null}",
+            "en": "JSON {source:target|null}"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "notify-users",
+          "type": "boolean",
+          "description": {
+            "es": "Avisar a los usuarios",
+            "en": "Notify users"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "confirm-domain",
+          "type": "string",
+          "description": {
+            "es": "Nombre del dominio",
+            "en": "Domain name"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "perms levels",
+      "category": {
+        "es": "Permisos",
+        "en": "Permissions"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Escala de permission_level 0..4 y lo que permite cada nivel",
+        "en": "The permission_level 0..4 scale and what each level allows"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "perms list",
+      "category": {
+        "es": "Permisos",
+        "en": "Permissions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cuentas con permission_level >= 1: nivel, origen (entorno/consola), quién lo concedió y cuándo",
+        "en": "Accounts with permission_level >= 1: level, source (environment/console), who granted it and when"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "perms set",
+      "category": {
+        "es": "Permisos",
+        "en": "Permissions"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": true,
+      "summary": {
+        "es": "Asigna el permission_level (0-4) de una cuenta. Solo niveles menores al propio; el 4 exige --confirm-super; step-up con código MFA",
+        "en": "Set an account's permission_level (0-4). Only levels lower than your own; level 4 needs --confirm-super; step-up with an MFA code"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "perms set ana@example.com 2 --note \"helpdesk\"",
+        "perms set cto@example.com 4 --confirm-super --yes"
+      ],
+      "positionals": [
+        {
+          "name": "email",
+          "description": {
+            "es": "Correo de la cuenta",
+            "en": "Account email"
+          },
+          "required": true,
+          "variadic": false
+        },
+        {
+          "name": "permission_level",
+          "description": {
+            "es": "Nivel 0..4",
+            "en": "Level 0..4"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "note",
+          "type": "string",
+          "description": {
+            "es": "Nota (máx. 300 caracteres)",
+            "en": "Note (max 300 chars)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "confirm-super",
+          "type": "boolean",
+          "description": {
+            "es": "Confirma conceder el nivel 4 (superadmin)",
+            "en": "Confirm granting level 4 (super admin)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "perms unlock",
+      "category": {
+        "es": "Permisos",
+        "en": "Permissions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": true,
+      "summary": {
+        "es": "Desbloquea el acceso privilegiado de una cuenta bloqueada por pelea de sesiones (solo superadmin; step-up MFA)",
+        "en": "Unlock the privileged access of an account locked by a session fight (super admin only; MFA step-up)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "email",
+          "description": {
+            "es": "Correo de la cuenta bloqueada",
+            "en": "Locked account email"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "perms history",
+      "category": {
+        "es": "Permisos",
+        "en": "Permissions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Historial de cambios de nivel (quién, a quién, anterior → nuevo, IP)",
+        "en": "Level change history (who, whom, previous → new, IP)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "email",
+          "type": "string",
+          "description": {
+            "es": "Filtrar por cuenta",
+            "en": "Filter by account"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "limit",
+          "type": "number",
+          "description": {
+            "es": "Filas (máx. 200)",
+            "en": "Rows (max 200)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "session show",
+      "category": {
+        "es": "Sesión privilegiada",
+        "en": "Privileged session"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Tu sesión privilegiada vigente (web o CLI): dónde, desde cuándo y cuándo caduca",
+        "en": "Your current privileged session (web or CLI): where, since when and when it expires"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "session close",
+      "category": {
+        "es": "Sesión privilegiada",
+        "en": "Privileged session"
+      },
+      "risk": "destructive",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cierra tu sesión privilegiada vigente (web o CLI) y libera el slot",
+        "en": "Close your current privileged session (web or CLI) and free the slot"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "session policy",
+      "category": {
+        "es": "Sesión privilegiada",
+        "en": "Privileged session"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Política de sesiones privilegiadas de la instancia: inactividad, tope y bloqueo por reemplazos",
+        "en": "Instance privileged session policy: idle timeout, cap and replacement lockout"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "session policy set",
+      "category": {
+        "es": "Sesión privilegiada",
+        "en": "Privileged session"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": true,
+      "summary": {
+        "es": "Cambia la política: inactividad (5-60 min), umbral (2-10) y ventana (1-60 min) del bloqueo por pelea de sesiones",
+        "en": "Change the policy: idle timeout (5-60 min), threshold (2-10) and window (1-60 min) of the session-fight lockout"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "idle-minutes",
+          "type": "number",
+          "description": {
+            "es": "Inactividad en minutos (5-60)",
+            "en": "Idle timeout in minutes (5-60)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "lock-threshold",
+          "type": "number",
+          "description": {
+            "es": "Reemplazos que bloquean (2-10)",
+            "en": "Replacements that lock (2-10)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "lock-window",
+          "type": "number",
+          "description": {
+            "es": "Ventana en minutos (1-60)",
+            "en": "Window in minutes (1-60)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    }
+  ],
+  "builtins": [
+    {
+      "name": "clear",
+      "summary": {
+        "es": "Limpia la pantalla (Ctrl+L)",
+        "en": "Clear the screen (Ctrl+L)"
+      }
+    },
+    {
+      "name": "exit",
+      "summary": {
+        "es": "Cierra la consola / el shell",
+        "en": "Close the console / the shell"
+      }
+    }
+  ],
+  "excluded": {
+    "POST /api/admin/login": {
+      "es": "Es el login web del manager (fija la cookie auth_session). La CLI usa POST /api/admin/cli/login (token) y la consola web ya esta autenticada.",
+      "en": "It is the manager web login (it sets the auth_session cookie). The CLI uses POST /api/admin/cli/login (token) and the web console is already authenticated."
+    },
+    "POST /api/admin/logout": {
+      "es": "Cierra la cookie de la sesion web; en la CLI el equivalente es `bloomx logout` (revoca el token) y `tokens revoke`.",
+      "en": "It clears the web session cookie; in the CLI the equivalents are `bloomx logout` (revokes the token) and `tokens revoke`."
+    },
+    "GET /api/admin/retention": {
+      "es": "Endpoint del cron de Vercel (CRON_SECRET) que ejecuta la purga; el equivalente manual es `retention run` (simulacro por defecto, --apply para borrar), que usa POST /api/admin/retention/run.",
+      "en": "Vercel cron endpoint (CRON_SECRET) that runs the purge; the manual equivalent is `retention run` (dry run by default, --apply to delete), which uses POST /api/admin/retention/run."
+    },
+    "POST /api/admin/retention": {
+      "es": "Alias POST del cron anterior; cubierto por `retention run`.",
+      "en": "POST alias of the cron endpoint above; covered by `retention run`."
+    },
+    "POST /api/admin/reprocess-attachments": {
+      "es": "Autentica con la cookie de SESION de usuario (getCurrentUser) y reprocesa correos del propio usuario o por id: no es una accion del guardia de admin y un token de CLI no tiene cookie de usuario. Para administradores existe el script `npm run attachments:reprocess`.",
+      "en": "It authenticates with the USER session cookie (getCurrentUser) and reprocesses the caller's own mail or given ids: it is not an admin-guard action and a CLI token has no user cookie. Administrators have the `npm run attachments:reprocess` script."
+    },
+    "PUT /api/admin/profile/password": {
+      "es": "Cambia la contrasena y REEMITE la cookie de sesion del navegador (setSessionCookie): no tiene sentido con un token. Alternativas: la consola web (/admin/profile) y, para otros usuarios, `users password-reset` / `users force-password-change`.",
+      "en": "It changes the password and RE-ISSUES the browser session cookie (setSessionCookie): meaningless with a token. Alternatives: the web console (/admin/profile) and, for other users, `users password-reset` / `users force-password-change`."
+    },
+    "GET /api/admin/profile": {
+      "es": "Depende de la cookie de usuario (getCurrentUser); el comando `profile` entrega lo mismo (identidad, MFA, sesiones) desde el actor autenticado.",
+      "en": "It depends on the user cookie (getCurrentUser); the `profile` command returns the same data (identity, MFA, sessions) from the authenticated actor."
+    },
+    "GET /api/admin/profile/sessions": {
+      "es": "Marca \"esta sesion\" con la cookie del navegador; equivalente: `users sessions me`.",
+      "en": "It flags \"this session\" using the browser cookie; equivalent: `users sessions me`."
+    },
+    "DELETE /api/admin/profile/sessions": {
+      "es": "Reemite la cookie de este navegador tras revocar; equivalente: `users sessions revoke me`.",
+      "en": "It re-issues this browser's cookie after revoking; equivalent: `users sessions revoke me`."
+    },
+    "DELETE /api/admin/profile/sessions/[jti]": {
+      "es": "Compara con la cookie actual para no cerrar \"esta sesion\"; equivalente: `users sessions revoke me --jti <jti>`.",
+      "en": "It compares against the current cookie so it does not close \"this session\"; equivalent: `users sessions revoke me --jti <jti>`."
+    }
+  },
+  "levels": [
+    {
+      "permission_level": 0,
+      "es": {
+        "name": "user",
+        "can": "Usuario normal: sin acceso al admin."
+      },
+      "en": {
+        "name": "user",
+        "can": "Regular user: no admin access."
+      }
+    },
+    {
+      "permission_level": 1,
+      "es": {
+        "name": "support",
+        "can": "Solo lectura: usuarios, auditoría, estado del sistema, correo, spam y marca en lectura. Nada que escriba."
+      },
+      "en": {
+        "name": "support",
+        "can": "Read only: users, audit, system status, mail, spam and brand (read). Nothing that writes."
+      }
+    },
+    {
+      "permission_level": 2,
+      "es": {
+        "name": "operator",
+        "can": "Gestiona cuentas: crear, deshabilitar y reactivar usuarios, cuotas, sesiones (revocar), supresiones y listas de spam. No toca configuración global ni seguridad."
+      },
+      "en": {
+        "name": "operator",
+        "can": "Manages accounts: create, disable and re-enable users, quotas, sessions (revoke), suppressions and spam lists. No global configuration or security."
+      }
+    },
+    {
+      "permission_level": 3,
+      "es": {
+        "name": "admin",
+        "can": "Configuración de la instancia: marca/temas/landing, extensiones, retención, cuotas del dominio, política de spam, transferencias de buzones, restablecer contraseñas. Gestiona niveles 0-2."
+      },
+      "en": {
+        "name": "admin",
+        "can": "Instance configuration: brand/themes/landing, extensions, retention, domain quotas, spam policy, mailbox transfers, password resets. Manages levels 0-2."
+      }
+    },
+    {
+      "permission_level": 4,
+      "es": {
+        "name": "superadmin",
+        "can": "Todo: claves de firma, extensiones obligatorias y credenciales, restablecer MFA, purga de retención real y niveles de otros (0-4). Conceder el 4 exige confirmación y step-up con MFA."
+      },
+      "en": {
+        "name": "superadmin",
+        "can": "Everything: signing keys, mandatory extensions and credentials, MFA resets, real retention purge and others' levels (0-4). Granting 4 needs confirmation and an MFA step-up."
+      }
+    }
+  ],
+  "limits": {
+    "maxLineBytes": 8192,
+    "maxOutputBytes": 1048576,
+    "maxInputBytes": 524288,
+    "timeoutMs": 25000,
+    "perMinute": 60,
+    "maxActiveTokens": 10
+  }
+}

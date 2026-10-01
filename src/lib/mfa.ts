@@ -1,5 +1,6 @@
 import { encrypt, tryDecrypt } from "./encryption";
 import { prisma } from "./prisma";
+import { ADMIN_LEVEL, MIN_ADMIN_ACCESS_LEVEL, effectiveLevelSync, emailsAtLeast } from "./permissions-core";
 import {
     buildOtpauthUri,
     generateRecoveryCodes,
@@ -26,23 +27,24 @@ export class MfaStoreUnavailableError extends Error {
     }
 }
 
+/**
+ * Correos con ACCESO al admin (permission_level >= 1: entorno ADMIN_EMAILS + concesiones de consola). Es el conjunto al que se exige MFA.
+ * La instantanea de BD la refrescan los puntos de entrada asincronos (permissions.refreshPermissions); aqui solo se lee.
+ */
 export function adminEmails(): string[] {
-    return String(process.env.ADMIN_EMAILS || "")
-        .split(",")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
+    return emailsAtLeast(MIN_ADMIN_ACCESS_LEVEL);
 }
 
+/** Equivale al antiguo "administrador": permission_level >= 3 (entorno = 4). Compatibilidad con los helpers anteriores. */
 export function isAdminEmail(email: unknown): boolean {
-    const e = String(email ?? "").trim().toLowerCase();
-    return !!e && adminEmails().includes(e);
+    return effectiveLevelSync(email).level >= ADMIN_LEVEL;
 }
 
-/** El usuario DEBE tener MFA para iniciar sesion. */
+/** El usuario DEBE tener MFA para iniciar sesion: cualquier cuenta con acceso al admin (nivel >= 1). */
 export function mfaRequiredFor(email: unknown): boolean {
     if (process.env.MFA_REQUIRED_ALL === "true") return true;
     if (process.env.MFA_ENFORCE_ADMIN === "false") return false;
-    return isAdminEmail(email);
+    return effectiveLevelSync(email).level >= MIN_ADMIN_ACCESS_LEVEL;
 }
 
 function pepper(): string {

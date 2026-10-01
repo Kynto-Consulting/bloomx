@@ -1210,6 +1210,206 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "UserSession_expiresAt_idx" ON "UserSession" ("expiresAt")',
         ],
     },
+    // Tokens de la CLI de administracion (bloomx-cli / consola). Solo se guarda el SHA-256 del token; ver src/lib/admin-cli/tokens.ts.
+    {
+        name: 'AdminCliToken',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AdminCliToken" (
+            "id" TEXT NOT NULL,
+            "tokenHash" TEXT NOT NULL,
+            "name" TEXT NOT NULL,
+            "kind" TEXT NOT NULL,
+            "adminId" TEXT NOT NULL,
+            "adminEmail" TEXT,
+            "scopes" TEXT NOT NULL DEFAULT 'read',
+            "domain" TEXT,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "expiresAt" TIMESTAMPTZ NOT NULL,
+            "lastUsedAt" TIMESTAMPTZ,
+            "lastUsedIp" TEXT,
+            "lastUsedUa" TEXT,
+            "createdIp" TEXT,
+            "revokedAt" TIMESTAMPTZ,
+            "managerSessionEnc" TEXT,
+            "permission_level" SMALLINT NOT NULL DEFAULT 1,
+            "class" TEXT NOT NULL DEFAULT 'interactive'
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'tokenHash', definition: 'TEXT NOT NULL' },
+            { name: 'name', definition: 'TEXT NOT NULL' },
+            { name: 'kind', definition: 'TEXT NOT NULL' },
+            { name: 'adminId', definition: 'TEXT NOT NULL' },
+            { name: 'adminEmail', definition: 'TEXT' },
+            { name: 'scopes', definition: "TEXT NOT NULL DEFAULT 'read'" },
+            { name: 'domain', definition: 'TEXT' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+            { name: 'lastUsedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'lastUsedIp', definition: 'TEXT' },
+            { name: 'lastUsedUa', definition: 'TEXT' },
+            { name: 'createdIp', definition: 'TEXT' },
+            { name: 'revokedAt', definition: 'TIMESTAMPTZ' },
+            { name: 'managerSessionEnc', definition: 'TEXT' },
+            // Tope de nivel de la cuenta al emitir el token (el nivel efectivo es min(este, el actual de la cuenta)).
+            { name: 'permission_level', definition: 'SMALLINT NOT NULL DEFAULT 1' },
+            // interactive (ocupa el slot de sesion privilegiada) | machine (automatizacion: solo lectura, corta duracion, no ocupa el slot)
+            { name: 'class', definition: "TEXT NOT NULL DEFAULT 'interactive'" },
+        ],
+        constraints: [
+            { name: 'AdminCliToken_pkey', statement: 'ALTER TABLE "AdminCliToken" ADD CONSTRAINT "AdminCliToken_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE UNIQUE INDEX IF NOT EXISTS "AdminCliToken_tokenHash_key" ON "AdminCliToken" ("tokenHash")',
+            'CREATE INDEX IF NOT EXISTS "AdminCliToken_adminId_idx" ON "AdminCliToken" ("adminId", "createdAt" DESC)',
+        ],
+    },
+    // Niveles de permisos de la administracion (0 user .. 4 superadmin). ADMIN_EMAILS sigue siendo semilla/rescate (nivel 4 fijado por
+    // entorno); aqui solo viven las concesiones hechas desde la consola/CLI. Ver src/lib/permissions-core.ts y permissions.ts.
+    {
+        name: 'UserPermission',
+        createStatement: `CREATE TABLE IF NOT EXISTS "UserPermission" (
+            "email" TEXT NOT NULL,
+            "userId" TEXT,
+            "permission_level" SMALLINT NOT NULL DEFAULT 0,
+            "grantedBy" TEXT,
+            "grantedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "note" TEXT
+        )`,
+        columns: [
+            { name: 'email', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT' },
+            { name: 'permission_level', definition: 'SMALLINT NOT NULL DEFAULT 0' },
+            { name: 'grantedBy', definition: 'TEXT' },
+            { name: 'grantedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'note', definition: 'TEXT' },
+        ],
+        constraints: [
+            { name: 'UserPermission_pkey', statement: 'ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_pkey" PRIMARY KEY ("email")' },
+            { name: 'UserPermission_level_check', statement: 'ALTER TABLE "UserPermission" ADD CONSTRAINT "UserPermission_level_check" CHECK ("permission_level" BETWEEN 0 AND 4)' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "UserPermission_level_idx" ON "UserPermission" ("permission_level") WHERE "permission_level" > 0',
+        ],
+    },
+    // Historial inmutable de cambios de nivel (quien, a quien, anterior -> nuevo, IP). Solo se inserta.
+    {
+        name: 'UserPermissionHistory',
+        createStatement: `CREATE TABLE IF NOT EXISTS "UserPermissionHistory" (
+            "id" TEXT NOT NULL,
+            "email" TEXT NOT NULL,
+            "userId" TEXT,
+            "previousLevel" SMALLINT NOT NULL,
+            "newLevel" SMALLINT NOT NULL,
+            "changedBy" TEXT,
+            "changedByLevel" SMALLINT,
+            "changedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "ip" TEXT,
+            "source" TEXT,
+            "note" TEXT
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'email', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT' },
+            { name: 'previousLevel', definition: 'SMALLINT NOT NULL' },
+            { name: 'newLevel', definition: 'SMALLINT NOT NULL' },
+            { name: 'changedBy', definition: 'TEXT' },
+            { name: 'changedByLevel', definition: 'SMALLINT' },
+            { name: 'changedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'ip', definition: 'TEXT' },
+            { name: 'source', definition: 'TEXT' },
+            { name: 'note', definition: 'TEXT' },
+        ],
+        constraints: [
+            { name: 'UserPermissionHistory_pkey', statement: 'ALTER TABLE "UserPermissionHistory" ADD CONSTRAINT "UserPermissionHistory_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "UserPermissionHistory_email_idx" ON "UserPermissionHistory" ("email", "changedAt" DESC)',
+            'CREATE INDEX IF NOT EXISTS "UserPermissionHistory_changedAt_idx" ON "UserPermissionHistory" ("changedAt" DESC)',
+        ],
+    },
+    // UNA sola sesion privilegiada (admin web o CLI interactivo) por cuenta con permission_level >= 1. Ver src/lib/privileged-session.ts.
+    {
+        name: 'PrivilegedSession',
+        createStatement: `CREATE TABLE IF NOT EXISTS "PrivilegedSession" (
+            "userId" TEXT NOT NULL,
+            "kind" TEXT NOT NULL,
+            "sessionRef" TEXT NOT NULL,
+            "ip" TEXT,
+            "userAgent" TEXT,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "lastSeenAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'kind', definition: 'TEXT NOT NULL' },
+            { name: 'sessionRef', definition: 'TEXT NOT NULL' },
+            { name: 'ip', definition: 'TEXT' },
+            { name: 'userAgent', definition: 'TEXT' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'lastSeenAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'PrivilegedSession_pkey', statement: 'ALTER TABLE "PrivilegedSession" ADD CONSTRAINT "PrivilegedSession_pkey" PRIMARY KEY ("userId")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "PrivilegedSession_ref_idx" ON "PrivilegedSession" ("sessionRef")',
+        ],
+    },
+    // Bloqueo del acceso privilegiado de una cuenta por "pelea de sesiones" (>= umbral de reemplazos en la ventana). Solo lo levanta un superadmin
+    // (perms unlock, con step-up) o el rescate por entorno ADMIN_LOCKOUT_RESET. No afecta al correo web normal de la cuenta.
+    {
+        name: 'PrivilegedLock',
+        createStatement: `CREATE TABLE IF NOT EXISTS "PrivilegedLock" (
+            "userId" TEXT NOT NULL,
+            "email" TEXT,
+            "lockedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "replacements" INTEGER NOT NULL DEFAULT 0,
+            "reason" TEXT NOT NULL DEFAULT 'session_fight'
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'email', definition: 'TEXT' },
+            { name: 'lockedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'replacements', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'reason', definition: "TEXT NOT NULL DEFAULT 'session_fight'" },
+        ],
+        constraints: [
+            { name: 'PrivilegedLock_pkey', statement: 'ALTER TABLE "PrivilegedLock" ADD CONSTRAINT "PrivilegedLock_pkey" PRIMARY KEY ("userId")' },
+        ],
+    },
+    // Por que termino una sesion privilegiada (superseded | expired_idle | expired_absolute | closed): permite el mensaje claro al volver a usarla.
+    {
+        name: 'PrivilegedSessionEnd',
+        createStatement: `CREATE TABLE IF NOT EXISTS "PrivilegedSessionEnd" (
+            "sessionRef" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "kind" TEXT NOT NULL,
+            "reason" TEXT NOT NULL,
+            "endedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "byKind" TEXT,
+            "byIp" TEXT,
+            "byUserAgent" TEXT
+        )`,
+        columns: [
+            { name: 'sessionRef', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'kind', definition: 'TEXT NOT NULL' },
+            { name: 'reason', definition: 'TEXT NOT NULL' },
+            { name: 'endedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'byKind', definition: 'TEXT' },
+            { name: 'byIp', definition: 'TEXT' },
+            { name: 'byUserAgent', definition: 'TEXT' },
+        ],
+        constraints: [
+            { name: 'PrivilegedSessionEnd_pkey', statement: 'ALTER TABLE "PrivilegedSessionEnd" ADD CONSTRAINT "PrivilegedSessionEnd_pkey" PRIMARY KEY ("sessionRef")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "PrivilegedSessionEnd_endedAt_idx" ON "PrivilegedSessionEnd" ("endedAt")',
+        ],
+    },
     // Politicas editables desde la consola (retencion). Sustituyen a la variable de entorno cuando existen.
     {
         name: 'AdminSetting',
@@ -1625,4 +1825,9 @@ export async function ensureDatabaseSchema() {
     }
 
     return ensureSchemaPromise;
+}
+
+/** Nombres de las tablas que `ensureDatabaseSchema` garantiza (para comprobar el esquema desde la consola/CLI de administracion). */
+export function expectedSchemaTables(): string[] {
+    return TABLES.map((t) => t.name);
 }

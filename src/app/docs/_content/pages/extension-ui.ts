@@ -1,40 +1,12 @@
 import type { Block, DocPageContent } from '../types';
 import { iconBlocks } from '../icon-docs';
 import { GAPS, TONES, UI_ACTIONS, UI_COMPONENTS, UI_LIMITS, type PropSpec } from '@/lib/expansions/ui-schema';
+import { EN_DOC, KIT_CATEGORIES as CATEGORIES, kitHref } from '../ui-kit/kit';
 
 /**
  * Kit de componentes de extensiones. Las tablas del catalogo se GENERAN desde ui-schema.ts: la documentacion no
  * puede quedar desfasada respecto al schema que valida y al renderer que pinta.
  */
-
-const CATEGORIES: Array<{ id: string; es: string; en: string }> = [
-    { id: 'layout', es: 'Estructura', en: 'Layout' },
-    { id: 'typography', es: 'Texto', en: 'Text' },
-    { id: 'action', es: 'Acciones', en: 'Actions' },
-    { id: 'input', es: 'Entradas y formularios', en: 'Inputs and forms' },
-    { id: 'data', es: 'Datos', en: 'Data' },
-    { id: 'navigation', es: 'Navegación', en: 'Navigation' },
-    { id: 'feedback', es: 'Estado y avisos', en: 'Status and alerts' },
-    { id: 'overlay', es: 'Superpuestos', en: 'Overlays' },
-    { id: 'chart', es: 'Gráficos', en: 'Charts' },
-    { id: 'logic', es: 'Lógica', en: 'Logic' },
-];
-
-const EN_DOC: Record<string, string> = {
-    STACK: 'Vertical stack with a scale gap', ROW: 'Horizontal row', GRID: 'Equal-column grid, collapses on mobile', CARD: 'Card with optional title and accent', SECTION: 'Section with heading, optionally collapsible',
-    DIVIDER: 'Separator line with optional label', SPACER: 'Empty space from the scale', TEXT: 'Plain text paragraph (never HTML)', HEADING: 'Semantic heading h1-h6', CODE: 'Inline or block code with copy button',
-    LINK: 'Safe link (http, https, mailto, tel or internal path)', MARKDOWN: 'Safe Markdown (raw HTML is shown as text)', ICON: 'Decorative Lucide icon', BUTTON: 'Button: tone + variant, contrast guaranteed',
-    ICON_BUTTON: 'Icon-only button (label required)', BUTTON_GROUP: 'Groups buttons', MENU: 'Button that opens an action menu (keyboard: arrows, Enter, Escape)', IMAGE_BUTTON: 'Clickable https image',
-    SMART_REPLY_CHIPS: 'Row of clickable reply suggestions', INPUT: 'Single-line text field', TEXTAREA: 'Multi-line text', SELECT: 'Native dropdown', CHECKBOX: 'Checkbox', RADIO_GROUP: 'Mutually exclusive options',
-    TOGGLE: 'On/off switch', SLIDER: 'Numeric slider', DATE_PICKER: 'Date (YYYY-MM-DD)', TIME_PICKER: 'Time (HH:MM)', COLOR_PICKER: 'Colour chooser for USER DATA only (never styles the UI)', FILE_INPUT: 'File selection with size limit',
-    TAG_INPUT: 'List of tags/values', CONTACT_PICKER: 'Address-book contact picker', FORM: 'Form with declarative validation and automatic loading/error/success states', TABLE: 'Table with sorting, pagination and selection',
-    LIST: 'List from an item template or LIST_ITEM children', LIST_ITEM: 'List item with title, description, icon and actions', TABS: 'Accessible tabs', TAB_ITEM: 'TABS panel (legacy children form)', ACCORDION: 'Collapsible sections',
-    ACCORDION_ITEM: 'ACCORDION section (legacy children form)', WIZARD: 'Step-by-step wizard with progress', BADGE: 'Short status label', CHIP: 'Filter/value chip, optionally clickable or removable', AVATAR: 'Avatar with https image or initials',
-    STAT: 'Highlighted metric with delta', PROGRESS: 'Progress bar', SKELETON: 'Loading placeholder', EMPTY: 'Empty state with message and action', ALERT: 'Inline alert', CALLOUT: 'Highlighted note', LOADING: 'Loading indicator',
-    MODAL: 'OVERLAY frame (or your own dialog with open/bind)', DRAWER: 'Side panel', POPOVER: 'Floating content anchored to a trigger', TOOLTIP: 'Help on hover/focus', BAR_CHART: 'Simple bar chart (own SVG, theme colours)',
-    SPARKLINE: 'Minimal trend line', DONUT: 'Proportion ring with legend', CONDITIONAL: 'Shows `true` or `false` by `condition`', CONDITION: 'Like CONDITIONAL with `if`/`else`', FOR_EACH: 'Repeats `template` per item', REPEAT: 'Repeats children N times or per item',
-    SWITCH: 'Picks a case by `value`', CASE: 'SWITCH case', DEFAULT: 'SWITCH default', SET_VAR: 'Sets a `state` variable (invisible)', HEADLESS: 'No UI: only runs `onLoad`', DEBUG: 'Development only: shows context and state',
-};
 
 function shortProp(name: string, spec: PropSpec): string {
     if (spec.k === 'enum' && spec.values) {
@@ -51,7 +23,7 @@ function catalogBlocks(locale: 'es' | 'en'): Block[] {
         const rows = Object.entries(UI_COMPONENTS)
             .filter(([, spec]) => spec.category === category.id)
             .map(([type, spec]) => [
-                `\`${type}\``,
+                `[\`${type}\`](${kitHref(type)})`,
                 locale === 'es' ? spec.doc : (EN_DOC[type] ?? spec.doc),
                 Object.entries(spec.props).map(([name, prop]) => shortProp(name, prop)).map((p) => `\`${p}\``).join(' ') || '—',
             ]);
@@ -114,6 +86,9 @@ const limits = `maxNodes ${UI_LIMITS.maxNodes} · maxDepth ${UI_LIMITS.maxDepth}
 const page: DocPageContent = {
     es: [
         { t: 'p', text: 'Las extensiones describen su interfaz como **JSON** (`{ "type", "props", "children" }`). BloomX lo dibuja con un **kit de componentes** propio que hereda, sin que la extensión haga nada, la **paleta, el radio, la tipografía y el modo claro/oscuro de la empresa**. Esta página es la referencia de componentes, tematización, estado, expresiones y acciones; las herramientas para escribirlos y probarlos están en [Herramientas de extensiones](/docs/extension-tools).' },
+        { t: 'h2', id: 'components', text: 'Un componente, una página' },
+        { t: 'p', text: 'Cada componente del kit tiene su **página propia** (`/docs/extension-ui/<componente>`, por ejemplo [`BUTTON`](/docs/extension-ui/button), [`FORM`](/docs/extension-ui/form) o [`TABLE`](/docs/extension-ui/table)) con la tabla de props generada del esquema, vista previa en vivo con el renderer real, un **simulador** (editor de props, validación, estado, contexto, backend simulado y registro de eventos) y un ejemplo tomado de un manifest real. El índice de abajo agrupa todos por categoría.' },
+        { t: 'kit-index' },
         { t: 'h2', id: 'theming', text: 'Reglas de tematización' },
         { t: 'p', text: 'Regla clave: **una extensión no elige colores ni estilos**. Solo usa propiedades semánticas y el renderer las traduce a los tokens del tema activo (`bg-primary`, `text-success`, `border-destructive`...), con el contraste exigido por el contrato de temas ([Temas empresariales](/docs/themes)).' },
         { t: 'table', head: ['Propiedad', 'Valores', 'Uso'], rows: [
@@ -125,7 +100,7 @@ const page: DocPageContent = {
             ['`gap` / `padding` / `spacing`', GAPS.map((g) => `\`${g}\``).join(' '), 'Escala de 4 px (0, 4, 8, 12, 16, 20, 24, 32, 40, 48 px)'],
             ['`width`', '`sm` `md` `lg` `xl` `full`', 'Ancho de modales y paneles'],
         ] },
-        { t: 'callout', kind: 'danger', title: 'Lo que se rechaza', text: 'Cualquier `className`, `style`, `color`, `bg`, `border`, `shadow`, `html`, `dangerouslySetInnerHTML`, evento DOM (`onclick`...), `url()`, HTML en textos o color hex en una prop semántica. El validador lo marca como **error** con su ruta; en ejecución se **elimina con aviso** (nunca llega al DOM). `COLOR_PICKER` solo maneja un hex como **dato** del usuario (etiquetas, agendas), nunca estiliza la interfaz.' },
+        { t: 'callout', kind: 'danger', title: 'Lo que se rechaza', text: 'Cualquier `className`, `style`, `color`, `bg`, `border`, `shadow`, `html`, `dangerouslySetInnerHTML`, evento DOM (`onclick`...), `url()`, HTML en textos o color hex en una prop semántica. El validador lo marca como **error** con su ruta; en ejecución se **elimina con aviso** (nunca llega al DOM). [`COLOR_PICKER`](/docs/extension-ui/color-picker) solo maneja un hex como **dato** del usuario (etiquetas, agendas), nunca estiliza la interfaz.' },
         { t: 'ul', items: [
             '**Contraste garantizado**: cada par texto/fondo que pinta el kit está declarado y un test lo comprueba en los 8 temas genéricos y en las paletas de empresa de prueba (claro y oscuro). Las superficies "suaves" usan la pareja `card`/`card-foreground` con borde de la intención, no tintes translucidos que podrían bajar de 4.5:1.',
             '**Valores inválidos no rompen**: un `tone` desconocido, un `gap` fuera de escala o un texto donde se espera un número se corrigen al valor por defecto en ejecución y se avisan en el validador.',
@@ -140,8 +115,8 @@ const page: DocPageContent = {
         { t: 'ul', items: [
             '`state` del manifest define el valor inicial; cada mount y cada overlay tiene su propio estado. Lee con `${state.a.b}` y escribe con `SET_STATE` (`key` admite rutas `"a.b"`).',
             '**Binding bidireccional**: `bind: "form.email"` en cualquier entrada lee y escribe `state.form.email`; `defaultValue` se aplica una vez si aún no hay valor; `onChange` recibe `value`.',
-            'Dentro de un `FORM`, las entradas con `name` se registran solas: validan al enviar y sus valores viajan en `formData`.',
-            '**Carga y error automáticos**: `CALL_BACKEND`/`CALL_API` mantienen `state.$loading.<clave>` y `state.$error.<clave>` (la clave es `key` o el nombre de la función). Un `BUTTON` cuyo `onClick` llama al backend muestra solo su carga, se bloquea y evita el doble envío; un `FORM` muestra cargando, el error del backend y `successMessage`.',
+            'Dentro de un [`FORM`](/docs/extension-ui/form), las entradas con `name` se registran solas: validan al enviar y sus valores viajan en `formData`.',
+            '**Carga y error automáticos**: `CALL_BACKEND`/`CALL_API` mantienen `state.$loading.<clave>` y `state.$error.<clave>` (la clave es `key` o el nombre de la función). Un [`BUTTON`](/docs/extension-ui/button) cuyo `onClick` llama al backend muestra solo su carga, se bloquea y evita el doble envío; un [`FORM`](/docs/extension-ui/form) muestra cargando, el error del backend y `successMessage`.',
         ] },
         { t: 'code', lang: 'json', title: 'Estado inicial, bind, resultKey y carga', code: statefulExample },
         { t: 'h2', id: 'expressions', text: 'Expresiones' },
@@ -176,7 +151,7 @@ const page: DocPageContent = {
             ['`COLUMN`, `FLEX`, `BOX`, `BLOCK`', '`STACK` / `ROW` con `gap`, `align`, `justify`'],
             ['`SEPARATOR`, `EMPTY_STATE`, `DATA_TABLE`, `CODE_BLOCK`, `FILE_UPLOAD`, `CODE_EDITOR`', '`DIVIDER`, `EMPTY`, `TABLE`, `CODE`, `FILE_INPUT`, `TEXTAREA` (con `mono`)'],
             ['`BUTTON` `variant: "primary"|"secondary"|"destructive"`', '`tone` + `variant` (`solid` `soft` `outline` `ghost` `link`)'],
-            ['`BUTTON` con `menuOptions`', '`MENU` con `items`'],
+            ['`BUTTON` con `menuOptions`', '[`MENU`](/docs/extension-ui/menu) con `items`'],
             ['`TEXT variant: "error"|"success"|"h4"|"body"`', '`ALERT tone` · `HEADING` · `TEXT variant: "quote"`'],
             ['`ALERT variant`, `BADGE variant`', '`tone` (+ `variant` de superficie)'],
             ['`bindTo`, `INPUT multiline`', '`bind`, `TEXTAREA`'],
@@ -185,10 +160,13 @@ const page: DocPageContent = {
             ['`IFRAME` (HTML en una prop)', 'Ya no se admite: usa `MARKDOWN` o componentes'],
         ] },
         ...iconBlocks(true),
-        { t: 'callout', kind: 'note', title: 'Límites', text: 'El HTML sigue siendo texto: `MARKDOWN` solo admite un subconjunto (negrita, cursiva, código, listas, encabezados, enlaces seguros). Los gráficos son SVG propios sin ejes complejos ni animaciones. `ContactPicker` usa la libreta del usuario (`/api/contacts/suggestions`). El backend compartido valida el manifest pero **aún no** valida el UI al publicar: la comprobación de UI la hacen el validador CLI y el frontend al cargar.' },
+        { t: 'callout', kind: 'note', title: 'Límites', text: 'El HTML sigue siendo texto: [`MARKDOWN`](/docs/extension-ui/markdown) solo admite un subconjunto (negrita, cursiva, código, listas, encabezados, enlaces seguros). Los gráficos son SVG propios sin ejes complejos ni animaciones. [`CONTACT_PICKER`](/docs/extension-ui/contact-picker) usa la libreta del usuario (`/api/contacts/suggestions`). El backend compartido valida el manifest pero **aún no** valida el UI al publicar: la comprobación de UI la hacen el validador CLI y el frontend al cargar.' },
     ],
     en: [
         { t: 'p', text: 'Extensions describe their interface as **JSON** (`{ "type", "props", "children" }`). BloomX draws it with its own **component kit**, which inherits — with nothing for the extension to do — the company **palette, radius, typography and light/dark mode**. This page is the reference for components, theming, state, expressions and actions; the tools to write and test them are in [Extension tools](/docs/extension-tools).' },
+        { t: 'h2', id: 'components', text: 'One component, one page' },
+        { t: 'p', text: 'Every kit component has its **own page** (`/docs/extension-ui/<component>`, for example [`BUTTON`](/docs/extension-ui/button), [`FORM`](/docs/extension-ui/form) or [`TABLE`](/docs/extension-ui/table)) with the props table generated from the schema, a live preview using the real renderer, a **simulator** (props editor, validation, state, context, simulated backend and event log) and an example taken from a real manifest. The index below groups them all by category.' },
+        { t: 'kit-index' },
         { t: 'h2', id: 'theming', text: 'Theming rules' },
         { t: 'p', text: 'Key rule: **an extension does not choose colours or styles**. It only uses semantic properties and the renderer maps them to the active theme tokens (`bg-primary`, `text-success`, `border-destructive`...) with the contrast required by the theme contract ([Enterprise themes](/docs/themes)).' },
         { t: 'table', head: ['Property', 'Values', 'Use'], rows: [
@@ -200,7 +178,7 @@ const page: DocPageContent = {
             ['`gap` / `padding` / `spacing`', GAPS.map((g) => `\`${g}\``).join(' '), '4 px scale (0, 4, 8, 12, 16, 20, 24, 32, 40, 48 px)'],
             ['`width`', '`sm` `md` `lg` `xl` `full`', 'Width of modals and panels'],
         ] },
-        { t: 'callout', kind: 'danger', title: 'What is rejected', text: 'Any `className`, `style`, `color`, `bg`, `border`, `shadow`, `html`, `dangerouslySetInnerHTML`, DOM event (`onclick`...), `url()`, HTML in text or a hex colour in a semantic prop. The validator flags it as an **error** with its path; at runtime it is **dropped with a warning** (it never reaches the DOM). `COLOR_PICKER` only handles a hex as user **data** (labels, calendars); it never styles the interface.' },
+        { t: 'callout', kind: 'danger', title: 'What is rejected', text: 'Any `className`, `style`, `color`, `bg`, `border`, `shadow`, `html`, `dangerouslySetInnerHTML`, DOM event (`onclick`...), `url()`, HTML in text or a hex colour in a semantic prop. The validator flags it as an **error** with its path; at runtime it is **dropped with a warning** (it never reaches the DOM). [`COLOR_PICKER`](/docs/extension-ui/color-picker) only handles a hex as user **data** (labels, calendars); it never styles the interface.' },
         { t: 'ul', items: [
             '**Guaranteed contrast**: every text/background pair the kit paints is declared and a test checks it on the 8 generic themes and on the test company palettes (light and dark). "Soft" surfaces use the `card`/`card-foreground` pair with an intent-coloured border, not translucent tints that could fall below 4.5:1.',
             '**Invalid values do not break anything**: an unknown `tone`, an out-of-scale `gap` or text where a number is expected fall back to the default at runtime and are reported by the validator.',
@@ -215,8 +193,8 @@ const page: DocPageContent = {
         { t: 'ul', items: [
             'The manifest `state` defines the initial value; each mount and each overlay has its own state. Read with `${state.a.b}` and write with `SET_STATE` (`key` accepts `"a.b"` paths).',
             '**Two-way binding**: `bind: "form.email"` on any input reads and writes `state.form.email`; `defaultValue` is applied once if there is no value yet; `onChange` receives `value`.',
-            'Inside a `FORM`, inputs with a `name` register themselves: they validate on submit and their values travel in `formData`.',
-            '**Automatic loading and error**: `CALL_BACKEND`/`CALL_API` maintain `state.$loading.<key>` and `state.$error.<key>` (the key is `key` or the function name). A `BUTTON` whose `onClick` calls the backend shows only its own loading, locks and prevents double submit; a `FORM` shows loading, the backend error and `successMessage`.',
+            'Inside a [`FORM`](/docs/extension-ui/form), inputs with a `name` register themselves: they validate on submit and their values travel in `formData`.',
+            '**Automatic loading and error**: `CALL_BACKEND`/`CALL_API` maintain `state.$loading.<key>` and `state.$error.<key>` (the key is `key` or the function name). A [`BUTTON`](/docs/extension-ui/button) whose `onClick` calls the backend shows only its own loading, locks and prevents double submit; a [`FORM`](/docs/extension-ui/form) shows loading, the backend error and `successMessage`.',
         ] },
         { t: 'code', lang: 'json', title: 'Initial state, bind, resultKey and loading', code: statefulExampleEn },
         { t: 'h2', id: 'expressions', text: 'Expressions' },
@@ -251,7 +229,7 @@ const page: DocPageContent = {
             ['`COLUMN`, `FLEX`, `BOX`, `BLOCK`', '`STACK` / `ROW` with `gap`, `align`, `justify`'],
             ['`SEPARATOR`, `EMPTY_STATE`, `DATA_TABLE`, `CODE_BLOCK`, `FILE_UPLOAD`, `CODE_EDITOR`', '`DIVIDER`, `EMPTY`, `TABLE`, `CODE`, `FILE_INPUT`, `TEXTAREA` (with `mono`)'],
             ['`BUTTON` `variant: "primary"|"secondary"|"destructive"`', '`tone` + `variant` (`solid` `soft` `outline` `ghost` `link`)'],
-            ['`BUTTON` with `menuOptions`', '`MENU` with `items`'],
+            ['`BUTTON` with `menuOptions`', '[`MENU`](/docs/extension-ui/menu) with `items`'],
             ['`TEXT variant: "error"|"success"|"h4"|"body"`', '`ALERT tone` · `HEADING` · `TEXT variant: "quote"`'],
             ['`ALERT variant`, `BADGE variant`', '`tone` (+ surface `variant`)'],
             ['`bindTo`, `INPUT multiline`', '`bind`, `TEXTAREA`'],
@@ -260,7 +238,7 @@ const page: DocPageContent = {
             ['`IFRAME` (HTML in a prop)', 'No longer supported: use `MARKDOWN` or components'],
         ] },
         ...iconBlocks(false),
-        { t: 'callout', kind: 'note', title: 'Limits', text: 'HTML is still text: `MARKDOWN` only supports a subset (bold, italic, code, lists, headings, safe links). Charts are own SVG with no complex axes or animations. `ContactPicker` uses the user address book (`/api/contacts/suggestions`). The shared backend validates the manifest but **does not yet** validate the UI when publishing: the UI check is done by the CLI validator and by the frontend on load.' },
+        { t: 'callout', kind: 'note', title: 'Limits', text: 'HTML is still text: [`MARKDOWN`](/docs/extension-ui/markdown) only supports a subset (bold, italic, code, lists, headings, safe links). Charts are own SVG with no complex axes or animations. [`CONTACT_PICKER`](/docs/extension-ui/contact-picker) uses the user address book (`/api/contacts/suggestions`). The shared backend validates the manifest but **does not yet** validate the UI when publishing: the UI check is done by the CLI validator and by the frontend on load.' },
     ],
 };
 

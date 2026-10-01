@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { requireAdmin } from '@/lib/admin-auth';
+import { requireLevel } from '@/lib/admin-auth';
 import { auditLog, getClientIp } from '@/lib/security';
 
 /**
@@ -53,8 +53,9 @@ function shape(status: number, data: any) {
     return NextResponse.json({ error }, { status, headers: NO_STORE });
 }
 
+// Niveles (lib/admin-levels.ts): ver nombres de credenciales = 3 (admin); fijarlas, borrarlas o migrarlas = 4 (superadmin).
 export async function GET(req: Request) {
-    const guard = await requireAdmin(req);
+    const guard = await requireLevel(3, req);
     if (!guard.ok) return guard.response;
 
     try {
@@ -80,7 +81,7 @@ export async function GET(req: Request) {
 }
 
 export async function PUT(req: Request) {
-    const guard = await requireAdmin(req);
+    const guard = await requireLevel(4, req);
     if (!guard.ok) return guard.response;
 
     try {
@@ -127,7 +128,7 @@ export async function PUT(req: Request) {
 }
 
 export async function POST(req: Request) {
-    const guard = await requireAdmin(req);
+    const guard = await requireLevel(4, req);
     if (!guard.ok) return guard.response;
 
     try {

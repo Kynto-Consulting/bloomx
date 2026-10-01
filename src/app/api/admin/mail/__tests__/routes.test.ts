@@ -24,11 +24,10 @@ async function setup() {
     getDnsHealth = vi.fn(async (domain: string) => ({ configured: true, domain, checkedAt: 'x', spf: null, dkim: null, dmarc: null, mx: null }));
     vi.doMock('@/lib/admin-auth', async () => {
         const { NextResponse } = await import('next/server');
-        return {
-            requireAdmin: async () => admin === 'ok'
-                ? { ok: true, actor: { kind: 'user', id: 'admin1', email: 'admin@acme.com' } }
-                : { ok: false, response: NextResponse.json({ error: 'x' }, { status: admin }) },
-        };
+        const requireAdmin = async () => admin === 'ok'
+            ? { ok: true, actor: { kind: 'user', id: 'admin1', email: 'admin@acme.com' } }
+            : { ok: false, response: NextResponse.json({ error: 'x' }, { status: admin }) };
+        return { requireAdmin, requireLevel: async () => requireAdmin() };
     });
     vi.doMock('@/lib/security', () => ({
         auditLog,

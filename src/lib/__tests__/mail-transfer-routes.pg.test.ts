@@ -17,7 +17,11 @@ import { issueReauthToken, REAUTH_COOKIE, signDownload } from '../mail-transfer/
 import type { TransferActor } from '../mail-transfer/http';
 
 const mocks = vi.hoisted(() => ({ requireAdmin: vi.fn(), getCurrentUser: vi.fn(), getSessionCookie: vi.fn() }));
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: mocks.requireAdmin }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = mocks.requireAdmin;
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/session', () => ({ getCurrentUser: mocks.getCurrentUser, getSessionCookie: mocks.getSessionCookie }));
 
 import { dispatch } from '../mail-transfer/router';

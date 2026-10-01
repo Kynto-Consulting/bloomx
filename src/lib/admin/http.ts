@@ -1,17 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { ZodType } from 'zod';
-import { requireAdmin, type AdminActor } from '@/lib/admin-auth';
+import { requireLevel, type AdminActor, type LevelInfo } from '@/lib/admin-auth';
+import { levelForScope } from '@/lib/admin-levels';
+import type { PermissionLevel } from '@/lib/permissions-core';
 import { auditLog, getClientIp, rateLimitAsync } from '@/lib/security';
 
 /**
  * Envoltorio unico de las rutas /api/admin/** de la consola.
  *
- *  1. requireAdmin (duenio del dominio via backend, o ADMIN_EMAILS con MFA): sin sesion 401, sin rol/propiedad 403.
+ *  1. requireLevel(minLevel) (manager duenio del dominio = nivel 4, o usuario con permission_level suficiente y MFA): sin sesion 401,
+ *     sin nivel/propiedad 403. El nivel minimo sale de lib/admin-levels.ts (SCOPE_LEVELS) salvo que la ruta indique `minLevel`.
  *  2. Rate limit ASINCRONO (Redis si esta configurado, memoria si no) por admin+ambito.
  *  3. Validacion con zod (cuerpo y query) -> 400 sin repetir los valores recibidos.
  *  4. Errores: HttpError -> su estado; cualquier otro -> 500 generico (el detalle va solo al log del servidor).
  *  5. Todas las respuestas llevan Cache-Control: no-store.
  */
+
+/** Sondeos de estado de la consola (cabecera): se validan pero NO cuentan como actividad para el cierre por inactividad. */
+const PASSIVE_SCOPES = new Set(['me', 'system']);
 
 export const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
@@ -27,7 +33,7 @@ export const conflict = (code = 'conflict') => new HttpError(409, code);
 
 export interface AdminCtx {
     req: NextRequest;
-    actor: AdminActor;
+    actor: AdminActor & LevelInfo;
     ip: string;
 }
 
@@ -47,6 +53,8 @@ export interface AdminRouteOptions {
     limit?: number;
     windowMs?: number;
     write?: boolean;
+    /** Nivel minimo (0..4). Por defecto el de lib/admin-levels.ts para este scope (desconocido => 3). */
+    minLevel?: PermissionLevel;
 }
 
 type RouteContext<P> = { params: Promise<P> } | undefined;
@@ -55,8 +63,9 @@ export function adminRoute<P extends Record<string, string> = Record<string, str
     opts: AdminRouteOptions,
     handler: (ctx: AdminCtx, params: P) => Promise<Response | Record<string, unknown> | unknown[]>,
 ) {
-    return async function route(req: NextRequest, context?: RouteContext<P>): Promise<Response> {
-        const guard = await requireAdmin(req);
+    const minLevel: PermissionLevel = opts.minLevel ?? levelForScope(opts.scope);
+    const route = async function route(req: NextRequest, context?: RouteContext<P>): Promise<Response> {
+        const guard = await requireLevel(minLevel, req, { passive: PASSIVE_SCOPES.has(opts.scope) });
         if (!guard.ok) return guard.response;
         const ip = getClientIp(req);
         const limit = opts.limit ?? (opts.write ? 30 : 120);
@@ -75,6 +84,8 @@ export function adminRoute<P extends Record<string, string> = Record<string, str
             return json({ error: 'Internal Server Error', code: 'internal' }, { status: 500 });
         }
     };
+    // Metadatos para pruebas y documentacion (nivel exigido por la ruta).
+    return Object.assign(route, { meta: { scope: opts.scope, minLevel, write: !!opts.write } });
 }
 
 const MAX_BODY = 64 * 1024;
@@ -122,6 +133,7 @@ export function audit(ctx: AdminCtx, event: string, data: Record<string, unknown
         targetUserId: typeof targetUserId === 'string' ? targetUserId : undefined,
         actorId: ctx.actor.id,
         actorKind: ctx.actor.kind,
+        actorLevel: ctx.actor.level,
         actorEmail: ctx.actor.email,
         ip: ctx.ip,
     });

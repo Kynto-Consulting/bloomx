@@ -9,7 +9,11 @@ const requireAdmin = vi.fn();
 const queryMock = vi.fn();
 const auditLog = vi.fn();
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: (...a: unknown[]) => requireAdmin(...a) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = (...a: unknown[]) => requireAdmin(...a);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', () => ({
     auditLog: (...a: unknown[]) => auditLog(...a),
     rateLimitAsync: async () => ({ ok: true, retryAfter: 0, backend: 'memory' }),
@@ -61,7 +65,7 @@ describe('GET /api/admin/me', () => {
         requireAdmin.mockResolvedValue(admin);
         const { GET } = await import('../me/route');
         const res = await GET(get('/api/admin/me'));
-        expect(await res.json()).toEqual({ me: { kind: 'user', id: 'u-admin', email: 'admin@acme.test', userId: 'u-admin', instanceDomain: 'mail.acme.test' } });
+        expect(await res.json()).toMatchObject({ me: { kind: 'user', id: 'u-admin', email: 'admin@acme.test', userId: 'u-admin', instanceDomain: 'mail.acme.test' } });
     });
     it('manager: userId null', async () => {
         requireAdmin.mockResolvedValue({ ok: true, actor: { kind: 'manager', id: 'm1', email: 'o@acme.test' } });

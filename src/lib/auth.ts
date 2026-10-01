@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs";
 import { auditLog, getDummyBcryptHash, rateLimitAsync } from "@/lib/security";
 import { getSessionTtlSeconds } from "@/lib/jwt";
 import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
+import { refreshPermissions } from "@/lib/permissions";
 
 export const authOptions: NextAuthOptions = {
     // `prisma` lleva la extension de cifrado de tokens OAuth (lib/account-tokens.ts): el tipo ya no es PrismaClient puro.
@@ -57,6 +58,7 @@ export const authOptions: NextAuthOptions = {
                 // Este proveedor solo valida la contrasena: no puede saltarse el segundo factor. Las cuentas con MFA
                 // (activo u obligatorio) deben iniciar sesion por /api/auth/login + /api/auth/mfa/verify.
                 const mfa = await getMfaStatus(user.id).catch(() => null);
+                await refreshPermissions();
                 if (mfaRequiredFor(user.email) || !mfa || mfa.enabled) {
                     auditLog("auth.nextauth.mfa_blocked", { userId: user.id, ip });
                     return null;

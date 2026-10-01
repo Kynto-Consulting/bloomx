@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: vi.fn(async () => ({ ok: true, actor: { kind: 'manager', id: 'm1', email: 'a@b.c' } })) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = vi.fn(async () => ({ ok: true, actor: { kind: 'manager', id: 'm1', email: 'a@b.c' } }));
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', () => ({ auditLog: vi.fn(), getClientIp: () => '1.2.3.4' }));
 
 import { GET, POST } from '../settings/route';

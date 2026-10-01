@@ -3,6 +3,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, getSessionCookie, setSessionCookie } from "@/lib/session";
 import { mfaRequiredFor } from "@/lib/mfa";
+import { refreshPermissions } from "@/lib/permissions";
 import { patchAllUserMeetRooms } from "@/lib/google/meet";
 import { auditLog, getClientIp, isSafeRelativePath, safeEqual } from "@/lib/security";
 
@@ -110,6 +111,7 @@ export async function GET(req: NextRequest) {
         }
 
         // Inicio de sesion (no vinculacion) de una cuenta que EXIGE MFA (p. ej. admin): Google no sustituye al segundo factor.
+        await refreshPermissions(); // niveles de consola frescos antes de decidir si exige MFA
         if (!currentUser && user && mfaRequiredFor(user.email)) {
             auditLog('auth.google.mfa_required_blocked', { userId: user.id, ip: getClientIp(req) });
             return NextResponse.redirect(`${process.env.NEXTAUTH_URL}/login?error=MfaRequiredUsePassword`);

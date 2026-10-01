@@ -3,24 +3,32 @@ import { revokeAllSessions } from '@/lib/session';
 import { adminRoute, audit, HttpError, parseBody } from '@/lib/admin/http';
 import { setUserDisabled } from '@/lib/admin/user-state';
 import { existingUserIds, isSelf } from '@/lib/admin/users-store';
+import { outranks } from '@/lib/admin/outranks';
+import { query } from '@/lib/admin/sql';
 
 const schema = z.object({
     ids: z.array(z.string().min(1).max(200)).min(1).max(100),
     action: z.enum(['disable', 'enable', 'revokeSessions']),
 });
 
-type Outcome = 'ok' | 'not_found' | 'skipped_self' | 'failed';
+type Outcome = 'ok' | 'not_found' | 'skipped_self' | 'forbidden_level' | 'failed';
 
 // Accion masiva: resultado POR id. Nunca deshabilita al propio admin. Auditoria por usuario.
 export const POST = adminRoute({ scope: 'users.bulk', write: true, limit: 10 }, async (ctx) => {
     const { ids: raw, action } = await parseBody(ctx.req, schema);
     const ids = Array.from(new Set(raw));
     const existing = await existingUserIds(ids);
+    // Nivel de cada objetivo: nadie modifica a alguien de nivel >= al suyo (resultado por id, sin abortar el lote).
+    const emails = new Map((await query<{ id: string; email: string }>(`SELECT "id", "email" FROM "User" WHERE "id" = ANY($1::text[])`, ids)).map((r) => [r.id, r.email]));
     const results: { id: string; result: Outcome }[] = [];
 
     for (const id of ids) {
         if (!existing.has(id)) {
             results.push({ id, result: 'not_found' });
+            continue;
+        }
+        if (!(await outranks(ctx.actor, emails.get(id) ?? ''))) {
+            results.push({ id, result: 'forbidden_level' });
             continue;
         }
         if (action === 'disable' && isSelf(ctx.actor, id)) {
@@ -43,5 +51,5 @@ export const POST = adminRoute({ scope: 'users.bulk', write: true, limit: 10 }, 
         }
     }
     const count = (r: Outcome) => results.filter((x) => x.result === r).length;
-    return { action, results, summary: { ok: count('ok'), notFound: count('not_found'), skippedSelf: count('skipped_self'), failed: count('failed') } };
+    return { action, results, summary: { ok: count('ok'), notFound: count('not_found'), skippedSelf: count('skipped_self'), forbiddenLevel: count('forbidden_level'), failed: count('failed') } };
 });

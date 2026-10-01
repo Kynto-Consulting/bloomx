@@ -6,7 +6,11 @@ const rateLimitAsync = vi.fn();
 const queryRawUnsafe = vi.fn();
 const loadDomainPrivateKey = vi.fn();
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: (...a: unknown[]) => requireAdmin(...a) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = (...a: unknown[]) => requireAdmin(...a);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', () => ({
     auditLog: vi.fn(),
     rateLimitAsync: (...a: unknown[]) => rateLimitAsync(...a),

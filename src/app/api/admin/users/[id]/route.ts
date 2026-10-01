@@ -1,17 +1,22 @@
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
 import { getMfaStatus, isAdminEmail, mfaRequiredFor } from '@/lib/mfa';
+import { refreshPermissions } from '@/lib/permissions';
+import { effectiveLevelSync, levelName } from '@/lib/permissions-core';
 import { revokeAllSessions } from '@/lib/session';
 import { adminRoute, audit, conflict, HttpError, notFound, parseBody } from '@/lib/admin/http';
 import { getUserState, setUserDisabled } from '@/lib/admin/user-state';
 import { listActiveSessions } from '@/lib/admin/session-registry';
 import { getUserBasic, getUserStorage, isSelf, listUserAccounts } from '@/lib/admin/users-store';
 import { getUserQuotaAdminView } from '@/lib/admin/quota-settings';
+import { assertOutranks } from '@/lib/admin/outranks';
 
 // GET: detalle (datos basicos, estado admin, MFA, cuentas vinculadas sin tokens, sesiones activas, almacenamiento: solo conteos).
 export const GET = adminRoute<{ id: string }>({ scope: 'users.detail' }, async ({ actor }, { id }) => {
     const user = await getUserBasic(id);
     if (!user) throw notFound('user_not_found');
+    await refreshPermissions();
+    const perm = effectiveLevelSync(user.email);
     const [state, mfa, accounts, sessions, storage, quota] = await Promise.all([
         getUserState(id),
         getMfaStatus(id),
@@ -21,7 +26,7 @@ export const GET = adminRoute<{ id: string }>({ scope: 'users.detail' }, async (
         getUserQuotaAdminView(id).catch(() => null),
     ]);
     return {
-        user: { ...user, isAdmin: isAdminEmail(user.email), isSelf: isSelf(actor, id) },
+        user: { ...user, isAdmin: isAdminEmail(user.email), isSelf: isSelf(actor, id), permission_level: perm.level, levelName: levelName(perm.level), levelSource: perm.source },
         state,
         mfa: {
             available: mfa.available,
@@ -48,6 +53,7 @@ export const PATCH = adminRoute<{ id: string }>({ scope: 'users.update', write: 
     if (body.disabled === true && isSelf(ctx.actor, id)) throw conflict('cannot_disable_self');
     const user = await getUserBasic(id);
     if (!user) throw notFound('user_not_found');
+    await assertOutranks(ctx.actor, user);
 
     if (body.name !== undefined) {
         await prisma.user.update({ where: { id }, data: { name: body.name || null } });

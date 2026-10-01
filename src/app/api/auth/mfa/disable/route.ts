@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { auditLog, getClientIp } from "@/lib/security";
 import { disableMfa, mfaRequiredFor, verifyMfa } from "@/lib/mfa";
+import { refreshPermissions } from "@/lib/permissions";
 import { mfaAttemptLimit, NO_STORE, resolveMfaActor } from "@/lib/mfa-http";
 import { revokeAllSessions, setSessionCookie } from "@/lib/session";
 
@@ -15,6 +16,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const actor = await resolveMfaActor({}); // solo sesion (nunca mfaToken)
     if (!actor) return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_STORE });
+    await refreshPermissions();
     if (mfaRequiredFor(actor.email)) {
         return NextResponse.json({ error: "MFA is required for this account" }, { status: 403, headers: NO_STORE });
     }

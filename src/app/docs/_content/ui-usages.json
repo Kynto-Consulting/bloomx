@@ -1,0 +1,1024 @@
+{
+  "source": "bloomx-extensions",
+  "components": {
+    "STACK": {
+      "file": "calendar/manifest.json",
+      "extensionId": "core-calendar",
+      "point": "OVERLAY",
+      "path": "mounts[3].component.children[0]",
+      "node": {
+        "type": "STACK",
+        "props": {
+          "gap": 2
+        },
+        "children": [
+          {
+            "type": "FOR_EACH",
+            "props": {
+              "items": "${state.existingEvents}",
+              "as": "eventItem",
+              "empty": {
+                "type": "EMPTY",
+                "props": {
+                  "icon": "CalendarX",
+                  "title": {
+                    "es": "Aún no hay eventos",
+                    "en": "No events yet"
+                  },
+                  "description": {
+                    "es": "Crea tu primer evento y vuelve a intentarlo.",
+                    "en": "Create your first event and try again."
+                  }
+                }
+              },
+              "template": {
+                "type": "BUTTON",
+                "props": {
+                  "label": "${eventItem.displayTitle || eventItem.title || 'Untitled event'}",
+                  "icon": "CalendarDays",
+                  "onClick": {
+                    "action": "CALL_API",
+                    "url": "/api/calendar/events/${eventItem.id}/attach-invite",
+                    "method": "POST",
+                    "body": {
+                      "to": "${context.to}",
+                      "cc": "${context.cc}"
+                    },
+                    "onSuccess": {
+                      "actions": [
+                        {
+                          "action": "ADD_ATTACHMENT",
+                          "attachment": "${result.attachment}"
+                        },
+                        {
+                          "action": "SET_SUBJECT",
+                          "subject": "${result.subject}",
+                          "ifEmpty": true
+                        },
+                        {
+                          "action": "TOAST",
+                          "message": {
+                            "es": "Invitación del evento adjuntada",
+                            "en": "Selected event invite attached"
+                          }
+                        },
+                        {
+                          "action": "CLOSE_OVERLAY"
+                        }
+                      ]
+                    }
+                  },
+                  "variant": "outline",
+                  "fullWidth": true,
+                  "align": "start"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "alsoIn": [
+        "composer-helper/manifest.json",
+        "giphy/manifest.json"
+      ]
+    },
+    "ROW": {
+      "file": "google-drive/manifest.json",
+      "extensionId": "core-google-drive",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0].props.true[0]",
+      "node": {
+        "type": "ROW",
+        "props": {
+          "children": [
+            {
+              "type": "TEXT",
+              "props": {
+                "content": "Connect your Google account to browse Drive files."
+              }
+            },
+            {
+              "type": "BUTTON",
+              "props": {
+                "label": "Connect Google",
+                "onClick": {
+                  "action": "OAUTH_CONNECT",
+                  "provider": "google"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "alsoIn": [
+        "composer-helper/manifest.json",
+        "giphy/manifest.json",
+        "organizer/manifest.json"
+      ]
+    },
+    "GRID": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[1].props.false[0].props.false[0].props.true[0]",
+      "node": {
+        "type": "GRID",
+        "props": {
+          "columns": 3,
+          "gap": 2,
+          "maxHeight": "lg"
+        },
+        "children": [
+          {
+            "type": "FOR_EACH",
+            "props": {
+              "items": "${state.gifs}",
+              "as": "item",
+              "template": {
+                "type": "IMAGE_BUTTON",
+                "props": {
+                  "src": "${item.images.fixed_height_small.url}",
+                  "alt": "${item.title || \"GIF\"}",
+                  "onClick": {
+                    "action": "INSERT_CONTENT",
+                    "content": "<img src=\"${item.images.original.url}\" alt=\"${item.title}\" style=\"max-width:100%;height:auto\" />",
+                    "closeOverlay": true
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "alsoIn": []
+    },
+    "CARD": {
+      "file": "composer-helper/manifest.json",
+      "extensionId": "core-composer-helper",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[3].props.true[0]",
+      "node": {
+        "type": "CARD",
+        "props": {
+          "title": {
+            "es": "Vista previa",
+            "en": "Preview"
+          },
+          "icon": "FileText",
+          "density": "compact",
+          "footer": [
+            {
+              "type": "BUTTON",
+              "props": {
+                "label": {
+                  "es": "Insertar",
+                  "en": "Insert"
+                },
+                "icon": "Check",
+                "variant": "solid",
+                "onClick": {
+                  "action": "INSERT_CONTENT",
+                  "content": "${state.generated}",
+                  "closeOverlay": true
+                }
+              }
+            },
+            {
+              "type": "BUTTON",
+              "props": {
+                "label": {
+                  "es": "Regenerar",
+                  "en": "Regenerate"
+                },
+                "icon": "RefreshCw",
+                "variant": "outline",
+                "onClick": {
+                  "action": "CALL_BACKEND",
+                  "function": "generateContent",
+                  "key": "generate",
+                  "toastOnError": false,
+                  "args": {
+                    "prompt": "${state.prompt || context.slashArgs}",
+                    "tone": "${state.tone}",
+                    "length": "${state.length}",
+                    "lang": "${context.locale}",
+                    "emailContent": "${context.emailContent}",
+                    "subject": "${context.subject}",
+                    "to": "${context.to}"
+                  },
+                  "onSuccess": {
+                    "actions": [
+                      {
+                        "action": "SET_STATE",
+                        "key": "generated",
+                        "value": "${result.success ? result.content : null}"
+                      },
+                      {
+                        "action": "SET_STATE",
+                        "key": "genError",
+                        "value": "${result.success ? null : result.error}"
+                      }
+                    ]
+                  },
+                  "onError": {
+                    "actions": [
+                      {
+                        "action": "SET_STATE",
+                        "key": "generated",
+                        "value": null
+                      },
+                      {
+                        "action": "SET_STATE",
+                        "key": "genError",
+                        "value": "${error}"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "type": "BUTTON",
+              "props": {
+                "label": {
+                  "es": "Descartar",
+                  "en": "Discard"
+                },
+                "icon": "X",
+                "variant": "ghost",
+                "onClick": {
+                  "action": "SET_STATE",
+                  "key": "generated",
+                  "value": null
+                }
+              }
+            }
+          ]
+        },
+        "children": [
+          {
+            "type": "TEXT",
+            "props": {
+              "content": "${state.generated}"
+            }
+          }
+        ]
+      },
+      "alsoIn": []
+    },
+    "SPACER": {
+      "file": "google-meet/manifest.json",
+      "extensionId": "core-google-meet",
+      "point": "OVERLAY",
+      "path": "mounts[2].component.props.children[0].props.true[0].props.true[1]",
+      "node": {
+        "type": "SPACER",
+        "props": {
+          "size": 12
+        }
+      },
+      "alsoIn": [
+        "zoom/manifest.json"
+      ]
+    },
+    "TEXT": {
+      "file": "summarizer/manifest.json",
+      "extensionId": "core-summarizer",
+      "point": "OVERLAY",
+      "path": "mounts[3].component.props.children[0].props.false[3].props.template",
+      "node": {
+        "type": "TEXT",
+        "props": {
+          "content": "- ${item.title}"
+        }
+      },
+      "alsoIn": [
+        "appointments/manifest.json",
+        "composer-helper/manifest.json",
+        "giphy/manifest.json",
+        "google-drive/manifest.json",
+        "google-meet/manifest.json",
+        "hubspot/manifest.json",
+        "notion/manifest.json",
+        "translator/manifest.json"
+      ]
+    },
+    "LINK": {
+      "file": "hubspot/manifest.json",
+      "extensionId": "core-hubspot",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0].props.true[2].props.true[0]",
+      "node": {
+        "type": "LINK",
+        "props": {
+          "label": "View in HubSpot",
+          "url": "https://app.hubspot.com/contacts/${state.portalId}/contact/${state.contact.id}"
+        }
+      },
+      "alsoIn": []
+    },
+    "BUTTON": {
+      "file": "google-drive/manifest.json",
+      "extensionId": "core-google-drive",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0].props.true[0].props.children[1]",
+      "node": {
+        "type": "BUTTON",
+        "props": {
+          "label": "Connect Google",
+          "onClick": {
+            "action": "OAUTH_CONNECT",
+            "provider": "google"
+          }
+        }
+      },
+      "alsoIn": [
+        "appointments/manifest.json",
+        "calendar/manifest.json",
+        "composer-helper/manifest.json",
+        "giphy/manifest.json",
+        "google-meet/manifest.json",
+        "google-sync/manifest.json",
+        "hubspot/manifest.json",
+        "notion/manifest.json",
+        "organizer/manifest.json",
+        "summarizer/manifest.json",
+        "translator/manifest.json",
+        "trello/manifest.json",
+        "zoom/manifest.json"
+      ]
+    },
+    "IMAGE_BUTTON": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[1].props.false[0].props.false[0].props.true[0].children[0].props.template",
+      "node": {
+        "type": "IMAGE_BUTTON",
+        "props": {
+          "src": "${item.images.fixed_height_small.url}",
+          "alt": "${item.title || \"GIF\"}",
+          "onClick": {
+            "action": "INSERT_CONTENT",
+            "content": "<img src=\"${item.images.original.url}\" alt=\"${item.title}\" style=\"max-width:100%;height:auto\" />",
+            "closeOverlay": true
+          }
+        }
+      },
+      "alsoIn": []
+    },
+    "SMART_REPLY_CHIPS": {
+      "file": "smart-reply/manifest.json",
+      "extensionId": "core-smart-reply",
+      "point": "EMAIL_FOOTER",
+      "path": "mounts[0].component",
+      "node": {
+        "type": "SMART_REPLY_CHIPS",
+        "props": {
+          "onLoad": {
+            "action": "CALL_BACKEND",
+            "function": "generateReplies",
+            "args": {
+              "content": "${context.emailContent}"
+            },
+            "onSuccess": {
+              "action": "SET_STATE",
+              "key": "suggestions",
+              "value": "${result.replies}"
+            }
+          },
+          "suggestions": "${state.suggestions}",
+          "onSelect": {
+            "action": "INSERT_CONTENT",
+            "content": "${value}"
+          }
+        }
+      },
+      "alsoIn": []
+    },
+    "INPUT": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[0].children[0]",
+      "node": {
+        "type": "INPUT",
+        "props": {
+          "type": "search",
+          "bind": "query",
+          "placeholder": {
+            "es": "Buscar GIF…",
+            "en": "Search GIFs…"
+          },
+          "maxLength": 100,
+          "autoFocus": true,
+          "onSubmit": {
+            "action": "CALL_BACKEND",
+            "function": "searchGifs",
+            "key": "giphy",
+            "toastOnError": false,
+            "args": {
+              "q": "${state.query}"
+            },
+            "onSuccess": {
+              "action": "SET_STATE",
+              "key": "gifs",
+              "value": "${result.data}"
+            }
+          }
+        }
+      },
+      "alsoIn": [
+        "google-drive/manifest.json"
+      ]
+    },
+    "TEXTAREA": {
+      "file": "composer-helper/manifest.json",
+      "extensionId": "core-composer-helper",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0]",
+      "node": {
+        "type": "TEXTAREA",
+        "props": {
+          "label": {
+            "es": "¿Qué quieres decir?",
+            "en": "What do you want to say?"
+          },
+          "placeholder": {
+            "es": "Ej.: pide a Ana los datos del contrato antes del viernes",
+            "en": "E.g. ask Ana for the contract details before Friday"
+          },
+          "bind": "prompt",
+          "defaultValue": "${context.slashArgs}",
+          "rows": 4,
+          "maxLength": 2000
+        }
+      },
+      "alsoIn": []
+    },
+    "SELECT": {
+      "file": "trello/manifest.json",
+      "extensionId": "core-trello",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0].props.steps[1].content[0]",
+      "node": {
+        "type": "SELECT",
+        "props": {
+          "label": "List",
+          "options": "${state.lists}",
+          "valueKey": "id",
+          "labelKey": "name",
+          "onChange": {
+            "actions": [
+              {
+                "action": "SET_STATE",
+                "key": "selectedList",
+                "value": "${value}"
+              },
+              {
+                "action": "NEXT_STEP"
+              }
+            ]
+          }
+        }
+      },
+      "alsoIn": [
+        "composer-helper/manifest.json"
+      ]
+    },
+    "FORM": {
+      "file": "notion/manifest.json",
+      "extensionId": "core-notion",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0].props.false[1]",
+      "node": {
+        "type": "FORM",
+        "props": {
+          "onSubmit": {
+            "action": "CALL_BACKEND",
+            "function": "savePage",
+            "onSuccess": {
+              "action": "TOAST",
+              "message": "Saved to Notion"
+            },
+            "args": {
+              "subject": "${formData.subject}"
+            }
+          },
+          "fields": [
+            {
+              "name": "subject",
+              "label": "Page Title",
+              "defaultValue": "${context.subject}"
+            }
+          ]
+        }
+      },
+      "alsoIn": [
+        "calendar/manifest.json",
+        "google-meet/manifest.json",
+        "hubspot/manifest.json",
+        "trello/manifest.json",
+        "zoom/manifest.json"
+      ]
+    },
+    "LIST": {
+      "file": "google-drive/manifest.json",
+      "extensionId": "core-google-drive",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[1].props.tabs[0].content[1].props.true[0]",
+      "node": {
+        "type": "LIST",
+        "props": {
+          "items": "${state.files}",
+          "itemTemplate": {
+            "type": "BUTTON",
+            "props": {
+              "label": "${item.name}",
+              "className": "w-full justify-start",
+              "variant": "outline",
+              "onClick": {
+                "action": "INSERT_CONTENT",
+                "content": "<a href='${item.webViewLink}' target='_blank' rel='noreferrer'>${item.name}</a>",
+                "closeOverlay": true
+              }
+            }
+          }
+        }
+      },
+      "alsoIn": []
+    },
+    "TABS": {
+      "file": "google-drive/manifest.json",
+      "extensionId": "core-google-drive",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[1]",
+      "node": {
+        "type": "TABS",
+        "props": {
+          "tabs": [
+            {
+              "label": "Files",
+              "content": [
+                {
+                  "type": "ROW",
+                  "props": {
+                    "children": [
+                      {
+                        "type": "INPUT",
+                        "props": {
+                          "placeholder": "Search files...",
+                          "bindTo": "driveSearch"
+                        }
+                      },
+                      {
+                        "type": "BUTTON",
+                        "props": {
+                          "label": "Search",
+                          "onClick": {
+                            "action": "CALL_BACKEND",
+                            "function": "listFiles",
+                            "args": {
+                              "search": "${state.driveSearch}"
+                            },
+                            "onSuccess": {
+                              "action": "SET_STATE",
+                              "key": "files",
+                              "value": "${result.files}"
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "CONDITIONAL",
+                  "props": {
+                    "condition": "${state.files != null}",
+                    "true": [
+                      {
+                        "type": "LIST",
+                        "props": {
+                          "items": "${state.files}",
+                          "itemTemplate": {
+                            "type": "BUTTON",
+                            "props": {
+                              "label": "${item.name}",
+                              "className": "w-full justify-start",
+                              "variant": "outline",
+                              "onClick": {
+                                "action": "INSERT_CONTENT",
+                                "content": "<a href='${item.webViewLink}' target='_blank' rel='noreferrer'>${item.name}</a>",
+                                "closeOverlay": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "false": [
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "content": "Loading files..."
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "label": "Upload",
+              "content": [
+                {
+                  "type": "TEXT",
+                  "props": {
+                    "content": "Upload from this panel is not available yet. Use Files tab to insert links from Drive."
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "alsoIn": []
+    },
+    "WIZARD": {
+      "file": "trello/manifest.json",
+      "extensionId": "core-trello",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0]",
+      "node": {
+        "type": "WIZARD",
+        "props": {
+          "steps": [
+            {
+              "title": "Select Board",
+              "content": [
+                {
+                  "type": "SELECT",
+                  "props": {
+                    "label": "Board",
+                    "options": "${state.boards}",
+                    "valueKey": "id",
+                    "labelKey": "name",
+                    "onChange": {
+                      "action": "CALL_BACKEND",
+                      "function": "getLists",
+                      "args": {
+                        "boardId": "${value}"
+                      },
+                      "onSuccess": {
+                        "actions": [
+                          {
+                            "action": "SET_STATE",
+                            "key": "lists",
+                            "value": "${result}"
+                          },
+                          {
+                            "action": "SET_STATE",
+                            "key": "selectedBoard",
+                            "value": "${value}"
+                          },
+                          {
+                            "action": "NEXT_STEP"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "title": "Select List",
+              "content": [
+                {
+                  "type": "SELECT",
+                  "props": {
+                    "label": "List",
+                    "options": "${state.lists}",
+                    "valueKey": "id",
+                    "labelKey": "name",
+                    "onChange": {
+                      "actions": [
+                        {
+                          "action": "SET_STATE",
+                          "key": "selectedList",
+                          "value": "${value}"
+                        },
+                        {
+                          "action": "NEXT_STEP"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "title": "Card Details",
+              "content": [
+                {
+                  "type": "FORM",
+                  "props": {
+                    "onSubmit": {
+                      "action": "CALL_BACKEND",
+                      "function": "createCard",
+                      "args": {
+                        "listId": "${state.selectedList}",
+                        "name": "${formData.name}",
+                        "desc": "${formData.desc}"
+                      },
+                      "onSuccess": {
+                        "action": "TOAST",
+                        "message": "Card Created!"
+                      }
+                    },
+                    "fields": [
+                      {
+                        "name": "name",
+                        "label": "Card Title",
+                        "defaultValue": "${context.subject}"
+                      },
+                      {
+                        "name": "desc",
+                        "label": "Description",
+                        "type": "textarea",
+                        "defaultValue": "From: ${context.from}\n\n${context.emailContent | truncate:500}"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "alsoIn": []
+    },
+    "SKELETON": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[1].props.true[0].children[0].children[0]",
+      "node": {
+        "type": "SKELETON",
+        "props": {
+          "variant": "rect",
+          "size": "md"
+        }
+      },
+      "alsoIn": []
+    },
+    "EMPTY": {
+      "file": "calendar/manifest.json",
+      "extensionId": "core-calendar",
+      "point": "OVERLAY",
+      "path": "mounts[3].component.children[0].children[0].props.empty",
+      "node": {
+        "type": "EMPTY",
+        "props": {
+          "icon": "CalendarX",
+          "title": {
+            "es": "Aún no hay eventos",
+            "en": "No events yet"
+          },
+          "description": {
+            "es": "Crea tu primer evento y vuelve a intentarlo.",
+            "en": "Create your first event and try again."
+          }
+        }
+      },
+      "alsoIn": [
+        "giphy/manifest.json"
+      ]
+    },
+    "ALERT": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[1].props.false[0].props.true[0]",
+      "node": {
+        "type": "ALERT",
+        "props": {
+          "tone": "danger",
+          "title": {
+            "es": "No se pudieron cargar los GIF",
+            "en": "Could not load GIFs"
+          },
+          "message": {
+            "es": "Comprueba tu conexión e inténtalo de nuevo.",
+            "en": "Check your connection and try again."
+          }
+        },
+        "children": [
+          {
+            "type": "BUTTON",
+            "props": {
+              "label": {
+                "es": "Reintentar",
+                "en": "Retry"
+              },
+              "icon": "RefreshCw",
+              "variant": "outline",
+              "size": "sm",
+              "onClick": {
+                "action": "CALL_BACKEND",
+                "function": "searchGifs",
+                "key": "giphy",
+                "toastOnError": false,
+                "args": {
+                  "q": "${state.query}"
+                },
+                "onSuccess": {
+                  "action": "SET_STATE",
+                  "key": "gifs",
+                  "value": "${result.data}"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "alsoIn": [
+        "composer-helper/manifest.json",
+        "google-meet/manifest.json",
+        "zoom/manifest.json"
+      ]
+    },
+    "MODAL": {
+      "file": "summarizer/manifest.json",
+      "extensionId": "core-summarizer",
+      "point": "OVERLAY",
+      "path": "mounts[2].component",
+      "node": {
+        "type": "MODAL",
+        "props": {
+          "title": "Email Summary",
+          "width": "lg",
+          "onLoadWhen": "${context.emailContent}",
+          "onLoad": {
+            "action": "CALL_BACKEND",
+            "function": "summarize",
+            "args": {
+              "content": "${context.emailContent}"
+            },
+            "onSuccess": {
+              "action": "SET_STATE",
+              "key": "summary",
+              "value": "${result.summary}"
+            },
+            "onError": {
+              "action": "SET_STATE",
+              "key": "error",
+              "value": "${error}"
+            }
+          },
+          "children": [
+            {
+              "type": "CONDITIONAL",
+              "props": {
+                "condition": "${state.error != null}",
+                "true": [
+                  {
+                    "type": "TEXT",
+                    "props": {
+                      "content": "${state.error}",
+                      "variant": "error"
+                    }
+                  }
+                ],
+                "false": [
+                  {
+                    "type": "TEXT",
+                    "props": {
+                      "content": "${state.summary || 'Generating summary...'}",
+                      "variant": "body"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "alsoIn": [
+        "appointments/manifest.json",
+        "calendar/manifest.json",
+        "composer-helper/manifest.json",
+        "giphy/manifest.json",
+        "google-drive/manifest.json",
+        "google-meet/manifest.json",
+        "hubspot/manifest.json",
+        "notion/manifest.json",
+        "translator/manifest.json",
+        "trello/manifest.json",
+        "zoom/manifest.json"
+      ]
+    },
+    "CONDITIONAL": {
+      "file": "google-drive/manifest.json",
+      "extensionId": "core-google-drive",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[0]",
+      "node": {
+        "type": "CONDITIONAL",
+        "props": {
+          "condition": "${state.needsAuth}",
+          "true": [
+            {
+              "type": "ROW",
+              "props": {
+                "children": [
+                  {
+                    "type": "TEXT",
+                    "props": {
+                      "content": "Connect your Google account to browse Drive files."
+                    }
+                  },
+                  {
+                    "type": "BUTTON",
+                    "props": {
+                      "label": "Connect Google",
+                      "onClick": {
+                        "action": "OAUTH_CONNECT",
+                        "provider": "google"
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "alsoIn": [
+        "appointments/manifest.json",
+        "composer-helper/manifest.json",
+        "giphy/manifest.json",
+        "google-meet/manifest.json",
+        "google-sync/manifest.json",
+        "hubspot/manifest.json",
+        "notion/manifest.json",
+        "summarizer/manifest.json",
+        "zoom/manifest.json"
+      ]
+    },
+    "FOR_EACH": {
+      "file": "appointments/manifest.json",
+      "extensionId": "core-appointments",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.props.children[2]",
+      "node": {
+        "type": "FOR_EACH",
+        "props": {
+          "items": "${state.schedules}",
+          "as": "schedule",
+          "template": {
+            "type": "BUTTON",
+            "props": {
+              "label": "${schedule.name} · ${schedule.duration} min",
+              "icon": "Clock",
+              "className": "w-full justify-start mb-2 text-left",
+              "onClick": {
+                "action": "INSERT_CONTENT",
+                "content": "${schedule.bookingUrl}",
+                "closeOverlay": true
+              }
+            }
+          }
+        }
+      },
+      "alsoIn": [
+        "calendar/manifest.json",
+        "giphy/manifest.json",
+        "summarizer/manifest.json"
+      ]
+    },
+    "REPEAT": {
+      "file": "giphy/manifest.json",
+      "extensionId": "core-giphy",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[0].children[0].props.false[0].children[1].props.true[0].children[0]",
+      "node": {
+        "type": "REPEAT",
+        "props": {
+          "count": 9
+        },
+        "children": [
+          {
+            "type": "SKELETON",
+            "props": {
+              "variant": "rect",
+              "size": "md"
+            }
+          }
+        ]
+      },
+      "alsoIn": []
+    }
+  }
+}

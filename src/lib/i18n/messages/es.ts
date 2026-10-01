@@ -532,7 +532,7 @@ const es = {
         },
     },
     sidebar: {
-        sections: { mailboxes: 'Carpetas', workspace: 'Espacio de trabajo', labels: 'Etiquetas' },
+        sections: { mailboxes: 'Carpetas', workspace: 'Espacio de trabajo', labels: 'Etiquetas y carpetas' },
         folders: {
             inbox: 'Bandeja de entrada',
             drafts: 'Borradores',

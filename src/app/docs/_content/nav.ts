@@ -1,4 +1,5 @@
-import type { DocNavSection, DocNavPage } from './types';
+import type { DocNavSection, DocNavPage, Locale } from './types';
+import { KIT_BASE, kitGroups, kitHref } from './ui-kit/kit';
 
 /**
  * Navegacion unica de la documentacion (layout, buscador, anterior/siguiente y tests).
@@ -54,6 +55,7 @@ export const DOC_NAV: DocNavSection[] = [
             { slug: 'create-extension', icon: 'wrench', title: { es: 'Crear una extensión', en: 'Build an extension' }, description: { es: 'Paso a paso con un ejemplo mínimo.', en: 'Step by step with a minimal example.' }, keywords: 'tutorial ejemplo handler manifest publicar' },
             { slug: 'extension-ui', icon: 'component', title: { es: 'Kit de componentes y UI', en: 'Component kit and UI' }, description: { es: 'Componentes, tematización, estado, expresiones y acciones de las extensiones.', en: 'Extension components, theming, state, expressions and actions.' }, keywords: 'kit componentes ui json tone variant tema contraste schema validacion migracion bind state expresiones acciones formularios tabla' },
             { slug: 'extension-tools', icon: 'wrench', title: { es: 'Herramientas de extensiones', en: 'Extension tools' }, description: { es: 'SDK, plantilla, validador, playground, galería y gestión en /extensions.', en: 'SDK, template, validator, playground, gallery and /extensions management.' }, keywords: 'sdk plantilla template validador validate playground galeria componentes gestion extensions errores permisos build-manifest' },
+            { slug: 'extension-tools/tsdocs', icon: 'code', title: { es: 'TSDocs: referencia del SDK', en: 'TSDocs: SDK reference' }, description: { es: 'Interfaces, tipos, funciones, acciones y servicios del host, generados de los .d.ts del SDK.', en: 'Interfaces, types, functions, actions and host services, generated from the SDK .d.ts files.' }, keywords: 'tsdocs typedoc sdk tipos interfaces manifest ctx handler services storage notify defineManifest referencia api' },
             { slug: 'api', icon: 'code', title: { es: 'API del frontend', en: 'Frontend API' }, description: { es: 'Endpoints públicos y autenticados con ejemplos curl.', en: 'Public and authenticated endpoints with curl examples.' }, keywords: 'rest curl endpoints codigos error limites' },
             { slug: 'api-backend', icon: 'plug', title: { es: 'API del backend y firma', en: 'Backend API and signing' }, description: { es: 'Backend compartido y protocolo de firma v1 con código Node.', en: 'Shared backend and the v1 signing protocol with Node code.' }, keywords: 'firma ed25519 register-domain verify-domain X-BloomX-Signature' },
         ],
@@ -66,6 +68,7 @@ export const DOC_NAV: DocNavSection[] = [
             { slug: 'spam', icon: 'shield', title: { es: 'Filtro de spam y remitentes', en: 'Spam filter and senders' }, description: { es: 'Motor explicable, niveles, listas de bloqueo y permitidos, aprendizaje y correos externos.', en: 'Explainable engine, levels, block and allow lists, learning and external mail.' }, keywords: 'spam antispam phishing suplantacion bloqueo bloqueados permitidos lista negra blanca externos externo whitelist blocklist umbral nivel bayes aprendizaje dmarc spf dkim' },
             { slug: 'mail-transfer', icon: 'mail', title: { es: 'Importar y exportar correo', en: 'Import and export mail' }, description: { es: 'MBOX, EML, ZIP y PST desde Gmail, Titan, Outlook o Thunderbird; buzones faltantes, cifrado y salvaguardas.', en: 'MBOX, EML, ZIP and PST from Gmail, Titan, Outlook or Thunderbird; missing mailboxes, encryption and safeguards.' }, keywords: 'importar exportar mbox eml pst takeout gmail titan outlook hotmail thunderbird migrar respaldo cifrado buzones' },
             { slug: 'operations', icon: 'life-buoy', title: { es: 'Operación y pruebas', en: 'Operations and testing' }, description: { es: 'Backups, migraciones, pruebas, E2E y solución de problemas.', en: 'Backups, migrations, tests, E2E and troubleshooting.' }, keywords: 'backup migraciones vitest test:pg e2e check:themes troubleshooting' },
+            { slug: 'admin-cli', icon: 'code', title: { es: 'Admin CLI y consola de comandos', en: 'Admin CLI and command console' }, description: { es: 'Terminal web y CLI `bloomx` por HTTPS: instalación, login, niveles de permisos, sesión privilegiada única, tokens y comandos.', en: 'Web terminal and `bloomx` CLI over HTTPS: install, login, permission levels, single privileged session, tokens and commands.' }, keywords: 'cli bloomx consola comandos terminal ssh token permission_level niveles permisos sesion privilegiada superseded step-up mfa admin' },
             { slug: 'faq', icon: 'help', title: { es: 'Preguntas frecuentes', en: 'FAQ' }, description: { es: 'Respuestas rápidas a los problemas habituales.', en: 'Quick answers to common problems.' }, keywords: 'faq preguntas errores 503 login' },
         ],
     },
@@ -86,4 +89,25 @@ export function neighbours(slug: string): { prev?: DocNavPage; next?: DocNavPage
     const i = DOC_PAGES.findIndex((p) => p.slug === slug);
     if (i < 0) return {};
     return { prev: DOC_PAGES[i - 1], next: DOC_PAGES[i + 1] };
+}
+
+// ---------------------------------------------------------------------------
+// Componentes del kit de UI (una ruta /docs/extension-ui/<componente> por cada uno de UI_COMPONENTS)
+// ---------------------------------------------------------------------------
+
+export interface KitNavItem { type: string; href: string }
+export interface KitNavGroup { id: string; title: Record<Locale, string>; items: KitNavItem[] }
+
+/** Navegacion lateral de los componentes, agrupada por categoria. Se genera del esquema: no se mantiene a mano. */
+export const KIT_NAV: KitNavGroup[] = kitGroups().map((g) => ({ id: g.id, title: g.label, items: g.types.map((type) => ({ type, href: kitHref(type) })) }));
+
+export function kitNavSection(): { title: Record<Locale, string>; href: string } {
+    return { title: { es: 'Componentes de UI', en: 'UI components' }, href: KIT_BASE };
+}
+
+export function findKitEntry(pathname: string | null): KitNavItem | undefined {
+    if (!pathname) return undefined;
+    const clean = pathname.replace(/\/$/, '');
+    for (const g of KIT_NAV) for (const item of g.items) if (item.href === clean) return item;
+    return undefined;
 }

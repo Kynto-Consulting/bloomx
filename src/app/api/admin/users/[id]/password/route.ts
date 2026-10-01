@@ -7,6 +7,7 @@ import { adminRoute, audit, conflict, json, notFound, parseBody } from '@/lib/ad
 import { generateTemporaryPassword } from '@/lib/admin/temp-password';
 import { setMustChangePassword } from '@/lib/admin/user-state';
 import { getUserBasic, isSelf } from '@/lib/admin/users-store';
+import { assertOutranks } from '@/lib/admin/outranks';
 
 const schema = z.object({ mode: z.literal('temporary') });
 
@@ -20,6 +21,7 @@ export const POST = adminRoute<{ id: string }>({ scope: 'users.password', write:
     if (isSelf(ctx.actor, id)) throw conflict('cannot_target_self');
     const user = await getUserBasic(id);
     if (!user) throw notFound('user_not_found');
+    await assertOutranks(ctx.actor, user);
 
     const temporaryPassword = generateTemporaryPassword(user.email);
     const hashed = await bcrypt.hash(temporaryPassword, BCRYPT_COST);

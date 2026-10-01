@@ -1,9 +1,10 @@
 'use client';
 
 import * as React from 'react';
+import Link from 'next/link';
 import { useI18n } from '@/components/I18nProvider';
 import {
-    Badge, Card, ErrorState, LoadingState, PageHeader, formatDateTime, initials, useAdminQuery, useConsole,
+    Badge, Card, ErrorState, btnOutline, LoadingState, PageHeader, formatDateTime, initials, useAdminQuery, useConsole,
 } from '@/components/admin/console';
 import type { ProfileData } from '@/lib/admin/profile-types';
 import { errorText } from './helpers';
@@ -12,6 +13,7 @@ import { MfaSection } from './MfaSection';
 import { SessionsSection } from './SessionsSection';
 import { SigningKeySection } from './SigningKeySection';
 import { PreferencesSection } from './PreferencesSection';
+import { PrivilegedSessionCard } from '@/components/admin/permissions/PrivilegedSessionCard';
 
 /** Hace scroll y foco a la seccion `id` (ancla). Seguro en jsdom. */
 export function focusSection(id: string): boolean {
@@ -148,6 +150,13 @@ export function ProfileView() {
                 <SigningKeySection kind={kind} domainId={domainId} instanceSigning={data.instanceSigning} />
             </Section>
             <Section id="preferences"><PreferencesSection /></Section>
+            <Section id="privileged-session"><PrivilegedSessionCard /></Section>
+            <Section id="command-console">
+                <Card title={t('admin.console.cli.linkTitle')} bodyClassName="flex flex-wrap items-center justify-between gap-3">
+                    <p className="max-w-2xl text-sm text-muted-foreground">{t('admin.console.cli.linkText')}</p>
+                    <Link href="/admin/profile/console" className={btnOutline}>{t('admin.console.cli.linkButton')}</Link>
+                </Card>
+            </Section>
         </div>
     );
 }

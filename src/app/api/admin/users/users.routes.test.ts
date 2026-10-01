@@ -44,7 +44,11 @@ function route(sql: string, params: unknown[]): unknown[] {
     return [];
 }
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: vi.fn(async () => h.admin) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = vi.fn(async () => h.admin);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/prisma', () => ({
     prisma: {
         $queryRawUnsafe: vi.fn(async (sql: string, ...params: unknown[]) => {
@@ -403,7 +407,7 @@ describe('POST /api/admin/users/bulk', () => {
             { id: 'admin1', result: 'skipped_self' },
             { id: 'ghost', result: 'not_found' },
         ]);
-        expect(body.summary).toEqual({ ok: 1, notFound: 1, skippedSelf: 1, failed: 0 });
+        expect(body.summary).toEqual({ ok: 1, notFound: 1, skippedSelf: 1, forbiddenLevel: 0, failed: 0 });
         expect(h.setDisabled).toHaveBeenCalledTimes(1);
         expect(h.setDisabled).toHaveBeenCalledWith('u1', true);
         expect(h.revokeAll).toHaveBeenCalledWith('u1');

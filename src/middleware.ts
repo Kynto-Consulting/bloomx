@@ -56,7 +56,8 @@ export async function middleware(req: NextRequest) {
 
     // /api/admin/*: el middleware no valida el rol (cada ruta usa requireAdmin de @/lib/admin-auth), pero como defensa en
     // profundidad exige al menos una cookie de sesion (usuario o manager) salvo el login. NIST AC-3 / CIS 6.8.
-    if (pathname.startsWith('/api/admin') && pathname !== '/api/admin/login') {
+    // /api/admin/cli/login es el login de la CLI (publico, con limites propios y credenciales en el cuerpo).
+    if (pathname.startsWith('/api/admin') && pathname !== '/api/admin/login' && pathname !== '/api/admin/cli/login') {
         const hasCred = readSessionCookie(req.cookies).token || req.cookies.get('auth_session')?.value ||
             req.headers.get('authorization')?.startsWith('Bearer ');
         if (!hasCred) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });

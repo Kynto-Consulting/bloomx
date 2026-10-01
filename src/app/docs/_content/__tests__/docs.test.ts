@@ -7,6 +7,7 @@ import { ENV_GROUPS, ENV_VARS } from '../env';
 import { buildIndex, search } from '../search';
 import { resolveDocsVisibility } from '@/lib/landing-config';
 import type { Block, Locale } from '../types';
+import { slugToType } from '../ui-kit/kit';
 
 /**
  * Evita documentacion falsa: enlaces internos validos (pagina y ancla), paridad es/en, variables de entorno reales
@@ -136,6 +137,11 @@ describe('enlaces internos', () => {
         const [pathPart, anchor] = href.split('#');
         expect(pathPart === '/docs' || pathPart.startsWith('/docs/'), `enlace interno fuera de /docs (${href}) en ${where}`).toBe(true);
         const slug = pathPart === '/docs' ? '' : pathPart.slice('/docs/'.length);
+        // /docs/extension-ui/<componente>: ruta generada desde el esquema (el componente debe existir; sin anclas propias)
+        if (slug.startsWith('extension-ui/')) {
+            expect(slugToType(slug.slice('extension-ui/'.length)), `componente inexistente ${href} en ${where}`).toBeTruthy();
+            return;
+        }
         const page = DOC_PAGES.find((p) => p.slug === slug);
         expect(page, `enlace roto ${href} en ${where}`).toBeTruthy();
         if (anchor && slug !== '') expect(anchorsOf(slug).has(anchor), `ancla inexistente ${href} en ${where}`).toBe(true);

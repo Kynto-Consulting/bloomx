@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { adminRoute, audit, conflict, notFound, parseBody } from '@/lib/admin/http';
 import { getAccountBrief, requestReconnect } from '@/lib/admin/accounts-store';
+import { getUserBasic } from '@/lib/admin/users-store';
+import { assertOutranks } from '@/lib/admin/outranks';
 
 const schema = z.object({ mode: z.enum(['reconnect', 'refresh']).optional() });
 
@@ -14,6 +16,8 @@ export const POST = adminRoute<{ id: string }>({ scope: 'accounts.reconnect', wr
     if (!id || id.length > 200) throw notFound('account_not_found');
     const account = await getAccountBrief(id);
     if (!account) throw notFound('account_not_found');
+    const owner = await getUserBasic(account.userId);
+    if (owner) await assertOutranks(ctx.actor, owner);
     if (mode === 'refresh' && !account.hasRefresh) throw conflict('no_refresh_token');
     await requestReconnect(id, mode);
     audit(ctx, 'accounts.reconnect_requested', { targetUserId: account.userId, provider: account.provider, accountId: account.id, mode });

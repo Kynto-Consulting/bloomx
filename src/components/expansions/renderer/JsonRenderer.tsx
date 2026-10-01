@@ -45,6 +45,10 @@ export interface RendererRuntime {
     callBackend?: BackendCaller;
     /** Observa el `state` de la raiz (panel de estado del playground). */
     onStateChange?: (state: Record<string, any>) => void;
+    /** Observa cada accion con sus argumentos ya interpolados (log de eventos de la documentacion). */
+    onAction?: ActionEnv['onAction'];
+    /** Simulacion: avisos, navegacion, URLs, portapapeles y CALL_API no se ejecutan de verdad (ver ActionEnv.dryRun). */
+    dryRun?: boolean;
 }
 
 interface RootEnv {
@@ -181,6 +185,8 @@ const InnerJsonRenderer: React.FC<{ component: JsonComponentProps; context?: any
         closeOverlay: () => root?.closeOverlay(context),
         confirm: root?.confirm,
         callBackend: root?.runtime?.callBackend,
+        onAction: root?.runtime?.onAction,
+        dryRun: root?.runtime?.dryRun,
     };
     const envRef = useRef(actionEnv);
     envRef.current = actionEnv;

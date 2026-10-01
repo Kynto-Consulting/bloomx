@@ -3,6 +3,7 @@ import { clearSessionCookie, getSessionCookie, revokeAllSessions, revokeCurrentS
 import { verifyJWT, isSessionPayload } from "@/lib/jwt";
 import { revokeSession } from "@/lib/session-revocation";
 import { auditLog, getClientIp } from "@/lib/security";
+import { closePrivileged, releaseIfOwner } from "@/lib/privileged-session";
 
 /**
  * POST /api/auth/logout
@@ -31,6 +32,11 @@ export async function POST(req: NextRequest) {
         revokedServerSide = await revokeCurrentSession(session).catch(() => false);
         if (body?.all === true && session.sub) {
             revokedServerSide = (await revokeAllSessions(String(session.sub)).catch(() => false)) || revokedServerSide;
+            // "Cerrar todas las sesiones" tambien cierra la sesion privilegiada vigente (web o CLI).
+            await closePrivileged(String(session.sub)).catch(() => undefined);
+        } else if (session.sub && typeof session.jti === "string") {
+            // Logout normal: si esta sesion ocupaba el slot privilegiado, se libera.
+            await releaseIfOwner(String(session.sub), session.jti).catch(() => undefined);
         }
     }
     await clearSessionCookie();

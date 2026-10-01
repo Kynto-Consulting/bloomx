@@ -1,6 +1,9 @@
 import { DOC_PAGES, docHref } from './nav';
 import { DOC_CONTENT } from './registry';
+import { SEARCH_ROWS, tsdocsHref } from './tsdocs-lite';
 import type { Block, Locale } from './types';
+import { UI_COMPONENTS } from '@/lib/expansions/ui-schema';
+import { KIT_TYPES, kitCategoryLabel, kitDescription, kitHref } from './ui-kit/kit';
 
 /** Indice de busqueda del lado del cliente: una entrada por seccion (h2/h3) de cada pagina. Sin dependencias. */
 export interface SearchEntry {
@@ -65,6 +68,29 @@ export function buildIndex(locale: Locale): SearchEntry[] {
             }
         }
         push(curHeading, curId, buf.join(' '));
+    }
+    // Una entrada por componente del kit (/docs/extension-ui/<componente>)
+    for (const type of KIT_TYPES) {
+        const spec = UI_COMPONENTS[type];
+        const props = Object.keys(spec.props).join(' ');
+        const heading = type;
+        const page = locale === 'es' ? 'Kit de componentes y UI' : 'Component kit and UI';
+        const text = `${kitDescription(type, locale)} ${kitCategoryLabel(spec.category, locale)}`;
+        out.push({ href: kitHref(type), page, heading, text: text.slice(0, 400), norm: normalize(`${type} ${text} ${props} ${spec.doc}`), headingNorm: normalize(`${type} ${type.replace(/_/g, ' ')}`), pageNorm: normalize(page) });
+    }
+    // Simbolos del SDK (TSDocs): una entrada por simbolo exportado.
+    const tsPage = 'TSDocs';
+    for (const r of SEARCH_ROWS) {
+        const text = r.s.replace(/[`*]/g, '');
+        out.push({
+            href: tsdocsHref({ name: r.n, module: r.m }),
+            page: tsPage,
+            heading: r.n,
+            text: text.slice(0, 400),
+            norm: normalize(`${r.n} ${r.m} ${r.k} ${text} tsdocs sdk`),
+            headingNorm: normalize(r.n),
+            pageNorm: normalize(tsPage),
+        });
     }
     return (cache[locale] = out);
 }

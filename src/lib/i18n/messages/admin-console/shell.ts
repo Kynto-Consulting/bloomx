@@ -198,6 +198,8 @@ export const shellEs = {
         transfer: 'Importar / Exportar',
         spam: 'Spam y remitentes',
         profile: 'Mi perfil',
+        console: 'Consola de comandos',
+        permissions: 'Permisos',
     },
     status: {
         label: 'Estado del sistema',
@@ -286,6 +288,8 @@ export const shellEn: DeepString<typeof shellEs> = {
         transfer: 'Import / Export',
         spam: 'Spam and senders',
         profile: 'My profile',
+        console: 'Command console',
+        permissions: 'Permissions',
     },
     status: {
         label: 'System status',

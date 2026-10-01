@@ -62,7 +62,20 @@ export interface ActionEnv {
     closeOverlay: () => void;
     /** Confirmacion accesible; por defecto window.confirm. */
     confirm?: (message: string) => Promise<boolean>;
+    /** Observador (docs/playground): recibe CADA paso con sus argumentos ya interpolados, justo antes de ejecutarlo. */
+    onAction?: (step: ActionStep) => void;
+    /**
+     * Simulacion (docs): los efectos externos (aviso, navegacion, URL, portapapeles, OAuth, almacenamiento seguro, composer)
+     * NO se ejecutan y CALL_API se trata como CALL_BACKEND (`callBackend`). SET_STATE, overlays, CONFIRM, CALL_BACKEND... si.
+     */
+    dryRun?: boolean;
 }
+
+/** Un paso de accion tal como se ejecuta: nombre y argumentos ya resueltos (`${...}` interpolado). */
+export interface ActionStep { action: string; args: Record<string, any>; depth: number }
+
+/** Acciones con efecto fuera del renderer: en `dryRun` solo se registran. */
+const DRY_RUN_NOOP = new Set(['TOAST', 'OPEN_URL', 'NAVIGATE', 'REFRESH', 'COPY_TO_CLIPBOARD', 'OAUTH_CONNECT', 'OAUTH_DISCONNECT', 'INSERT_CONTENT', 'APPEND_BODY', 'SET_SUBJECT', 'ADD_ATTACHMENT', 'SET_CONTEXT_VALUE', 'SECURE_SAVE', 'SECURE_READ']);
 
 export type ActionRunner = (actionDef: any, event?: any, extra?: Record<string, any>) => Promise<ActionOutcome>;
 
@@ -154,13 +167,24 @@ type Runner = (actionDef: any, event?: any, extra?: Record<string, any>, depth?:
 async function runOne(env: ActionEnv, act: any, event: any, extra: Record<string, any>, depth: number, run: Runner): Promise<ActionOutcome> {
     const scopeContext = { ...env.context, ...extra };
     const state = env.getState();
-    const resolved: any = resolveDeep(act, { ctx: scopeContext, state }, LAZY_KEYS);
+    let resolved: any = resolveDeep(act, { ctx: scopeContext, state }, LAZY_KEYS);
     const extensionId = String(scopeContext.extensionId || 'desconocida');
     const chain = (def: any, more: Record<string, any> = {}) => run(def, event, { ...extra, ...more }, depth + 1);
     const setFlag = (group: '$loading' | '$error', key: string | null, value: unknown) => { if (key) env.setState(`${group}.${key}`, value); };
 
     // `actions` anidadas dentro de un paso
     if (Array.isArray(resolved?.actions) && !resolved.action) return chain(act.actions);
+
+    if (env.onAction && resolved && typeof resolved === 'object') env.onAction({ action: String(resolved.action ?? ''), args: resolved, depth });
+    if (env.dryRun) {
+        if (resolved?.action === 'CALL_API') {
+            const method = String(resolved.method || 'GET').toUpperCase();
+            resolved = { ...resolved, action: 'CALL_BACKEND', function: `${method} ${String(resolved.url ?? '')}`, key: loadingKeyOf(resolved) ?? undefined, args: resolved.body ?? resolved.args ?? resolved.params };
+        } else if (DRY_RUN_NOOP.has(resolved?.action)) {
+            const nested = act.onSuccess && (resolved.action === 'SECURE_SAVE' || resolved.action === 'SECURE_READ' || resolved.action === 'OAUTH_DISCONNECT') ? await chain(act.onSuccess, {}) : { ok: true };
+            return { ok: nested.ok, error: nested.error, handled: nested.handled };
+        }
+    }
 
     try {
         switch (resolved.action) {
@@ -307,10 +331,10 @@ async function runOne(env: ActionEnv, act: any, event: any, extra: Record<string
                     }, resolved.retry);
                 } catch (error) {
                     const message = messageOf(error, 'La accion fallo');
-                    console.error('[Extensions] CALL_BACKEND fallo', resolved.function, message);
+                    if (!env.dryRun) console.error('[Extensions] CALL_BACKEND fallo', resolved.function, message);
                     setFlag('$error', key, message);
                     setFlag('$loading', key, false);
-                    reportExtensionError({ extensionId, kind: 'action', message: `${resolved.function}: ${message}` });
+                    if (!env.dryRun) reportExtensionError({ extensionId, kind: 'action', message: `${resolved.function}: ${message}` });
                     return handleFailure(error, 'La accion fallo', resolved.toastOnError !== false);
                 }
                 setFlag('$loading', key, false);

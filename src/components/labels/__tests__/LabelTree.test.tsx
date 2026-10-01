@@ -70,7 +70,7 @@ describe('LabelTree', () => {
         expect(w.getAttribute('aria-setsize')).toBe('3');
         expect(w.getAttribute('aria-expanded')).toBe('false');
         expect(item('p').hasAttribute('aria-expanded')).toBe(false);
-        expect(w.getAttribute('aria-label')).toBe('Trabajo, 3 sin leer'); // acumulado de los hijos que trae el servidor
+        expect(w.getAttribute('aria-label')).toBe('Trabajo, 3 sin leer de 10'); // acumulado de los hijos que trae el servidor
         expect(qa('[role="treeitem"][tabindex="0"]')).toHaveLength(1); // roving tabindex
     });
 
@@ -164,7 +164,7 @@ describe('LabelTree', () => {
         expect(document.activeElement).toBe(mi[0]);
         await key(menu, 'ArrowDown');
         expect(document.activeElement).toBe(mi[1]);
-        await click(mi.find((e) => e.textContent?.includes('Usar como carpeta'))!);
+        await click(mi.find((e) => e.textContent?.includes('Convertir en carpeta'))!);
         await flush();
         expect(calls.at(-1)).toMatchObject({ url: '/api/labels/p', method: 'PATCH', body: { behavior: 'folder' } });
         expect(q('[role="menu"]')).toBeNull();

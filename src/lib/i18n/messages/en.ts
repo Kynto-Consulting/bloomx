@@ -523,7 +523,7 @@ const en: Messages = {
         },
     },
     sidebar: {
-        sections: { mailboxes: 'Folders', workspace: 'Workspace', labels: 'Labels' },
+        sections: { mailboxes: 'Folders', workspace: 'Workspace', labels: 'Labels and folders' },
         folders: {
             inbox: 'Inbox',
             drafts: 'Drafts',

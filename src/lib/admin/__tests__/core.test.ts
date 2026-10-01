@@ -5,7 +5,11 @@ const requireAdmin = vi.fn();
 const auditLog = vi.fn();
 const rateLimitAsync = vi.fn();
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: (...a: unknown[]) => requireAdmin(...a) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = (...a: unknown[]) => requireAdmin(...a);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', () => ({
     auditLog: (...a: unknown[]) => auditLog(...a),
     rateLimitAsync: (...a: unknown[]) => rateLimitAsync(...a),
@@ -113,11 +117,11 @@ describe('parseBody / parseQuery', () => {
 
 describe('audit()', () => {
     it('userId = usuario afectado, actor siempre registrado, prefijo admin.', () => {
-        audit({ req: req(), actor: { kind: 'user', id: 'admin1', email: 'a@x.com' }, ip: '1.1.1.1' }, 'users.mfa_reset', { targetUserId: 'u9', extra: 1 });
+        audit({ req: req(), actor: { kind: 'user', id: 'admin1', email: 'a@x.com', level: 4, levelSource: 'env' }, ip: '1.1.1.1' }, 'users.mfa_reset', { targetUserId: 'u9', extra: 1 });
         expect(auditLog).toHaveBeenCalledWith('admin.users.mfa_reset', expect.objectContaining({ userId: 'u9', targetUserId: 'u9', actorId: 'admin1', actorKind: 'user', ip: '1.1.1.1', extra: 1 }));
     });
     it('sin afectado, userId = actor', () => {
-        audit({ req: req(), actor: { kind: 'manager', id: 'm1' }, ip: 'i' }, 'x');
+        audit({ req: req(), actor: { kind: 'manager', id: 'm1', level: 4, levelSource: 'manager' }, ip: 'i' }, 'x');
         expect(auditLog.mock.calls[0][1]).toMatchObject({ userId: 'm1', actorKind: 'manager' });
     });
 });

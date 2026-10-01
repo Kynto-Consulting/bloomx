@@ -12,6 +12,10 @@ export interface ConsoleMe {
     userId: string | null;
     /** Dominio activo de la instancia (TOP_DOMAIN / NEXT_PUBLIC_APP_URL). */
     instanceDomain: string | null;
+    /** permission_level 0..4 de quien administra (ADMIN_EMAILS = 4, la manager duena = 4). El menu oculta lo que no permite. */
+    permission_level?: number;
+    levelName?: string;
+    levelSource?: 'env' | 'console' | 'manager' | 'none';
 }
 
 export interface ConsoleDomain {

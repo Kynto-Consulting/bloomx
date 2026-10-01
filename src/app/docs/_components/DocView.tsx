@@ -6,6 +6,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, Check, Copy, Info, Lightbulb, Oct
 import { useI18n } from '@/components/I18nProvider';
 import { cn } from '@/lib/utils';
 import { Diagram } from './Diagram';
+import { KitIndex } from './ui-kit/KitIndex';
 import { DOC_NAV, docHref, findDocPage, neighbours } from '../_content/nav';
 import { DOC_CONTENT } from '../_content/registry';
 import { ENV_VARS } from '../_content/env';
@@ -33,9 +34,12 @@ export function Inline({ text }: { text: string }): ReactNode {
         } else {
             const href = m[4];
             const cls = 'text-link underline underline-offset-2 hover:text-link-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm';
+            // [`BUTTON`](/docs/...) : el texto del enlace en formato de codigo
+            const code = /^`([^`]+)`$/.exec(m[3]);
+            const label: ReactNode = code ? <code className="font-mono text-[0.85em] break-words">{code[1]}</code> : m[3];
             out.push(href.startsWith('/')
-                ? <Link key={i++} href={href} className={cls}>{m[3]}</Link>
-                : <a key={i++} href={href} target="_blank" rel="noopener noreferrer" className={cls}>{m[3]}</a>);
+                ? <Link key={i++} href={href} className={cls}>{label}</Link>
+                : <a key={i++} href={href} target="_blank" rel="noopener noreferrer" className={cls}>{label}</a>);
         }
         last = m.index + m[0].length;
     }
@@ -47,7 +51,7 @@ export function Inline({ text }: { text: string }): ReactNode {
 // Bloques
 // ---------------------------------------------------------------------------
 
-function CopyButton({ text, locale }: { text: string; locale: Locale }) {
+export function CopyButton({ text, locale }: { text: string; locale: Locale }) {
     const [done, setDone] = useState(false);
     return (
         <button
@@ -181,6 +185,8 @@ function BlockView({ b, locale }: { b: Block; locale: Locale }) {
             return <Diagram id={b.id} caption={b.caption} locale={locale} />;
         case 'env':
             return <EnvTable scope={b.scope} group={b.group} locale={locale} />;
+        case 'kit-index':
+            return <KitIndex />;
     }
 }
 

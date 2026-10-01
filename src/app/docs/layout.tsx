@@ -13,7 +13,8 @@ import { DocsHidden } from '@/components/landing/DocsHidden';
 import { useI18n } from '@/components/I18nProvider';
 import { useDialog } from '@/components/ui/useDialog';
 import { cn } from '@/lib/utils';
-import { DOC_NAV, docHref } from './_content/nav';
+import { DOC_NAV, KIT_NAV, docHref, kitNavSection } from './_content/nav';
+import { kitDescription } from './_content/ui-kit/kit';
 import { ui } from './_content/ui';
 import { DocsSearch } from './_components/DocsSearch';
 import type { IconName } from './_content/types';
@@ -158,6 +159,7 @@ function DocsNav({ pathname }: { pathname: string | null }) {
                                     <NavLink href={href} icon={ICONS[p.icon]} active={pathname === href}>
                                         {p.title[locale]}
                                     </NavLink>
+                                    {p.slug === 'extension-ui' && <KitNav pathname={pathname} />}
                                 </li>
                             );
                         })}
@@ -165,6 +167,44 @@ function DocsNav({ pathname }: { pathname: string | null }) {
                 </div>
             ))}
         </nav>
+    );
+}
+
+/** Componentes del kit (una ruta por cada uno), agrupados por categoria y plegados salvo dentro de /docs/extension-ui. */
+function KitNav({ pathname }: { pathname: string | null }) {
+    const { locale } = useI18n();
+    const inKit = Boolean(pathname && pathname.startsWith(kitNavSection().href));
+    const total = KIT_NAV.reduce((n, g) => n + g.items.length, 0);
+    return (
+        <details open={inKit || undefined} className="ml-4 mt-1 border-l border-border pl-2">
+            <summary className="cursor-pointer rounded-md px-2 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {kitNavSection().title[locale]} ({total})
+            </summary>
+            <div className="mt-1 space-y-3">
+                {KIT_NAV.map((group) => (
+                    <div key={group.id}>
+                        <h5 className="px-2 pb-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{group.title[locale]}</h5>
+                        <ul className="flex flex-col">
+                            {group.items.map((item) => (
+                                <li key={item.type}>
+                                    <Link
+                                        href={item.href}
+                                        title={kitDescription(item.type, locale)}
+                                        aria-current={pathname === item.href ? 'page' : undefined}
+                                        className={cn(
+                                            'block rounded-md px-2 py-1 font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                                            pathname === item.href ? 'bg-primary/10 font-semibold text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                                        )}
+                                    >
+                                        {item.type}
+                                    </Link>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ))}
+            </div>
+        </details>
     );
 }
 

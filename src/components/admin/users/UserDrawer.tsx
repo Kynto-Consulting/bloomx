@@ -12,6 +12,7 @@ import {
 import type { UserDetail } from './types';
 import { parseQuotaInput } from './quota';
 import { TempPasswordBox } from './TempPasswordBox';
+import { PermissionLevelControl } from '@/components/admin/permissions/PermissionLevelControl';
 
 type Pending =
     | { kind: 'disable' | 'enable' | 'mfa' | 'sessions' | 'password' | 'force' }
@@ -201,11 +202,10 @@ export function UserDrawer({ id, onClose, onChanged }: { id: string; onClose: ()
                                             ? <Badge tone="danger">{t('admin.console.users.badge.disabled')}</Badge>
                                             : <Badge tone="success">{t('admin.console.users.badge.active')}</Badge>,
                                     },
-                                    { label: d('role'), value: <Badge tone={u.isAdmin ? 'info' : 'neutral'}>{u.isAdmin ? d('roleAdmin') : d('roleUser')}</Badge> },
+                                    { label: d('role'), value: <PermissionLevelControl email={u.email} level={u.permission_level ?? (u.isAdmin ? 4 : 0)} source={u.levelSource ?? (u.isAdmin ? 'env' : 'none')} isSelf={u.isSelf} onChanged={() => { void mutate(); onChanged(); }} /> },
                                     ...(data.state.mustChangePassword ? [{ label: d('mustChange'), value: <Badge tone="warning">{t('admin.console.common.yes')}</Badge> }] : []),
                                 ]}
                             />
-                            <p className="mt-3 text-xs text-muted-foreground">{d('roleHelp')}</p>
                             <div className="mt-4 flex flex-wrap items-center gap-2">
                                 {data.state.disabled ? (
                                     <button type="button" className={btnPrimary} onClick={() => ask({ kind: 'enable' })}>{d('enable')}</button>

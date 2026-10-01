@@ -32,7 +32,8 @@ import { MAIL_DND_TYPE, canDropOnFolder, dragState, parseDragPayload } from '@/l
 import { useMailActions } from '@/components/mail/useMailActions';
 import { Avatar } from '@/components/mail/ui';
 import { QuotaMeter } from '@/components/mail/QuotaMeter';
-import { LabelTree } from '@/components/labels/LabelTree';
+import { LabelsHelp, NewLabelMenu, SidebarLabelGroups } from '@/components/labels/SidebarLabelGroups';
+import type { LabelGroupKey } from '@/lib/labels/groups';
 
 // Init
 
@@ -150,7 +151,7 @@ function SidebarContent({ onClose }: SidebarProps) {
     };
 
     // Label creation state
-    const [isCreatingLabel, setIsCreatingLabel] = useState(false);
+    const [creatingKind, setCreatingKind] = useState<LabelGroupKey | null>(null);
     const [newLabelName, setNewLabelName] = useState('');
     const [isSubmittingLabel, setIsSubmittingLabel] = useState(false);
 
@@ -364,13 +365,13 @@ function SidebarContent({ onClose }: SidebarProps) {
             const res = await fetch('/api/labels', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: newLabelName.trim() })
+                body: JSON.stringify({ name: newLabelName.trim(), behavior: creatingKind ?? 'tag' })
             });
 
             if (res.ok) {
                 const [label] = normalizeLabelList([await res.json()]);
                 if (label) {
-                    const created = { ...label, count: 0 };
+                    const created = { ...label, behavior: creatingKind ?? label.behavior ?? 'tag', count: 0 };
                     setLabels(prev => (prev.some(l => l.id === created.id) ? prev : [...prev, created])); // Optimistic add
 
                     // Update global cache for MailView (misma forma: siempre con id)
@@ -381,8 +382,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                 }
 
                 setNewLabelName('');
-                setIsCreatingLabel(false);
-                toast.success(t('sidebar.labelCreated'));
+                setCreatingKind(null);
+                toast.success(t(creatingKind === 'folder' ? 'labelTree.groups.createdFolder' : 'labelTree.groups.createdTag'));
             } else {
                 toast.error(t('sidebar.labelCreateFailed'));
             }
@@ -566,22 +567,14 @@ function SidebarContent({ onClose }: SidebarProps) {
                                 'labels',
                                 <div className="flex shrink-0 items-center gap-0.5">
                                     <ExtensionLoader mountPoint="SIDEBAR_HEADER" />
-                                    <button
-                                        type="button"
-                                        onClick={() => setIsCreatingLabel(!isCreatingLabel)}
-                                        className="text-muted-foreground hover:text-sidebar-accent-foreground transition-colors p-1 rounded-sm hover:bg-sidebar-accent"
-                                        title={t('sidebar.createLabel')}
-                                        aria-label={t('sidebar.createLabel')}
-                                        aria-expanded={isCreatingLabel}
-                                    >
-                                        <Plus className="h-3 w-3" />
-                                    </button>
+                                    <LabelsHelp />
+                                    <NewLabelMenu active={creatingKind} onPick={(k) => { setCreatingKind(k); setNewLabelName(''); }} />
                                 </div>
                             )}
 
                             {!collapsedSections.labels && (
                                 <>
-                                    {isCreatingLabel && (
+                                    {creatingKind && (
                                         <motion.div
                                             initial={{ opacity: 0, height: 0 }}
                                             animate={{ opacity: 1, height: 'auto' }}
@@ -592,20 +585,20 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 <input
                                                     autoFocus
                                                     type="text"
-                                                    placeholder={t('sidebar.labelNamePlaceholder')}
-                                                    aria-label={t('sidebar.labelName')}
+                                                    placeholder={t(creatingKind === 'folder' ? 'labelTree.groups.namePlaceholderFolder' : 'labelTree.groups.namePlaceholderTag')}
+                                                    aria-label={t(creatingKind === 'folder' ? 'labelTree.groups.nameFolder' : 'labelTree.groups.nameTag')}
                                                     value={newLabelName}
                                                     onChange={(e) => setNewLabelName(e.target.value)}
                                                     className="h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                                                     onKeyDown={(e) => {
                                                         if (e.key === 'Enter') handleCreateLabel();
-                                                        if (e.key === 'Escape') setIsCreatingLabel(false);
+                                                        if (e.key === 'Escape') setCreatingKind(null);
                                                     }}
                                                 />
-                                                <button type="button" aria-label={t('sidebar.saveLabel')} onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
+                                                <button type="button" aria-label={t(creatingKind === 'folder' ? 'labelTree.groups.saveFolder' : 'labelTree.groups.saveTag')} onClick={handleCreateLabel} disabled={isSubmittingLabel} className="p-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90">
                                                     <Check className="h-3 w-3" />
                                                 </button>
-                                                <button type="button" aria-label={t('common.cancel')} onClick={() => setIsCreatingLabel(false)} className="p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground">
+                                                <button type="button" aria-label={t('common.cancel')} onClick={() => setCreatingKind(null)} className="p-1.5 rounded-md hover:bg-sidebar-accent text-muted-foreground">
                                                     <X className="h-3 w-3" />
                                                 </button>
                                             </div>
@@ -613,20 +606,17 @@ function SidebarContent({ onClose }: SidebarProps) {
                                     )}
 
                                     <nav aria-label={t('labelTree.treeLabel')}>
-                                        {labels.length === 0 && !isCreatingLabel ? (
-                                            <div className="px-4 py-4 text-xs text-muted-foreground text-center border mr-2 ml-2 rounded border-dashed border-sidebar-border">{t('sidebar.noLabels')}</div>
-                                        ) : (
-                                            <LabelTree
-                                                labels={labels}
-                                                activePaths={activeLabels}
-                                                getHref={(l) => getLabelUrl(l.fullPath || l.name)}
-                                                onChanged={() => { void invalidate(LABELS_CACHE_KEY); void invalidate(COUNTS_CACHE_KEY); }}
-                                                dropTarget={dropTarget}
-                                                onMailDragOver={(e, l) => handleLabelDragOver(e, l.id)}
-                                                onMailDragLeave={(l) => handleDragLeave(`label:${l.id}`)}
-                                                onMailDrop={(e, l) => { void handleDrop(e, { kind: 'label', label: l }); }}
-                                            />
-                                        )}
+                                        <SidebarLabelGroups
+                                            labels={labels}
+                                            onCreate={(k) => { setCreatingKind(k); setNewLabelName(''); }}
+                                            activePaths={activeLabels}
+                                            getHref={(l) => getLabelUrl(l.fullPath || l.name)}
+                                            onChanged={() => { void invalidate(LABELS_CACHE_KEY); void invalidate(COUNTS_CACHE_KEY); }}
+                                            dropTarget={dropTarget}
+                                            onMailDragOver={(e, l) => handleLabelDragOver(e, l.id)}
+                                            onMailDragLeave={(l) => handleDragLeave(`label:${l.id}`)}
+                                            onMailDrop={(e, l) => { void handleDrop(e, { kind: 'label', label: l }); }}
+                                        />
                                     </nav>
                                 </>
                             )}

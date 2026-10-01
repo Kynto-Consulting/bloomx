@@ -44,7 +44,7 @@ const ROWS = [
     { id: 'u2', name: null, email: 'bob@x.test', avatar: false, createdAt: '2025-01-02T00:00:00.000Z', disabled: true, isAdmin: false, mfaEnabled: false, googleLinked: false, lastLoginAt: null, storageBytes: 0, sessions: 0, quotaMb: null, quotaSource: 'none' },
 ];
 const DETAIL = (over: any = {}) => ({
-    user: { id: 'u1', name: 'Ann Zeta', email: 'ann@x.test', avatar: false, createdAt: '2025-01-01T00:00:00.000Z', isAdmin: true, isSelf: false },
+    user: { id: 'u1', name: 'Ann Zeta', email: 'ann@x.test', avatar: false, createdAt: '2025-01-01T00:00:00.000Z', isAdmin: true, isSelf: false, permission_level: 4, levelName: 'superadmin', levelSource: 'env' },
     state: { disabled: false, disabledAt: null, mustChangePassword: false, lastLoginAt: '2025-03-01T10:00:00.000Z', lastLoginIp: '10.0.0.1' },
     mfa: { available: true, enabled: true, pendingEnrollment: false, recoveryCodesLeft: 8, required: true },
     accounts: [{ id: 'a1', provider: 'google', scopes: ['openid'], expiresAt: null, hasRefreshToken: true }],
@@ -298,9 +298,9 @@ describe('UsersPage: detalle en panel lateral', () => {
         for (const section of ['Datos', 'Estado y rol', 'Autenticación en dos pasos (MFA)', 'Sesiones activas', 'Cuentas vinculadas', 'Almacenamiento', 'Contraseña']) {
             expect(d.textContent).toContain(section);
         }
-        expect(d.textContent).toContain('Administrador (ADMIN_EMAILS)');
-        expect(d.textContent).toContain('ADMIN_EMAILS');
-        expect(d.textContent).toContain('vuelve a desplegar');
+        // El rol ahora es un permission_level (0-4) con su origen: ADMIN_EMAILS = nivel 4 fijado por entorno (no editable desde la consola).
+        expect(d.textContent).toContain('Nivel 4 · superadmin');
+        expect(d.textContent).toContain('fijado por entorno (ADMIN_EMAILS)');
         expect(d.textContent).not.toMatch(/Tmp-Secret/);
 
         await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });

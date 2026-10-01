@@ -1,6 +1,7 @@
 import { actorKey, adminRoute, audit, notFound, parseBody } from '@/lib/admin/http';
 import { getUserQuotaAdminView, saveQuotaSettings, userQuotaBodySchema } from '@/lib/admin/quota-settings';
 import { getUserBasic } from '@/lib/admin/users-store';
+import { assertOutranks } from '@/lib/admin/outranks';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,9 @@ export const GET = adminRoute<{ id: string }>({ scope: 'users.quota.read', limit
  */
 export const PUT = adminRoute<{ id: string }>({ scope: 'users.quota.write', write: true, limit: 30 }, async (ctx, { id }) => {
     const body = await parseBody(ctx.req, userQuotaBodySchema);
-    if (!(await getUserBasic(id))) throw notFound('user_not_found');
+    const target = await getUserBasic(id);
+    if (!target) throw notFound('user_not_found');
+    await assertOutranks(ctx.actor, target);
     await saveQuotaSettings({ userId: id, mailQuotaMb: body.mailQuotaMb }, ctx.actor.email || actorKey(ctx.actor, ctx.ip));
     audit(ctx, 'users.quota_changed', {
         targetUserId: id,

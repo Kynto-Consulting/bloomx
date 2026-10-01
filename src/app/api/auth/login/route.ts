@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { setSessionCookie } from "@/lib/session";
 import { signPendingJWT } from "@/lib/jwt";
 import { getMfaStatus, mfaRequiredFor } from "@/lib/mfa";
+import { refreshPermissions } from "@/lib/permissions";
 import { findUserByEmail } from "@/lib/user-lookup";
 import { auditLog, getClientIp, getDummyBcryptHash, rateLimitAsync, rateLimitResetAsync } from "@/lib/security";
 import { getUserState } from "@/lib/admin/user-state";
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
 
         // Segundo factor (NIST 800-63B AAL2, CIS 6.3-6.5). No se emite cookie hasta verificarlo.
         // Obligatorio para administradores (ADMIN_EMAILS); opcional para el resto si lo activaron.
+        await refreshPermissions(); // niveles de consola frescos: una cuenta con nivel >= 1 SIEMPRE pasa por MFA
         const mfaRequired = mfaRequiredFor(user.email);
         const mfa = await getMfaStatus(user.id);
         if (mfaRequired && !mfa.available) {

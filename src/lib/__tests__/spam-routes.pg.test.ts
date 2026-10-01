@@ -15,7 +15,11 @@ let sessionUser: { id: string; email: string } | null = null;
 const denied = (status: number) => ({ ok: false as const, get response() { return NextResponse.json({ error: status === 401 ? 'Unauthorized' : 'Forbidden' }, { status }); } });
 const OK_ADMIN = { ok: true as const, actor: { kind: 'user' as const, id: 'admin-1', email: 'admin@pg.test' } };
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: vi.fn(async () => adminGuard) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = vi.fn(async () => adminGuard);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/session', () => ({ getCurrentUser: async () => sessionUser }));
 vi.mock('@/lib/security', async (orig) => {
     const actual = await orig<typeof import('@/lib/security')>();

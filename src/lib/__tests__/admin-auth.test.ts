@@ -70,7 +70,7 @@ describe('requireAdmin: via manager', () => {
         const { admin, req } = await load();
         const r = await admin.requireAdmin(req('s1'));
         expect(r.ok).toBe(true);
-        if (r.ok) expect(r.actor).toEqual({ kind: 'manager', id: 'm1', email: 'owner@acme.com' });
+        if (r.ok) expect(r.actor).toMatchObject({ kind: 'manager', id: 'm1', email: 'owner@acme.com', level: 4, levelSource: 'manager' });
         // la cookie del manager viaja al backend; nada de secretos compartidos
         expect(backend.calls.every((c) => c.endsWith('|auth_session=s1'))).toBe(true);
     });

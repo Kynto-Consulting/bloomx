@@ -1,0 +1,34 @@
+{
+  "name": "@kyntocg/bloomx-cli",
+  "version": "0.1.0",
+  "description": "Command-line client for the BloomX administration API: control a BloomX instance (users, quotas, audit, security, branding, spam, extensions, import/export) from your terminal over HTTPS.",
+  "license": "MIT",
+  "type": "commonjs",
+  "bin": {
+    "bloomx": "bin/bloomx.js",
+    "bloomx-cli": "bin/bloomx.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "bloomx",
+    "mail",
+    "admin",
+    "cli"
+  ],
+  "scripts": {
+    "test": "node --test test/cli.test.js test/pack.test.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

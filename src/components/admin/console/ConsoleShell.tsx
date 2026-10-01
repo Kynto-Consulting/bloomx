@@ -10,7 +10,8 @@ import { useI18n } from '@/components/I18nProvider';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { cn } from '@/lib/utils';
 import { ApiError, useAdminQuery } from './api';
-import { ConsoleContext, type ConsoleContextValue, type ConsoleMe } from './ConsoleContext';
+import { ConsoleContext, useConsole, type ConsoleContextValue, type ConsoleMe } from './ConsoleContext';
+import { SessionEndedOverlay, useSessionEnded } from './SessionEnded';
 import { NAV_GROUP_ORDER, NAV_ITEMS, isActiveHref, navItemFor, type NavItem } from './nav';
 import { GlobalSearch } from './GlobalSearch';
 import { ProfileMenu } from './ProfileMenu';
@@ -32,10 +33,12 @@ function typingTarget(el: EventTarget | null): boolean {
 
 function NavList({ pathname, onNavigate }: { pathname: string; onNavigate: (href: string) => void }) {
     const { t } = useI18n();
+    // El menu oculta lo que el permission_level no permite (las rutas lo rechazan igualmente con 403). Sin nivel conocido: se muestra todo.
+    const level = useConsole().me?.permission_level ?? 4;
     return (
         <nav aria-label={t('admin.console.shell.navLabel')} className="px-3 pb-4">
             {NAV_GROUP_ORDER.map((group) => {
-                const items = NAV_ITEMS.filter((n) => n.group === group);
+                const items = NAV_ITEMS.filter((n) => n.group === group && n.minLevel <= level);
                 if (items.length === 0) return null;
                 return (
                     <div key={group} className="mt-4 first:mt-0">
@@ -96,6 +99,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
     const { config } = useDomainConfig();
     const [density] = useDensity();
     const gate = useAdminQuery<{ me: ConsoleMe }>('/api/admin/me', { revalidateOnFocus: false });
+    const ended = useSessionEnded();
 
     const [menuOpen, setMenuOpen] = React.useState(false);
     const [searchOpen, setSearchOpen] = React.useState(false);
@@ -133,6 +137,14 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
         return () => window.removeEventListener('beforeunload', onBefore);
     }, []);
 
+    // Al volver a la pestana se revalida la sesion (consulta pasiva): una sesion reemplazada o caducada se detecta al instante.
+    React.useEffect(() => {
+        const onVisible = () => { if (document.visibilityState === 'visible') void gate.mutate(); };
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('focus', onVisible);
+        return () => { document.removeEventListener('visibilitychange', onVisible); window.removeEventListener('focus', onVisible); };
+    }, [gate]);
+
     // Atajos: "/" o Ctrl/Cmd+K abren la busqueda global
     React.useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -157,7 +169,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
     const error = gate.error as ApiError | undefined;
     if (!gate.data) {
         if (error) {
-            if (error.status === 401 && typeof window !== 'undefined') {
+            const endedCode = error.code === 'SUPERSEDED' || error.code === 'EXPIRED' || error.code === 'ACCOUNT_LOCKED';
+            if (error.status === 401 && !endedCode && typeof window !== 'undefined') {
                 // Sin sesion: se manda al acceso de administracion (los admins de la app tambien pueden usar /login).
                 window.location.replace('/admin/login');
             }
@@ -167,6 +180,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                 : error.status === 403 ? t('admin.console.shell.gate.forbidden')
                 : error.status === 0 || error.status >= 500 ? t('admin.console.shell.gate.backendDown')
                 : t('admin.console.shell.gate.forbidden');
+            if (endedCode) return <SessionEndedOverlay detail={ended ?? { code: error.code as 'SUPERSEDED' | 'EXPIRED' | 'ACCOUNT_LOCKED' }} />;
             return (
                 <main className="flex min-h-screen items-center justify-center bg-background p-6">
                     <div role="alert" className="w-full max-w-md rounded-xl border border-border bg-card p-6 text-center shadow-sm">
@@ -275,6 +289,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                         {children}
                     </main>
                 </div>
+
+                {ended && <SessionEndedOverlay detail={ended} />}
 
                 <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
 

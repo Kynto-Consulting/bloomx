@@ -30,7 +30,7 @@ export interface UsersResponse {
 }
 
 export interface UserDetail {
-    user: { id: string; name: string | null; email: string; avatar: boolean; createdAt: string | null; isAdmin: boolean; isSelf: boolean };
+    user: { id: string; name: string | null; email: string; avatar: boolean; createdAt: string | null; isAdmin: boolean; isSelf: boolean; permission_level: number; levelName: string; levelSource: 'env' | 'console' | 'manager' | 'none' };
     state: { disabled: boolean; disabledAt: string | null; mustChangePassword: boolean; lastLoginAt: string | null; lastLoginIp: string | null };
     mfa: { available: boolean; enabled: boolean; pendingEnrollment: boolean; recoveryCodesLeft: number; required: boolean };
     accounts: { id: string; provider: string; scopes: string[]; expiresAt: string | null; hasRefreshToken: boolean }[];

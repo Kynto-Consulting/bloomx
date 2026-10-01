@@ -22,6 +22,16 @@ export interface AdminFetchInit {
     signal?: AbortSignal;
 }
 
+/** Una sesion de administracion terminada (reemplazada por otra / caducada / bloqueada): la consola muestra un mensaje claro y manda al acceso. */
+export const SESSION_ENDED_EVENT = 'bloomx:admin-session-ended';
+export interface SessionEndedDetail { code: 'SUPERSEDED' | 'EXPIRED' | 'ACCOUNT_LOCKED'; reason?: string; at?: string | null; byIp?: string | null; byDevice?: string | null; byKind?: string | null }
+export function notifySessionEnded(data: unknown): boolean {
+    const d = data as Partial<SessionEndedDetail> | null;
+    if (!d || (d.code !== 'SUPERSEDED' && d.code !== 'EXPIRED' && d.code !== 'ACCOUNT_LOCKED')) return false;
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent<SessionEndedDetail>(SESSION_ENDED_EVENT, { detail: d as SessionEndedDetail }));
+    return true;
+}
+
 export async function adminFetch<T = unknown>(url: string, init: AdminFetchInit = {}): Promise<T> {
     let res: Response;
     try {
@@ -38,6 +48,7 @@ export async function adminFetch<T = unknown>(url: string, init: AdminFetchInit 
         throw new ApiError(0, 'network');
     }
     const data = await res.json().catch(() => null);
+    if (!res.ok && (res.status === 401 || res.status === 403)) notifySessionEnded(data);
     if (!res.ok) throw new ApiError(res.status, typeof data?.code === 'string' ? data.code : undefined, typeof data?.error === 'string' ? data.error : undefined);
     return data as T;
 }

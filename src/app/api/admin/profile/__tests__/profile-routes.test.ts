@@ -28,7 +28,11 @@ const mocks = vi.hoisted(() => ({
     mfaRequiredFor: vi.fn(() => true),
 }));
 
-vi.mock('@/lib/admin-auth', () => ({ requireAdmin: vi.fn(async () => guard) }));
+vi.mock('@/lib/admin-auth', () => {
+    const guardFn = vi.fn(async () => guard);
+    // adminRoute usa requireLevel(n): en estas pruebas el nivel no se evalua (lo cubre admin-levels.test / admin-cli.pg.test)
+    return { requireAdmin: guardFn, requireLevel: (_min: number, ...a: unknown[]) => (guardFn as (...x: unknown[]) => unknown)(...a) };
+});
 vi.mock('@/lib/security', async (importOriginal) => ({
     ...(await importOriginal<typeof import('@/lib/security')>()),
     auditLog: mocks.auditLog,

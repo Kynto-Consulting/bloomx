@@ -20,7 +20,9 @@ export type Block =
     | { t: 'table'; head: string[]; rows: string[][]; caption?: string }
     | { t: 'callout'; kind: CalloutKind; title?: string; text: string }
     | { t: 'diagram'; id: 'architecture' | 'signing' | 'mail-flow'; caption: string }
-    | { t: 'env'; scope?: 'frontend' | 'backend' | 'all'; group?: string };
+    | { t: 'env'; scope?: 'frontend' | 'backend' | 'all'; group?: string }
+    /** Indice de componentes del kit (rejilla de tarjetas por categoria, generada de UI_COMPONENTS). */
+    | { t: 'kit-index' };
 
 export interface DocPageContent {
     es: Block[];

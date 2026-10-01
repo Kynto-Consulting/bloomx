@@ -12,6 +12,7 @@ import { DEFAULT_LABEL_COLOR } from '@/lib/labels/palette';
 import { buildTree, flattenVisible, type LabelIcon, type LabelRow } from '@/lib/labels/model';
 import { applyPlan, planDrop, planIndent, planMoveSibling, planOutdent, planPlace, type DropZone, type Plan } from '@/lib/labels/tree-ops';
 import { labelsApi } from '@/lib/labels/client';
+import { groupLabelIds, type LabelGroupKey } from '@/lib/labels/groups';
 import { LabelGlyph } from './labelIcons';
 import { LabelMenu } from './LabelMenu';
 import { DeleteLabelDialog } from './DeleteLabelDialog';
@@ -51,6 +52,8 @@ export interface LabelTreeProps {
     /** Abre el editor completo de la etiqueta (reglas de "Asignar automaticamente"). */
     onEdit?: (label: LabelRef) => void;
     selectedId?: string | null;
+    /** Sidebar: muestra solo un grupo (carpetas o etiquetas). `labels` sigue siendo la lista completa para mover/ordenar entre grupos. */
+    group?: LabelGroupKey;
 }
 
 function loadExpanded(): Set<string> {
@@ -58,7 +61,7 @@ function loadExpanded(): Set<string> {
 }
 
 export function LabelTree(props: LabelTreeProps) {
-    const { labels, activePaths = [], getHref, mode = 'sidebar', onChanged, dropTarget, onMailDragOver, onMailDragLeave, onMailDrop, onEdit, selectedId } = props;
+    const { labels, activePaths = [], getHref, mode = 'sidebar', onChanged, dropTarget, onMailDragOver, onMailDragLeave, onMailDrop, onEdit, selectedId, group } = props;
     const { t } = useI18n();
     const [pending, setPending] = useState<LabelRow[] | null>(null);
     const rows = useMemo(() => pending ?? toRows(labels), [pending, labels]);
@@ -95,14 +98,15 @@ export function LabelTree(props: LabelTreeProps) {
 
     const visibleRows = useMemo(() => {
         if (mode === 'settings') return rows;
+        const inGroup = group ? groupLabelIds(rows)[group] : null;
         // Ocultas de la barra: se omiten salvo que tengan descendientes visibles.
         const kids = new Map<string | null, LabelRow[]>();
         for (const r of rows) kids.set(r.parentId && byId.has(r.parentId) ? r.parentId : null, [...(kids.get(r.parentId && byId.has(r.parentId) ? r.parentId : null) ?? []), r]);
         const keep = new Set<string>();
         const visit = (r: LabelRow): boolean => { const any = (kids.get(r.id) ?? []).map(visit).some(Boolean); if (r.showInSidebar || any) keep.add(r.id); return keep.has(r.id); };
         (kids.get(null) ?? []).forEach(visit);
-        return rows.filter((r) => keep.has(r.id));
-    }, [rows, byId, mode]);
+        return rows.filter((r) => keep.has(r.id) && (!inGroup || inGroup.has(r.id)));
+    }, [rows, byId, mode, group]);
 
     const flat = useMemo(() => flattenVisible(buildTree(visibleRows), shownExpanded), [visibleRows, shownExpanded]);
     const current = focusId && flat.some((f) => f.node.label.id === focusId) ? focusId : flat[0]?.node.label.id ?? null;
@@ -207,6 +211,7 @@ export function LabelTree(props: LabelTreeProps) {
         }
     };
 
+    if (group && flat.length === 0) return null;
     if (rows.length === 0 && mode === 'sidebar') {
         return <div className="mx-2 rounded border border-dashed border-sidebar-border px-4 py-4 text-center text-xs text-muted-foreground">{t('sidebar.noLabels')}</div>;
     }
@@ -222,15 +227,17 @@ export function LabelTree(props: LabelTreeProps) {
                     const unread = l.showUnread ? (l.count ?? 0) : 0;
                     const total = l.total ?? 0;
                     const name = labelDisplayName(l.name, t);
-                    const countLabel = mode === 'sidebar' && unread > 0 ? t('labelTree.unread', { n: unread }) : '';
+                    const countLabel = mode !== 'sidebar' ? ''
+                        : unread > 0 ? t('sidebar.counts.unreadOfTotal', { unread, total: Math.max(total, unread) })
+                        : total > 0 ? t('sidebar.counts.total', { total }) : '';
                     const isDrop = dropTarget === `label:${l.id}`;
                     const hintHere = hint?.id === l.id ? hint.zone : null;
                     const inner = (
                         <>
                             <LabelGlyph behavior={l.behavior} icon={l.icon} color={l.color} open={f.expanded} />
-                            <span className={cn('min-w-0 flex-1 truncate', isActive && 'font-bold', !l.showInSidebar && 'italic opacity-70')} title={l.fullPath}>{name}</span>
+                            <span className={cn('min-w-0 flex-1 truncate', isActive && 'font-bold', !l.showInSidebar && 'italic opacity-70')} title={countLabel ? `${l.fullPath} · ${countLabel}` : l.fullPath}>{name}</span>
                             {mode === 'sidebar' && unread > 0 && <span aria-hidden="true" className="rounded-full bg-primary px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-foreground">{unread}</span>}
-                            {mode === 'sidebar' && total > 0 && <span aria-hidden="true" className={cn('min-w-[1.5rem] text-right text-xs tabular-nums', !isActive && 'text-muted-foreground')}>{total}</span>}
+                            {mode === 'sidebar' && total > 0 && <span aria-hidden="true" data-total className={cn('min-w-[1.5rem] text-right text-xs tabular-nums', !isActive && 'text-muted-foreground', unread > 0 && 'hidden group-hover:inline group-focus-within:inline')}>{unread > 0 ? `/${total}` : total}</span>}
                         </>
                     );
                     const rowCls = 'flex min-h-10 min-w-0 flex-1 items-center gap-3 rounded-lg px-2 py-2 text-sm font-medium transition-colors focus-visible:outline-none';
