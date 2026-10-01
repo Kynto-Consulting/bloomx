@@ -5,6 +5,9 @@
 import { declaredCredentialKeys } from '@/lib/extension-credentials';
 import type { ManifestHealth, ManifestProblem } from '@/lib/expansions/manage/health';
 import { manifestTexts } from '@/lib/expansions/manifest-schema';
+import { aiBlockInfo, type AiBlockInfo } from '@/lib/ai/extension-block';
+import type { AiBlockState } from '@/lib/ai/types';
+import { sanitizeVersionInfo, type VersionInfo, type VersionUpgrade } from './extensions-compat';
 import { deriveCategory, hasUpdate, parseTemplate, summarizeTemplate, type ExtensionCategory, type ManifestSummary } from './extensions-manifest';
 
 export interface CatalogExtension {
@@ -17,6 +20,12 @@ export interface CatalogExtension {
     price: string;
     currency: string;
     template: ManifestSummary | null;
+    /** Ultima version publicada (la resuelta puede ser anterior si el cliente no entiende la ultima). */
+    latestVersion?: string | null;
+    /** Ninguna version sirve a este cliente (se muestra la ultima). */
+    incompatible?: boolean;
+    deprecated?: boolean;
+    upgrade?: VersionUpgrade | null;
 }
 
 export interface InstalledExtension {
@@ -35,6 +44,8 @@ export interface InstalledExtension {
     /** El manifest declara `mandatory: true`: no se puede quitar desde el dominio. */
     mandatoryByManifest?: boolean;
     template: ManifestSummary | null;
+    /** Resolucion de version para este cliente (backend compartido). */
+    versionInfo?: VersionInfo | null;
 }
 
 export type ExtensionStatus = 'enabled' | 'disabled' | 'available';
@@ -73,6 +84,18 @@ export interface ExtensionRow {
     hasCredentialKeys: boolean;
     /** Esta en el catalogo publico (si no, solo se puede desinstalar/desactivar). */
     inCatalog: boolean;
+    /** Declara necesitar IA (permiso AI/AI_GENERATE, categoria ai o bloque ai). */
+    requiresAi: boolean;
+    /** Bloqueo por IA (isExtensionBlockedByAi): blocked, reason, degraded, optional, features. */
+    aiBlock: AiBlockInfo;
+    /** Ultima version publicada (distinta de `version` cuando la ultima exige un cliente mas nuevo). */
+    latestVersion: string | null;
+    pinnedVersion: string | null;
+    /** Ninguna version es compatible con este cliente: no se puede instalar, activar ni actualizar. */
+    incompatible: boolean;
+    deprecated: boolean;
+    /** Version mas nueva que exige actualizar el cliente (con lo que falta). */
+    upgrade: VersionUpgrade | null;
 }
 
 export interface BuildRowsInput {
@@ -84,10 +107,12 @@ export interface BuildRowsInput {
     health?: ReadonlyMap<string, ManifestHealth>;
     /** Idioma de la interfaz: nombre y descripcion salen de manifest.i18n[locale] si existe. */
     locale?: string;
+    /** Estado de IA de la instancia (de /api/admin/extensions/installed). Sin el se asume IA disponible. */
+    ai?: AiBlockState | null;
 }
 
 /** Una fila por id (catalogo + instaladas que ya no estan en el catalogo). */
-export function buildRows({ catalog, installed, errorIds = [], health, locale }: BuildRowsInput): ExtensionRow[] {
+export function buildRows({ catalog, installed, errorIds = [], health, locale, ai }: BuildRowsInput): ExtensionRow[] {
     const errors = new Set(errorIds);
     const installedById = new Map(installed.map((i) => [i.extensionId, i]));
     const rows: ExtensionRow[] = [];
@@ -127,6 +152,12 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale }:
             manifestProblems: health?.get(id)?.problems ?? [],
             hasCredentialKeys: declaredCredentialKeys(template).length > 0,
             inCatalog: !!cat,
+            latestVersion: inst?.versionInfo?.latestVersion ?? cat?.latestVersion ?? version,
+            pinnedVersion: inst?.versionInfo?.pinnedVersion ?? null,
+            incompatible: inst?.versionInfo?.incompatible ?? cat?.incompatible ?? false,
+            deprecated: inst?.versionInfo?.deprecated ?? cat?.deprecated ?? false,
+            upgrade: inst?.versionInfo?.upgrade ?? cat?.upgrade ?? null,
+            ...aiFields(template, ai),
         };
     };
 
@@ -141,6 +172,12 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale }:
         rows.push(make(inst.extensionId, undefined, inst));
     }
     return rows;
+}
+
+const AI_ALL_ON: AiBlockState = { enabled: true, features: { composer: true, 'smart-reply': true, summarize: true, translate: true, organizer: true, other: true }, extensions: {} };
+function aiFields(template: ManifestSummary | null, ai?: AiBlockState | null): { requiresAi: boolean; aiBlock: AiBlockInfo } {
+    const aiBlock = aiBlockInfo(template, ai ?? AI_ALL_ON);
+    return { requiresAi: aiBlock.requiresAi, aiBlock };
 }
 
 export type StatusFilter = 'all' | 'installed' | 'available' | 'disabled' | 'errors' | 'paid';
@@ -212,6 +249,7 @@ export function installedFromConfig(extensions: readonly any[]): InstalledExtens
             mandatory: ext?.mandatory === true || ext?.settings?.meta?.mandatory === true,
             mandatoryByManifest: template?.mandatory === true,
             template: summarizeTemplate(template),
+            versionInfo: sanitizeVersionInfo(ext?.versionInfo),
         });
     }
     return out;

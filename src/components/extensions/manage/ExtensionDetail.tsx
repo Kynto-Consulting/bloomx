@@ -13,6 +13,7 @@ import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { ExtensionSwitch } from './ExtensionItem';
 import { ExtensionPreview } from './ExtensionPreview';
 import { ErrorsPanel } from './ErrorsPanel';
+import { AiRequirementNote } from './AiRequirementNote';
 import { fmt, useManageStrings } from './strings';
 
 const LEVEL_TONE = { low: 'neutral', medium: 'warning', high: 'danger' } as const;
@@ -146,6 +147,8 @@ function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onTog
                         </ul>
                     )}
                 </Section>
+
+                <AiRequirementNote row={row} />
 
                 <Section title={s.whereAppears}>
                     {mounts.length === 0 ? <p className="text-sm text-muted-foreground">{s.noMounts}</p> : (

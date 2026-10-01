@@ -1,3 +1,4 @@
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { HttpError } from '@/lib/admin/http';
 
 /**
@@ -40,6 +41,7 @@ export async function resolveInstanceDomainId(req?: Request): Promise<string | n
     try {
         const res = await fetch(`${backendUrl()}/api/config?domain=${encodeURIComponent(host)}`, {
             cache: 'no-store',
+            headers: clientVersionHeaders(),
             signal: AbortSignal.timeout(5000),
         });
         if (res.ok) {

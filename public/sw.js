@@ -7,9 +7,17 @@
  *  - Si una navegacion falla por falta de red, responde /offline.html.
  *  - Ademas gestiona notificaciones push y el branding de las notificaciones.
  *
- * Al cambiar la estrategia, subir CACHE_VERSION: activate borra los caches anteriores.
+ * Version de cache: sale del build id con el que se registra (`/sw.js?v=<buildId>`, ver src/lib/pwa/client-version.ts);
+ * cada build tiene sus caches y activate borra los de builds anteriores (prefijo bloomx-).
  */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = (() => {
+    try {
+        const v = new URLSearchParams((self.location && self.location.search) || '').get('v') || '';
+        return v.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 40) || 'dev';
+    } catch {
+        return 'dev';
+    }
+})();
 const SHELL_CACHE = `bloomx-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `bloomx-static-${CACHE_VERSION}`;
 const OFFLINE_URL = '/offline.html';
@@ -49,7 +57,7 @@ function isCacheableResponse(response) {
     return true;
 }
 
-self.__SW_POLICY__ = { classifyRequest, isCacheableResponse, STATIC_PATHS, PRECACHE_URLS };
+self.__SW_POLICY__ = { CACHE_VERSION, SHELL_CACHE, RUNTIME_CACHE, classifyRequest, isCacheableResponse, STATIC_PATHS, PRECACHE_URLS };
 
 async function precache() {
     const cache = await caches.open(SHELL_CACHE);

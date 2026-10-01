@@ -1,10 +1,10 @@
 import {
-    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight, ShieldAlert, Terminal, KeyRound,
+    Activity, Building2, FileClock, LayoutDashboard, Link2, Mail, Puzzle, ShieldCheck, UserCircle, Users, Database, ArrowLeftRight, Sparkles, ShieldAlert, Terminal, KeyRound,
     type LucideIcon,
 } from 'lucide-react';
 
 /** Secciones de la consola (una sola fuente de verdad para la navegacion, el breadcrumb y la busqueda global). */
-export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'transfer' | 'spam' | 'profile' | 'console' | 'permissions';
+export type NavId = 'overview' | 'users' | 'accounts' | 'mail' | 'domain' | 'extensions' | 'security' | 'audit' | 'retention' | 'ai' | 'transfer' | 'spam' | 'profile' | 'console' | 'permissions';
 export type NavGroup = 'overview' | 'people' | 'mail' | 'platform' | 'account';
 
 export interface NavItem {
@@ -26,6 +26,7 @@ export const NAV_ITEMS: readonly NavItem[] = [
     { id: 'security', href: '/admin/security', icon: ShieldCheck, group: 'platform', minLevel: 3 },
     { id: 'audit', href: '/admin/audit', icon: FileClock, group: 'platform', minLevel: 1 },
     { id: 'retention', href: '/admin/retention', icon: Database, group: 'platform', minLevel: 3 },
+    { id: 'ai', href: '/admin/ai', icon: Sparkles, group: 'platform', minLevel: 1 },
     { id: 'transfer', href: '/admin/transfer', icon: ArrowLeftRight, group: 'mail', minLevel: 3 },
     { id: 'spam', href: '/admin/spam', icon: ShieldAlert, group: 'mail', minLevel: 1 },
     { id: 'profile', href: '/admin/profile', icon: UserCircle, group: 'account', minLevel: 1 },

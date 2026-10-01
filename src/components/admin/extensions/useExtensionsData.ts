@@ -13,6 +13,8 @@ export interface InstalledResponse {
     extensions: InstalledExtension[];
     errorExtensionIds: string[];
     capabilities: { test: boolean; testReason?: 'user_context_required' | 'signing_key_required' };
+    /** Estado de IA de la instancia (sin secretos) para marcar las extensiones que requieren IA. */
+    ai?: { enabled: boolean; features: Record<string, boolean>; extensions: Record<string, boolean> } | null;
 }
 
 export const CATALOG_URL = '/api/admin/extensions/catalog';
@@ -42,7 +44,10 @@ export function useExtensionsData(domainId: string | undefined): ExtensionsData 
     const { locale } = useI18n();
     const catalogQ = useAdminQuery<{ extensions: CatalogExtension[] }>(CATALOG_URL);
     const installedQ = useAdminQuery<InstalledResponse>(domainId ? installedUrl(domainId) : null);
-    const { extensions: configExtensions, isError: configFailed, extensionsLoaded, retry: retryConfig } = useDomainConfig();
+    const domain = useDomainConfig();
+    const { isError: configFailed, extensionsLoaded, retry: retryConfig } = domain;
+    // Incluye las pausadas por la IA (aiBlock.blocked): siguen instaladas y se listan.
+    const configExtensions = domain.allExtensions ?? domain.extensions;
 
     const managerDenied = installedQ.data?.managerSessionRequired === true;
     const installedFailed = !!installedQ.error;
@@ -65,8 +70,8 @@ export function useExtensionsData(domainId: string | undefined): ExtensionsData 
     }, [configExtensions]);
 
     const rows = useMemo(
-        () => buildRows({ catalog: catalogQ.data?.extensions ?? [], installed, errorIds: installedQ.data?.errorExtensionIds ?? [], health, locale }),
-        [catalogQ.data, installed, installedQ.data?.errorExtensionIds, health, locale],
+        () => buildRows({ catalog: catalogQ.data?.extensions ?? [], installed, errorIds: installedQ.data?.errorExtensionIds ?? [], health, locale, ai: installedQ.data?.ai as any }),
+        [catalogQ.data, installed, installedQ.data?.errorExtensionIds, installedQ.data?.ai, health, locale],
     );
 
     const { mutate: mutateCatalog } = catalogQ;

@@ -1,7 +1,8 @@
 import { adminRoute, audit, parseBody } from '@/lib/admin/http';
 import { assertInstanceDomain } from '@/lib/admin/extensions-instance';
 import { backendError, managerFetch } from '@/lib/admin/extensions-proxy';
-import { installBody } from '@/lib/admin/extensions-schemas';
+import { installVersionBody } from '@/lib/admin/extensions-schemas';
+import { assertAiAllowsEnable } from '@/lib/admin/extensions-ai';
 
 /**
  * POST { domainId, extensionId } -> { success: true }
@@ -10,9 +11,10 @@ import { installBody } from '@/lib/admin/extensions-schemas';
  * Solo se reenvian los dos ids y solo se devuelve `success`: nunca la fila de instalacion (podria llevar authData).
  */
 export const POST = adminRoute({ scope: 'extensions.install', write: true }, async (ctx) => {
-    const body = await parseBody(ctx.req, installBody);
+    const body = await parseBody(ctx.req, installVersionBody);
     await assertInstanceDomain(body.domainId, ctx.req);
-    const result = await managerFetch(ctx.req, '/api/manager/extensions/install', { body: { domainId: body.domainId, extensionId: body.extensionId } });
+    await assertAiAllowsEnable(body.extensionId);
+    const result = await managerFetch(ctx.req, '/api/manager/extensions/install', { body: { domainId: body.domainId, extensionId: body.extensionId, ...(body.version ? { version: body.version } : {}) } });
     const ok = result.status >= 200 && result.status < 300 && result.data?.success === true;
     audit(ctx, 'extension.install', { domainId: body.domainId, extensionId: body.extensionId, outcome: ok ? 'ok' : 'failed', status: result.status });
     if (!ok) throw backendError(result, 'extension_not_found');

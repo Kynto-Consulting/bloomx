@@ -12,6 +12,8 @@ import crypto from 'node:crypto';
  */
 
 export const SIGNATURE_VERSION_LINE = 'BLOOMX-SIG-V1';
+/** Mensaje V2: V1 + X-BloomX-Client-Api y X-BloomX-Client-Caps (ver canonicalString). */
+export const SIGNATURE_VERSION_LINE_V2 = 'BLOOMX-SIG-V2';
 export const SIGNATURE_WINDOW_SECONDS = 120;
 export const NONCE_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -26,14 +28,19 @@ export interface CanonicalParts {
     userId?: string | null;
     userEmail?: string | null;
     callback?: string | null;
+    /** X-BloomX-Client-Api / X-BloomX-Client-Caps tal como viajan. Si alguno esta presente (no null/undefined) el mensaje es V2 y los firma. */
+    clientApi?: string | null;
+    clientCaps?: string | null;
 }
 
 export const sha256Hex = (data: string | Buffer): string => crypto.createHash('sha256').update(data).digest('hex');
 const clean = (v: unknown) => String(v ?? '').replace(/[\r\n]/g, ' ');
 
 export function canonicalString(p: CanonicalParts): string {
+    // V2 = V1 + cabeceras de version del cliente (firmadas: no se pueden quitar ni anadir sin invalidar la firma). Sin ellas, V1 intacto.
+    const withClient = (p.clientApi !== undefined && p.clientApi !== null) || (p.clientCaps !== undefined && p.clientCaps !== null);
     return [
-        SIGNATURE_VERSION_LINE,
+        withClient ? SIGNATURE_VERSION_LINE_V2 : SIGNATURE_VERSION_LINE,
         clean(p.method).toUpperCase(),
         clean(p.pathAndQuery),
         clean(p.bodySha256Hex).toLowerCase(),
@@ -43,6 +50,7 @@ export function canonicalString(p: CanonicalParts): string {
         clean(p.userId),
         clean(p.userEmail),
         clean(p.callback),
+        ...(withClient ? [clean(p.clientApi), clean(p.clientCaps)] : []),
     ].join('\n');
 }
 

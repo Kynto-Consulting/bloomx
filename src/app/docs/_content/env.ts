@@ -129,9 +129,9 @@ export const ENV_VARS: EnvVar[] = [
     v('B2_SECRET_KEY', 'both', 'storage', 'conditional', undefined, 'Secret key de B2.', 'B2 secret key.'),
 
     // ---------------- IA ----------------
-    v('AI_PROVIDER', 'both', 'ai', 'optional', 'openai', 'Proveedor: `openai`, `gemini`, `anthropic`, `cohere` o `grok` (frontend). En el backend se infiere si existe `OPENAI_API_KEY`.', 'Provider: `openai`, `gemini`, `anthropic`, `cohere` or `grok` (frontend). On the backend it is inferred when `OPENAI_API_KEY` exists.'),
-    v('AI_KEY', 'both', 'ai', 'optional', undefined, 'Clave **única** del proveedor elegido (no existen claves por proveedor). Sin ella las funciones de IA fallan con "AI_KEY is not configured".', '**Single** key for the chosen provider (there are no per-provider keys). Without it AI features fail with "AI_KEY is not configured".'),
-    v('AI_MODEL', 'both', 'ai', 'optional', 'gpt-3.5-turbo (frontend), gpt-4o-mini (backend)', 'Modelo. En el frontend se traduce a un modelo por defecto de cada proveedor si no se indica.', 'Model. On the frontend a default model per provider is used when unset.'),
+    v('AI_PROVIDER', 'both', 'ai', 'optional', 'openai', '**HEREDADA/DEPRECADA.** Proveedor del respaldo heredado; solo se usa si no hay configuración en `/admin/ai`. Migra: [IA](/docs/ai#migration).', '**LEGACY/DEPRECATED.** Provider of the legacy fallback; used only when nothing is configured in `/admin/ai`. Migrate: [AI](/docs/ai#migration).'),
+    v('AI_KEY', 'both', 'ai', 'optional', undefined, '**HEREDADA/DEPRECADA.** Clave del respaldo heredado; solo si no hay configuración en `/admin/ai` (se muestra aviso y nunca se mezcla). La clave se gestiona ahora cifrada desde la interfaz. Migra: [IA](/docs/ai#migration).', '**LEGACY/DEPRECATED.** Key of the legacy fallback; only when nothing is configured in `/admin/ai` (a notice is shown and it is never mixed). The key is now managed encrypted from the UI. Migrate: [AI](/docs/ai#migration).'),
+    v('AI_MODEL', 'both', 'ai', 'optional', 'gpt-3.5-turbo (frontend), gpt-4o-mini (backend)', '**HEREDADA/DEPRECADA.** Modelo del respaldo heredado; se elige ahora en `/admin/ai`. Migra: [IA](/docs/ai#migration).', '**LEGACY/DEPRECATED.** Model of the legacy fallback; now chosen in `/admin/ai`. Migrate: [AI](/docs/ai#migration).'),
 
     // ---------------- OAuth / push ----------------
     v('NEXTAUTH_URL', 'frontend', 'oauth', 'conditional', undefined, 'Origen público para construir el redirect URI de Google. Necesaria si activas el login o la sincronización de Google.', 'Public origin used to build the Google redirect URI. Needed if you enable Google login or sync.'),
@@ -180,7 +180,7 @@ export const ENV_VARS: EnvVar[] = [
     v('MP_ACCESS_TOKEN', 'backend', 'backend', 'optional', undefined, 'Token de Mercado Pago. Sin él los pagos responden 503.', 'Mercado Pago token. Without it payments answer 503.'),
     v('MP_WEBHOOK_SECRET', 'backend', 'backend', 'optional', undefined, 'Secreto de firma del webhook de Mercado Pago (recomendado).', 'Mercado Pago webhook signing secret (recommended).'),
     v('PAYMENT_REDIRECT_ALLOWED_ORIGINS', 'backend', 'backend', 'optional', undefined, 'Orígenes extra permitidos como `redirectUrl` tras un pago (coma).', 'Extra origins allowed as post-payment `redirectUrl` (comma-separated).'),
-    v('OPENAI_API_KEY', 'backend', 'backend', 'optional', undefined, 'Alternativa a `AI_KEY` para `services.ai` de las extensiones (OpenAI).', 'Alternative to `AI_KEY` for the extensions\' `services.ai` (OpenAI).'),
+    v('OPENAI_API_KEY', 'backend', 'backend', 'optional', undefined, '**HEREDADA/DEPRECADA.** El backend compartido ya no usa clave de IA global: su uso emite un aviso en logs y solo se conserva por compatibilidad con instancias antiguas sin el endpoint del puente. Migra cada instancia a `/admin/ai`: [IA](/docs/ai#migration).', '**LEGACY/DEPRECATED.** The shared backend no longer uses a global AI key: using it logs a warning and is kept only for old instances without the bridge endpoint. Migrate each instance to `/admin/ai`: [AI](/docs/ai#migration).'),
 ];
 
 export function envNames(): string[] {

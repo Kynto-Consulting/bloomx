@@ -74,7 +74,7 @@ const page: DocPageContent = {
         { t: 'p', text: 'La columna **Dónde** indica si la variable se lee en el frontend, en el backend o en ambos.' },
         ...groups('es'),
         { t: 'h2', id: 'removed', text: 'Variables que ya no existen' },
-        { t: 'p', text: 'Aparecían en documentación antigua y **el código no las lee**: `COOKIE_SECRET`, `EXPANSION_SECRET`, `AI_OPENAI_API_KEY`, `AI_GEMINI_API_KEY`, `AI_ANTHROPIC_API_KEY`, `AI_COHERE_API_KEY` (se usa `AI_KEY`), `SLACK_SIGNING_SECRET`, `EXPANSION_CRM_URL`, `EXPANSION_CRM_API_KEY`, `EXPANSION_WEBHOOK_URL` y `TRELLO_SECRET`. Entre frontend y backend tampoco se usan `EXTENSION_HOOKS_SECRET` ni `FRONTEND_INTERNAL_URL`. En el backend `RESEND_API_KEY` no se lee: la clave de Resend llega en `register-domain` y se guarda cifrada por dominio.' },
+        { t: 'p', text: 'Aparecían en documentación antigua y **el código no las lee**: `COOKIE_SECRET`, `EXPANSION_SECRET`, `AI_OPENAI_API_KEY`, `AI_GEMINI_API_KEY`, `AI_ANTHROPIC_API_KEY`, `AI_COHERE_API_KEY` (la IA se configura en `/admin/ai`; `AI_KEY`/`AI_PROVIDER`/`AI_MODEL` son solo respaldo heredado, ver [IA](/docs/ai#migration)),`SLACK_SIGNING_SECRET`, `EXPANSION_CRM_URL`, `EXPANSION_CRM_API_KEY`, `EXPANSION_WEBHOOK_URL` y `TRELLO_SECRET`. Entre frontend y backend tampoco se usan `EXTENSION_HOOKS_SECRET` ni `FRONTEND_INTERNAL_URL`. En el backend `RESEND_API_KEY` no se lee: la clave de Resend llega en `register-domain` y se guarda cifrada por dominio.' },
     ],
     en: [
         { t: 'p', text: 'This page is the complete reference. Every variable was verified against the code (name, default and what happens if it is missing) and a test prevents listing variables that do not exist. **Never commit real values**: use your provider\'s variable store (Vercel, etc.).' },
@@ -90,7 +90,7 @@ const page: DocPageContent = {
         { t: 'p', text: 'The **Where** column says whether the variable is read on the frontend, the backend or both.' },
         ...groups('en'),
         { t: 'h2', id: 'removed', text: 'Variables that no longer exist' },
-        { t: 'p', text: 'They appeared in old documentation and **the code does not read them**: `COOKIE_SECRET`, `EXPANSION_SECRET`, `AI_OPENAI_API_KEY`, `AI_GEMINI_API_KEY`, `AI_ANTHROPIC_API_KEY`, `AI_COHERE_API_KEY` (`AI_KEY` is used), `SLACK_SIGNING_SECRET`, `EXPANSION_CRM_URL`, `EXPANSION_CRM_API_KEY`, `EXPANSION_WEBHOOK_URL` and `TRELLO_SECRET`. Between frontend and backend `EXTENSION_HOOKS_SECRET` and `FRONTEND_INTERNAL_URL` are not used either. On the backend `RESEND_API_KEY` is not read: the Resend key arrives in `register-domain` and is stored encrypted per domain.' },
+        { t: 'p', text: 'They appeared in old documentation and **the code does not read them**: `COOKIE_SECRET`, `EXPANSION_SECRET`, `AI_OPENAI_API_KEY`, `AI_GEMINI_API_KEY`, `AI_ANTHROPIC_API_KEY`, `AI_COHERE_API_KEY` (AI is configured in `/admin/ai`; `AI_KEY`/`AI_PROVIDER`/`AI_MODEL` are only a legacy fallback, see [AI](/docs/ai#migration)),`SLACK_SIGNING_SECRET`, `EXPANSION_CRM_URL`, `EXPANSION_CRM_API_KEY`, `EXPANSION_WEBHOOK_URL` and `TRELLO_SECRET`. Between frontend and backend `EXTENSION_HOOKS_SECRET` and `FRONTEND_INTERNAL_URL` are not used either. On the backend `RESEND_API_KEY` is not read: the Resend key arrives in `register-domain` and is stored encrypted per domain.' },
     ],
 };
 

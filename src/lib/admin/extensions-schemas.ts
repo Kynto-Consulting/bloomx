@@ -5,6 +5,8 @@ export const extensionId = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$
 export const domainId = z.string().min(1).max(200);
 
 export const installBody = z.object({ domainId, extensionId });
+/** Instalar admite fijar una version concreta (el backend responde 404 VERSION_NOT_FOUND si no existe). */
+export const installVersionBody = z.object({ domainId, extensionId, version: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]{1,40})?$/).optional() });
 export const toggleBody = z.object({ domainId, extensionId, enabled: z.boolean() });
 export const mandatoryBody = z.object({ domainId, extensionId, mandatory: z.boolean() });
 export const orderBody = z.object({

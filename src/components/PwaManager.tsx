@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { ClientUpdateBanner } from '@/components/ClientUpdateBanner';
+import { BUILD_ID } from '@/lib/pwa/version-info';
+import { serviceWorkerUrl } from '@/lib/pwa/client-version';
 
 const INSTALL_PROMPT_STORAGE_KEY = 'bloomx-pwa-install-prompted';
 const PROMPT_STORAGE_KEY = 'bloomx-pwa-notifications-prompted';
@@ -206,16 +209,6 @@ export function PwaManager() {
             return;
         }
 
-        // Si ya habia un SW controlando la pagina y llega uno nuevo, recargar una vez para no quedarse con la version vieja.
-        const hadController = Boolean(navigator.serviceWorker.controller);
-        let reloaded = false;
-        const handleControllerChange = () => {
-            if (!hadController || reloaded) return;
-            reloaded = true;
-            window.location.reload();
-        };
-        navigator.serviceWorker.addEventListener('controllerchange', handleControllerChange);
-
         let registrationRef: ServiceWorkerRegistration | null = null;
         const checkForUpdate = () => {
             registrationRef?.update().catch(() => undefined);
@@ -224,7 +217,7 @@ export function PwaManager() {
             if (document.visibilityState === 'visible') checkForUpdate();
         };
 
-        navigator.serviceWorker.register('/sw.js', { scope: '/', updateViaCache: 'none' }).then((registration) => {
+        navigator.serviceWorker.register(serviceWorkerUrl(BUILD_ID), { scope: '/', updateViaCache: 'none' }).then((registration) => {
             registrationRef = registration;
             registration.update().catch(() => undefined);
             registration.active?.postMessage({
@@ -240,7 +233,6 @@ export function PwaManager() {
 
         document.addEventListener('visibilitychange', handleVisibility);
         return () => {
-            navigator.serviceWorker.removeEventListener('controllerchange', handleControllerChange);
             document.removeEventListener('visibilitychange', handleVisibility);
         };
     }, [brandLogo, brandName]);
@@ -433,5 +425,5 @@ export function PwaManager() {
         return () => window.removeEventListener('bloomx:enable-notifications', handleEnableRequest);
     }, []);
 
-    return null;
+    return <ClientUpdateBanner />;
 }

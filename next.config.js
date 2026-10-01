@@ -1,3 +1,12 @@
+// Identidad de build: commit de Vercel si existe; si no, hash corto de la fecha + aleatorio, estable durante este proceso de build.
+// Se fija en process.env para que los workers/reevaluaciones de este mismo build hereden el mismo valor.
+const builtAt = process.env.BLOOMX_BUILT_AT || new Date().toISOString();
+const buildId = process.env.BLOOMX_BUILD_ID
+    || (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 12)
+    || require('crypto').createHash('sha256').update(builtAt + Math.random()).digest('hex').slice(0, 12);
+process.env.BLOOMX_BUILT_AT = builtAt;
+process.env.BLOOMX_BUILD_ID = buildId;
+
 const isProd = process.env.NODE_ENV === 'production';
 
 // Cabeceras de seguridad (CIS 16.x / CIS Benchmarks web, NIST SC-8 / SC-18 / SI-10, ISO 27002 8.26 / 8.28).
@@ -41,6 +50,8 @@ const nextConfig = {
     // services.formats.sanitizeHtml (api/internal/formats) usa DOMPurify con jsdom en el servidor: que no se empaquete.
     serverExternalPackages: ['isomorphic-dompurify'],
     env: {
+        NEXT_PUBLIC_BUILD_ID: buildId,
+        NEXT_PUBLIC_BUILT_AT: builtAt,
         NEXT_PUBLIC_BRAND_NAME: process.env.BRAND_NAME,
         NEXT_PUBLIC_BRAND_COLOR: process.env.BRAND_COLOR,
         NEXT_PUBLIC_BRAND_LOGO: process.env.BRAND_LOGO,
@@ -49,6 +60,8 @@ const nextConfig = {
         return [
             { source: '/:path*', headers: securityHeaders },
             // Las respuestas de autenticacion nunca deben cachearse
+            { source: '/sw.js', headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }, { key: 'Service-Worker-Allowed', value: '/' }] },
+            { source: '/api/version', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
             { source: '/api/auth/:path*', headers: [{ key: 'Cache-Control', value: 'no-store' }] },
             // Mensajes sellados: la clave viaja en el #fragmento; jamas debe salir en un Referer ni cachearse.
             {

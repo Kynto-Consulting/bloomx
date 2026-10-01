@@ -1,3 +1,4 @@
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { NextResponse } from 'next/server';
 import { requireLevel } from '@/lib/admin-auth';
 import { auditLog, getClientIp } from '@/lib/security';
@@ -69,7 +70,7 @@ export async function GET(req: Request) {
         const query = new URLSearchParams({ domainId, extensionId });
         const response = await fetch(`${BACKEND_URL()}/api/extension/settings?${query}`, {
             method: 'GET',
-            headers: { Cookie: req.headers.get('cookie') || '' },
+            headers: { Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
             cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));
@@ -100,7 +101,7 @@ export async function PUT(req: Request) {
 
         const response = await fetch(`${BACKEND_URL()}/api/extension/settings`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '' },
+            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
             // Se reenvian solo los tres campos conocidos.
             body: JSON.stringify({ domainId, extensionId, credentials }),
             cache: 'no-store',
@@ -146,7 +147,7 @@ export async function POST(req: Request) {
 
         const response = await fetch(`${BACKEND_URL()}/api/extension/settings`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '' },
+            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
             body: JSON.stringify({ domainId, extensionId, action: 'migrate-legacy' }),
             cache: 'no-store',
         });

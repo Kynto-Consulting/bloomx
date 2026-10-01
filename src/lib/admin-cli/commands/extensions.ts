@@ -125,6 +125,56 @@ export const extensionCommands: CommandDef[] = [
         },
     }),
     def({
+        name: 'extensions config', risk: 'read', summary: L('Ajustes no secretos de una extensión: valor guardado y fuente (nunca secretos ni valores del entorno)', 'An extension\'s non-secret settings: stored value and source (never secrets or env values)'),
+        managerOnly: true, positionals: [EXT], covers: ['GET /api/admin/extensions/config'],
+        handler: async ({ args, ctx }) => {
+            const r = (await managerCall(ctx, { method: 'GET', path: '/extensions/config', query: { domainId: await instanceDomainId(), extensionId: args.positionals[0] } })).data;
+            const keys = Object.keys(r.sources ?? {});
+            return multi(
+                table(['key', 'source', 'value'], keys.map((k) => ({ key: k, source: r.sources[k], value: r.values?.[k] === undefined ? '' : JSON.stringify(r.values[k]).slice(0, 80) }))),
+                kv([['checklist', `${r.checklist?.done ?? 0}/${r.checklist?.total ?? 0}`], ['importable', (r.importable ?? []).join(', ') || '-']]),
+            );
+        },
+    }),
+    def({
+        name: 'extensions config set', risk: 'security', summary: L('Fija un ajuste no secreto (el JSON se acepta como valor; vacío = restablecer)', 'Set a non-secret setting (JSON accepted as value; empty = reset)'),
+        managerOnly: true, positionals: [EXT, pos('key', 'Clave del ajuste', 'Setting key'), pos('value', 'Valor (JSON o texto)', 'Value (JSON or text)')], covers: ['PUT /api/admin/extensions/config'],
+        handler: async ({ args, ctx }) => {
+            const raw = args.positionals[2];
+            let value: unknown = raw === '' ? null : raw;
+            try { if (raw !== '') value = JSON.parse(raw); } catch { /* texto plano */ }
+            const r = (await managerCall(ctx, { method: 'PUT', path: '/extensions/config', body: { domainId: await instanceDomainId(), extensionId: args.positionals[0], values: { [args.positionals[1]]: value } } })).data;
+            return kv([['checklist', `${r.checklist?.done ?? 0}/${r.checklist?.total ?? 0}`]]);
+        },
+    }),
+    def({
+        name: 'extensions config reset', risk: 'destructive', summary: L('Restablece todos los ajustes no secretos de la extensión a sus valores por defecto', 'Reset all non-secret settings of the extension to defaults'),
+        managerOnly: true, positionals: [EXT], covers: [],
+        handler: async ({ args, ctx }) => {
+            const r = (await managerCall(ctx, { method: 'PUT', path: '/extensions/config', body: { domainId: await instanceDomainId(), extensionId: args.positionals[0], reset: true } })).data;
+            return kv([['checklist', `${r.checklist?.done ?? 0}/${r.checklist?.total ?? 0}`]]);
+        },
+    }),
+    def({
+        name: 'extensions config import-env', risk: 'security', summary: L('Copia al dominio los ajustes no secretos heredados del entorno (los secretos no se tocan)', 'Copy legacy environment non-secret settings to the domain (secrets are untouched)'),
+        managerOnly: true, positionals: [EXT], covers: ['POST /api/admin/extensions/config'],
+        handler: async ({ args, ctx }) => {
+            const r = (await managerCall(ctx, { method: 'POST', path: '/extensions/config', body: { domainId: await instanceDomainId(), extensionId: args.positionals[0], action: 'import-env' } })).data;
+            return kv([['imported', (r.imported ?? []).join(', ') || '-']]);
+        },
+    }),
+    def({
+        name: 'extensions config action', risk: 'security', summary: L('Ejecuta una acción de ajustes (p. ej. enviar evento de prueba); no muestra secretos', 'Run a settings action (e.g. send a test event); never shows secrets'),
+        managerOnly: true, positionals: [EXT, pos('actionId', 'Id de la acción', 'Action id'), pos('itemId', 'Id del elemento (acciones por elemento)', 'Item id (per-item actions)', { required: false })], covers: [],
+        handler: async ({ args, ctx }) => {
+            const r = (await managerCall(ctx, { method: 'POST', path: '/extensions/config', body: { domainId: await instanceDomainId(), extensionId: args.positionals[0], action: 'run-action', actionId: args.positionals[1], ...(args.positionals[2] ? { itemId: args.positionals[2] } : {}) } })).data;
+            return multi(
+                kv([['status', r.result?.status ?? '-'], ['code', r.result?.code ?? '-'], ['latencyMs', r.result?.latencyMs ?? '-'], ['message', r.result?.message ?? '-']]),
+                table(['report'], (r.result?.report ?? []).map((line: string) => ({ report: line }))),
+            );
+        },
+    }),
+    def({
         name: 'extensions conferencing', risk: 'read', summary: L('Estado de las extensiones de conferencias (Zoom, Meet, Calendar)', 'Conferencing extensions state (Zoom, Meet, Calendar)'),
         managerOnly: true, covers: ['GET /api/admin/conferencing'],
         handler: async ({ ctx }) => data((await managerCall(ctx, { method: 'GET', path: '/conferencing' })).data),

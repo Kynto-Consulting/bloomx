@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/session';
 import { getLinkedAuth } from '@/lib/conferencing/auth-context';
 import { buildBackendHeaders, loadDomainPrivateKey } from '@/lib/backend-auth';
 import { loadDisabledExtensionsForUser } from '@/lib/expansions/user-disabled';
+import { getPublicAiState } from '@/lib/ai/settings';
+import { annotateExtensionsWithAi, recentBlockedIds } from '@/lib/ai/extension-block';
 import { sanitizeDisabledForRequest } from '@/lib/expansions/server-hooks';
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://backend.bloomx.arubik.dev';
@@ -36,8 +38,23 @@ export async function GET(req: NextRequest) {
             return NextResponse.json({ error: 'Backend error' }, { status: res.status });
         }
 
-        const data = await res.json();
-        return NextResponse.json(data);
+        let data = await res.json();
+        // Handlers de middleware: se quitan los de extensiones bloqueadas por la IA (no se ofrecen; siguen instaladas). Los ids bloqueados
+        // salen del ultimo calculo de /api/config (misma funcion pura); refrescar el estado de IA (cache 30 s) mantiene el kill switch <= 30 s.
+        if (Array.isArray(data)) {
+            let blocked = recentBlockedIds();
+            if (!blocked) {
+                // Calculo antiguo o inexistente (p. ej. nadie llamo a /api/config en este proceso): se recalcula con la config del dominio.
+                try {
+                    const cfgRes = await fetch(`${BACKEND_URL}/api/config?domain=${encodeURIComponent(host.split(':')[0])}`, { cache: 'no-store' });
+                    const cfg = cfgRes.ok ? await cfgRes.json() : null;
+                    if (cfg && Array.isArray(cfg.extensions)) annotateExtensionsWithAi(cfg.extensions, await getPublicAiState());
+                } catch { /* sin estado: no se filtra; el backend rechaza igualmente la ejecucion */ }
+                blocked = recentBlockedIds();
+            }
+            if (blocked && blocked.size > 0) data = data.filter((h: any) => !blocked.has(String(h?.extensionId ?? '')));
+        }
+        return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) {
         console.error("Proxy GET Error", error);
         return NextResponse.json({ error: 'Failed to fetch expansions' }, { status: 500 });

@@ -21,7 +21,7 @@ const esQa: QA[] = [
     { id: 'undo-send', q: '¿Hay deshacer envío, posponer o cancelar programados?', a: 'No hay "deshacer envío" con retardo. Posponer (`snooze`) y cancelar un envío programado existen solo como API, sin interfaz. Ver [Funciones](/docs/features#compose).' },
     { id: 'offline-envio', q: '¿Puedo enviar sin conexión?', a: 'No: la cola offline solo cubre acciones por lote de la lista (archivar, borrar, marcar…). Enviar un correo sin red no se encola. Ver [Funciones](/docs/features#offline).' },
     { id: 'limites-adjuntos', q: '¿Qué tamaño de adjunto se admite?', a: 'Hasta 200 MB por archivo con subida previa, y 35 MB en total si van incrustados en base64 en el envío; hasta 25 adjuntos por correo.' },
-    { id: 'claves-ia', q: '¿Qué variable configura la IA?', a: '`AI_KEY` (una sola clave), con `AI_PROVIDER` y `AI_MODEL`, **en el backend**. Las variables `AI_OPENAI_API_KEY` y similares no existen. Ver [IA](/docs/ai).' },
+    { id: 'claves-ia', q: '¿Qué variable configura la IA?', a: 'Ninguna: la IA se configura por instancia en `/admin/ai`. `AI_KEY`, `AI_PROVIDER` y `AI_MODEL` son un respaldo heredado y deprecado. Ver [IA](/docs/ai#migration).' },
     { id: 'idiomas', q: '¿Cómo añado un idioma?', a: 'Amplía `LOCALES`, crea el diccionario y regístralo; para la landing, amplía también `LANDING_LOCALES` en ambos repositorios. Ver [Funciones](/docs/features#i18n).' },
     { id: 'docs-desactualizada', q: 'Encontré algo que no coincide con el código', a: 'Esta documentación se verificó contra el código y un test comprueba enlaces y variables, pero puede quedar desfasada. El código manda: abre una incidencia indicando la página y la sección.' },
 ];
@@ -45,7 +45,7 @@ const enQa: QA[] = [
     { id: 'undo-send', q: 'Is there undo send, snooze or cancel for scheduled mail?', a: 'There is no delayed "undo send". Snooze and cancelling a scheduled send exist only as an API, without UI. See [Features](/docs/features#compose).' },
     { id: 'offline-envio', q: 'Can I send while offline?', a: 'No: the offline queue only covers list batch actions (archive, delete, mark…). Sending an email with no network is not queued. See [Features](/docs/features#offline).' },
     { id: 'limites-adjuntos', q: 'What attachment size is allowed?', a: 'Up to 200 MB per file with prior upload, and 35 MB in total if embedded as base64 in the send; up to 25 attachments per message.' },
-    { id: 'claves-ia', q: 'Which variable configures AI?', a: '`AI_KEY` (a single key), with `AI_PROVIDER` and `AI_MODEL`, **on the backend**. `AI_OPENAI_API_KEY` and similar do not exist. See [AI](/docs/ai).' },
+    { id: 'claves-ia', q: 'Which variable configures AI?', a: 'None: AI is configured per instance in `/admin/ai`. `AI_KEY`, `AI_PROVIDER` and `AI_MODEL` are a legacy, deprecated fallback. See [AI](/docs/ai#migration).' },
     { id: 'idiomas', q: 'How do I add a language?', a: 'Extend `LOCALES`, create the dictionary and register it; for the landing also extend `LANDING_LOCALES` in both repositories. See [Features](/docs/features#i18n).' },
     { id: 'docs-desactualizada', q: 'I found something that does not match the code', a: 'This documentation was verified against the code and a test checks links and variables, but it can drift. The code wins: open an issue naming the page and section.' },
 ];

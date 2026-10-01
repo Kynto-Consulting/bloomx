@@ -3,7 +3,9 @@
  * semver, categoria, permisos legibles + riesgo, funcion de prueba, campos de SETTINGS_PANEL, resumen acotado del manifest
  * y orden. Las comparten el servidor (proxy del catalogo), la UI y los tests.
  */
+import { sanitizeRequires } from './extensions-compat';
 import { describePermissions, KNOWN_MOUNT_POINTS, manifestIcon, type PermissionRisk } from '@/lib/expansions/manifest-schema';
+import { normalizeSettingsSchema, type SettingsSchema } from '@/lib/expansions/settings-schema';
 
 export type Json = Record<string, any>;
 
@@ -247,9 +249,15 @@ export interface ManifestSummary {
     api?: { functions: Record<string, Record<string, never>> };
     testConnection?: string | true;
     settingsFields?: SettingsField[];
+    /** Esquema declarativo de ajustes por dominio (`manifest.settingsSchema`), normalizado. */
+    settingsSchema?: SettingsSchema;
     intercepts?: { point: string }[];
     /** El manifest se declara OBLIGATORIA para todos los usuarios (`mandatory: true`). */
     mandatory?: boolean;
+    /** Bloque `ai` del manifest (funciones, obligatoriedad, finalidad), acotado. */
+    ai?: { features?: string[]; required?: boolean; purpose?: { es: string; en: string } };
+    /** Requisitos del cliente de esta version (manifest.requires), acotados. */
+    requires?: { clientApi: string | null; capabilities: string[] };
 }
 
 const short = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
@@ -282,6 +290,15 @@ export function summarizeTemplate(template: unknown): ManifestSummary | null {
         if (Object.keys(table).length > 0) out.i18n = table;
     }
     if (t.mandatory === true) out.mandatory = true;
+    const requires = sanitizeRequires(t.requires);
+    if (requires) out.requires = requires;
+    if (t.ai && typeof t.ai === 'object' && !Array.isArray(t.ai)) {
+        out.ai = {
+            ...(Array.isArray(t.ai.features) ? { features: t.ai.features.filter((f: unknown): f is string => typeof f === 'string').map((f: string) => f.slice(0, 40)).slice(0, 20) } : {}),
+            ...(typeof t.ai.required === 'boolean' ? { required: t.ai.required } : {}),
+            ...(t.ai.purpose && typeof t.ai.purpose === 'object' ? { purpose: { es: short(t.ai.purpose.es, 300) ?? '', en: short(t.ai.purpose.en, 300) ?? '' } } : {}),
+        };
+    }
     if (Array.isArray(t.permissions)) {
         assign('permissions', t.permissions.filter((p: unknown): p is string => typeof p === 'string' && p.length <= 100).slice(0, 60));
     }
@@ -303,6 +320,8 @@ export function summarizeTemplate(template: unknown): ManifestSummary | null {
     const fields = extractSettingsFields(t);
     if (fields.length) out.settingsFields = fields;
     if (declaresSettingsPanel(t) && !fields.length) out.settingsFields = [];
+    const schema = normalizeSettingsSchema(t.settingsSchema);
+    if (schema.fields.length) out.settingsSchema = schema;
     const intercepts: any[] = [...(Array.isArray(t.intercepts) ? t.intercepts : []), ...(Array.isArray(t.hooks) ? t.hooks : [])];
     const ipoints = intercepts.map((i) => short(i?.point, 60)).filter((p): p is string => !!p);
     if (ipoints.length) out.intercepts = Array.from(new Set(ipoints)).slice(0, 30).map((point) => ({ point }));

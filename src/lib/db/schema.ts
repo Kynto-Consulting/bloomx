@@ -1724,6 +1724,100 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "MailTransferItem_jobId_status_idx" ON "MailTransferItem" ("jobId", "status")',
         ],
     },
+    // ---- Servicio de IA central de la instancia (aditivo; lib/ai/*, SQL crudo) ----
+    // AiSettings: UNA fila por instancia (id = 'default'). La clave del proveedor va CIFRADA (lib/encryption) y nunca se devuelve.
+    // AiUsage: un renglon por llamada al proveedor SIN contenido de prompts ni respuestas. AiAudit: cambios de configuracion (sin secretos).
+    {
+        name: 'AiSettings',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AiSettings" (
+            "id" TEXT NOT NULL,
+            "enabled" BOOLEAN NOT NULL DEFAULT FALSE,
+            "provider" TEXT,
+            "model" TEXT,
+            "baseUrl" TEXT,
+            "apiKeyEnc" TEXT,
+            "apiKeyLast4" TEXT,
+            "config" JSONB NOT NULL DEFAULT '{}'::jsonb,
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedBy" TEXT
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'enabled', definition: 'BOOLEAN NOT NULL DEFAULT FALSE' },
+            { name: 'provider', definition: 'TEXT' },
+            { name: 'model', definition: 'TEXT' },
+            { name: 'baseUrl', definition: 'TEXT' },
+            { name: 'apiKeyEnc', definition: 'TEXT' },
+            { name: 'apiKeyLast4', definition: 'TEXT' },
+            { name: 'config', definition: "JSONB NOT NULL DEFAULT '{}'::jsonb" },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedBy', definition: 'TEXT' },
+        ],
+        constraints: [
+            { name: 'AiSettings_pkey', statement: 'ALTER TABLE "AiSettings" ADD CONSTRAINT "AiSettings_pkey" PRIMARY KEY ("id")' },
+        ],
+    },
+    {
+        name: 'AiUsage',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AiUsage" (
+            "id" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "feature" TEXT NOT NULL,
+            "extensionId" TEXT,
+            "provider" TEXT NOT NULL DEFAULT '',
+            "model" TEXT NOT NULL DEFAULT '',
+            "tokensIn" INTEGER NOT NULL DEFAULT 0,
+            "tokensOut" INTEGER NOT NULL DEFAULT 0,
+            "ok" BOOLEAN NOT NULL DEFAULT TRUE,
+            "errorCode" TEXT,
+            "flags" TEXT,
+            "costUsd" DOUBLE PRECISION NOT NULL DEFAULT 0,
+            "ts" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'feature', definition: 'TEXT NOT NULL' },
+            { name: 'extensionId', definition: 'TEXT' },
+            { name: 'provider', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'model', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'tokensIn', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'tokensOut', definition: 'INTEGER NOT NULL DEFAULT 0' },
+            { name: 'ok', definition: 'BOOLEAN NOT NULL DEFAULT TRUE' },
+            { name: 'errorCode', definition: 'TEXT' },
+            { name: 'flags', definition: 'TEXT' },
+            { name: 'costUsd', definition: 'DOUBLE PRECISION NOT NULL DEFAULT 0' },
+            { name: 'ts', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'AiUsage_pkey', statement: 'ALTER TABLE "AiUsage" ADD CONSTRAINT "AiUsage_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "AiUsage_ts_idx" ON "AiUsage" ("ts" DESC)',
+            'CREATE INDEX IF NOT EXISTS "AiUsage_userId_ts_idx" ON "AiUsage" ("userId", "ts" DESC)',
+        ],
+    },
+    {
+        name: 'AiAudit',
+        createStatement: `CREATE TABLE IF NOT EXISTS "AiAudit" (
+            "id" TEXT NOT NULL,
+            "actor" TEXT NOT NULL DEFAULT '',
+            "action" TEXT NOT NULL,
+            "fields" TEXT NOT NULL DEFAULT '',
+            "ts" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'id', definition: 'TEXT NOT NULL' },
+            { name: 'actor', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'action', definition: 'TEXT NOT NULL' },
+            { name: 'fields', definition: "TEXT NOT NULL DEFAULT ''" },
+            { name: 'ts', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'AiAudit_pkey', statement: 'ALTER TABLE "AiAudit" ADD CONSTRAINT "AiAudit_pkey" PRIMARY KEY ("id")' },
+        ],
+        indexes: ['CREATE INDEX IF NOT EXISTS "AiAudit_ts_idx" ON "AiAudit" ("ts" DESC)'],
+    },
 ];
 
 let ensureSchemaPromise: Promise<void> | null = null;

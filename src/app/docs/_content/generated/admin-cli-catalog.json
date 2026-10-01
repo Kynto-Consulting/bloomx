@@ -3289,6 +3289,192 @@
       "flags": []
     },
     {
+      "name": "extensions config",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Ajustes no secretos de una extensión: valor guardado y fuente (nunca secretos ni valores del entorno)",
+        "en": "An extension's non-secret settings: stored value and source (never secrets or env values)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions config set",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija un ajuste no secreto (el JSON se acepta como valor; vacío = restablecer)",
+        "en": "Set a non-secret setting (JSON accepted as value; empty = reset)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        },
+        {
+          "name": "key",
+          "description": {
+            "es": "Clave del ajuste",
+            "en": "Setting key"
+          },
+          "required": true,
+          "variadic": false
+        },
+        {
+          "name": "value",
+          "description": {
+            "es": "Valor (JSON o texto)",
+            "en": "Value (JSON or text)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions config reset",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "destructive",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Restablece todos los ajustes no secretos de la extensión a sus valores por defecto",
+        "en": "Reset all non-secret settings of the extension to defaults"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions config import-env",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Copia al dominio los ajustes no secretos heredados del entorno (los secretos no se tocan)",
+        "en": "Copy legacy environment non-secret settings to the domain (secrets are untouched)"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "extensions config action",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Ejecuta una acción de ajustes (p. ej. enviar evento de prueba); no muestra secretos",
+        "en": "Run a settings action (e.g. send a test event); never shows secrets"
+      },
+      "managerOnly": true,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "extension",
+          "description": {
+            "es": "Id de la extensión",
+            "en": "Extension id"
+          },
+          "required": true,
+          "variadic": false,
+          "complete": "extension"
+        },
+        {
+          "name": "actionId",
+          "description": {
+            "es": "Id de la acción",
+            "en": "Action id"
+          },
+          "required": true,
+          "variadic": false
+        },
+        {
+          "name": "itemId",
+          "description": {
+            "es": "Id del elemento (acciones por elemento)",
+            "en": "Item id (per-item actions)"
+          },
+          "required": false,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
       "name": "extensions conferencing",
       "category": {
         "es": "Extensiones",
@@ -3306,6 +3492,314 @@
       "examples": [],
       "positionals": [],
       "flags": []
+    },
+    {
+      "name": "ai status",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado del servicio de IA de la instancia (nunca muestra la clave)",
+        "en": "Instance AI service status (never shows the key)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai usage",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Uso de IA de los últimos N días (por función y, con --user, por usuario)",
+        "en": "AI usage over the last N days (by feature and, with --user, by user)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "days",
+          "type": "number",
+          "description": {
+            "es": "Días (1-366, defecto 30)",
+            "en": "Days (1-366, default 30)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "user",
+          "type": "boolean",
+          "description": {
+            "es": "Desglose por usuario",
+            "en": "Per-user breakdown"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "csv",
+          "type": "boolean",
+          "description": {
+            "es": "Exporta a CSV",
+            "en": "Export to CSV"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "ai audit",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "read",
+      "minLevel": 1,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Historial de cambios de ajustes de IA (solo nombres de campos)",
+        "en": "AI settings change history (field names only)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai test",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Prueba la conexión con el proveedor usando la configuración guardada",
+        "en": "Test the provider connection using the saved configuration"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai set",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "write",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Cambia un ajuste no crítico: ai set <campo> <valor>",
+        "en": "Change a non-critical setting: ai set <field> <value>"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "ai set model gpt-4o-mini",
+        "ai set features.translate off",
+        "ai set quotas.perUser.requestsDay 100",
+        "ai set guardrails.redaction.mode enforce"
+      ],
+      "positionals": [
+        {
+          "name": "field",
+          "description": {
+            "es": "Campo: model | features.<funcion> | limits.<maxOutputTokens|maxInputChars|maxTemperature|timeoutMs> | quotas.<perUser|global>.<requestsDay|requestsMonth|tokensDay|tokensMonth> | retention | guardrails.<redaction|blockedTopics|output|bodyPolicy>.mode",
+            "en": "Field: model | features.<feature> | limits.<maxOutputTokens|maxInputChars|maxTemperature|timeoutMs> | quotas.<perUser|global>.<requestsDay|requestsMonth|tokensDay|tokensMonth> | retention | guardrails.<redaction|blockedTopics|output|bodyPolicy>.mode"
+          },
+          "required": true,
+          "variadic": false
+        },
+        {
+          "name": "value",
+          "description": {
+            "es": "Valor (on|off, número, modo o texto)",
+            "en": "Value (on|off, number, mode or text)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "ai connection set",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Fija proveedor y URL base (nivel 4, step-up)",
+        "en": "Set provider and base URL (level 4, step-up)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "ai connection set openai",
+        "ai connection set compatible --base-url https://llm.example.com/v1"
+      ],
+      "positionals": [
+        {
+          "name": "provider",
+          "description": {
+            "es": "Proveedor",
+            "en": "Provider"
+          },
+          "required": true,
+          "variadic": false,
+          "values": [
+            "openai",
+            "anthropic",
+            "google",
+            "azure-openai",
+            "openrouter",
+            "compatible",
+            "cohere"
+          ]
+        }
+      ],
+      "flags": [
+        {
+          "name": "base-url",
+          "type": "string",
+          "description": {
+            "es": "URL base (obligatoria en azure-openai y compatible)",
+            "en": "Base URL (required for azure-openai and compatible)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "ai enable",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Activa el servicio de IA de la instancia",
+        "en": "Enable the instance AI service"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai disable",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Kill switch: desactiva la IA y bloquea las extensiones que la requieren (≤ 30 s)",
+        "en": "Kill switch: disable AI and block extensions that require it (<= 30 s)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai key set",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Guarda la clave API (se lee de stdin o aviso oculto; nunca por argumento, nunca se muestra ni se audita)",
+        "en": "Store the API key (read from stdin or a hidden prompt; never an argument, never shown or audited)"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai key clear",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "destructive",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Borra la clave API guardada",
+        "en": "Delete the stored API key"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "ai purge",
+      "category": {
+        "es": "IA de la instancia",
+        "en": "Instance AI"
+      },
+      "risk": "destructive",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Borra el registro de uso anterior a la retención (o a --days)",
+        "en": "Delete usage records older than the retention (or --days)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "days",
+          "type": "number",
+          "description": {
+            "es": "Días a conservar (defecto: retención configurada)",
+            "en": "Days to keep (default: configured retention)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
     },
     {
       "name": "spam config",

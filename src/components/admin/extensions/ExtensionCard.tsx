@@ -1,10 +1,14 @@
 'use client';
 
+import { useId } from "react";
 import { KeyRound } from 'lucide-react';
 import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { Badge, btnDangerOutline, btnOutline, btnPrimary } from '@/components/admin/console';
 import { useI18n } from '@/components/I18nProvider';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
+import { blockReason } from "@/lib/admin/extensions-compat";
+import { CompatNotice, useCompatLocale } from "./CompatNotice";
+import { AiRequirementSummary, aiBadgeLabel, aiBlockTitle, useAiText } from './AiRequirementSummary';
 
 export type DialogKind = 'install' | 'update' | 'uninstall' | 'disable' | 'mandatoryOn' | 'mandatoryOff';
 
@@ -18,8 +22,11 @@ export interface RowActions {
 /** Insignias de estado de una extension (todas con texto, no solo color). */
 export function StatusBadges({ row }: { row: ExtensionRow }) {
     const { t } = useI18n();
+    const aiT = useAiText();
+    const aiBadge = aiBadgeLabel(aiT, row);
     return (
         <>
+            {aiBadge && <Badge tone={aiBadge.tone}>{aiBadge.label}</Badge>}
             {row.status === 'enabled' && <Badge tone="success">{t('admin.console.extensions.status.enabled')}</Badge>}
             {row.status === 'disabled' && <Badge tone="warning">{t('admin.console.extensions.status.disabled')}</Badge>}
             {row.status === 'available' && <Badge>{t('admin.console.extensions.status.available')}</Badge>}
@@ -27,6 +34,8 @@ export function StatusBadges({ row }: { row: ExtensionRow }) {
             {row.mandatory && <Badge tone="warning">{t('admin.console.extensions.status.mandatory')}</Badge>}
             {row.hasErrors && <Badge tone="danger">{t('admin.console.extensions.status.errors')}</Badge>}
             {row.isPaid && <Badge tone="info">{t('admin.console.extensions.status.paid')}</Badge>}
+            {row.incompatible && <Badge tone="warning">{t('admin.console.extensions.card.incompatible')}</Badge>}
+            {row.deprecated && <Badge>{t('admin.console.extensions.card.deprecated')}</Badge>}
         </>
     );
 }
@@ -38,15 +47,24 @@ export function ExtensionActionButtons({ row, actions }: { row: ExtensionRow; ac
     const busy = actions.busyId === row.id;
     const disabled = actions.busyId !== null;
     const name = row.name;
+    const aiT = useAiText();
+    const aiLock = aiBlockTitle(aiT, row);
+    const locale = useCompatLocale();
+    const blockId = useId();
+    const installBlock = blockReason(row, 'install', locale);
+    const enableBlock = blockReason(row, 'enable', locale);
+    const updateBlock = blockReason(row, 'update', locale);
+    const anyBlock = (!row.installed && installBlock) || (row.installed && !row.enabled && enableBlock) || (row.installed && row.updateAvailable && updateBlock) || null;
     return (
         <>
+            {anyBlock && <span id={blockId} className="sr-only">{anyBlock}</span>}
             {!row.installed && (
-                <button type="button" className={btnPrimary} disabled={disabled} aria-label={t('admin.console.extensions.actions.installOf', { name })} onClick={() => actions.onRequest('install', row)}>
+                <button type="button" className={btnPrimary} disabled={disabled || !!aiLock || !!installBlock} title={installBlock || aiLock || undefined} aria-describedby={installBlock ? blockId : undefined} aria-label={t('admin.console.extensions.actions.installOf', { name })} onClick={() => actions.onRequest('install', row)}>
                     {busy ? t('admin.console.extensions.actions.working') : row.isPaid ? t('admin.console.extensions.actions.buyInstall') : t('admin.console.extensions.actions.install')}
                 </button>
             )}
             {row.installed && row.updateAvailable && (
-                <button type="button" className={btnPrimary} disabled={disabled} aria-label={t('admin.console.extensions.actions.updateOf', { name })} onClick={() => actions.onRequest('update', row)}>
+                <button type="button" className={btnPrimary} disabled={disabled || !!updateBlock} title={updateBlock || undefined} aria-describedby={updateBlock ? blockId : undefined} aria-label={t('admin.console.extensions.actions.updateOf', { name })} onClick={() => actions.onRequest('update', row)}>
                     {busy ? t('admin.console.extensions.actions.working') : t('admin.console.extensions.actions.update')}
                 </button>
             )}
@@ -56,7 +74,7 @@ export function ExtensionActionButtons({ row, actions }: { row: ExtensionRow; ac
                 </button>
             )}
             {row.installed && !row.enabled && (
-                <button type="button" className={btnOutline} disabled={disabled} aria-label={t('admin.console.extensions.actions.enableOf', { name })} onClick={() => actions.onEnable(row)}>
+                <button type="button" className={btnOutline} disabled={disabled || !!aiLock || !!enableBlock} title={enableBlock || aiLock || undefined} aria-describedby={enableBlock ? blockId : undefined} aria-label={t('admin.console.extensions.actions.enableOf', { name })} onClick={() => actions.onEnable(row)}>
                     {t('admin.console.extensions.actions.enable')}
                 </button>
             )}
@@ -98,6 +116,8 @@ export function ExtensionCard({ row, actions, onOpen }: { row: ExtensionRow; act
                     )}
                 </div>
                 <p className="mt-3 line-clamp-3 flex-1 text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
+                {row.requiresAi && <div className="mt-2"><AiRequirementSummary row={row} /></div>}
+                <div className="mt-2"><CompatNotice row={row} /></div>
                 {!row.inCatalog && <p className="mt-2 text-xs text-muted-foreground">{t('admin.console.extensions.catalog.notInCatalog')}</p>}
                 <div className="mt-4 flex flex-wrap gap-2 border-t border-border/60 pt-3">
                     <button type="button" className={btnOutline} aria-label={t('admin.console.extensions.actions.detailsOf', { name: row.name })} onClick={() => onOpen(row)}>

@@ -128,6 +128,8 @@ export function hasExtensionsList(data: any): boolean {
 export function useDomainConfig() {
     const { data, error, isLoading: swrLoading, isValidating, mutate } = useSWR<any, DomainConfigError>(CONFIG_URL, (url: string) => fetchDomainConfig(url), {
         revalidateOnFocus: true,
+        // El kill switch de IA surte efecto en <= 30 s (cache del servidor) tambien en pestanas abiertas.
+        refreshInterval: 30_000,
         // Con datos buenos previos, un fallo NO los borra (SWR conserva `data`); el reintento es por nuestra politica acotada.
         shouldRetryOnError: true,
         // SWR cuenta los reintentos desde 1 y espera que se le devuelvan las mismas `opts` (incrementa el en el siguiente fallo).
@@ -147,7 +149,10 @@ export function useDomainConfig() {
     const config = isLoading ? DEFAULT_CONFIG : (data?.config ?? DEFAULT_CONFIG);
     const rawTheme = (config as { theme?: unknown }).theme;
     const themeConfig = useMemo<DomainThemeConfig>(() => sanitizeThemeConfig(rawTheme), [rawTheme]);
-    const extensions = useMemo(() => (isLoading ? [] : normalizeExtensions(data?.extensions || [])), [isLoading, data]);
+    // `allExtensions`: todas las instaladas (la pagina de gestion muestra tambien las pausadas por la IA). `extensions`: las que se pueden
+    // MONTAR: se excluyen las que /api/config marca `aiBlock.blocked` (IA/funcion desactivada); siguen instaladas y vuelven al reactivar la IA.
+    const allExtensions = useMemo(() => (isLoading ? [] : normalizeExtensions(data?.extensions || [])), [isLoading, data]);
+    const extensions = useMemo(() => allExtensions.filter((e) => e?.aiBlock?.blocked !== true), [allExtensions]);
 
     const retry = useCallback(() => { void mutate(); }, [mutate]);
 
@@ -155,6 +160,7 @@ export function useDomainConfig() {
         config,
         themeConfig,
         extensions,
+        allExtensions,
         isLoading,
         isError,
         error: (error ?? null) as DomainConfigError | null,

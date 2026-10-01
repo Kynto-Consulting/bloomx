@@ -4,11 +4,13 @@ import { useCallback, useState } from 'react';
 import { ApiError, adminFetch, apiErrorKey } from '@/components/admin/console';
 import { useI18n } from '@/components/I18nProvider';
 import { normalizedOrders } from '@/lib/admin/extensions-manifest';
+import { canActivate, canInstall, canUpdate } from '@/lib/admin/extensions-compat';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
 
 const BACKEND_CODES = new Set([
     'manager_session_required', 'domain_mismatch', 'instance_unavailable', 'PAYMENT_REQUIRED', 'not_installed',
     'extension_not_found', 'backend_unavailable', 'backend_error', 'rate_limited', 'EXTENSION_NOT_ENABLED', 'EXTENSION_INVALID',
+    'client_incompatible', 'version_not_found',
 ]);
 
 /** Clave i18n del error: codigo propio de la seccion si lo hay; si no, los errores comunes de la consola. */
@@ -79,6 +81,7 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
         (row: ExtensionRow) =>
             run(row.id, async () => {
                 if (!domainId) return null;
+                if (!canInstall(row)) throw new ApiError(409, 'client_incompatible');
                 if (row.isPaid && !row.installed) {
                     // Pago: igual que la pantalla antigua (create-preference del backend -> init_point de Mercado Pago).
                     let pref: any = null;
@@ -113,6 +116,7 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
         (row: ExtensionRow) =>
             run(row.id, async () => {
                 if (!domainId) return null;
+                if (!canUpdate(row)) throw new ApiError(409, 'client_incompatible');
                 await adminFetch('/api/admin/extensions/update', { body: { domainId, extensionId: row.id } });
                 return t('admin.console.extensions.live.updated', { name: row.name, version: row.version ?? '' });
             }),
@@ -133,6 +137,7 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
         (row: ExtensionRow, enabled: boolean) =>
             run(row.id, async () => {
                 if (!domainId) return null;
+                if (enabled && !canActivate(row)) throw new ApiError(409, 'client_incompatible');
                 await adminFetch('/api/admin/extensions/toggle', { body: { domainId, extensionId: row.id, enabled } });
                 return t(enabled ? 'admin.console.extensions.live.enabled' : 'admin.console.extensions.live.disabled', { name: row.name });
             }),

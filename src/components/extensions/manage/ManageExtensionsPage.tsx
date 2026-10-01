@@ -43,7 +43,10 @@ function useIsNarrow(): boolean {
 export function ManageExtensionsPage() {
     const { s, lang, statusLabel, categoryLabel } = useManageStrings();
     const { data: session, status: sessionStatus } = useSession();
-    const { extensions, isLoading, isError, extensionsLoaded, isStale, isRetrying, retry } = useDomainConfig();
+    const domain = useDomainConfig();
+    const { isLoading, isError, extensionsLoaded, isStale, isRetrying, retry } = domain;
+    // Incluye las pausadas por la IA (aiBlock.blocked): se listan con su motivo, no se montan.
+    const extensions = domain.allExtensions ?? domain.extensions;
     const { prefs, setEnabled, move } = useExtensionPrefs();
     const errors = useLiveExtensionErrors();
     const catalog = useCatalogInfo();

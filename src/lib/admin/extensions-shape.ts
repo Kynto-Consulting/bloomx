@@ -1,4 +1,5 @@
 import { summarizeTemplate } from '@/lib/admin/extensions-manifest';
+import { sanitizeVersionInfo } from '@/lib/admin/extensions-compat';
 import type { InstalledExtension } from '@/lib/admin/extensions-view';
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
@@ -30,6 +31,7 @@ export function shapeInstalled(data: any): InstalledExtension[] {
             mandatory: raw.mandatory === true,
             mandatoryByManifest: raw.mandatoryByManifest === true,
             template: summarizeTemplate(raw.template),
+            versionInfo: sanitizeVersionInfo(raw.versionInfo),
         });
     }
     return out;

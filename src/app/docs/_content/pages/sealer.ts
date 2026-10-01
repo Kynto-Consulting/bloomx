@@ -35,7 +35,7 @@ const page: DocPageContent = {
         ] },
         { t: 'h2', id: 'organizer', text: 'Organizer: organización con IA' },
         { t: 'p', text: 'El **Organizer** clasifica el correo de la bandeja en categorías y aplica etiquetas automáticamente (o las propone). Es una extensión (`core-organizer`, `active`); el frontend solo aporta el puente de datos (`/api/internal/mail`) y la interfaz de propuestas.' },
-        { t: 'callout', kind: 'note', title: 'Requisitos', text: 'Necesita `services.mail`: llamada firmada (tu dominio en modo firmado, con `BLOOMX_DOMAIN_PRIVATE_KEY`) y el backend con `BACKEND_SIGNING_PRIVATE_KEY`. Si no, falla con `ORGANIZER_MAIL_SERVICE_UNAVAILABLE` y el hook `EMAIL_RECEIVED` se omite en silencio. La IA usa `AI_KEY` del backend ([IA](/docs/ai)); sin IA degrada a heurística.' },
+        { t: 'callout', kind: 'note', title: 'Requisitos', text: 'Necesita `services.mail`: llamada firmada (tu dominio en modo firmado, con `BLOOMX_DOMAIN_PRIVATE_KEY`) y el backend con `BACKEND_SIGNING_PRIVATE_KEY`. Si no, falla con `ORGANIZER_MAIL_SERVICE_UNAVAILABLE` y el hook `EMAIL_RECEIVED` se omite en silencio. La IA usa la configuración de la instancia en `/admin/ai` ([IA](/docs/ai)); sin IA degrada a heurística.' },
         { t: 'h3', id: 'organizer-how', text: 'Cómo decide' },
         { t: 'ol', items: [
             '**Candidatos**: solo `inbox`, sin etiquetas y sin decisión previa del organizer. Cada correo se evalúa una sola vez. "Organize" procesa hasta 50 recientes (máx. 100, antigüedad 30 días); el hook `EMAIL_RECEIVED` lo hace al llegar.',
@@ -90,7 +90,7 @@ const page: DocPageContent = {
         ] },
         { t: 'h2', id: 'organizer', text: 'Organizer: AI organising' },
         { t: 'p', text: 'The **Organizer** classifies inbox mail into categories and applies labels automatically (or proposes them). It is an extension (`core-organizer`, `active`); the frontend only provides the data bridge (`/api/internal/mail`) and the proposals UI.' },
-        { t: 'callout', kind: 'note', title: 'Requirements', text: 'It needs `services.mail`: a signed call (your domain in signed mode, with `BLOOMX_DOMAIN_PRIVATE_KEY`) and the backend with `BACKEND_SIGNING_PRIVATE_KEY`. Otherwise it fails with `ORGANIZER_MAIL_SERVICE_UNAVAILABLE` and the `EMAIL_RECEIVED` hook is silently skipped. AI uses the backend\'s `AI_KEY` ([AI](/docs/ai)); without AI it degrades to heuristics.' },
+        { t: 'callout', kind: 'note', title: 'Requirements', text: 'It needs `services.mail`: a signed call (your domain in signed mode, with `BLOOMX_DOMAIN_PRIVATE_KEY`) and the backend with `BACKEND_SIGNING_PRIVATE_KEY`. Otherwise it fails with `ORGANIZER_MAIL_SERVICE_UNAVAILABLE` and the `EMAIL_RECEIVED` hook is silently skipped. AI uses the instance configuration in `/admin/ai` ([AI](/docs/ai)); without AI it degrades to heuristics.' },
         { t: 'h3', id: 'organizer-how', text: 'How it decides' },
         { t: 'ol', items: [
             '**Candidates**: only `inbox`, with no labels and no earlier organizer decision. Each message is evaluated once. "Organize" processes up to 50 recent ones (max 100, age 30 days); the `EMAIL_RECEIVED` hook does it on arrival.',

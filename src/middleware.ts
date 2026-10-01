@@ -93,6 +93,7 @@ export async function middleware(req: NextRequest) {
         pathname.startsWith('/api/auth') || // Allow all auth routes
         pathname.startsWith('/api/cron') || // Allow cron routes
         pathname.startsWith('/api/config') || // Allow cron routes
+        pathname === '/api/version' || // identidad de build: publica, sin sesion
 
         pathname.startsWith('/api/webhooks') || // Allow cron routes
         pathname.startsWith('/api/molt') || // Allow cron routes

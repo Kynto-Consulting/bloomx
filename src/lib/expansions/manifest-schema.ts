@@ -17,6 +17,8 @@
  */
 
 import { UI_COMPONENT_TYPES, isIconRef } from "./ui-schema.ts";
+import { validateSettingsSchema } from "./settings-schema.ts";
+import { validateRequires } from "./client-contract.ts";
 
 export type ManifestIssue = { path: string; message: string };
 /**
@@ -148,7 +150,7 @@ export const PERMISSION_CATALOG: Record<string, PermissionInfo> = {
     MAIL_LABEL: { label: "Etiquetar correo", description: "Aplica o deshace etiquetas de categoria en correos del usuario (no mueve, borra ni envia).", risk: "medium" },
     READ_USER: { label: "Ver datos del usuario", description: "Ve el identificador y el correo del usuario que ejecuta la extension.", risk: "low" },
     READ_USER_NAME: { label: "Ver nombre del usuario", description: "Ve el nombre del usuario.", risk: "low" },
-    AI_GENERATE: { label: "Usar IA", description: "Envia texto al proveedor de IA de la plataforma (con limite de llamadas).", risk: "medium" },
+    AI_GENERATE: { label: "Usar IA", description: "Usa el servicio de IA de esta instancia (services.ai): envia texto al proveedor configurado por el administrador en /admin/ai, con cuotas, guardarrailes y limite de llamadas. Si la IA esta desactivada la extension se bloquea (salvo ai.required=false).", risk: "medium" },
     HTTP_REQUEST: { label: "Llamadas HTTP externas", description: "Hace peticiones HTTPS a servicios externos (filtradas contra SSRF).", risk: "high" },
     OAUTH_READ: { label: "Leer tokens OAuth", description: "Usa los tokens de las cuentas conectadas del dominio.", risk: "high" },
     OAUTH_WRITE: { label: "Gestionar conexiones OAuth", description: "Conecta o desconecta cuentas de terceros.", risk: "high" },
@@ -324,6 +326,12 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
         }
     }
 
+    // --- Bloque `ai` (servicio de IA de la instancia) -----------------------------------------------------------
+    validateAiBlock(m, err, warn);
+
+    // --- Requisitos del cliente (`requires`: version del contrato cliente<->backend y capacidades; ver client-contract.ts) ---
+    for (const issue of validateRequires(m.requires)) (issue.soft && options.lenientCatalog ? warn : err)(issue.path, issue.message);
+
     // --- Auth --------------------------------------------------------------------------------------------------
     if (m.auth !== undefined) {
         if (!isObject(m.auth)) {
@@ -371,6 +379,9 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
         // drop=false: una version antigua puede exportar la funcion desde su script (el backend la resuelve por nombre).
         if (!functionNames.has(name)) err(at, `"${name}" no esta declarada en api.functions`, false);
     };
+
+    // --- Esquema de ajustes tipados (settingsSchema; las acciones apuntan a api.functions) ---
+    for (const issue of validateSettingsSchema(m.settingsSchema, "settingsSchema", functionNames)) err(issue.path, issue.message);
 
     // --- Proveedores de videollamada (kind conferencing-provider) -----------------------------------------------
     if (m.kind !== undefined && !EXTENSION_KINDS.includes(String(m.kind))) warn("kind", `Tipo de extension desconocido; conocidos: ${EXTENSION_KINDS.join(", ")}`);
@@ -563,6 +574,42 @@ export function isSafeScreenshotUrl(value: unknown): boolean {
 }
 
 /** `category`, `tags`, `screenshots`, `changelog` y `mandatory`: campos que lee la pagina /extensions y la politica del dominio. */
+/** Funciones de IA que una extension puede declarar en `ai.features` (espejo de AI_FEATURES de la instancia). */
+export const AI_MANIFEST_FEATURES = ["composer", "smart-reply", "summarize", "translate", "organizer", "other"] as const;
+
+/**
+ * Bloque opcional `ai: { features, required (true por defecto), maxTokens?, purpose: {es, en} }`. Si existe, el permiso AI_GENERATE
+ * debe estar declarado (error). AI_GENERATE sin bloque `ai` sigue siendo valido (compat) pero avisa: la extension no podra
+ * declarar funciones ni degradar sin IA.
+ */
+function validateAiBlock(m: Record<string, any>, err: IssueSink, warn: IssueSink) {
+    const perms: unknown[] = Array.isArray(m.permissions) ? m.permissions : [];
+    const hasPermission = perms.includes("AI_GENERATE");
+    if (m.ai === undefined) {
+        if (hasPermission) warn("ai", "Declara AI_GENERATE sin bloque \"ai\": anade ai: { features, required, purpose } para que el administrador sepa para que usa la IA");
+        return;
+    }
+    if (!isObject(m.ai)) return err("ai", "Debe ser un objeto { features, required?, maxTokens?, purpose }");
+    const ai = m.ai;
+    if (!hasPermission) err("ai", "El bloque \"ai\" requiere el permiso AI_GENERATE en permissions");
+    for (const key of Object.keys(ai)) if (!["features", "required", "maxTokens", "purpose"].includes(key)) warn(`ai.${key}`, "Clave desconocida en el bloque ai");
+    if (!Array.isArray(ai.features) || ai.features.length === 0) err("ai.features", `Requerido: arreglo no vacio con valores de ${AI_MANIFEST_FEATURES.join(", ")}`);
+    else {
+        if (ai.features.length > AI_MANIFEST_FEATURES.length) err("ai.features", "Demasiadas funciones");
+        ai.features.forEach((f: unknown, i: number) => {
+            if (typeof f !== "string" || !(AI_MANIFEST_FEATURES as readonly string[]).includes(f)) err(`ai.features[${i}]`, `Debe ser uno de ${AI_MANIFEST_FEATURES.join(", ")}`);
+        });
+        if (new Set(ai.features).size !== ai.features.length) err("ai.features", "Funciones duplicadas");
+    }
+    if (ai.required !== undefined && typeof ai.required !== "boolean") err("ai.required", "Debe ser booleano (por defecto true)");
+    if (ai.maxTokens !== undefined && (typeof ai.maxTokens !== "number" || !Number.isInteger(ai.maxTokens) || ai.maxTokens < 16 || ai.maxTokens > 32000)) err("ai.maxTokens", "Debe ser un entero entre 16 y 32000");
+    if (!isObject(ai.purpose)) err("ai.purpose", "Requerido: { es: texto, en: texto } (para que usa la IA)");
+    else for (const lang of ["es", "en"]) {
+        const v = ai.purpose[lang];
+        if (typeof v !== "string" || !v.trim() || v.length > 300) err(`ai.purpose.${lang}`, "Requerido: texto no vacio (max 300)");
+    }
+}
+
 function validateCatalogFields(m: Record<string, any>, err: IssueSink, warn: IssueSink) {
     if (m.category !== undefined) {
         if (typeof m.category !== "string" || !m.category.trim() || m.category.length > 40) err("category", "Debe ser texto no vacio (max 40)");

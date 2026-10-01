@@ -28,6 +28,73 @@ node --experimental-strip-types _shared/validate.mjs mi-extension               
 node --experimental-strip-types --test mi-extension/tests/*.test.mjs                            # tests de la extension
 npm test                                                                                        # contrato + schema + SDK + validador`;
 
+const aiBasic = `// permisos: AI_GENERATE · manifest.ai = { features: ['summarize'], required: false, purpose: {...} }
+export async function summarize(ctx) {
+  const ai = ctx.services.ai;
+  if (!(await ai.isAvailable('summarize'))) return { text: null }; // degradar sin error
+  const r = await ai.generate({
+    prompt: 'Resume en 3 viñetas:\\n' + ctx.args.body,
+    system: 'Responde en el idioma del texto.',
+    feature: 'summarize', maxTokens: 300, temperature: 0.2,
+  });
+  // r: { text, json?, usage: { tokensIn, tokensOut }, model, warnings? }
+  return { text: r.text, tokens: r.usage.tokensIn + r.usage.tokensOut, model: r.model };
+}
+
+// Conversación: chat({ messages, feature, ... }) devuelve el mismo resultado
+const c = await ai.chat({ feature: 'composer', messages: [
+  { role: 'user', content: 'Redacta un saludo breve' },
+] });`;
+
+const aiJson = `const schema = {
+  type: 'object', additionalProperties: false,
+  required: ['asunto', 'prioridad', 'fechas'],
+  properties: {
+    asunto: { type: 'string', maxLength: 120 },
+    prioridad: { enum: ['baja', 'media', 'alta'] },
+    fechas: { type: 'array', maxItems: 10, items: { type: 'string', minLength: 8, maxLength: 10 } },
+  },
+};
+const { data, usage } = await ctx.services.ai.json(
+  'Extrae asunto, prioridad y fechas (AAAA-MM-DD) de este correo:\\n' + ctx.args.body,
+  schema,
+  { feature: 'organizer', retries: 1, maxTokens: 400 },
+);
+// data: { asunto: string, prioridad: 'baja'|'media'|'alta', fechas: string[] }`;
+
+const aiErrors = `const MSG = {
+  ai_disabled: { es: 'La IA está desactivada en esta organización.', en: 'AI is turned off for this organization.' },
+  feature_disabled: { es: 'Esta función de IA está desactivada.', en: 'This AI feature is turned off.' },
+  quota_exceeded: { es: 'Has alcanzado la cuota de IA. Inténtalo más tarde.', en: 'AI quota reached. Try again later.' },
+  guardrail_blocked: { es: 'El contenido fue bloqueado por las reglas de seguridad.', en: 'The content was blocked by safety rules.' },
+  not_configured: { es: 'La IA aún no está configurada.', en: 'AI is not configured yet.' },
+  provider_error: { es: 'El proveedor de IA falló. Reintenta en un momento.', en: 'The AI provider failed. Please retry shortly.' },
+  schema_validation_failed: { es: 'La IA no devolvió el formato esperado.', en: 'The AI did not return the expected format.' },
+  invalid_args: { es: 'Petición de IA no válida.', en: 'Invalid AI request.' },
+};
+try {
+  const { text } = await ctx.services.ai.generate({ prompt, feature: 'summarize' });
+  return { text };
+} catch (err) {
+  const code = err && err.code;
+  const m = MSG[code] || { es: 'No se pudo usar la IA.', en: 'AI is unavailable.' };
+  const wait = code === 'quota_exceeded' && err.retryAfter ? err.retryAfter : undefined; // segundos
+  return { error: m, retryAfter: wait }; // nunca muestres err.message crudo
+}`;
+
+const aiManifest = `"permissions": ["AI_GENERATE"],
+"ai": {
+  "features": ["organizer", "summarize"],
+  "required": false,
+  "maxTokens": 600,
+  "purpose": { "es": "Resume y clasifica tus correos", "en": "Summarizes and sorts your emails" }
+}`;
+
+const aiStatus = `const s = await ctx.services.ai.status('summarize');
+// { enabled, available, featureEnabled, provider, model, remaining: { requestsDay, requestsMonth, tokensDay, tokensMonth },
+//   limits, reason, state }   (model es el nombre; nunca la clave)
+if (!s.available) return { hint: s.reason };`;
+
 const page: DocPageContent = {
     es: [
         { t: 'p', text: 'Todo lo necesario para **escribir, validar, probar y gestionar** extensiones sin desplegar nada: SDK con tipos, plantilla, validador por línea de comandos, **playground** y **galería de componentes** en la propia aplicación, y la página **/extensions** para usuarios y autores. La referencia de componentes, expresiones y acciones está en [Kit de componentes y UI](/docs/extension-ui).' },
@@ -70,6 +137,49 @@ const page: DocPageContent = {
             ['`changelog`', '`[{ version, date, notes }]`', 'Historial de versiones mostrado como texto'],
         ] },
         { t: 'callout', kind: 'note', title: 'Límites', text: 'Estos campos no se validan aún en el schema de manifest (se leen de forma defensiva). Las preferencias de usuario no se aplican a los hooks de servidor (DLP, webhooks): solo a lo que se pinta. El playground no ejecuta `server.js`: simula sus respuestas. La vista previa de /extensions es solo visual.' },
+        { t: 'h2', id: 'ai-sdk', text: 'SDK de IA' },
+        { t: 'p', text: '`ctx.services.ai` da acceso a la IA configurada por tu organización en [/admin/ai](/docs/ai), sin claves en la extensión. Requiere el permiso `AI_GENERATE` y el bloque `ai` del manifest. Los guardarrailes, las cuotas y la redacción de datos de /admin/ai se aplican igual que en el resto de la aplicación. **No se guardan prompts ni respuestas.**' },
+        { t: 'table', head: ['Método', 'Devuelve', 'Notas'], rows: [
+            ['`generate({ prompt, system?, feature?, maxTokens?, temperature?, responseFormat?, parts? })`', '`{ text, json?, usage: { tokensIn, tokensOut }, model, warnings? }`', '`responseFormat`: `text` o `json`. La firma antigua `generate(system, prompt, extra)` sigue funcionando pero está **obsoleta**.'],
+            ['`chat({ messages, ... })`', 'igual que generate', 'Conversación con roles; mismas opciones.'],
+            ['`json(input, schema, { feature?, system?, maxTokens?, temperature?, retries?, parts? })`', '`{ data, usage, model, warnings? }`', 'Salida estructurada validada (ver abajo). `retries`: 0 a 2.'],
+            ['`status(feature?)`', 'estado y cuota restante', 'No consume cuota de IA.'],
+            ['`isAvailable(feature?)`', '`boolean`', 'Nunca lanza; ideal para degradar.'],
+        ] },
+        { t: 'p', text: 'Funciones (`feature`): `composer`, `smart-reply`, `summarize`, `translate`, `organizer` y `other`. Cada una se puede desactivar por separado en /admin/ai. El uso (`usage`) informa de tokens de entrada y salida de esa llamada.' },
+        { t: 'code', lang: 'js', title: 'generate, chat e isAvailable', code: aiBasic },
+        { t: 'h2', id: 'ai-structured', text: 'Salida estructurada' },
+        { t: 'p', text: '`ai.json(input, schema, opciones)` devuelve datos ya validados contra un **subconjunto de JSON Schema**: `object`, `array`, `string`, `number`, `integer`, `boolean`, `enum` y `nullable`; `required`, `items`, `minItems`/`maxItems`, `minimum`/`maximum`, `minLength`/`maxLength` y `additionalProperties: false`. **No** se admiten `$ref`, `$defs`, `allOf`, `anyOf`, `oneOf`, `not`, `pattern` ni `format`.' },
+        { t: 'ul', items: [
+            '**Límites del esquema**: profundidad 6, 200 nodos, 16 KB y `enum` de hasta 100 valores. Si se superan, la llamada falla con `invalid_args`.',
+            '**El servidor siempre valida**, sea cual sea el proveedor. Usa el modo nativo cuando existe: `json_schema` en OpenAI, tool-use forzado en Anthropic y `responseSchema` en Gemini; en OpenRouter y compatibles se añade una instrucción y se valida igualmente.',
+            '**Reintentos** (`retries`, 0 a 2): ante un incumplimiento se reintenta indicando a la IA la ruta del campo fallido. **Cada reintento cuenta en la cuota** y en el presupuesto por invocación.',
+            'Si sigue sin cumplirse: error `schema_validation_failed`; `err.detail` es la ruta del primer incumplimiento (por ejemplo `prioridad`) y nunca incluye contenido del modelo.',
+        ] },
+        { t: 'code', lang: 'js', title: 'Extraer asunto, prioridad y fechas de un correo', code: aiJson },
+        { t: 'h2', id: 'ai-errors', text: 'Errores de IA' },
+        { t: 'p', text: 'Todos los fallos son `Error` con `.code`. El SDK exporta `AiErrorCodes` con las constantes.' },
+        { t: 'table', head: ['Código', 'Cuándo ocurre', 'Cómo mostrarlo'], rows: [
+            ['`ai_disabled`', 'La IA está apagada para la instancia u organización', 'Oculta la función o avisa; no reintentes'],
+            ['`feature_disabled`', 'Esa `feature` está apagada en /admin/ai', 'Igual que el anterior, indicando la función'],
+            ['`quota_exceeded`', 'Se agotó una cuota (día o mes, peticiones o tokens); `.retryAfter` en segundos', 'Muestra "inténtalo más tarde" y, si hay `retryAfter`, cuándo'],
+            ['`guardrail_blocked`', 'Un guardarraíl bloqueó la entrada o la salida', 'Mensaje neutro; no repitas el contenido'],
+            ['`not_configured`', 'No hay proveedor o clave configurados', 'Pide a un administrador configurar /admin/ai'],
+            ['`provider_error`', 'Fallo del proveedor (red, 5xx, límite externo)', 'Permite reintentar'],
+            ['`schema_validation_failed`', 'La salida no cumple el esquema tras los reintentos; `.detail` = ruta', 'Ofrece reintentar o rellenar a mano'],
+            ['`invalid_args`', 'Argumentos o esquema no válidos (límites, palabras clave no admitidas)', 'Es un error de programación: corrígelo'],
+            ['`AI_PERMISSION_DENIED`', 'Falta `AI_GENERATE` o la función no está declarada en `ai.features`', 'Corrige el manifest'],
+            ['`AI_CALL_BUDGET`', 'Se superó el presupuesto de la invocación', 'Reduce llamadas o reintentos'],
+            ['`AI_SERVICE_ERROR`', 'Fallo interno del puente de IA', 'Permite reintentar'],
+        ] },
+        { t: 'code', lang: 'js', title: 'Patrón try/catch con mensajes es/en', code: aiErrors },
+        { t: 'h2', id: 'ai-quota', text: 'Cuotas y disponibilidad' },
+        { t: 'p', text: '`status(feature?)` devuelve `enabled`, `available`, `featureEnabled`, `provider`, `model` (nombre, nunca la clave), `remaining` (`requestsDay`, `requestsMonth`, `tokensDay`, `tokensMonth`), `limits`, `reason` y `state`. `isAvailable(feature?)` es la versión corta y **nunca lanza**.' },
+        { t: 'code', lang: 'js', title: 'Consultar el estado', code: aiStatus },
+        { t: 'p', text: 'Declara el uso de IA en el manifest. Con `required: false` la extensión **degrada**: sigue activa y tú decides qué hacer según `isAvailable`. Con `required: true`, si se desactiva la IA o la función, la extensión queda **pausada** y el backend rechaza las llamadas con `ai_disabled`.' },
+        { t: 'code', lang: 'json', title: 'Bloque ai del manifest', code: aiManifest },
+        { t: 'callout', kind: 'note', title: 'Presupuesto por invocación', text: 'Cada ejecución de `server.js` puede hacer hasta **5 generaciones** (`generate`, `chat` y `json`, incluidos los reintentos) y **20 consultas** de `status`/`isAvailable`; al excederlo se lanza `AI_CALL_BUDGET`.' },
+        { t: 'callout', kind: 'note', title: 'Por qué no hay stream', text: 'El puente hacia el backend es una petición/respuesta firmada y el sandbox solo transfiere strings por RPC; un contexto `vm` no admite iteradores asíncronos del host. Por eso las respuestas llegan completas. Más sobre proveedores, cuotas y guardarrailes en [IA](/docs/ai).' },
     ],
     en: [
         { t: 'p', text: 'Everything needed to **write, validate, test and manage** extensions without deploying anything: an SDK with types, a template, a command-line validator, a **playground** and a **component gallery** inside the app itself, and the **/extensions** page for users and authors. The reference for components, expressions and actions is in [Component kit and UI](/docs/extension-ui).' },
@@ -112,6 +222,49 @@ const page: DocPageContent = {
             ['`changelog`', '`[{ version, date, notes }]`', 'Version history shown as text'],
         ] },
         { t: 'callout', kind: 'note', title: 'Limits', text: 'These fields are not validated by the manifest schema yet (they are read defensively). User preferences do not apply to server hooks (DLP, webhooks): only to what is painted. The playground does not run `server.js`: it simulates its responses. The /extensions preview is visual only.' },
+        { t: 'h2', id: 'ai-sdk', text: 'AI SDK' },
+        { t: 'p', text: '`ctx.services.ai` gives access to the AI configured by your organization in [/admin/ai](/docs/ai), with no keys inside the extension. It needs the `AI_GENERATE` permission and the manifest `ai` block. Guardrails, quotas and redaction from /admin/ai apply exactly as elsewhere in the app. **Prompts and responses are not stored.**' },
+        { t: 'table', head: ['Method', 'Returns', 'Notes'], rows: [
+            ['`generate({ prompt, system?, feature?, maxTokens?, temperature?, responseFormat?, parts? })`', '`{ text, json?, usage: { tokensIn, tokensOut }, model, warnings? }`', '`responseFormat`: `text` or `json`. The old `generate(system, prompt, extra)` signature still works but is **deprecated**.'],
+            ['`chat({ messages, ... })`', 'same as generate', 'Role-based conversation; same options.'],
+            ['`json(input, schema, { feature?, system?, maxTokens?, temperature?, retries?, parts? })`', '`{ data, usage, model, warnings? }`', 'Validated structured output (see below). `retries`: 0 to 2.'],
+            ['`status(feature?)`', 'state and remaining quota', 'Does not consume AI quota.'],
+            ['`isAvailable(feature?)`', '`boolean`', 'Never throws; ideal for degrading.'],
+        ] },
+        { t: 'p', text: 'Features (`feature`): `composer`, `smart-reply`, `summarize`, `translate`, `organizer` and `other`. Each can be turned off separately in /admin/ai. `usage` reports input and output tokens for that call.' },
+        { t: 'code', lang: 'js', title: 'generate, chat and isAvailable', code: aiBasic },
+        { t: 'h2', id: 'ai-structured', text: 'Structured output' },
+        { t: 'p', text: '`ai.json(input, schema, options)` returns data already validated against a **JSON Schema subset**: `object`, `array`, `string`, `number`, `integer`, `boolean`, `enum` and `nullable`; `required`, `items`, `minItems`/`maxItems`, `minimum`/`maximum`, `minLength`/`maxLength` and `additionalProperties: false`. **Not** supported: `$ref`, `$defs`, `allOf`, `anyOf`, `oneOf`, `not`, `pattern` or `format`.' },
+        { t: 'ul', items: [
+            '**Schema limits**: depth 6, 200 nodes, 16 KB and `enum` up to 100 values. Exceeding them fails with `invalid_args`.',
+            '**The server always validates**, whatever the provider. It uses the native mode where available: `json_schema` on OpenAI, forced tool-use on Anthropic and `responseSchema` on Gemini; OpenRouter and compatible providers get an instruction plus the same validation.',
+            '**Retries** (`retries`, 0 to 2): on a mismatch the AI is retried with the failing field path as a hint. **Each retry counts against the quota** and the per-invocation budget.',
+            'If it still fails: `schema_validation_failed`; `err.detail` is the path of the first mismatch (for example `prioridad`) and never contains model content.',
+        ] },
+        { t: 'code', lang: 'js', title: 'Extract subject, priority and dates from an email', code: aiJson },
+        { t: 'h2', id: 'ai-errors', text: 'AI errors' },
+        { t: 'p', text: 'Every failure is an `Error` with `.code`. The SDK exports `AiErrorCodes` with the constants.' },
+        { t: 'table', head: ['Code', 'When it happens', 'How to show it'], rows: [
+            ['`ai_disabled`', 'AI is off for the instance or organization', 'Hide the feature or notify; do not retry'],
+            ['`feature_disabled`', 'That `feature` is off in /admin/ai', 'As above, naming the feature'],
+            ['`quota_exceeded`', 'A quota is exhausted (day or month, requests or tokens); `.retryAfter` in seconds', 'Show "try again later" and, if present, when'],
+            ['`guardrail_blocked`', 'A guardrail blocked the input or output', 'Neutral message; do not echo the content'],
+            ['`not_configured`', 'No provider or key configured', 'Ask an admin to set up /admin/ai'],
+            ['`provider_error`', 'Provider failure (network, 5xx, upstream limit)', 'Allow retry'],
+            ['`schema_validation_failed`', 'Output does not match the schema after retries; `.detail` = path', 'Offer retry or manual entry'],
+            ['`invalid_args`', 'Invalid arguments or schema (limits, unsupported keywords)', 'Programming error: fix it'],
+            ['`AI_PERMISSION_DENIED`', 'Missing `AI_GENERATE` or feature not listed in `ai.features`', 'Fix the manifest'],
+            ['`AI_CALL_BUDGET`', 'Per-invocation budget exceeded', 'Reduce calls or retries'],
+            ['`AI_SERVICE_ERROR`', 'Internal AI bridge failure', 'Allow retry'],
+        ] },
+        { t: 'code', lang: 'js', title: 'try/catch pattern with es/en messages', code: aiErrors },
+        { t: 'h2', id: 'ai-quota', text: 'Quotas and availability' },
+        { t: 'p', text: '`status(feature?)` returns `enabled`, `available`, `featureEnabled`, `provider`, `model` (name, never the key), `remaining` (`requestsDay`, `requestsMonth`, `tokensDay`, `tokensMonth`), `limits`, `reason` and `state`. `isAvailable(feature?)` is the short form and **never throws**.' },
+        { t: 'code', lang: 'js', title: 'Checking the state', code: aiStatus },
+        { t: 'p', text: 'Declare AI use in the manifest. With `required: false` the extension **degrades**: it stays active and you decide what to do from `isAvailable`. With `required: true`, if AI or the feature is turned off the extension is **paused** and the backend rejects calls with `ai_disabled`.' },
+        { t: 'code', lang: 'json', title: 'Manifest ai block', code: aiManifest },
+        { t: 'callout', kind: 'note', title: 'Per-invocation budget', text: 'Each `server.js` run may make up to **5 generations** (`generate`, `chat` and `json`, retries included) and **20** `status`/`isAvailable` queries; exceeding it throws `AI_CALL_BUDGET`.' },
+        { t: 'callout', kind: 'note', title: 'Why there is no streaming', text: 'The bridge to the backend is a signed request/response and the sandbox only passes strings over RPC; a `vm` context cannot accept async iterators from the host. Responses therefore arrive complete. More on providers, quotas and guardrails in [AI](/docs/ai).' },
     ],
 };
 

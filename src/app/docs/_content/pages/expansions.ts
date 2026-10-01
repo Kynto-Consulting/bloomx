@@ -1,4 +1,37 @@
 import type { Block, DocPageContent } from '../types';
+import { CAPABILITY_REGISTRY } from '@/lib/expansions/client-contract';
+
+const domainConfigManifest = `"settingsSchema": {
+  "groups": [{ "id": "scan", "label": { "es": "Análisis", "en": "Scanning" } }],
+  "fields": [
+    { "key": "mode", "type": "enum", "group": "scan", "default": "block", "legacyEnv": "DLP_MODE",
+      "label": { "es": "Modo", "en": "Mode" },
+      "options": [{ "value": "block", "label": { "es": "Bloquear", "en": "Block" } }, "warn", "log"] },
+    { "key": "keywords", "type": "list", "group": "scan", "maxItems": 100, "itemMaxLength": 100,
+      "legacyEnv": "DLP_KEYWORDS", "label": { "es": "Palabras clave", "en": "Keywords" } },
+    { "key": "GIPHY_API_KEY", "type": "string", "secret": true, "required": true,
+      "label": { "es": "Clave de API", "en": "API key" } }
+  ]
+}`;
+const domainConfigUsageEs = `// server.js: los ajustes NO secretos llegan en ctx.settings; los secretos, en ctx.env
+module.exports = {
+    async onEmailPreSend(ctx) {
+        const mode = ctx.settings.mode || 'block';          // dominio > heredado > defecto
+        const keywords = ctx.settings.keywords || [];
+        const key = ctx.env.GIPHY_API_KEY;                  // credencial cifrada del dominio
+        // ...
+    }
+};`;
+const domainConfigUsageEn = `// server.js: non-secret settings arrive in ctx.settings; secrets in ctx.env
+module.exports = {
+    async onEmailPreSend(ctx) {
+        const mode = ctx.settings.mode || 'block';          // domain > legacy > default
+        const keywords = ctx.settings.keywords || [];
+        const key = ctx.env.GIPHY_API_KEY;                  // encrypted domain credential
+        // ...
+    }
+};`;
+
 
 const manifestMin = `{
   "manifestVersion": "1.0",
@@ -64,6 +97,46 @@ const CM: Record<string, { es: string; en: string }> = {
     c17: { es: 'un hook nunca debe lanzar', en: 'a hook must never throw' },
     c18: { es: 'Nuevo contacto: ', en: 'New contact: ' },
 };
+
+const objectsEx = `"settingsSchema": {
+  "fields": [{
+    "key": "endpoints", "type": "objects", "required": true, "maxItems": 20,
+    "label": { "es": "Endpoints", "en": "Endpoints" },
+    "itemFields": [
+      { "key": "name", "type": "string", "required": true, "label": "Name" },
+      { "key": "url", "type": "string", "format": "url", "required": true, "label": "URL" },
+      { "key": "secret", "type": "string", "secret": true, "required": true, "label": "Signing secret" }
+    ],
+    "templates": [{ "id": "slack", "label": "Slack", "value": { "name": "Slack", "url": "https://hooks.example.com/x" } }]
+  }],
+  "actions": [{ "id": "send-test", "label": "Send test event", "handler": "sendTest", "scope": "item", "itemsKey": "endpoints" }],
+  "runLog": { "limit": 50 }
+}`;
+const webhookPayload = `{ "id": "7b0c2f0e-...", "type": "email.received", "version": 1, "createdAt": "2026-01-01T10:00:00.000Z",
+  "data": { "emailId": "...", "userId": "...", "timestamp": "..." } }`;
+const webhookNode = `const crypto = require('node:crypto');
+
+// rawBody: el cuerpo CRUDO recibido (string/Buffer), sin reserializar
+function verify(rawBody, headers, secret, toleranceSec = 300) {
+  const ts = Number(headers['x-bloomx-timestamp']);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > toleranceSec) return false; // anti-replay
+  const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(\`\${ts}.\${rawBody}\`).digest('hex');
+  const got = String(headers['x-bloomx-signature'] || '');
+  return got.length === expected.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(expected));
+}`;
+const webhookPy = `import hashlib, hmac, time
+
+def verify(raw_body: bytes, headers: dict, secret: str, tolerance: int = 300) -> bool:
+    try:
+        ts = int(headers["X-BloomX-Timestamp"])
+    except (KeyError, ValueError):
+        return False
+    if abs(time.time() - ts) > tolerance:
+        return False
+    signed = f"{ts}.".encode() + raw_body
+    expected = "sha256=" + hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, headers.get("X-BloomX-Signature", ""))`;
+
 const tr = (code: string, l: 'es' | 'en'): string => code.replace(/@@(\w+)@@/g, (_m, k: string) => CM[k][l]);
 
 const servicesCode = `// server.js
@@ -351,7 +424,7 @@ const permissionsRowsEs: string[][] = [
     ['`MAIL_LABEL`', 'Etiquetar correo', 'Aplica o deshace etiquetas de categoría en correos del usuario (no mueve, borra ni envía).', 'Medio'],
     ['`READ_USER`', 'Ver datos del usuario', 'Ve el identificador y el correo del usuario que ejecuta la extensión.', 'Bajo'],
     ['`READ_USER_NAME`', 'Ver nombre del usuario', 'Ve el nombre del usuario.', 'Bajo'],
-    ['`AI_GENERATE`', 'Usar IA', 'Envía texto al proveedor de IA de la plataforma (con límite de llamadas).', 'Medio'],
+    ['`AI_GENERATE`', 'Usar IA', 'Envía texto al proveedor de IA configurado por la instancia en `/admin/ai`, con guardarraíles y cuotas. Con la IA desactivada la extensión se bloquea ([IA](/docs/ai#blocking)). `core-composer-helper` es la única ayuda de redacción: no hay compositor nativo con IA.', 'Medio'],
     ['`HTTP_REQUEST`', 'Llamadas HTTP externas', 'Hace peticiones HTTPS a servicios externos (filtradas contra SSRF).', 'Alto'],
     ['`OAUTH_READ`', 'Leer tokens OAuth', 'Usa los tokens de las cuentas conectadas del dominio.', 'Alto'],
     ['`OAUTH_WRITE`', 'Gestionar conexiones OAuth', 'Conecta o desconecta cuentas de terceros.', 'Alto'],
@@ -528,7 +601,7 @@ const permissionsRowsEn: string[][] = [
     ['`MAIL_LABEL`', 'Label mail', 'Applies or undoes category labels on the user\'s messages (it does not move, delete or send).', 'Medium'],
     ['`READ_USER`', 'See user data', 'Sees the id and email of the user running the extension.', 'Low'],
     ['`READ_USER_NAME`', 'See user name', 'Sees the user\'s name.', 'Low'],
-    ['`AI_GENERATE`', 'Use AI', 'Sends text to the platform AI provider (with a call limit).', 'Medium'],
+    ['`AI_GENERATE`', 'Use AI', 'Sends text to the AI provider configured by the instance in `/admin/ai`, with guardrails and quotas. With AI disabled the extension is blocked ([AI](/docs/ai#blocking)). `core-composer-helper` is the only writing help: there is no native AI composer.', 'Medium'],
     ['`HTTP_REQUEST`', 'External HTTP calls', 'Makes HTTPS requests to external services (filtered against SSRF).', 'High'],
     ['`OAUTH_READ`', 'Read OAuth tokens', 'Uses the tokens of the domain\'s connected accounts.', 'High'],
     ['`OAUTH_WRITE`', 'Manage OAuth connections', 'Connects or disconnects third-party accounts.', 'High'],
@@ -558,6 +631,111 @@ const permissionsEn: Block[] = [
     { t: 'callout', kind: 'note', title: 'Reserved variables', text: 'These cannot be requested with `ENV_READ`: `DATABASE_URL`, `DIRECT_URL`, `POSTGRES_*`, `PG*`, `B2_*`, `ADMIN_*`, `MP_*`, `NEXTAUTH_*`, `AUTH_*`, `DATA_ENCRYPTION_KEY`, `AI_*`, `OPENAI_*`, `RESEND_*`, `VERCEL*`, `NEXT_*`, `NODE_*`, `EXTENSION_*`, `INTERNAL_*`, `JWT_*`, `SESSION_*`, `AWS_*`, `GITHUB_*`, `NPM_*`, `PATH`, `HOME`, `USER*`.' },
 ];
 
+const reqEx = `"requires": { "clientApi": ">=2", "capabilities": ["settings.schema.v1", "ai.v1"] }
+// clientApi: 2 | ">=2" | ">=2 <4"   (sin "requires" = compatible con legacy / without it = legacy-compatible)`;
+const capRows = (l: 'es' | 'en'): string[][] => Object.entries(CAPABILITY_REGISTRY).map(([id, c]) => ['`' + id + '`', String(c.since) + (c.since <= 1 ? (l === 'es' ? ' (línea base)' : ' (baseline)') : ''), c[l]]);
+const legacyList = 'appointments, calendar, composer-helper, dlp, giphy, google-drive, google-meet, hubspot, mail-groups, notion, organizer, sealer, signature, smart-reply, summarizer, translator, trello, webhooks, zoom';
+
+const versioningEs: Block[] = [
+    { t: 'h2', id: 'client-versioning', text: 'Versionado del cliente y compatibilidad' },
+    { t: 'p', text: 'El backend es compartido y guarda **una sola copia** de cada extensión, pero cada instancia (frontend) puede desplegar una versión distinta del cliente. La solución es versionar el cliente y **negociar capacidades**: el cliente dice qué sabe hacer y el backend sirve a cada instancia la versión de la extensión que ese cliente puede ejecutar.' },
+    { t: 'h3', id: 'client-identity', text: 'Identidad del cliente' },
+    { t: 'ul', items: [
+        '`CLIENT_API_VERSION` (entero; hoy **2**): contrato cliente↔backend de extensiones. Es independiente de la versión de la app y del `BUILD_ID`. `CLIENT_CAPABILITIES` son cadenas estables. Ambos se definen en `src/lib/expansions/client/capabilities.ts`.',
+        'Registro único `CAPABILITY_REGISTRY` en `client-contract.ts` (copia idéntica en el frontend, el backend y `bloomx-extensions/_shared`).',
+        'Cabeceras `X-BloomX-Client-Api` (entero) y `X-BloomX-Client-Caps` (lista separada por comas, máx. 1024 caracteres y 64 capacidades) en **todas** las llamadas al backend.',
+        'Con firma Ed25519 activa, el mensaje firmado pasa a `BLOOMX-SIG-V2` = V1 + dos líneas (api y caps), de modo que no se pueden quitar ni añadir. Sin firma (modo legado) viajan como informativas.',
+        'Un cliente sin cabeceras es la línea base `legacy`: `clientApi` 1 + las capacidades con `since: 1`.',
+    ] },
+    { t: 'table', head: ['Capacidad', 'Desde clientApi', 'Qué significa'], rows: capRows('es') },
+    { t: 'h3', id: 'client-requires', text: 'requires en el manifest' },
+    { t: 'code', lang: 'json', title: 'requires', code: reqEx },
+    { t: 'ul', items: [
+        'Sin `requires` la extensión es compatible con legacy (todas las 1.0.x).',
+        'Las capacidades **desconocidas se rechazan al publicar**: hay que registrarlas primero (decisión documentada, evita erratas y capacidades futuras sin soporte).',
+        'Un verificador estático (`bloomx-extensions/_shared/feature-rules.mjs`, usado por `validate` y por los tests) obliga a declarar la capacidad cuando el manifest o `server.js` usa `settingsSchema`, `onSubmit` en campos (no FORM), los componentes STACK/REPEAT/EMPTY/SKELETON/TEXTAREA u `onCancel`, `props.toolbar`, un bloque `ai` o `services.ai.chat/status`, `ai.json()`, eventos de ciclo de vida, permisos de servicios del host, o `kind`/`conferencingProviders`.',
+    ] },
+    { t: 'h3', id: 'client-resolution', text: 'Resolución por petición' },
+    { t: 'ul', items: [
+        'Se sirve la versión **más alta no-yanked** cuyos `requires` cumple el cliente.',
+        'La versión fijada por el dominio (`settings.meta.pinnedVersion`, o install con `version` explícita) se respeta si es compatible y no está yanked.',
+        'Si hay una versión más nueva incompatible, la respuesta incluye `upgrade { latestVersion, requires, missingCaps, clientApiNeeded }`.',
+        'Si ninguna es compatible, la extensión no se entrega: aparece en `incompatibleExtensions` de `/api/config`, y install/update/toggle/execute responden 409 `EXTENSION_CLIENT_INCOMPATIBLE`.',
+        'La ejecución en el backend (execute, hooks, settings, config) usa la versión resuelta para ese dominio y cliente. `mandatory` se conserva: si la última versión viva es obligatoria, la servida también.',
+        'Se aplica en `/api/config`, `/api/extensions`, public-list, `/api/manager/extensions` (`versionInfo`), execute, hooks y settings/config.',
+    ] },
+    { t: 'h3', id: 'client-versions-table', text: 'Tabla ExtensionVersion' },
+    { t: 'p', text: '`ExtensionVersion` guarda `extensionId`, `version`, `template`, `requiresClientApi`, `requiresCaps`, `status` (`published`, `deprecated`, `yanked`), `scriptUrl`, `scriptSource` y `contentHash`, con `UNIQUE(extensionId, version)`. `Extension` es el puntero a la última versión. Las versiones son **inmutables**: el mismo número con otro contenido responde 409 `VERSION_EXISTS` (el sync aborta; sube la versión, o usa `--replace <id>@<ver>` de forma explícita).' },
+    { t: 'h3', id: 'client-publish', text: 'Publicar una extensión que necesita un cliente nuevo' },
+    { t: 'ol', items: [
+        '**Cliente**: registra la capacidad en `CAPABILITY_REGISTRY` (las 3 copias), añádela a `CLIENT_CAPABILITIES`, sube `CLIENT_API_VERSION` si cambia el contrato y añade la regla en `feature-rules.mjs`.',
+        '**Extensión**: sube la versión, añade `requires`, ejecuta `npm run validate` y `npm test`. Conserva la anterior publicable: `node --experimental-strip-types scripts/archive-legacy-versions.mjs` (desde `bloomx-extensions`) archiva versiones previas desde git en `<ext>/versions/<ver>/`.',
+        '**Sync**: `node --env-file=.env scripts/sync-repository-extensions.mjs` (o `sync-extensions.mjs`). Conserva la versión que sirve la BD, archiva y mueve el puntero.',
+        '**Orden de despliegue**: (a) crear la tabla `ExtensionVersion` (`prisma/schema_push.prisma` con `npm run prisma:push`, o el DDL idempotente de `prisma/schema.prisma`); (b) desplegar el backend (preview primero, luego prod); (c) ejecutar el sync de extensiones; (d) desplegar los frontends.',
+    ] },
+    { t: 'callout', kind: 'note', text: 'Sin la tabla, el código del backend funciona como antes (tolerante), pero el sync falla cerrado.' },
+    { t: 'h3', id: 'client-lifecycle', text: 'Deprecación y ciclo de vida' },
+    { t: 'ul', items: [
+        'Política: se mantiene publicada como mínimo la última versión compatible con la línea base legacy mientras haya instancias legacy, y las 2 últimas versiones menores previas de cada línea.',
+        '`deprecated` = se sirve marcada; `yanked` = nunca se sirve, instala ni ejecuta. Ambos son reversibles.',
+        'CLI: `node --env-file=.env scripts/extension-version.mjs list|yank|deprecate|restore <id> [<version>]`. API: `POST`/`GET /api/admin/extensions/versions` (Basic Auth de plataforma).',
+        'Regla: añadir una capacidad exige registrarla y/o subir `CLIENT_API_VERSION`; los tests lo exigen.',
+        'Opcional: la variable `BLOOMX_MIN_CLIENT_API` en el backend añade la cabecera `X-BloomX-Min-Client-Api` a las respuestas de extensiones. Enlaza con la sección «Cómo se actualiza la PWA» de [Operación](/docs/operations).',
+    ] },
+    { t: 'h3', id: 'client-legacy-archive', text: 'Versiones legacy archivadas' },
+    { t: 'p', text: 'Extensiones con carpeta `versions/` en el repositorio de extensiones: ' + legacyList + '. Se reconstruyen desde el historial git eligiendo, por cada número de versión, el commit más nuevo compatible con la línea base. El contenido que hoy sirva la BD de producción se conserva automáticamente en el primer sync (la BD manda). Si el commit histórico no existe, no se puede reconstruir esa versión.' },
+];
+
+const versioningEn: Block[] = [
+    { t: 'h2', id: 'client-versioning', text: 'Client versioning and compatibility' },
+    { t: 'p', text: 'The backend is shared and keeps **one copy** of each extension, but every instance (frontend) may deploy a different client version. The solution is to version the client and **negotiate capabilities**: the client says what it can do and the backend serves each instance the extension version that client can run.' },
+    { t: 'h3', id: 'client-identity', text: 'Client identity' },
+    { t: 'ul', items: [
+        '`CLIENT_API_VERSION` (integer; currently **2**): the client↔backend extension contract. It is independent of the app version and of `BUILD_ID`. `CLIENT_CAPABILITIES` are stable strings. Both are defined in `src/lib/expansions/client/capabilities.ts`.',
+        'A single `CAPABILITY_REGISTRY` in `client-contract.ts` (identical copy in the frontend, the backend and `bloomx-extensions/_shared`).',
+        'Headers `X-BloomX-Client-Api` (integer) and `X-BloomX-Client-Caps` (comma-separated list, max 1024 characters and 64 capabilities) on **every** backend call.',
+        'With Ed25519 signing on, the signed message becomes `BLOOMX-SIG-V2` = V1 + two lines (api and caps), so they can be neither removed nor added. Without signing (legacy mode) they are informative only.',
+        'A client without headers is the `legacy` baseline: `clientApi` 1 + the capabilities with `since: 1`.',
+    ] },
+    { t: 'table', head: ['Capability', 'Since clientApi', 'Meaning'], rows: capRows('en') },
+    { t: 'h3', id: 'client-requires', text: 'requires in the manifest' },
+    { t: 'code', lang: 'json', title: 'requires', code: reqEx },
+    { t: 'ul', items: [
+        'Without `requires` the extension is legacy-compatible (all 1.0.x).',
+        '**Unknown capabilities are rejected at publish time**: register them first (documented decision; avoids typos and unsupported future capabilities).',
+        'A static checker (`bloomx-extensions/_shared/feature-rules.mjs`, used by `validate` and the tests) forces you to declare the capability when the manifest or `server.js` uses `settingsSchema`, `onSubmit` on fields (not FORM), the STACK/REPEAT/EMPTY/SKELETON/TEXTAREA components or `onCancel`, `props.toolbar`, an `ai` block or `services.ai.chat/status`, `ai.json()`, lifecycle events, host service permissions, or `kind`/`conferencingProviders`.',
+    ] },
+    { t: 'h3', id: 'client-resolution', text: 'Per-request resolution' },
+    { t: 'ul', items: [
+        'The **highest non-yanked** version whose `requires` the client meets is served.',
+        'The version pinned by the domain (`settings.meta.pinnedVersion`, or install with an explicit `version`) is honoured if compatible and not yanked.',
+        'If a newer incompatible version exists, the response carries `upgrade { latestVersion, requires, missingCaps, clientApiNeeded }`.',
+        'If none is compatible the extension is not delivered: it shows in `incompatibleExtensions` of `/api/config`, and install/update/toggle/execute answer 409 `EXTENSION_CLIENT_INCOMPATIBLE`.',
+        'Backend execution (execute, hooks, settings, config) uses the version resolved for that domain and client. `mandatory` is preserved: if the latest live version is mandatory, so is the served one.',
+        'Applied in `/api/config`, `/api/extensions`, public-list, `/api/manager/extensions` (`versionInfo`), execute, hooks and settings/config.',
+    ] },
+    { t: 'h3', id: 'client-versions-table', text: 'The ExtensionVersion table' },
+    { t: 'p', text: '`ExtensionVersion` stores `extensionId`, `version`, `template`, `requiresClientApi`, `requiresCaps`, `status` (`published`, `deprecated`, `yanked`), `scriptUrl`, `scriptSource` and `contentHash`, with `UNIQUE(extensionId, version)`. `Extension` is the pointer to the latest version. Versions are **immutable**: the same number with different content answers 409 `VERSION_EXISTS` (the sync aborts; bump the version, or explicitly use `--replace <id>@<ver>`).' },
+    { t: 'h3', id: 'client-publish', text: 'Publishing an extension that needs a new client' },
+    { t: 'ol', items: [
+        '**Client**: register the capability in `CAPABILITY_REGISTRY` (all 3 copies), add it to `CLIENT_CAPABILITIES`, bump `CLIENT_API_VERSION` if the contract changes, and add the rule in `feature-rules.mjs`.',
+        '**Extension**: bump the version, add `requires`, run `npm run validate` and `npm test`. Keep the previous one publishable: `node --experimental-strip-types scripts/archive-legacy-versions.mjs` (from `bloomx-extensions`) archives earlier versions from git into `<ext>/versions/<ver>/`.',
+        '**Sync**: `node --env-file=.env scripts/sync-repository-extensions.mjs` (or `sync-extensions.mjs`). It keeps the version the DB serves, archives, and moves the pointer.',
+        '**Deploy order**: (a) create the `ExtensionVersion` table (`prisma/schema_push.prisma` with `npm run prisma:push`, or the idempotent DDL in `prisma/schema.prisma`); (b) deploy the backend (preview first, then prod); (c) run the extension sync; (d) deploy the frontends.',
+    ] },
+    { t: 'callout', kind: 'note', text: 'Without the table the backend code works as before (tolerant), but the sync fails closed.' },
+    { t: 'h3', id: 'client-lifecycle', text: 'Deprecation and lifecycle' },
+    { t: 'ul', items: [
+        'Policy: keep published at least the latest version compatible with the legacy baseline while legacy instances exist, plus the 2 previous minor versions of each line.',
+        '`deprecated` = served but flagged; `yanked` = never served, installed or executed. Both are reversible.',
+        'CLI: `node --env-file=.env scripts/extension-version.mjs list|yank|deprecate|restore <id> [<version>]`. API: `POST`/`GET /api/admin/extensions/versions` (platform Basic Auth).',
+        'Rule: adding a capability requires registering it and/or bumping `CLIENT_API_VERSION`; the tests enforce it.',
+        'Optional: the backend variable `BLOOMX_MIN_CLIENT_API` adds the `X-BloomX-Min-Client-Api` header to extension responses. See the "How the PWA updates" section of [Operations](/docs/operations).',
+    ] },
+    { t: 'h3', id: 'client-legacy-archive', text: 'Archived legacy versions' },
+    { t: 'p', text: 'Extensions with a `versions/` folder in the extensions repository: ' + legacyList + '. They are rebuilt from the git history by picking, for each version number, the newest commit compatible with the baseline. Whatever the production DB serves today is preserved automatically on the first sync (the DB wins). If the historical commit does not exist, that version cannot be rebuilt.' },
+];
+
 const es: Block[] = [
     { t: 'p', text: 'Una **extensión** (en el código y en la interfaz también se llama *expansión*) añade interfaz y lógica a BloomX sin tocar su código. Se compone de un `manifest.json` (declarativo: qué se muestra, qué funciones expone, qué permisos pide) y, opcionalmente, un `server.js` que se ejecuta en el **backend compartido** dentro de un sandbox. Para construir una paso a paso ve a [Crear una extensión](/docs/create-extension).' },
     { t: 'h2', id: 'model', text: 'Modelo' },
@@ -577,7 +755,7 @@ const es: Block[] = [
         ['`user`', '`{id, email}` o `null`. Lo fija el servidor a partir de la identidad firmada'],
         ['`settings`', 'Ajustes de la instalación sin secretos (sin credenciales)'],
         ['`extension`', '`{id, sourceId, name, manifest}`'],
-        ['`services.ai.generate(system, prompt)`', 'Genera texto con el proveedor de IA del backend (máx. 5 llamadas por invocación)'],
+        ['`services.ai.generate(system, prompt)`', 'Genera texto con la IA de la instancia (puente firmado `/api/internal/host/ai`, configurada en `/admin/ai`; máx. 5 llamadas por invocación). Errores tipados: [IA](/docs/ai#errors)'],
         ['`services.auth.getToken(provider)`', 'Token OAuth del usuario o dominio; string o `null`. Orden: `ctx.auth`, `authData` de la instalación, credencial `<PROVEEDOR>_ACCESS_TOKEN`, ajuste y, si se permite, variable global'],
         ['`services.mail.*`', '`listRecent`, `getEmail`, `applyBatch`, `undoRun`. Solo si la llamada va firmada, el backend tiene `BACKEND_SIGNING_PRIVATE_KEY` y el manifest declara `READ_EMAIL` (lectura) o `MAIL_LABEL` (etiquetar/deshacer)'],
         ['`services.calendar`, `contacts`, `storage`, `notify`, `formats`', 'Solo en dominios firmados y según los permisos del manifest (ausentes en modo legado). Ver [Servicios del sandbox](#services)'],
@@ -631,6 +809,88 @@ const es: Block[] = [
         'En modo legado (sin firma) la extensión recibe las mismas credenciales, que quedan dentro del sandbox y no se devuelven; no tiene `services.mail` y cada ejecución se audita. `requireSignature` rechaza el modo legado.',
         'Desinstalar una extensión borra sus credenciales y `authData`, y **intenta** revocar los tokens OAuth en el proveedor (Google, HubSpot, Notion, Zoom; mejor esfuerzo, 5 s).',
     ] },
+    { t: 'h2', id: 'domain-config', text: 'Configuración por dominio vs variables de entorno' },
+    { t: 'p', text: 'El manifest puede declarar `settingsSchema`: los campos que el administrador configura **por dominio** en la consola (extensiones → detalle → pestañas **Ajustes** y **Credenciales**), sin tocar variables de entorno del servidor. Cada campo tiene `key`, `type`, `label`/`description` (texto o `{es, en}`), `default`, `required`, `group` (secciones definidas en `groups`), `visibleWhen: {key, in:[...]}` y los límites propios de su tipo.' },
+    { t: 'code', lang: 'json', title: 'manifest.json: settingsSchema', code: domainConfigManifest },
+    { t: 'table', head: [
+        'Tipo',
+        'Control en la consola',
+        'Valor guardado',
+    ], rows: [
+        ['`string`, `multiline`', 'Campo de texto / área de texto (`maxLength`, `pattern`, `format`: `email`, `url`, `domain`, `regex`)', 'Texto'],
+        ['`number`', 'Campo numérico (`min`, `max`, `integer`)', 'Número'],
+        ['`boolean`', 'Interruptor', 'Booleano'],
+        ['`enum`', 'Lista desplegable (`options`)', 'Uno de los valores de `options`'],
+        ['`multienum`', 'Casillas, cada una con descripción y ejemplo', 'Lista de valores de `options` (puede ser vacía)'],
+        ['`list`', 'Un elemento por línea, con contador (`maxItems`, `itemMaxLength`)', 'Lista de textos sin repetidos'],
+        ['`json`', 'Área de texto con validación', 'Cualquier JSON de hasta 8 KB'],
+    ] },
+    { t: 'h3', id: 'domain-config-secrets', text: 'Secretos frente a ajustes' },
+    { t: 'ul', items: [
+        '**Secretos** (`secret: true`): tokens, claves y contraseñas. La `key` es el nombre de variable en MAYÚSCULAS (el mismo de `ENV_READ:*`) y no admite `default`. Se guardan **cifrados** como credenciales del dominio, se editan solo en la pestaña **Credenciales** y su valor nunca vuelve al navegador. La pestaña Ajustes solo muestra «n de m secretos configurados» con un enlace.',
+        '**Ajustes** (el resto): valores tipados que se guardan en claro en `ExtensionOnDomain.settings.config` y la extensión recibe en **`ctx.settings[key]`**. No pongas secretos aquí. Claves reservadas: `credentials`, `env`, `meta`, `ui`, `config`, `configMeta`, `authData`, `mandatory`.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings y ctx.env', code: domainConfigUsageEs },
+    { t: 'h3', id: 'domain-config-objects', text: 'Listas de elementos (objects), acciones y registro' },
+    { t: 'ul', items: [
+        '**`objects`**: lista editable de registros (p. ej. los endpoints de un webhook). `itemFields` declara los sub-campos (tipos simples, con `required` y `visibleWhen`); cada elemento lleva un `id` estable (`[a-z0-9-]`, único, hasta 32 caracteres) que la consola genera a partir de un nombre más un sufijo y **no se puede editar** después de guardar. Máximo 50 elementos.',
+        '**Secretos por elemento**: un sub-campo con `secret: true` se guarda **cifrado por elemento** (nombre `campo.id.subcampo`), es de **solo escritura** y llega al handler únicamente dentro del sandbox. La consola solo recibe `secretsSet` (los nombres establecidos): muestra «Configurado / No configurado», un campo de contraseña vacío para establecer o reemplazar y el botón «Quitar». Los secretos viajan en `secrets` del mismo `PUT` y solo si el administrador los cambió.',
+        '**`templates`**: elementos sugeridos con un botón «Añadir desde plantilla». No quedan activos por defecto: se añade el elemento, el administrador lo revisa y pulsa Guardar.',
+        '**`actions`**: botones que invocan una función de `api.functions` con `{itemId?}` (`scope: "global"` arriba del formulario o `"item"` dentro de cada tarjeta, que se deshabilita si el elemento tiene cambios sin guardar). `confirm` pide confirmación. El resultado (`status`, código HTTP, latencia, mensaje y `report[]`) se muestra saneado y nunca incluye secretos; máximo 10 ejecuciones por minuto (HTTP 429).',
+        '**`runLog: {limit}`**: registro acotado de ejecuciones (fecha, evento, destino, estado, intentos, latencia, código y mensaje corto; nunca cuerpos, cabeceras ni secretos). Alimenta «Registro de ejecuciones recientes» en la pestaña Estado y registro.',
+        '**Errores de validación**: cada error lleva `path`, `code` y `params` además de `message` (español de respaldo). La consola traduce siempre por `code` + `params` (es/en): `type`, `control`, `format`, `pattern`, `number`, `integer`, `min`, `max`, `option`, `options`, `list`, `maxItems`, `maxChars`, `required`, `objects`, `itemId`, `itemDup`, `itemUnknown`, `itemSecret`, `itemField` (con el sub-código en `params.sub`), `json`, `jsonSize`... El `message` solo se usa si el código no tiene traducción.',
+        'En un campo `objects` obligatorio, el listado «Configuración completa» cuenta 1 cuando hay al menos un elemento.',
+    ] },
+    { t: 'code', lang: 'json', title: 'manifest.json: objects, acciones y registro', code: objectsEx },
+    { t: 'h3', id: 'domain-config-priority', text: 'Prioridad y retrocompatibilidad' },
+    { t: 'ul', items: [
+        'Valor efectivo de un ajuste: **ajuste del dominio > valor heredado del dominio > variable de entorno global (`legacyEnv`) > `default`**. Si nada lo define, la clave queda sin valor (`unset`).',
+        '`legacyEnv` nombra la variable de entorno que respaldaba el ajuste antes de existir el esquema (p. ej. `DLP_KEYWORDS`). Si el esquema es heredado y la clave ya está en MAYÚSCULAS, esa misma clave hace de `legacyEnv`. Las extensiones sin `settingsSchema` siguen funcionando igual y la pestaña Ajustes muestra la tabla de solo lectura de antes.',
+        'El panel marca cada ajuste que aún se resuelve desde el entorno heredado («usando variable de entorno (heredada): migra a Ajustes») y avisa en el Resumen. **Importar desde el entorno** (solo si hay algo importable) copia al dominio esos ajustes **no secretos**; los secretos no se tocan y el valor del entorno global nunca se muestra en la consola: se copia en el servidor. Un campo con `envImport: false` queda fuera de la importación.',
+        '**Restablecer a valores por defecto** borra los ajustes guardados del dominio (pide confirmación) y no toca las credenciales.',
+    ] },
+    { t: 'h3', id: 'domain-config-api', text: 'Validación, auditoría y límites' },
+    { t: 'ul', items: [
+        'La consola valida en vivo con las **mismas reglas** que el backend (`validateFieldValue`, módulo compartido `settings-schema`); el servidor vuelve a validar y responde `422 {errors:[{path:"values.<clave>", message}]}`, que la consola pinta junto al campo. Un `required` visible sin valor (propio, heredado o por defecto) cuenta en la lista «Configuración completa X/Y» del Resumen.',
+        'API: `GET/PUT/POST /api/extension/config` (el proxy de la consola es `/api/admin/extensions/config`: lectura nivel 3, escritura y importación nivel 4; CLI: `extensions config`, `config set`, `config reset`, `config import-env`).',
+        'Auditoría: cada cambio registra `admin.extension.config` con la acción, el resultado y **solo los nombres** de las claves cambiadas o importadas, nunca sus valores.',
+        'Límites: hasta 60 campos por esquema; texto de 1000 caracteres (5000 en `multiline`); listas de 200 elementos de 200 caracteres; JSON de 8 KB; patrones regex de 200 caracteres sin referencias hacia atrás ni lookaround; `settings.config` completo, 32 KB.',
+    ] },
+    { t: 'h2', id: 'outgoing-webhooks', text: 'Webhooks salientes' },
+    { t: 'p', text: 'La extensión **webhooks** (`core-webhooks`) entrega eventos de correo a las URL que configure el administrador. Se configura en la consola (extensiones → Webhooks → **Ajustes**): hasta 20 **endpoints**, cada uno con nombre, URL https, interruptor *Activo*, **secreto de firma** (cifrado y de solo escritura), eventos, filtros y límites. Sin secreto no se entrega.' },
+    { t: 'table', head: ['Evento', '`type` del payload', 'Datos'], rows: [
+        ['`EMAIL_RECEIVED`', '`email.received`', '`emailId`, `userId` y lo que el dominio firmante incluya (carpeta, remitente, etiquetas, asunto/cuerpo si se activan)'],
+        ['`EMAIL_SENT`', '`email.sent`', '`emailId`, `toCount`, `ccCount`, `bccCount`, `hasAttachments`, `sentAt` (sin destinatarios)'],
+        ['`EMAIL_OPENED`', '`email.opened`', '`emailId`, `folder`, `fromEmail`, `isRead`'],
+    ] },
+    { t: 'callout', kind: 'note', title: 'Spam, etiquetas y altas de usuario', text: '«Spam detectado», «etiqueta aplicada» y «usuario creado» **no existen como hook** y no se han simulado. Para añadirlos hay que (1) agregar el valor a `LIFECYCLE_EVENTS` y a la lista blanca de contexto del ejecutor de hooks, (2) llamar a `/api/extension/hooks` desde el flujo que lo origina (clasificador, etiquetado, alta de usuario) y (3) añadir el intercept y la opción en `events` del manifest.' },
+    { t: 'h3', id: 'outgoing-webhooks-filters', text: 'Filtros y contenido' },
+    { t: 'p', text: 'Los filtros opcionales `folder`, `senderDomain` y `label` solo se evalúan si el evento trae ese dato; si el filtro está configurado y falta el dato, el evento **no se entrega** (`skipped`): es más seguro filtrar de más que de menos. `includeSubject` e `includeBody` solo añaden asunto/cuerpo cuando el contexto del evento los trae.' },
+    { t: 'h3', id: 'outgoing-webhooks-payload', text: 'Payload y firma' },
+    { t: 'code', lang: 'json', title: 'Cuerpo versionado', code: webhookPayload },
+    { t: 'ul', items: [
+        'Cabeceras: `X-BloomX-Signature: sha256=<hex>`, `X-BloomX-Timestamp` (segundos Unix), `X-BloomX-Event` y `X-BloomX-Delivery` (uuid, igual en los reintentos).',
+        'Firma: `sha256=HMAC-SHA256(secreto, "<timestamp>.<cuerpo exacto>")`. El timestamp se renueva en cada reintento; el `id` del payload no cambia, así que sirve para deduplicar.',
+        '**Verificación en el receptor**: usa el cuerpo **crudo**, compara en tiempo constante y rechaza timestamps con más de **5 minutos** de diferencia (anti-replay). Guarda además los `X-BloomX-Delivery` ya vistos durante 5 minutos.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'Receptor en Node.js', code: webhookNode },
+    { t: 'code', lang: 'python', title: 'Receptor en Python', code: webhookPy },
+    { t: 'h3', id: 'outgoing-webhooks-delivery', text: 'Entrega, reintentos y registro' },
+    { t: 'ul', items: [
+        '**Reintentos** de 0 a 5 con espera exponencial (300 ms · 2^n) dentro de un **presupuesto de ≈9 s por evento** (los hooks se cortan a 10 s) y **18 peticiones por invocación** (el sandbox permite 20). Los endpoints se entregan en paralelo.',
+        '**Límite de tasa por endpoint** (`rateLimitPerMinute`), calculado sobre el registro de entregas (máximo 100 entradas guardadas).',
+        '**SSRF y redirecciones**: solo https, sin credenciales en la URL, sin localhost, redes privadas ni IPv6 literal; no se siguen redirecciones (una 3xx se registra como fallo: configura la URL final).',
+        '**Enviar evento de prueba**: botón dentro de cada endpoint (deshabilitado si tiene cambios sin guardar); hace un único intento de `webhook.test` y muestra código, latencia y mensaje.',
+        '**Registro de entregas**: «Registro de ejecuciones recientes» en Estado y registro (fecha, evento, destino, estado, intentos, latencia, código, mensaje). Nunca URLs, cuerpos, cabeceras ni secretos.',
+        '**Endpoint heredado** (`webhookUrl` / `WEBHOOK_URL`): si no hay endpoints se sintetiza uno solo para `EMAIL_RECEIVED`, firmado con `WEBHOOK_SECRET` si existe y con el campo antiguo `event: "email_received"`. Ambos ajustes están obsoletos: crea un endpoint nuevo con su secreto y retira el heredado.',
+    ] },
+    { t: 'h2', id: 'mail-groups-defaults', text: 'Grupos por defecto de mail-groups' },
+    { t: 'ul', items: [
+        '**`defaultGroups`** (desde la 1.1.0) es una lista `objects` de hasta 30 grupos del dominio: alias, dirección opcional, descripción, hasta 200 miembros y visibilidad (`domain` o `private`). Plantillas sugeridas (no activas): **todos**, **soporte** y **ventas**.',
+        '**Prioridad del usuario**: los grupos del dominio se fusionan **por debajo** de los alias del usuario; si el usuario tiene un alias con el mismo nombre (con o sin `@`), gana el suyo y nunca se modifica ni se borra nada de lo suyo. La expansión es idempotente y no duplica direcciones.',
+        '**Aplicar ahora** (`applyNow`) no copia nada: el modelo es de expansión en tiempo de uso, así que la acción devuelve un **informe de validación** (`report[]`: aplicado u omitido y el motivo).',
+        '**`autoAddNewUsers` no existe** por una limitación técnica real: añadir usuarios nuevos exige conocer los usuarios del dominio y enterarse de un alta, y el sandbox no tiene ni un servicio de directorio de usuarios (`ctx.user` es solo quien ejecuta; los `services.*` operan sobre el usuario actual) ni un evento de alta en `LIFECYCLE_EVENTS`. Haría falta un servicio de host `users.list` con permiso propio o un evento `USER_CREATED` con su lista blanca de contexto.',
+    ] },
     { t: 'h2', id: 'sandbox', text: 'Sandbox y sus límites' },
     { t: 'p', text: 'Cada invocación crea un `worker_threads` **nuevo** (sin variables de entorno del proceso) con un contexto `node:vm` de prototipo nulo y sin `eval`/`new Function`. Toda entrada/salida sale por mensajes al hilo principal.' },
     { t: 'table', head: ['Límite', 'Valor'], rows: [
@@ -674,6 +934,7 @@ const es: Block[] = [
     { t: 'h2', id: 'slash', text: 'slashCommands' },
     { t: 'p', text: 'Los comandos `/` del editor de redacción salen de los manifests de las extensiones instaladas. Cada uno es `{key, description, action, arguments?}` con `key` `^[a-zA-Z0-9_-]{1,32}$`. `/` al inicio o tras un espacio abre el menú; flechas, `Home`/`End` navegan, `Enter` ejecuta, `Tab` completa y `Esc` cierra. El texto tras el comando llega como `args`/`slashArgs`. Si dos extensiones repiten la clave gana la primera.' },
     { t: 'code', lang: 'json', title: 'slashCommands en el manifest', code: slashEx },
+    ...versioningEs,
     { t: 'h2', id: 'catalogue', text: 'Catálogo actual y estado' },
     { t: 'table', head: ['Extensión', 'Estado'], rows: [
         ['`calendar`, `zoom`, `google-meet`', 'Funcionales (Zoom exige credenciales de dominio; Meet, cuenta Google vinculada o credenciales)'],
@@ -707,7 +968,7 @@ const en: Block[] = [
         ['`user`', '`{id, email}` or `null`. Set by the server from the signed identity'],
         ['`settings`', 'Installation settings without secrets (no credentials)'],
         ['`extension`', '`{id, sourceId, name, manifest}`'],
-        ['`services.ai.generate(system, prompt)`', 'Generates text with the backend AI provider (max 5 calls per invocation)'],
+        ['`services.ai.generate(system, prompt)`', 'Generates text with the instance AI (signed bridge `/api/internal/host/ai`, configured in `/admin/ai`; max 5 calls per invocation). Typed errors: [AI](/docs/ai#errors)'],
         ['`services.auth.getToken(provider)`', 'OAuth token of the user or domain; string or `null`. Order: `ctx.auth`, installation `authData`, `<PROVIDER>_ACCESS_TOKEN` credential, setting and, if allowed, a global variable'],
         ['`services.mail.*`', '`listRecent`, `getEmail`, `applyBatch`, `undoRun`. Only if the call is signed, the backend has `BACKEND_SIGNING_PRIVATE_KEY` and the manifest declares `READ_EMAIL` (read) or `MAIL_LABEL` (label/undo)'],
         ['`services.calendar`, `contacts`, `storage`, `notify`, `formats`', 'Only on signed domains and according to the manifest permissions (absent in legacy mode). See [Sandbox services](#services)'],
@@ -761,6 +1022,88 @@ const en: Block[] = [
         'In legacy mode (no signature) the extension receives the same credentials, which stay inside the sandbox and are never returned; it has no `services.mail` and every run is audited. `requireSignature` rejects legacy mode.',
         'Uninstalling an extension deletes its credentials and `authData`, and **tries** to revoke OAuth tokens at the provider (Google, HubSpot, Notion, Zoom; best effort, 5 s).',
     ] },
+    { t: 'h2', id: 'domain-config', text: 'Per-domain configuration vs environment variables' },
+    { t: 'p', text: 'A manifest can declare `settingsSchema`: the fields the administrator configures **per domain** in the console (extensions → detail → **Settings** and **Credentials** tabs), without touching server environment variables. Each field has `key`, `type`, `label`/`description` (text or `{es, en}`), `default`, `required`, `group` (sections defined in `groups`), `visibleWhen: {key, in:[...]}` and the limits of its type.' },
+    { t: 'code', lang: 'json', title: 'manifest.json: settingsSchema', code: domainConfigManifest },
+    { t: 'table', head: [
+        'Type',
+        'Console control',
+        'Stored value',
+    ], rows: [
+        ['`string`, `multiline`', 'Text field / textarea (`maxLength`, `pattern`, `format`: `email`, `url`, `domain`, `regex`)', 'Text'],
+        ['`number`', 'Number field (`min`, `max`, `integer`)', 'Number'],
+        ['`boolean`', 'Switch', 'Boolean'],
+        ['`enum`', 'Dropdown (`options`)', 'One of the `options` values'],
+        ['`multienum`', 'Checkboxes, each with description and example', 'List of `options` values (may be empty)'],
+        ['`list`', 'One item per line, with counter (`maxItems`, `itemMaxLength`)', 'List of unique strings'],
+        ['`json`', 'Textarea with validation', 'Any JSON up to 8 KB'],
+    ] },
+    { t: 'h3', id: 'domain-config-secrets', text: 'Secrets vs settings' },
+    { t: 'ul', items: [
+        '**Secrets** (`secret: true`): tokens, keys and passwords. The `key` is the UPPERCASE variable name (the same as `ENV_READ:*`) and takes no `default`. They are stored **encrypted** as domain credentials, edited only in the **Credentials** tab and their value never returns to the browser. The Settings tab only shows "n of m secrets configured" with a link.',
+        '**Settings** (everything else): typed values stored in clear in `ExtensionOnDomain.settings.config` and received by the extension in **`ctx.settings[key]`**. Do not put secrets here. Reserved keys: `credentials`, `env`, `meta`, `ui`, `config`, `configMeta`, `authData`, `mandatory`.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings and ctx.env', code: domainConfigUsageEn },
+    { t: 'h3', id: 'domain-config-objects', text: 'Item lists (objects), actions and run log' },
+    { t: 'ul', items: [
+        '**`objects`**: an editable list of records (e.g. a webhook\'s endpoints). `itemFields` declares the sub-fields (simple types, with `required` and `visibleWhen`); every item has a stable `id` (`[a-z0-9-]`, unique, up to 32 characters) that the console generates from a name plus a suffix and that **cannot be edited** after saving. Up to 50 items.',
+        '**Per-item secrets**: a sub-field with `secret: true` is stored **encrypted per item** (name `field.id.subfield`), is **write-only** and reaches the handler only inside the sandbox. The console only receives `secretsSet` (the names that are set): it shows "Configured / Not configured", an empty password input to set or replace, and a "Remove" button. Secrets travel in `secrets` of the same `PUT`, and only if the administrator changed them.',
+        '**`templates`**: suggested items with an "Add from template" button. They are not active by default: the item is added, the administrator reviews it and presses Save.',
+        '**`actions`**: buttons that call a function of `api.functions` with `{itemId?}` (`scope: "global"` above the form or `"item"` inside each card, disabled while the item has unsaved changes). `confirm` asks for confirmation. The result (`status`, HTTP code, latency, message and `report[]`) is shown sanitized and never includes secrets; at most 10 runs per minute (HTTP 429).',
+        '**`runLog: {limit}`**: a bounded run log (date, event, target, status, attempts, latency, code and a short message; never bodies, headers or secrets). It feeds "Recent runs log" in the Status and log tab.',
+        '**Validation errors**: every error carries `path`, `code` and `params` besides `message` (Spanish fallback). The console always translates by `code` + `params` (es/en): `type`, `control`, `format`, `pattern`, `number`, `integer`, `min`, `max`, `option`, `options`, `list`, `maxItems`, `maxChars`, `required`, `objects`, `itemId`, `itemDup`, `itemUnknown`, `itemSecret`, `itemField` (sub-code in `params.sub`), `json`, `jsonSize`... `message` is only used when the code has no translation.',
+        'In a required `objects` field, the "Configuration complete" list counts 1 when there is at least one item.',
+    ] },
+    { t: 'code', lang: 'json', title: 'manifest.json: objects, actions and run log', code: objectsEx },
+    { t: 'h3', id: 'domain-config-priority', text: 'Priority and backward compatibility' },
+    { t: 'ul', items: [
+        'Effective value of a setting: **domain setting > legacy domain value > global environment variable (`legacyEnv`) > `default`**. If nothing defines it, the key has no value (`unset`).',
+        '`legacyEnv` names the environment variable that backed the setting before the schema existed (e.g. `DLP_KEYWORDS`). With a legacy schema whose key is already UPPERCASE, that key acts as `legacyEnv`. Extensions without `settingsSchema` keep working as before and the Settings tab shows the old read-only table.',
+        'The panel flags every setting still resolved from the legacy environment ("using environment variable (legacy): migrate to Settings") and warns in the Summary. **Import from environment** (only when something is importable) copies those **non-secret** settings to the domain; secrets are untouched and the global environment value is never shown in the console: it is copied on the server. A field with `envImport: false` is left out of the import.',
+        '**Reset to defaults** deletes the domain\'s saved settings (asks for confirmation) and does not touch credentials.',
+    ] },
+    { t: 'h3', id: 'domain-config-api', text: 'Validation, audit and limits' },
+    { t: 'ul', items: [
+        'The console validates live with the **same rules** as the backend (`validateFieldValue`, the shared `settings-schema` module); the server validates again and answers `422 {errors:[{path:"values.<key>", message}]}`, which the console renders next to the field. A visible `required` field without a value (own, legacy or default) counts in the Summary\'s "Configuration complete X/Y" list.',
+        'API: `GET/PUT/POST /api/extension/config` (the console proxy is `/api/admin/extensions/config`: read level 3, write and import level 4; CLI: `extensions config`, `config set`, `config reset`, `config import-env`).',
+        'Audit: every change records `admin.extension.config` with the action, the outcome and **only the names** of the changed or imported keys, never their values.',
+        'Limits: up to 60 fields per schema; 1000-character text (5000 for `multiline`); lists of 200 items of 200 characters; 8 KB JSON; regex patterns of 200 characters without back-references or lookaround; the whole `settings.config`, 32 KB.',
+    ] },
+    { t: 'h2', id: 'outgoing-webhooks', text: 'Outgoing webhooks' },
+    { t: 'p', text: 'The **webhooks** extension (`core-webhooks`) delivers mail events to the URLs the administrator configures. It is configured in the console (extensions → Webhooks → **Settings**): up to 20 **endpoints**, each with a name, https URL, an *Active* switch, a **signing secret** (encrypted, write-only), events, filters and limits. Nothing is delivered without a secret.' },
+    { t: 'table', head: ['Event', 'Payload `type`', 'Data'], rows: [
+        ['`EMAIL_RECEIVED`', '`email.received`', '`emailId`, `userId` and whatever the signing domain includes (folder, sender, labels, subject/body when enabled)'],
+        ['`EMAIL_SENT`', '`email.sent`', '`emailId`, `toCount`, `ccCount`, `bccCount`, `hasAttachments`, `sentAt` (no recipients)'],
+        ['`EMAIL_OPENED`', '`email.opened`', '`emailId`, `folder`, `fromEmail`, `isRead`'],
+    ] },
+    { t: 'callout', kind: 'note', title: 'Spam, labels and user creation', text: '"Spam detected", "label applied" and "user created" **do not exist as hooks** and were not simulated. To add them you must (1) add the value to `LIFECYCLE_EVENTS` and to the hook runner\'s context allow-list, (2) call `/api/extension/hooks` from the flow that produces it (classifier, labeling, user creation) and (3) add the intercept and the option in the manifest `events`.' },
+    { t: 'h3', id: 'outgoing-webhooks-filters', text: 'Filters and content' },
+    { t: 'p', text: 'The optional `folder`, `senderDomain` and `label` filters are only evaluated if the event carries that datum; if the filter is set and the datum is missing, the event is **not delivered** (`skipped`): filtering too much is safer than too little. `includeSubject` and `includeBody` only add subject/body when the event context carries them.' },
+    { t: 'h3', id: 'outgoing-webhooks-payload', text: 'Payload and signature' },
+    { t: 'code', lang: 'json', title: 'Versioned body', code: webhookPayload },
+    { t: 'ul', items: [
+        'Headers: `X-BloomX-Signature: sha256=<hex>`, `X-BloomX-Timestamp` (Unix seconds), `X-BloomX-Event` and `X-BloomX-Delivery` (uuid, the same across retries).',
+        'Signature: `sha256=HMAC-SHA256(secret, "<timestamp>.<exact body>")`. The timestamp is renewed on every retry; the payload `id` does not change, so use it to deduplicate.',
+        '**Receiver verification**: use the **raw** body, compare in constant time and reject timestamps more than **5 minutes** off (anti-replay). Also remember the `X-BloomX-Delivery` values already seen for 5 minutes.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'Node.js receiver', code: webhookNode },
+    { t: 'code', lang: 'python', title: 'Python receiver', code: webhookPy },
+    { t: 'h3', id: 'outgoing-webhooks-delivery', text: 'Delivery, retries and log' },
+    { t: 'ul', items: [
+        '**Retries** from 0 to 5 with exponential backoff (300 ms · 2^n) inside a **budget of ≈9 s per event** (hooks are cut at 10 s) and **18 requests per invocation** (the sandbox allows 20). Endpoints are delivered in parallel.',
+        '**Per-endpoint rate limit** (`rateLimitPerMinute`), computed over the delivery log (at most 100 stored entries).',
+        '**SSRF and redirects**: https only, no credentials in the URL, no localhost, private networks or literal IPv6; redirects are not followed (a 3xx is logged as a failure: configure the final URL).',
+        '**Send test event**: a button inside every endpoint (disabled while it has unsaved changes); it makes a single `webhook.test` attempt and shows code, latency and message.',
+        '**Delivery log**: "Recent runs log" in Status and log (date, event, target, status, attempts, latency, code, message). Never URLs, bodies, headers or secrets.',
+        '**Legacy endpoint** (`webhookUrl` / `WEBHOOK_URL`): if there are no endpoints, one is synthesized for `EMAIL_RECEIVED` only, signed with `WEBHOOK_SECRET` if present and with the old `event: "email_received"` field. Both settings are deprecated: create a new endpoint with its secret and drop the legacy one.',
+    ] },
+    { t: 'h2', id: 'mail-groups-defaults', text: 'mail-groups default groups' },
+    { t: 'ul', items: [
+        '**`defaultGroups`** (since 1.1.0) is an `objects` list of up to 30 domain groups: alias, optional address, description, up to 200 members and visibility (`domain` or `private`). Suggested templates (not active): **everyone**, **support** and **sales**.',
+        '**User priority**: domain groups are merged **below** the user\'s aliases; if the user has an alias with the same name (with or without `@`), theirs wins and nothing of theirs is ever modified or deleted. Expansion is idempotent and does not duplicate addresses.',
+        '**Apply now** (`applyNow`) copies nothing: the model is expansion at use time, so the action returns a **validation report** (`report[]`: applied or skipped and why).',
+        '**`autoAddNewUsers` does not exist** because of a real technical limit: adding new users requires knowing the domain\'s users and learning about a sign-up, and the sandbox has neither a user directory service (`ctx.user` is only whoever runs; `services.*` act on the current user) nor a sign-up event in `LIFECYCLE_EVENTS`. It would need a `users.list` host service with its own permission or a `USER_CREATED` event with its context allow-list.',
+    ] },
     { t: 'h2', id: 'sandbox', text: 'Sandbox and its limits' },
     { t: 'p', text: 'Each invocation creates a **new** `worker_threads` worker (without the process environment variables) with a null-prototype `node:vm` context and no `eval`/`new Function`. All I/O leaves through messages to the main thread.' },
     { t: 'table', head: ['Limit', 'Value'], rows: [
@@ -804,6 +1147,7 @@ const en: Block[] = [
     { t: 'h2', id: 'slash', text: 'slashCommands' },
     { t: 'p', text: 'The composer\'s `/` commands come from the manifests of installed extensions. Each is `{key, description, action, arguments?}` with `key` `^[a-zA-Z0-9_-]{1,32}$`. `/` at the start or after a space opens the menu; arrows, `Home`/`End` navigate, `Enter` runs, `Tab` completes and `Esc` closes. The text after the command arrives as `args`/`slashArgs`. If two extensions repeat a key the first wins.' },
     { t: 'code', lang: 'json', title: 'slashCommands in the manifest', code: slashEx },
+    ...versioningEn,
     { t: 'h2', id: 'catalogue', text: 'Current catalogue and status' },
     { t: 'table', head: ['Extension', 'Status'], rows: [
         ['`calendar`, `zoom`, `google-meet`', 'Working (Zoom needs domain credentials; Meet, a linked Google account or credentials)'],

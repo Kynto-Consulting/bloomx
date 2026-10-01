@@ -11,6 +11,7 @@ import {
     verifyBackendSignature,
     verifyCanonical,
 } from '../bloomx-signature';
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { __resetBackendKeyCache, buildBackendHeaders, getBackendPublicKey, loadDomainPrivateKey, ownDomains, verifyBackendRequest } from '../backend-auth';
 
 // Vector fijo generado con bloomx-backend/src/lib/signing.ts: garantiza que ambos repos hablan el MISMO protocolo.
@@ -50,7 +51,8 @@ describe('buildBackendHeaders: firma con la clave del dominio o protocolo legado
 
     it('SIN BLOOMX_DOMAIN_PRIVATE_KEY: solo cabeceras antiguas, nunca Authorization/JWT/firma', () => {
         const h = buildBackendHeaders({ ...base, env: {} });
-        expect(h).toEqual({ 'X-BloomX-Domain': 'mail.acme.com', 'X-User-ID': 'u1', 'X-User-Email': 'a@acme.com' });
+        // Cabeceras antiguas + version del cliente (informativas en modo legado); ni firma, ni Authorization, ni JWT.
+        expect(h).toEqual({ 'X-BloomX-Domain': 'mail.acme.com', 'X-User-ID': 'u1', 'X-User-Email': 'a@acme.com', ...clientVersionHeaders() });
     });
 
     it('con clave invalida: se cae al modo legado sin lanzar', () => {
@@ -76,6 +78,9 @@ describe('buildBackendHeaders: firma con la clave del dominio o protocolo legado
                 userId: 'u1',
                 userEmail: 'a@acme.com',
                 callback: 'https://mail.acme.com',
+                // El cliente firma tambien su version (mensaje V2).
+                clientApi: h['X-BloomX-Client-Api'],
+                clientCaps: h['X-BloomX-Client-Caps'],
             });
             expect(verifyCanonical(parseEd25519PublicKey(kp.publicKey)!, canonical, h['X-BloomX-Signature'])).toBe(true);
         }

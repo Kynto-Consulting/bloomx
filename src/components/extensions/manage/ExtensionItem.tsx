@@ -8,6 +8,7 @@ import { Button } from '@/components/expansions/kit/Actions';
 import { Badge } from '@/components/expansions/kit/Feedback';
 import { buttonClasses } from '@/components/expansions/kit/tokens';
 import { fmt, useManageStrings } from './strings';
+import { aiBlockReasonText } from './AiRequirementNote';
 
 export type ViewMode = 'cards' | 'list';
 
@@ -45,9 +46,11 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
     const lockId = `${uid}-l`;
     const list = view === 'list';
 
+    const aiBlocked = row.valid && row.ai.blocked;
     const stateBadge = !row.valid
         ? <Badge tone="danger" label={s.badgeInvalid} size="sm" />
         : row.orgDisabled ? <Badge tone="warning" label={s.badgeOrgDisabled} size="sm" />
+        : aiBlocked ? <Badge tone="warning" label={row.userEnabled ? s.aiPausedBadge : s.aiBlockedBadge} size="sm" />
             : !row.userEnabled ? <Badge tone="neutral" label={s.badgeUserDisabled} size="sm" />
                 : <Badge tone="success" label={s.badgeActive} size="sm" />;
 
@@ -73,7 +76,7 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
             <article
                 aria-labelledby={titleId}
                 data-extension-id={row.id}
-                data-state={!row.valid ? 'invalid' : row.orgDisabled ? 'org-disabled' : row.userEnabled ? 'active' : 'user-disabled'}
+                data-state={!row.valid ? 'invalid' : row.orgDisabled ? 'org-disabled' : aiBlocked ? 'ai-blocked' : row.userEnabled ? 'active' : 'user-disabled'}
                 className={`flex h-full min-w-0 gap-3 rounded-xl border border-border bg-card p-4 text-card-foreground ${list ? 'flex-col sm:flex-row sm:items-center' : 'flex-col'}`}
             >
                 <div className="flex min-w-0 flex-1 items-start gap-3">
@@ -89,6 +92,8 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
                             {stateBadge}
                             {row.valid && <Badge tone="neutral" variant="outline" label={categoryLabel(row.category)} size="sm" />}
                             {row.mandatory && <Badge tone="warning" label={s.badgeMandatory} size="sm" />}
+                            {row.valid && row.ai.requiresAi && !row.ai.blocked && row.ai.optional && <Badge tone="info" variant="outline" label={row.ai.degraded ? s.aiDegradedBadge : s.aiOptionalBadge} size="sm" />}
+                            {aiBlocked && <Badge tone="warning" variant="outline" label={s.aiBlockedBadge} size="sm" />}
                             {row.updateAvailable && <Badge tone="info" label={s.badgeUpdate} size="sm" />}
                             {row.isPaid === true && <Badge tone="primary" variant="outline" label={row.price && row.price !== '0' ? `${s.badgePaid} ${row.price}${row.currency ? ` ${row.currency}` : ''}` : s.badgePaid} size="sm" />}
                             {row.isPaid === false && <Badge tone="neutral" variant="outline" label={s.badgeFree} size="sm" />}
@@ -104,14 +109,15 @@ export const ExtensionItem = React.memo(function ExtensionItem({ row, position, 
                         )}
                         {row.valid && row.droppedCount > 0 && <p data-testid="degraded-note" className="text-xs text-muted-foreground">{fmt(s.degradedTitle, { n: row.droppedCount })}</p>}
                         {row.valid && row.mandatory && <p id={lockId} data-testid="mandatory-note" className="text-xs text-muted-foreground">{s.mandatoryLocked}</p>}
-                        {row.valid && row.orgDisabled && <p id={noteId} className="text-xs text-muted-foreground">{s.noEffect}. {s.noEffectHelp}</p>}
+                        {aiBlocked && <p id={noteId} data-testid="ai-blocked-note" className="text-xs text-muted-foreground">{aiBlockReasonText(s, row)} {s.aiBlockedNote}</p>}
+                        {row.valid && row.orgDisabled && !aiBlocked && <p id={noteId} className="text-xs text-muted-foreground">{s.noEffect}. {s.noEffectHelp}</p>}
                     </div>
                 </div>
 
                 <div className={`flex shrink-0 flex-wrap items-center gap-2 ${list ? 'sm:justify-end' : 'justify-between border-t border-border pt-3'}`}>
                     {row.valid && (
                         <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                            <ExtensionSwitch checked={row.userEnabled} locked={row.mandatory} label={row.mandatory ? fmt(s.mandatorySwitch, { name: row.name }) : fmt(s.enableSwitch, { name: row.name })} describedBy={row.mandatory ? lockId : row.orgDisabled ? noteId : undefined} onChange={(next) => onToggle(row, next)} />
+                            <span title={aiBlocked ? aiBlockReasonText(s, row) : undefined}><ExtensionSwitch checked={row.userEnabled} locked={row.mandatory || (aiBlocked && !row.userEnabled)} label={row.mandatory ? fmt(s.mandatorySwitch, { name: row.name }) : fmt(s.enableSwitch, { name: row.name })} describedBy={row.mandatory ? lockId : row.orgDisabled || aiBlocked ? noteId : undefined} onChange={(next) => onToggle(row, next)} /></span>
                             <span aria-hidden="true">{row.mandatory ? s.mandatoryFor : row.userEnabled ? s.enabledFor : s.disabledFor}</span>
                         </span>
                     )}

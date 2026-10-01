@@ -91,6 +91,9 @@ describe('callBackendHooks', () => {
             userId: 'u9',
             userEmail: '',
             callback: init.headers['X-BloomX-Callback'] || '',
+            // La version del cliente va firmada (mensaje V2).
+            clientApi: init.headers['X-BloomX-Client-Api'],
+            clientCaps: init.headers['X-BloomX-Client-Caps'],
         });
         expect(verifyCanonical(parseEd25519PublicKey(kp.publicKey)!, canonical, init.headers['X-BloomX-Signature'])).toBe(true);
     });

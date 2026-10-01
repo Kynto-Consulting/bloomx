@@ -8,6 +8,7 @@ import { labelTreeEn } from './label-tree';
 import { ruleBuilderEn } from './rule-builder';
 import { spamListsEn } from './spam-lists';
 import { adminConsoleEn } from './admin-console';
+import { aiEn } from './admin-ai';
 import { spamUserEn } from './spam-user';
 
 /** Ingles. Debe tener exactamente las mismas claves que es.ts (lo exige el tipo Messages). */
@@ -33,6 +34,13 @@ const en: Messages = {
         maximize: 'Maximize',
         restore: 'Restore',
         language: 'Language',
+    },
+    pwaUpdate: {
+        available: 'A new version is available',
+        update: 'Update',
+        waitingDraft: 'We will update once you finish your draft',
+        mandatory: 'This version is no longer supported. Update to continue.',
+        updateNow: 'Update now',
     },
     layout: {
         description: 'Serverless mail client',
@@ -138,6 +146,7 @@ const en: Messages = {
     },
     admin: {
         console: adminConsoleEn,
+        ai: aiEn,
         brandFallback: 'BloomX',
         nav: { label: 'Admin panel', extensions: 'Extensions', users: 'Users', settings: 'Settings', openMenu: 'Open menu', closeMenu: 'Close menu' },
         heading: {

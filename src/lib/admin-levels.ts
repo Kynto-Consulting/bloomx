@@ -17,7 +17,7 @@ export const SCOPE_LEVELS: Record<string, L> = {
     // lectura
     me: 1, overview: 1, system: 1, search: 1, 'users.list': 1, 'users.detail': 1, 'users.quota.read': 1, 'accounts.list': 1, 'audit.read': 1,
     'mail.metrics': 1, 'mail.dns': 1, 'mail.webhooks': 1, 'mail.suppressions': 1, 'retention.settings.read': 1, 'retention.quota.read': 1, 'retention.storage': 1,
-    'spam.config.read': 1, 'spam.events.read': 1, 'spam.stats.read': 1, 'spam.lists.read': 1, 'extensions.catalog': 1, 'extensions.status': 1,
+    'spam.config.read': 1, 'spam.events.read': 1, 'spam.stats.read': 1, 'spam.lists.read': 1, 'extensions.catalog': 1, 'extensions.status': 1, 'ai.read': 1,
     'profile.get': 1, 'profile.sessions': 1, 'profile.sessions.revoke': 1,
     // gestion de cuentas (operator)
     'users.create': 2, 'users.update': 2, 'users.bulk': 2, 'users.export': 2, 'users.sessions': 2, 'users.quota.write': 2,
@@ -26,6 +26,8 @@ export const SCOPE_LEVELS: Record<string, L> = {
     // configuracion (admin)
     'users.password': 3, 'audit.export': 3, 'security.status': 3, 'retention.settings.write': 3, 'retention.quota.write': 3, 'spam.config.write': 3,
     'extensions.installed': 3, 'extensions.install': 3, 'extensions.update': 3, 'extensions.uninstall': 3, 'extensions.toggle': 3, 'extensions.order': 3, 'extensions.test': 3,
+    // IA: ajustes no criticos 3; la rama critica (enabled/provider/baseUrl/apiKey) exige 4 + step-up dentro del handler
+    'ai.write': 3, 'ai.test': 3, 'ai.purge': 3,
     'permissions.read': 3, 'permissions.write': 3, 'permissions.history': 3, 'profile.password': 1, 'privileged.read': 1, 'privileged.close': 1,
     // seguridad critica / destructivo global (superadmin)
     'users.mfa_reset': 4, 'permissions.unlock': 4, 'privileged.policy': 4, 'retention.run.dry': 4, 'extensions.mandatory': 4, 'domain-key.get': 4, 'domain-key.write': 4,
@@ -42,6 +44,9 @@ export const DIRECT_ROUTES: Record<string, L> = {
     'GET /api/admin/extensions/settings': 3,
     'PUT /api/admin/extensions/settings': 4,
     'POST /api/admin/extensions/settings': 4,
+    'GET /api/admin/extensions/config': 3,
+    'PUT /api/admin/extensions/config': 4,
+    'POST /api/admin/extensions/config': 4,
     'GET /api/admin/retention': 4,
     'POST /api/admin/retention': 4,
     'ALL /api/admin/mail-transfer/**': 3,
@@ -73,6 +78,10 @@ export const COMMAND_LEVELS: Record<string, L> = {
     'extensions list': 3, 'extensions install': 3, 'extensions update': 3, 'extensions uninstall': 3, 'extensions enable': 3, 'extensions disable': 3, 'extensions order': 3,
     'extensions test': 3, 'extensions credentials': 3, 'extensions conferencing': 3,
     'extensions mandatory': 4, 'extensions credentials set': 4, 'extensions credentials unset': 4, 'extensions credentials migrate': 4,
+    'extensions config': 3, 'extensions config set': 4, 'extensions config reset': 4, 'extensions config import-env': 4, 'extensions config action': 4,
+    // IA de la instancia
+    'ai status': 1, 'ai usage': 1, 'ai audit': 1, 'ai test': 3, 'ai set': 3, 'ai purge': 3,
+    'ai enable': 4, 'ai disable': 4, 'ai connection set': 4, 'ai key set': 4, 'ai key clear': 4,
     // spam
     'spam config': 1, 'spam events': 1, 'spam stats': 1, 'spam list': 1,
     'spam simulate': 2, 'spam test': 2, 'spam list add': 2, 'spam list remove': 2, 'spam list import': 2, 'spam list export': 2,

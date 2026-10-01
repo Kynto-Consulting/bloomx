@@ -50,6 +50,11 @@ const ES = {
     openPlayground: 'Abrir en el playground', manageLink: 'Gestionar extensiones',
     reportTitle: 'Informe de errores de extensiones',
     times: 'x{n}', justNow: 'ahora',
+    aiBlockedBadge: 'Requiere IA · deshabilitada', aiPausedBadge: 'Pausada: IA desactivada', aiOptionalBadge: 'IA opcional', aiDegradedBadge: 'Sin IA (funciones reducidas)',
+    aiReason_ai_disabled: 'El administrador desactivo la IA de esta organizacion.', aiReason_feature_disabled: 'El administrador desactivo una funcion de IA que esta extension necesita.', aiReason_extension_disabled: 'El administrador desactivo la IA para esta extension.',
+    aiRequiresTitle: 'Funciones de IA', aiFeaturesAsk: 'Pide: {features}.', aiFeaturesNone: 'Usa el servicio de IA de la organizacion.', aiEnabledYes: 'Habilitadas.', aiEnabledNo: 'Deshabilitadas: {features}.',
+    aiOptionalNote: 'La IA es opcional: sin ella la extension sigue funcionando con funciones reducidas.', aiManageLink: 'Ajustes de IA', aiBlockedNote: 'No se muestra ni se ejecuta mientras tanto; sigue instalada y vuelve al reactivar la IA.',
+    composerHelperNote: 'No existe un compositor nativo con IA: la extension "Asistente de redacción" (Composer Helper) es la única que aporta redacción con IA.',
 } as const;
 
 export type ManageStrings = { [K in keyof typeof ES]: string };
@@ -95,6 +100,11 @@ const EN: ManageStrings = {
     openPlayground: 'Open in the playground', manageLink: 'Manage extensions',
     reportTitle: 'Extension error report',
     times: 'x{n}', justNow: 'now',
+    aiBlockedBadge: 'Requires AI · disabled', aiPausedBadge: 'Paused: AI turned off', aiOptionalBadge: 'AI optional', aiDegradedBadge: 'No AI (reduced features)',
+    aiReason_ai_disabled: 'The administrator turned AI off for this organization.', aiReason_feature_disabled: 'The administrator turned off an AI feature this extension needs.', aiReason_extension_disabled: 'The administrator turned AI off for this extension.',
+    aiRequiresTitle: 'AI features', aiFeaturesAsk: 'Asks for: {features}.', aiFeaturesNone: 'Uses the organization AI service.', aiEnabledYes: 'Enabled.', aiEnabledNo: 'Disabled: {features}.',
+    aiOptionalNote: 'AI is optional: without it the extension keeps working with reduced features.', aiManageLink: 'AI settings', aiBlockedNote: 'It is neither shown nor run meanwhile; it stays installed and returns when AI is turned back on.',
+    composerHelperNote: 'There is no native AI composer: the "Composer Helper" extension (Asistente de redacción) is the only one that provides AI writing.',
 };
 
 const STATUS_KEY: Record<StatusFilter, keyof ManageStrings> = {

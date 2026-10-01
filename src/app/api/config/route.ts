@@ -1,5 +1,8 @@
 
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { NextResponse } from 'next/server';
+import { getPublicAiState } from '@/lib/ai/settings';
+import { annotateExtensionsWithAi } from '@/lib/ai/extension-block';
 
 export async function GET(req: Request) {
     // In production, this call would go to the backend service.
@@ -18,7 +21,8 @@ export async function GET(req: Request) {
         const res = await fetch(targetUrl.toString(), {
             headers: {
                 'x-forwarded-host': host || '',
-                'Cache-Control': 'no-cache'
+                'Cache-Control': 'no-cache',
+                ...clientVersionHeaders()
             },
             cache: 'no-store'
         });
@@ -29,7 +33,12 @@ export async function GET(req: Request) {
         }
 
         const data = await res.json();
-        return NextResponse.json(data);
+        // Bloqueo por IA: cada extension lleva `aiBlock` (misma funcion pura que usa el backend). Estado cacheado 30 s en proceso.
+        // Si no se puede leer el estado de IA no se marca nada (la ejecucion igualmente la rechaza el backend con ai_disabled).
+        if (data && Array.isArray(data.extensions)) {
+            try { data.extensions = annotateExtensionsWithAi(data.extensions, await getPublicAiState()); } catch (e) { console.error('[CONFIG_PROXY] AI state unavailable:', e); }
+        }
+        return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
 
     } catch (e) {
         console.error("[CONFIG_PROXY] Failed to fetch config:", e);

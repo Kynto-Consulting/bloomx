@@ -10,6 +10,8 @@ import { deriveCategory, mountPointsOf, tagsOf, type CategoryId } from './catego
 import { manifestIcon, manifestTexts } from '@/lib/expansions/manifest-schema';
 import { hasUpdate } from './semver';
 import { manifestHealth, type ManifestProblem } from './health';
+import { aiBlockInfo } from '@/lib/ai/extension-block';
+import { AI_ALL_ENABLED } from '@/lib/ai/blocking';
 
 export type StatusFilter = 'all' | 'active' | 'user-disabled' | 'org-disabled' | 'errors' | 'paid' | 'free';
 export const STATUS_FILTERS: StatusFilter[] = ['all', 'active', 'user-disabled', 'org-disabled', 'errors', 'paid', 'free'];
@@ -19,8 +21,22 @@ export interface CatalogInfo { version?: string | null; isPaid?: boolean; price?
 
 export interface ChangelogEntry { version: string; date: string; notes: string }
 
+/** Requisito de IA de la extension (derivado de isExtensionBlockedByAi; `blocked` viene de /api/config o, sin el, se asume IA disponible). */
+export interface RowAi {
+    requiresAi: boolean;
+    blocked: boolean;
+    reason: 'ai_disabled' | 'feature_disabled' | 'extension_disabled' | null;
+    degraded: boolean;
+    /** ai.required === false */
+    optional: boolean;
+    features: string[];
+    disabledFeatures: string[];
+    purpose: { es: string; en: string };
+}
+
 export interface ExtensionRow {
     id: string;
+    ai: RowAi;
     name: string;
     description: string;
     /** Icono declarado por la extension (manifest.icon): brand:<slug>, lucide:<Nombre>, initials:<XY> o un nombre Lucide. */
@@ -130,6 +146,17 @@ export function buildRows({ extensions, prefs, errors = [], catalog, locale }: B
         const valid = prepared.ok;
         const errorCount = errors.filter((e) => e.extensionId === id).length;
         const health = manifestHealth(id, extension?.template);
+        const blockInfo = isRecord(extension?.aiBlock) ? extension.aiBlock : aiBlockInfo(raw, AI_ALL_ENABLED);
+        const ai: RowAi = {
+            requiresAi: blockInfo.requiresAi === true,
+            blocked: blockInfo.blocked === true,
+            reason: blockInfo.reason ?? null,
+            degraded: blockInfo.degraded === true,
+            optional: blockInfo.optional === true || (blockInfo.requiresAi === true && raw.ai?.required === false),
+            features: Array.isArray(blockInfo.features) ? blockInfo.features.filter((f: unknown) => typeof f === 'string') : [],
+            disabledFeatures: Array.isArray(blockInfo.disabledFeatures) ? blockInfo.disabledFeatures.filter((f: unknown) => typeof f === 'string') : [],
+            purpose: { es: str(raw.ai?.purpose?.es, 300), en: str(raw.ai?.purpose?.en, 300) },
+        };
 
         const paidFlag = typeof info?.isPaid === 'boolean' ? info.isPaid : typeof extension?.isPaid === 'boolean' ? extension.isPaid : null;
         const priceRaw = info?.price ?? extension?.price;
@@ -137,6 +164,7 @@ export function buildRows({ extensions, prefs, errors = [], catalog, locale }: B
 
         rows.push({
             id,
+            ai,
             name: str(texts.name, 120) || str(raw.name, 120) || str(extension?.name, 120) || id,
             description: str(texts.description, 2000) || str(raw.description, 2000) || str(extension?.description, 2000),
             icon: manifestIcon(raw),
@@ -150,7 +178,7 @@ export function buildRows({ extensions, prefs, errors = [], catalog, locale }: B
             orgDisabled,
             userEnabled,
             mandatory,
-            active: valid && !orgDisabled && userEnabled,
+            active: valid && !orgDisabled && userEnabled && !ai.blocked,
             category: valid ? deriveCategory(raw) : 'other',
             tags: valid ? tagsOf(raw) : [],
             permissions: valid && Array.isArray(raw.permissions) ? raw.permissions.filter((p: unknown): p is string => typeof p === 'string') : [],

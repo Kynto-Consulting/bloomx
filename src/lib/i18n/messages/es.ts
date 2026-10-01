@@ -16,6 +16,7 @@ import { labelTreeEs } from './label-tree';
 import { ruleBuilderEs } from './rule-builder';
 import { spamListsEs } from './spam-lists';
 import { adminConsoleEs } from './admin-console';
+import { aiEs } from './admin-ai';
 import { spamUserEs } from './spam-user';
 
 type DeepString<T> = { [K in keyof T]: T[K] extends string ? string : DeepString<T[K]> };
@@ -42,6 +43,13 @@ const es = {
         maximize: 'Maximizar',
         restore: 'Restaurar',
         language: 'Idioma',
+    },
+    pwaUpdate: {
+        available: 'Hay una versión nueva',
+        update: 'Actualizar',
+        waitingDraft: 'Actualizaremos cuando termines el borrador',
+        mandatory: 'Esta versión ya no es compatible. Actualiza para continuar.',
+        updateNow: 'Actualizar ahora',
     },
     layout: {
         description: 'Cliente de correo serverless',
@@ -147,6 +155,7 @@ const es = {
     },
     admin: {
         console: adminConsoleEs,
+        ai: aiEs,
         brandFallback: 'BloomX',
         nav: { label: 'Panel de administración', extensions: 'Extensiones', users: 'Usuarios', settings: 'Ajustes', openMenu: 'Abrir menú', closeMenu: 'Cerrar menú' },
         heading: {

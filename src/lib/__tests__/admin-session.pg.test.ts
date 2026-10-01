@@ -288,7 +288,7 @@ describe('tokens "machine" (automatizacion)', () => {
         expect((await slot('alice')).sessionRef).toBe('jti-keep'); // el slot sigue siendo de la sesion interactiva
         expect(await revoked('jti-keep')).toBe(false);
         const long = await createCliToken({ kind: 'user', adminId: U.alice.id, name: 'cron2', scopes: ['read'], permissionLevel: 4, tokenClass: 'machine', ttlHours: 99999 });
-        expect((new Date(long.record.expiresAt!).getTime() - Date.now()) / 3_600_000).toBeLessThanOrEqual(MACHINE_MAX_TTL_HOURS);
+        expect((new Date(long.record.expiresAt!).getTime() - Date.now()) / 3_600_000).toBeLessThanOrEqual(MACHINE_MAX_TTL_HOURS + 0.01); // tolerancia por redondeo de ms
         await expect(createCliToken({ kind: 'user', adminId: U.alice.id, name: 'w', scopes: ['write'], permissionLevel: 4, tokenClass: 'machine' })).rejects.toMatchObject({ code: 'scope_not_allowed_for_machine' });
     });
 

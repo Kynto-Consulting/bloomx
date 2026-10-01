@@ -101,6 +101,15 @@ const es: Block[] = [
         ['`next build` falla con `DATABASE_URL`', '`prebuild` ejecuta `db:ensure`; define la variable en el entorno de build o accede a una base alcanzable.'],
         ['Los estilos de empresa no aparecen', 'Comprueba `GET /api/config` (`theme`), `npm run check:themes` y que borraste la cookie `bloomx-theme`/`localStorage` para ver `defaultMode`.'],
     ] },
+    { t: 'h2', id: 'pwa-update', text: 'Cómo se actualiza la PWA' },
+    { t: 'ul', items: [
+        '**BUILD_ID**: `next.config.js` lo genera en cada build (`VERCEL_GIT_COMMIT_SHA` si existe; si no, un hash corto de fecha y azar fijo durante ese build) y lo expone como `NEXT_PUBLIC_BUILD_ID` y `NEXT_PUBLIC_BUILT_AT`.',
+        '**`GET /api/version`**: público, sin sesión y con `Cache-Control: no-store`. Devuelve `{ buildId, clientApi, minClientApi, builtAt }`; `clientApi` es `CLIENT_API_VERSION` y `minClientApi` sale de `BLOOMX_MIN_CLIENT_API` (entero, por defecto 1).',
+        '**Service worker**: se registra como `/sw.js?v=<buildId>` (sin caché HTTP, `updateViaCache: none`). Las cachés se nombran con el build id y `activate` borra las de builds anteriores; no hay versión manual que subir.',
+        '**Aviso**: el cliente consulta `/api/version` al cargar, al volver a la pestaña, al recuperar la red y cada ~10 min (±20%). Si el build cambió muestra «Hay una versión nueva · Actualizar»; al pulsar activa el SW nuevo (`SKIP_WAITING`) y recarga. Nunca recarga solo si hay un borrador con contenido o peticiones pendientes en la cola offline: espera a que el usuario termine.',
+        '**Actualización obligatoria**: si el `clientApi` del cliente es menor que `minClientApi`, o una respuesta del backend trae `X-BloomX-Min-Client-Api` mayor que `CLIENT_API_VERSION`, aparece un aviso bloqueante «Actualizar ahora» y se recarga automáticamente (los borradores se guardan al descargar la página y la cola offline persiste).',
+        'Sin red no ocurre nada. Para forzar a todos a actualizarse, sube `BLOOMX_MIN_CLIENT_API` y despliega.',
+    ] },
     { t: 'h2', id: 'monitoring', text: 'Qué vigilar' },
     { t: 'ul', items: [
         'Logs de `AuditEvent` (login, MFA, admin, assets) y avisos como `[BLOOMX_AUTH] … LEGADO`.',
@@ -170,6 +179,15 @@ const en: Block[] = [
         ['Upload returns 422 or 503', '422: the antivirus detected a threat. 503: it could not be scanned with `AV_FAIL_MODE=closed`.'],
         ['`next build` fails on `DATABASE_URL`', '`prebuild` runs `db:ensure`; set the variable in the build environment or reach a reachable database.'],
         ['Company styles do not appear', 'Check `GET /api/config` (`theme`), `npm run check:themes` and that you cleared the `bloomx-theme` cookie/`localStorage` to see `defaultMode`.'],
+    ] },
+    { t: 'h2', id: 'pwa-update', text: 'How the PWA updates' },
+    { t: 'ul', items: [
+        '**BUILD_ID**: `next.config.js` generates it on every build (`VERCEL_GIT_COMMIT_SHA` if present; otherwise a short hash of the date plus randomness, fixed for that build) and exposes it as `NEXT_PUBLIC_BUILD_ID` and `NEXT_PUBLIC_BUILT_AT`.',
+        '**`GET /api/version`**: public, no session, `Cache-Control: no-store`. Returns `{ buildId, clientApi, minClientApi, builtAt }`; `clientApi` is `CLIENT_API_VERSION` and `minClientApi` comes from `BLOOMX_MIN_CLIENT_API` (integer, default 1).',
+        '**Service worker**: registered as `/sw.js?v=<buildId>` (no HTTP cache, `updateViaCache: none`). Caches are named after the build id and `activate` deletes those of previous builds; there is no manual version to bump.',
+        '**Notice**: the client queries `/api/version` on load, when the tab becomes visible, when the network returns and every ~10 min (±20%). If the build changed it shows "A new version is available · Update"; clicking activates the new SW (`SKIP_WAITING`) and reloads. It never reloads on its own while there is a draft with content or pending offline-queue requests: it waits for the user.',
+        '**Mandatory update**: if the client `clientApi` is lower than `minClientApi`, or a backend response carries `X-BloomX-Min-Client-Api` greater than `CLIENT_API_VERSION`, a blocking "Update now" notice appears and the page reloads automatically (drafts are saved on page unload and the offline queue persists).',
+        'Offline, nothing happens. To force everyone to update, raise `BLOOMX_MIN_CLIENT_API` and deploy.',
     ] },
     { t: 'h2', id: 'monitoring', text: 'What to watch' },
     { t: 'ul', items: [

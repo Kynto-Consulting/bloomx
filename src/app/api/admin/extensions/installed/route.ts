@@ -5,6 +5,7 @@ import { installedQuery } from '@/lib/admin/extensions-schemas';
 import { shapeInstalled } from '@/lib/admin/extensions-shape';
 import { extensionIdsWithErrors } from '@/lib/admin/extensions-status';
 import { testConnectionSupport } from '@/lib/admin/extensions-test';
+import { loadAiStateDto } from '@/lib/admin/extensions-ai';
 
 /**
  * GET ?domainId= -> {
@@ -25,12 +26,13 @@ export const GET = adminRoute({ scope: 'extensions.installed' }, async (ctx) => 
         managerFetch(ctx.req, `/api/manager/extensions?domainId=${encodeURIComponent(domainId)}`),
         extensionIdsWithErrors(24),
     ]);
+    const ai = await loadAiStateDto();
     const support = testConnectionSupport(ctx.actor);
     const capabilities = support.supported ? { test: true } : { test: false, testReason: support.reason };
 
     if (isManagerDenied(result.status)) {
-        return { managerSessionRequired: true, extensions: [], errorExtensionIds, capabilities };
+        return { managerSessionRequired: true, extensions: [], errorExtensionIds, capabilities, ai };
     }
     if (result.status < 200 || result.status >= 300) throw backendError(result);
-    return { managerSessionRequired: false, extensions: shapeInstalled(result.data), errorExtensionIds, capabilities };
+    return { managerSessionRequired: false, extensions: shapeInstalled(result.data), errorExtensionIds, capabilities, ai };
 });

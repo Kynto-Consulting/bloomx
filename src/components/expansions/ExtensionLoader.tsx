@@ -87,6 +87,8 @@ export const ExtensionLoader: React.FC<ExtensionLoaderProps> = ({ mountPoint, co
         const uniqueExtensions = new Map<string, any>();
 
         for (const extension of extensions) {
+            // Bloqueada por la IA (aiBlock de /api/config): no monta nada ni da error; sigue instalada.
+            if (extension?.aiBlock?.blocked === true) continue;
             const canonicalId = getCanonicalExtensionId(extension);
             if (!canonicalId || uniqueExtensions.has(canonicalId)) continue;
 

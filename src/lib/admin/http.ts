@@ -22,7 +22,7 @@ const PASSIVE_SCOPES = new Set(['me', 'system']);
 export const NO_STORE = { 'Cache-Control': 'no-store' } as const;
 
 export class HttpError extends Error {
-    constructor(public status: number, public code: string, message?: string) {
+    constructor(public status: number, public code: string, message?: string, public extra?: Record<string, unknown>) {
         super(message ?? code);
         this.name = 'HttpError';
     }
@@ -78,7 +78,7 @@ export function adminRoute<P extends Record<string, string> = Record<string, str
             const out = await handler({ req, actor: guard.actor, ip }, params);
             return out instanceof Response ? out : json(out);
         } catch (error) {
-            if (error instanceof HttpError) return json({ error: error.message, code: error.code }, { status: error.status });
+            if (error instanceof HttpError) return json({ error: error.message, code: error.code, ...(error.extra ?? {}) }, { status: error.status });
             // Solo el mensaje (nunca el objeto completo: puede arrastrar parametros SQL o cabeceras).
             console.error(`[ADMIN_${opts.scope.toUpperCase()}]`, error instanceof Error ? error.message.slice(0, 300) : 'error');
             return json({ error: 'Internal Server Error', code: 'internal' }, { status: 500 });

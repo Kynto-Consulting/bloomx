@@ -164,6 +164,7 @@ export function ExtensionsScreen() {
 
             <ExtensionDetail
                 row={selected}
+                domainId={domain.id ?? ''}
                 onClose={() => setSelectedId(null)}
                 actions={rowActions}
                 testSupport={{ supported: data.testSupported, reason: data.testReason }}

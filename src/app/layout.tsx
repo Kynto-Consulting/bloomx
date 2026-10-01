@@ -1,3 +1,4 @@
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
@@ -38,7 +39,7 @@ const getDomainTheme = cache(async (): Promise<{ theme: DomainThemeConfig; name:
         const targetUrl = new URL(`${backendUrl}/api/config`);
         if (host) targetUrl.searchParams.set('domain', host.split(':')[0]);
         const res = await fetch(targetUrl.toString(), {
-            headers: { 'x-forwarded-host': host },
+            headers: { 'x-forwarded-host': host, ...clientVersionHeaders() },
             next: { revalidate: 60, tags: [DOMAIN_CONFIG_TAG] }
         });
         if (!res.ok) return null;
@@ -79,6 +80,7 @@ export async function generateMetadata(): Promise<Metadata> {
         const res = await fetch(targetUrl.toString(), {
             headers: {
                 'x-forwarded-host': host,
+                ...clientVersionHeaders(),
             },
             next: { revalidate: 60, tags: [DOMAIN_CONFIG_TAG] }
         });

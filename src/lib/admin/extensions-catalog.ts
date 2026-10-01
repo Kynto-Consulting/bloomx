@@ -1,5 +1,7 @@
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { HttpError } from '@/lib/admin/http';
 import { backendUrl } from '@/lib/admin/extensions-instance';
+import { sanitizeUpgrade } from '@/lib/admin/extensions-compat';
 import { summarizeTemplate } from '@/lib/admin/extensions-manifest';
 import type { CatalogExtension } from '@/lib/admin/extensions-view';
 
@@ -36,6 +38,10 @@ export function shapeCatalog(data: unknown): CatalogExtension[] {
             price: text(String(raw.price ?? '0'), 20) || '0',
             currency: text(raw.currency, 8) || 'USD',
             template: summarizeTemplate(raw.template),
+            latestVersion: /^\d+\.\d+\.\d+/.test(text(raw.latestVersion, 40)) ? text(raw.latestVersion, 40) : null,
+            incompatible: raw.incompatible === true,
+            deprecated: raw.deprecated === true,
+            upgrade: sanitizeUpgrade(raw.upgrade),
         });
     }
     return out;
@@ -45,7 +51,7 @@ export async function fetchCatalog(opts: { fresh?: boolean } = {}): Promise<Cata
     if (!opts.fresh && cache && Date.now() - cache.at < TTL_MS) return cache.items;
     let res: Response;
     try {
-        res = await fetch(`${backendUrl()}/api/admin/extensions/public-list`, { cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS) });
+        res = await fetch(`${backendUrl()}/api/admin/extensions/public-list`, { cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS), headers: clientVersionHeaders() });
     } catch {
         throw new HttpError(502, 'backend_unavailable');
     }

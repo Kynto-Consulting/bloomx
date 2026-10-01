@@ -6,6 +6,7 @@ import {
     verifyBackendSignature,
     type NonceStore,
 } from '@/lib/bloomx-signature';
+import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 
 /**
  * Lado frontend del protocolo con el backend COMPARTIDO (bloomx-backend), sin secretos compartidos:
@@ -77,6 +78,11 @@ export function buildBackendHeaders(init: BackendCallInit): Record<string, strin
     if (init.userId) headers['X-User-ID'] = init.userId;
     if (init.email) headers['X-User-Email'] = init.email;
 
+    // Version del cliente (CLIENT_API_VERSION + capacidades): el backend sirve la version de cada extension que ESTE cliente entiende.
+    // Con firma se incluye en el mensaje firmado (V2); en modo legado viaja igualmente como dato informativo.
+    const version = clientVersionHeaders();
+    Object.assign(headers, version);
+
     const key = loadDomainPrivateKey(env);
     if (!key) return headers;
 
@@ -93,6 +99,8 @@ export function buildBackendHeaders(init: BackendCallInit): Record<string, strin
             userId: init.userId ?? '',
             userEmail: init.email ?? '',
             callback,
+            clientApi: version['X-BloomX-Client-Api'],
+            clientCaps: version['X-BloomX-Client-Caps'],
             nowMs: init.nowMs,
         }),
     };

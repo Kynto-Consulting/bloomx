@@ -11,9 +11,17 @@ import {
     declaredFunctions, declaresSettingsPanel, declaresTestConnection, describeMounts, overallRisk, riskCounts, type SettingsField,
 } from '@/lib/admin/extensions-manifest';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
+import { CompatNotice, useCompatLocale } from './CompatNotice';
+import { describeCapability, CLIENT_API_VERSION, CLIENT_CAPABILITIES } from '@/lib/expansions/client/capabilities';
+import { describeRequires } from '@/lib/admin/extensions-compat';
+import { AiRequirementSummary } from './AiRequirementSummary';
 import { ExtensionActionButtons, StatusBadges, type RowActions } from './ExtensionCard';
 import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { PermissionsList, RISK_TONE } from './PermissionsList';
+import { ConfigSummary } from './ConfigSummary';
+import { SettingsForm } from './SettingsForm';
+import { RunLogTable } from './RunLogTable';
+import { configFields } from '@/lib/expansions/settings-schema';
 import { TabList, panelDomId, tabDomId, type TabDef } from './Tabs';
 import type { TestResult } from './useExtensionActions';
 
@@ -21,6 +29,8 @@ type TabId = 'summary' | 'permissions' | 'credentials' | 'settings' | 'status';
 
 export interface DetailProps {
     row: ExtensionRow | null;
+    /** Dominio de la consola (los ajustes y su lista de comprobacion son por dominio). */
+    domainId: string;
     onClose: () => void;
     actions: RowActions;
     testSupport: { supported: boolean; reason: string | null };
@@ -28,7 +38,7 @@ export interface DetailProps {
     onOpenCredentials: (row: ExtensionRow) => void;
 }
 
-export function ExtensionDetail({ row, onClose, actions, testSupport, onTest, onOpenCredentials }: DetailProps) {
+export function ExtensionDetail({ row, domainId, onClose, actions, testSupport, onTest, onOpenCredentials }: DetailProps) {
     const { t } = useI18n();
     const uid = useId();
     const [tab, setTab] = useState<TabId>('summary');
@@ -60,13 +70,14 @@ export function ExtensionDetail({ row, onClose, actions, testSupport, onTest, on
             {row && (
                 <div className="space-y-4">
                     <div className="flex flex-wrap gap-1.5"><StatusBadges row={row} /></div>
+                    <AiRequirementSummary row={row} />
                     <TabList tabs={tabs} active={active} onChange={setTab} label={t('admin.console.extensions.detail.tabs')} idPrefix={uid} />
                     <div role="tabpanel" id={panelDomId(uid, active)} aria-labelledby={tabDomId(uid, active)} tabIndex={0} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {active === 'summary' && <SummaryTab row={row} actions={actions} />}
+                        {active === 'summary' && <SummaryTab row={row} actions={actions} domainId={domainId} onGoTab={setTab} />}
                         {active === 'permissions' && <PermissionsTab row={row} />}
                         {active === 'credentials' && <CredentialsTab row={row} readOnly={actions.readOnly} onOpen={() => onOpenCredentials(row)} />}
-                        {active === 'settings' && <SettingsTab row={row} />}
-                        {active === 'status' && <StatusTab row={row} testSupport={testSupport} onTest={onTest} />}
+                        {active === 'settings' && <SettingsTab row={row} domainId={domainId} readOnly={actions.readOnly} onGoCredentials={() => setTab('credentials')} />}
+                        {active === 'status' && <StatusTab row={row} domainId={domainId} testSupport={testSupport} onTest={onTest} />}
                     </div>
                 </div>
             )}
@@ -101,7 +112,7 @@ function ManifestHealthNotice({ row }: { row: ExtensionRow }) {
     );
 }
 
-function SummaryTab({ row, actions }: { row: ExtensionRow; actions: RowActions }) {
+function SummaryTab({ row, actions, domainId, onGoTab }: { row: ExtensionRow; actions: RowActions; domainId: string; onGoTab: (tab: 'credentials' | 'settings') => void }) {
     const { t } = useI18n();
     const tpl = row.template;
     const risk = overallRisk(tpl);
@@ -113,6 +124,7 @@ function SummaryTab({ row, actions }: { row: ExtensionRow; actions: RowActions }
                 <ExtensionIcon icon={row.icon} label={row.name} size={32} />
                 <p className="min-w-0 text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
             </div>
+            <CompatNotice row={row} />
             <DefinitionList
                 items={[
                     { label: t('admin.console.extensions.summaryTab.category'), value: t(`admin.console.extensions.filters.categories.${row.category}`) },
@@ -154,6 +166,7 @@ function SummaryTab({ row, actions }: { row: ExtensionRow; actions: RowActions }
                     ...(tpl?.manifestVersion ? [{ label: t('admin.console.extensions.summaryTab.manifestVersion'), value: tpl.manifestVersion }] : []),
                 ]}
             />
+            {row.installed && <ConfigSummary row={row} domainId={domainId} onGoTab={onGoTab} />}
             {row.installed && <MandatoryControl row={row} actions={actions} />}
         </div>
     );
@@ -293,8 +306,12 @@ function CredentialsTab({ row, readOnly, onOpen }: { row: ExtensionRow; readOnly
     );
 }
 
-function SettingsTab({ row }: { row: ExtensionRow }) {
+function SettingsTab({ row, domainId, readOnly, onGoCredentials }: { row: ExtensionRow; domainId: string; readOnly: boolean; onGoCredentials: () => void }) {
     const { t } = useI18n();
+    const schema = row.template?.settingsSchema;
+    if (schema && configFields(schema.fields).length > 0) {
+        return <SettingsForm row={row} domainId={domainId} readOnly={readOnly || !domainId} onGoCredentials={onGoCredentials} />;
+    }
     const declared = declaresSettingsPanel(row.template);
     const fields: readonly SettingsField[] = row.template?.settingsFields ?? [];
     return (
@@ -358,6 +375,8 @@ const EVENT_KEYS: Record<string, string> = {
     'admin.extension.uninstall': 'uninstall',
     'admin.extension.credentials': 'credentials',
     'admin.extension.credentials.migrate': 'credentials',
+    'admin.extension.config': 'config',
+    'admin.extension.config.action': 'configAction',
     'admin.extension.toggled': 'toggled',
     'admin.extension.mandatory_changed': 'mandatory',
     'admin.extension.reordered': 'reordered',
@@ -368,7 +387,7 @@ function eventLabel(t: (k: string) => string, event: string): string {
     return `${t(`admin.console.extensions.statusTab.events.${EVENT_KEYS[event] ?? 'other'}`)} (${event})`;
 }
 
-function StatusTab({ row, testSupport, onTest }: { row: ExtensionRow; testSupport: DetailProps['testSupport']; onTest: DetailProps['onTest'] }) {
+function StatusTab({ row, domainId, testSupport, onTest }: { row: ExtensionRow; domainId: string; testSupport: DetailProps['testSupport']; onTest: DetailProps['onTest'] }) {
     const { t, intlLocale } = useI18n();
     const q = useAdminQuery<StatusResponse>(`/api/admin/extensions/${encodeURIComponent(row.id)}/status`);
     const [testing, setTesting] = useState(false);
@@ -398,7 +417,9 @@ function StatusTab({ row, testSupport, onTest }: { row: ExtensionRow; testSuppor
 
     return (
         <div className="space-y-5">
+            <VersionClientBlock row={row} />
             <p className="text-xs text-muted-foreground">{t('admin.console.extensions.statusTab.note')}</p>
+            <RunLogTable row={row} domainId={domainId} />
             {q.isLoading && !q.data ? (
                 <LoadingState />
             ) : q.error ? (
@@ -473,3 +494,43 @@ function StatusTab({ row, testSupport, onTest }: { row: ExtensionRow; testSuppor
     );
 }
 
+
+/** Pestana Estado: version instalada vs disponible (resuelta y ultima), requisitos de cada una e identidad del cliente. */
+function VersionClientBlock({ row }: { row: ExtensionRow }) {
+    const { t } = useI18n();
+    const locale = useCompatLocale();
+    const v = (x: string | null) => (x ? `v${x}` : t('admin.console.extensions.statusTab.unknown'));
+    const newest = row.upgrade;
+    return (
+        <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-foreground">{t('admin.console.extensions.statusTab.versionsTitle')}</h3>
+            <CompatNotice row={row} />
+            <DefinitionList
+                items={[
+                    { label: t('admin.console.extensions.statusTab.installedVersion'), value: row.installed ? v(row.installedVersion) : t('admin.console.extensions.statusTab.notInstalled') },
+                    { label: t('admin.console.extensions.statusTab.resolvedVersion'), value: v(row.version) },
+                    { label: t('admin.console.extensions.statusTab.latestVersion'), value: v(row.latestVersion) },
+                    ...(row.pinnedVersion ? [{ label: t('admin.console.extensions.statusTab.pinnedVersion'), value: v(row.pinnedVersion) }] : []),
+                    { label: t('admin.console.extensions.statusTab.requiresResolved'), value: describeRequires(row.template?.requires, locale) },
+                    ...(newest ? [{ label: t('admin.console.extensions.statusTab.requiresLatest'), value: describeRequires(newest.requires, locale) }] : []),
+                ]}
+                className="sm:grid-cols-1"
+            />
+            <h3 className="text-sm font-semibold text-foreground">{t('admin.console.extensions.statusTab.clientTitle')}</h3>
+            <DefinitionList
+                items={[
+                    { label: t('admin.console.extensions.statusTab.clientApi'), value: String(CLIENT_API_VERSION) },
+                    {
+                        label: t('admin.console.extensions.statusTab.clientCapabilities'),
+                        value: (
+                            <ul className="list-disc space-y-0.5 pl-4">
+                                {CLIENT_CAPABILITIES.map((c) => (<li key={c}><code className="text-xs">{c}</code> — {describeCapability(c, locale)}</li>))}
+                            </ul>
+                        ),
+                    },
+                ]}
+                className="sm:grid-cols-1"
+            />
+        </div>
+    );
+}

@@ -4,6 +4,7 @@ import { usersCommands } from './commands/users';
 import { platformCommands } from './commands/platform';
 import { brandCommands } from './commands/brand';
 import { extensionCommands } from './commands/extensions';
+import { aiCommands } from './commands/ai';
 import { spamCommands } from './commands/spam';
 import { transferCommands } from './commands/transfer';
 import { permsCommands } from './commands/perms';
@@ -27,6 +28,7 @@ export const CATEGORIES: Record<string, L10n> = {
     audit: L('Auditoría', 'Audit'), security: L('Seguridad', 'Security'),
     domain: L('Dominio, marca y temas', 'Domain, brand and themes'), theme: L('Dominio, marca y temas', 'Domain, brand and themes'), landing: L('Dominio, marca y temas', 'Domain, brand and themes'),
     extensions: L('Extensiones', 'Extensions'),
+    ai: L('IA de la instancia', 'Instance AI'),
     perms: L('Permisos', 'Permissions'),
     session: L('Sesión privilegiada', 'Privileged session'),
 };
@@ -78,7 +80,7 @@ const helpCommand: CommandDef = def({
 });
 
 export const COMMANDS: readonly CommandDef[] = [
-    helpCommand, ...coreCommands, ...usersCommands, ...platformCommands, ...brandCommands, ...extensionCommands, ...spamCommands, ...transferCommands, ...permsCommands, ...sessionCommands,
+    helpCommand, ...coreCommands, ...usersCommands, ...platformCommands, ...brandCommands, ...extensionCommands, ...aiCommands, ...spamCommands, ...transferCommands, ...permsCommands, ...sessionCommands,
 ];
 
 /** Catalogo serializable (sin handlers) para GET /api/admin/cli/commands, la UI y la documentacion. */
