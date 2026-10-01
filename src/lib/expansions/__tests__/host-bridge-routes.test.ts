@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+// La primera peticion importa modulos pesados (Prisma, bridge): con la maquina cargada supera los 5 s por defecto.vi.setConfig({ testTimeout: 30_000 });
 
 // Las 5 rutas comparten createBridgeHandler: se prueba cada una con firma/clave/rate limit/usuario simulados.
 const verify = vi.fn();
