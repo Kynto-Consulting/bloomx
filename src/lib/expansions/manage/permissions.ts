@@ -30,6 +30,7 @@ export const PERMISSION_TEXTS: Record<string, PermissionText> = {
     FORMATS: { es: 'Dar formato a fechas, numeros y plantillas (sin acceso a tus datos)', en: 'Format dates, numbers and templates (no access to your data)', level: 'low' },
     STORAGE: { es: 'Guardar sus propios ajustes en el servidor (hasta 256 KB por usuario)', en: 'Save its own settings on the server (up to 256 KB per user)', level: 'low' },
     NOTIFY: { es: 'Mostrarte avisos dentro de la aplicacion', en: 'Show you notices inside the app', level: 'low' },
+    PUBLIC_ROUTE: { es: 'Exponer rutas o paginas publicas, accesibles sin iniciar sesion (con limites estrictos)', en: 'Expose public routes or pages reachable without signing in (with strict limits)', level: 'high' },
 };
 
 const ENV_KEY_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
@@ -50,6 +51,10 @@ export function describePermission(permission: string, locale: ManageLocale = 'e
         if (valid) return { permission, text: locale === 'en' ? `Use the administrator's setting ${key}` : `Usar el ajuste ${key} del administrador`, level: 'high', known: true };
         return { permission, text: permission, level: 'high', known: false };
     }
+    const shared = /^OAUTH_SHARED:([a-z][a-z0-9-]{1,31})$/.exec(permission);
+    if (shared) return { permission, text: locale === 'en' ? `Act as the organization's shared ${shared[1]} identity (organizer or service account), not as a user` : `Actuar como la identidad compartida de ${shared[1]} de la organizacion (organizador o cuenta de servicio), no como un usuario`, level: 'high', known: true };
+    const oauth = /^OAUTH_ACCOUNT:([a-z][a-z0-9-]{1,31}):([a-z][a-z0-9-]{0,31})$/.exec(permission);
+    if (oauth) return { permission, text: locale === 'en' ? `Use your linked ${oauth[1]} account(s) for "${oauth[2]}" (it never sees your passwords or tokens)` : `Usar tu(s) cuenta(s) ${oauth[1]} vinculada(s) para "${oauth[2]}" (nunca ve tus contrasenas ni tokens)`, level: 'high', known: true };
     const info = Object.prototype.hasOwnProperty.call(PERMISSION_TEXTS, permission) ? PERMISSION_TEXTS[permission] : null;
     if (!info) return { permission, text: permission, level: 'high', known: false };
     return { permission, text: info[locale === 'en' ? 'en' : 'es'], level: info.level, known: true };

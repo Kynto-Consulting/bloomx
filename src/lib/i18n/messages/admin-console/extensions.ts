@@ -141,6 +141,14 @@ export const extensionsEs = {
         confirmOffBody: 'Cada usuario podrá desactivar esta extensión para sí mismo. Las reglas de servidor dejarán de ejecutarse para quien la desactive.',
         confirmOff: 'Quitar obligatoriedad',
     },
+    dependencies: {
+        pausedBy: 'Pausada: falta {names}',
+        pausedReason: 'Esta extensión está pausada porque depende de {names}, que no está instalada, activa o en una versión compatible. No se ha borrado nada: volverá a funcionar al activar la dependencia.',
+        installIntro: 'Esta extensión necesita otras extensiones. Se instalarán o activarán también:',
+        willPause: 'Quedarán pausadas (no se borran): {names}',
+        requires: 'Requiere: {names}',
+        approvePublic: 'Entiendo y apruebo para este dominio los permisos sensibles de esta extensión: rutas o páginas públicas (sin iniciar sesión), cuentas compartidas de un proveedor (organizador / cuenta de servicio) o acceso de riesgo alto a los datos del usuario (Gmail, Drive).',
+    },
     disable: {
         title: 'Desactivar {name}',
         body: 'Dejará de estar disponible para todos los usuarios del dominio, pero se conservan sus credenciales, tokens y ajustes. Podrás activarla de nuevo cuando quieras.',
@@ -161,6 +169,10 @@ export const extensionsEs = {
         EXTENSION_INVALID: 'La versión publicada en el catálogo no es válida y no se puede aplicar todavía. Hay que republicar la extensión con "sync-extensions" y volver a intentarlo.',
         installedLoad: 'No se pudo cargar el estado de instalación.',
         client_incompatible: 'Ninguna versión de esta extensión es compatible con este cliente: actualiza el cliente antes de continuar.',
+        PUBLIC_ROUTE_APPROVAL_REQUIRED: 'Esta extensión expone rutas o páginas públicas: marca la casilla de aprobación para continuar.',
+        PERMISSION_APPROVAL_REQUIRED: 'Esta extensión pide permisos sensibles (cuentas compartidas de un proveedor o acceso de riesgo alto): marca la casilla de aprobación para continuar.',
+        dependencies_required: 'Esta extensión necesita otras extensiones: confirma su instalación.',
+        EXTENSION_DEPENDENCY_MISSING: 'Falta una extensión de la que depende, o su versión no es compatible.',
         version_not_found: 'Esa versión de la extensión no existe.',
     },
     order: {
@@ -622,6 +634,14 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         confirmOffBody: 'Each user will be able to turn this extension off for themselves. Server rules will stop running for anyone who does.',
         confirmOff: 'Remove mandatory status',
     },
+    dependencies: {
+        pausedBy: 'Paused: {names} missing',
+        pausedReason: 'This extension is paused because it depends on {names}, which is not installed, active or in a compatible version. Nothing was deleted: it will work again once the dependency is active.',
+        installIntro: 'This extension needs other extensions. These will also be installed or enabled:',
+        willPause: 'These will be paused (not deleted): {names}',
+        requires: 'Requires: {names}',
+        approvePublic: 'I understand and approve for this domain this extension\'s sensitive permissions: public routes or pages (no sign-in), shared provider accounts (organizer / service account) or high-risk access to user data (Gmail, Drive).',
+    },
     disable: {
         title: 'Disable {name}',
         body: 'It will stop being available to all users of the domain, but its credentials, tokens and settings are kept. You can enable it again at any time.',
@@ -642,6 +662,10 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         EXTENSION_INVALID: 'The version published in the catalog is not valid and cannot be applied yet. The extension must be republished with "sync-extensions" and then retried.',
         installedLoad: 'The installation state could not be loaded.',
         client_incompatible: 'No version of this extension is compatible with this client: update the client before continuing.',
+        PUBLIC_ROUTE_APPROVAL_REQUIRED: 'This extension exposes public routes or pages: tick the approval box to continue.',
+        PERMISSION_APPROVAL_REQUIRED: 'This extension asks for sensitive permissions (shared provider accounts or high-risk access): tick the approval box to continue.',
+        dependencies_required: 'This extension needs other extensions: confirm their installation.',
+        EXTENSION_DEPENDENCY_MISSING: 'A required extension is missing, or its version is not compatible.',
         version_not_found: 'That version of the extension does not exist.',
     },
     order: {

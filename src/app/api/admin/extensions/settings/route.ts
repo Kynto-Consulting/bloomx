@@ -2,6 +2,9 @@ import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { NextResponse } from 'next/server';
 import { requireLevel } from '@/lib/admin-auth';
 import { auditLog, getClientIp } from '@/lib/security';
+import { isFreshMfa } from '@/lib/admin/stepup';
+import { divertOAuthCredentials, oauthCredentialStatus } from '@/lib/oauth/credentials-admin';
+import { invalidateProviderCache } from '@/lib/oauth/providers';
 
 /**
  * Proxy de credenciales por dominio de extensiones -> backend /api/extension/settings.
@@ -74,6 +77,14 @@ export async function GET(req: Request) {
             cache: 'no-store',
         });
         const data = await response.json().catch(() => ({}));
+        // Credenciales OAuth gestionadas por el nucleo de ESTA instancia (client secret, organizador, cuenta de servicio): se anaden al estado.
+        if (response.ok) {
+            const oauthKeys = await oauthCredentialStatus(extensionId).catch(() => []);
+            if (oauthKeys.length > 0) {
+                const names = new Set(oauthKeys.map((k) => k.name));
+                data.keys = [...(Array.isArray(data.keys) ? data.keys.filter((k: any) => !names.has(k?.name)) : []), ...oauthKeys];
+            }
+        }
         return shape(response.status, data);
     } catch (error) {
         console.error('[ADMIN_EXTENSION_SETTINGS_GET]', error instanceof Error ? error.message : 'error');
@@ -99,14 +110,37 @@ export async function PUT(req: Request) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: NO_STORE });
         }
 
-        const response = await fetch(`${BACKEND_URL()}/api/extension/settings`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
-            // Se reenvian solo los tres campos conocidos.
-            body: JSON.stringify({ domainId, extensionId, credentials }),
-            cache: 'no-store',
-        });
+        // Las credenciales OAuth del nucleo se guardan AQUI (cifradas, ancladas a los hosts aprobados) y no viajan al backend. Exigen step-up.
+        const diverted = await divertOAuthCredentials(extensionId, credentials as Record<string, unknown>, guard.actor.id ?? guard.actor.email ?? null).catch(() => null);
+        let oauthApplied: string[] = [];
+        let forwarded = credentials as Record<string, unknown>;
+        if (diverted && diverted.applied.length > 0) {
+            if (!(await isFreshMfa({ req: req as never, actor: guard.actor }).catch(() => false))) {
+                return NextResponse.json({ error: 'reauth_required', code: 'reauth_required' }, { status: 403, headers: NO_STORE });
+            }
+            if (diverted.error) return NextResponse.json({ error: diverted.error }, { status: diverted.error === 'storage_unavailable' ? 503 : 400, headers: NO_STORE });
+            oauthApplied = diverted.applied;
+            forwarded = diverted.remaining;
+            invalidateProviderCache();
+            auditLog('admin.oauth.credentials', { userId: guard.actor.id, ip: getClientIp(req), extensionId, set: diverted.set, removed: diverted.removed });
+        }
+        const response = Object.keys(forwarded).length === 0 && oauthApplied.length > 0
+            ? ({ ok: true, status: 200, json: async () => ({ success: true, keys: [] }) } as unknown as Response)
+            : await fetch(`${BACKEND_URL()}/api/extension/settings`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
+                // Se reenvian solo los tres campos conocidos.
+                body: JSON.stringify({ domainId, extensionId, credentials: forwarded }),
+                cache: 'no-store',
+            });
         const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+            const oauthKeys = await oauthCredentialStatus(extensionId).catch(() => []);
+            if (oauthKeys.length > 0) {
+                const names = new Set(oauthKeys.map((k) => k.name));
+                data.keys = [...(Array.isArray(data.keys) ? data.keys.filter((k: any) => !names.has(k?.name)) : []), ...oauthKeys];
+            }
+        }
 
         const entries = Object.entries(credentials as Record<string, unknown>);
         auditLog('admin.extension.credentials', {

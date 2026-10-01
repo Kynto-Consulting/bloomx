@@ -25,6 +25,7 @@ const CSRF_EXEMPT_PREFIXES = [
     '/api/register',
     '/api/appointments/book',
     '/api/appointments/schedules/',
+    '/api/ext/',            // rutas de extensiones: la ruta aplica su propia regla (sesion solo en mismo origen; terceros siempre anonimos)
 ];
 
 // Defensa CSRF en profundidad (CIS 16.x, NIST SC-23, OWASP ASVS 4.2.2): para peticiones que cambian estado
@@ -95,6 +96,8 @@ export async function middleware(req: NextRequest) {
         pathname.startsWith('/api/config') || // Allow cron routes
         pathname === '/api/version' || // identidad de build: publica, sin sesion
 
+        pathname.startsWith('/p/') || // paginas de extension PUBLICAS (auth: none): la pagina solo se renderiza si el manifest las declara y el admin aprobo PUBLIC_ROUTE
+        pathname.startsWith('/api/ext/') || // rutas de extensiones (session/admin/hmac/none): cada ruta decide segun el manifest; el backend falla cerrado
         pathname.startsWith('/api/webhooks') || // Allow cron routes
         pathname.startsWith('/api/molt') || // Allow cron routes
         (pathname.startsWith('/api/emails/') && pathname.endsWith('/process-attachments')) || // internal async job (guarded by the derived internal key, lib/internal-auth.ts)

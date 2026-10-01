@@ -1,6 +1,6 @@
 import { adminRoute, audit, parseBody } from '@/lib/admin/http';
 import { assertInstanceDomain } from '@/lib/admin/extensions-instance';
-import { backendError, managerFetch } from '@/lib/admin/extensions-proxy';
+import { backendError, managerFetch, sanitizeIdList } from '@/lib/admin/extensions-proxy';
 import { installVersionBody } from '@/lib/admin/extensions-schemas';
 import { assertAiAllowsEnable } from '@/lib/admin/extensions-ai';
 
@@ -14,9 +14,10 @@ export const POST = adminRoute({ scope: 'extensions.install', write: true }, asy
     const body = await parseBody(ctx.req, installVersionBody);
     await assertInstanceDomain(body.domainId, ctx.req);
     await assertAiAllowsEnable(body.extensionId);
-    const result = await managerFetch(ctx.req, '/api/manager/extensions/install', { body: { domainId: body.domainId, extensionId: body.extensionId, ...(body.version ? { version: body.version } : {}) } });
+    const result = await managerFetch(ctx.req, '/api/manager/extensions/install', { body: { domainId: body.domainId, extensionId: body.extensionId, ...(body.version ? { version: body.version } : {}), ...(body.installDependencies ? { installDependencies: true } : {}), ...(body.approvePublicRoutes ? { approvePublicRoutes: true } : {}) } });
     const ok = result.status >= 200 && result.status < 300 && result.data?.success === true;
     audit(ctx, 'extension.install', { domainId: body.domainId, extensionId: body.extensionId, outcome: ok ? 'ok' : 'failed', status: result.status });
     if (!ok) throw backendError(result, 'extension_not_found');
-    return { success: true };
+    const installedDependencies = sanitizeIdList(result.data?.installedDependencies);
+    return installedDependencies.length > 0 ? { success: true, installedDependencies } : { success: true };
 });

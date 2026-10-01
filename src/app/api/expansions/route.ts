@@ -1,3 +1,4 @@
+import { backendUrl } from '@/lib/backend-url';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/session';
@@ -7,8 +8,12 @@ import { loadDisabledExtensionsForUser } from '@/lib/expansions/user-disabled';
 import { getPublicAiState } from '@/lib/ai/settings';
 import { annotateExtensionsWithAi, recentBlockedIds } from '@/lib/ai/extension-block';
 import { sanitizeDisabledForRequest } from '@/lib/expansions/server-hooks';
+import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
+import { adminProtectedActions, mayInvokeAction } from '@/lib/expansions/page-auth';
+import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
+import { mayReceiveProviderTokens } from '@/lib/expansions/token-access';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://backend.bloomx.arubik.dev';
+const BACKEND_URL = backendUrl();
 
 // Cuentas vinculadas (Google y Zoom) del USUARIO DE LA SESION, compartido con la fachada de conferencias
 // (lib/conferencing/auth-context.ts). Google/Zoom son opcionales para el usuario actual.
@@ -69,7 +74,22 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const linkedAuth = await getLinkedAuthContext(user.id);
+        // Acciones que usan las paginas/mounts `auth: admin` (y las declaradas con nivel): se exige el nivel EN EL SERVIDOR, no solo ocultar la pagina.
+        let sendTokens = false;
+        if (typeof body?.extensionId === 'string' && typeof body?.action === 'string') {
+            let protectedActions: Map<string, number>;
+            try {
+                const template = (await loadDomainTemplates(host)).get(body.extensionId);
+                protectedActions = adminProtectedActions(template);
+                // Los tokens de las cuentas vinculadas solo se ENVIAN a extensiones con OAUTH_READ o versiones legadas conocidas (el backend vuelve a decidir).
+                sendTokens = mayReceiveProviderTokens(template, body.extensionId);
+            } catch { return NextResponse.json({ error: 'Config unavailable' }, { status: 503 }); }
+            if (protectedActions.has(body.action)) {
+                const identity = await resolveEdgeIdentity(req).catch(() => null);
+                if (!mayInvokeAction(protectedActions, body.action, identity?.level ?? null)) return NextResponse.json({ error: 'Forbidden', code: 'ADMIN_ACTION_FORBIDDEN' }, { status: 403 });
+            }
+        }
+        const linkedAuth = sendTokens ? await getLinkedAuthContext(user.id) : {};
         const clientContext = body?.context && typeof body.context === 'object' && !Array.isArray(body.context) ? body.context : {};
         // `auth` SOLO lo fija este servidor con las cuentas vinculadas del usuario autenticado: un `context.auth`
         // enviado por el navegador se descarta (no puede inyectar tokens de otros proveedores/cuentas).

@@ -1,8 +1,11 @@
 
 import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
+import { stripAdminMounts } from '@/lib/expansions/page-auth';
 import { getPublicAiState } from '@/lib/ai/settings';
 import { annotateExtensionsWithAi } from '@/lib/ai/extension-block';
+import { splitPausedConfigExtensions } from '@/lib/expansions/dependency-filter';
 
 export async function GET(req: Request) {
     // In production, this call would go to the backend service.
@@ -37,6 +40,11 @@ export async function GET(req: Request) {
         // Si no se puede leer el estado de IA no se marca nada (la ejecucion igualmente la rechaza el backend con ai_disabled).
         if (data && Array.isArray(data.extensions)) {
             try { data.extensions = annotateExtensionsWithAi(data.extensions, await getPublicAiState()); } catch (e) { console.error('[CONFIG_PROXY] AI state unavailable:', e); }
+        }
+        // auth: "admin" en paginas: quien no tiene el nivel NO recibe el arbol de componentes ni el estado inicial de esas paginas (no basta ocultarlas).
+        if (data && Array.isArray(data.extensions)) {
+            const identity = await resolveEdgeIdentity(req as NextRequest).catch(() => null);
+            data.extensions = stripAdminMounts(data.extensions, identity?.level ?? null);
         }
         return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
 

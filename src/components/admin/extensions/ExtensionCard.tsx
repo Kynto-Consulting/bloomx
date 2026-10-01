@@ -34,6 +34,7 @@ export function StatusBadges({ row }: { row: ExtensionRow }) {
             {row.mandatory && <Badge tone="warning">{t('admin.console.extensions.status.mandatory')}</Badge>}
             {row.hasErrors && <Badge tone="danger">{t('admin.console.extensions.status.errors')}</Badge>}
             {row.isPaid && <Badge tone="info">{t('admin.console.extensions.status.paid')}</Badge>}
+            {row.pausedBy.length > 0 && <Badge tone="warning">{t('admin.console.extensions.dependencies.pausedBy', { names: row.pausedBy.map((i) => i.name).join(', ') })}</Badge>}
             {row.incompatible && <Badge tone="warning">{t('admin.console.extensions.card.incompatible')}</Badge>}
             {row.deprecated && <Badge>{t('admin.console.extensions.card.deprecated')}</Badge>}
         </>

@@ -1,3 +1,4 @@
+import { backendUrl } from '@/lib/backend-url';
 import type crypto from 'node:crypto';
 import {
     parseEd25519PrivateKey,
@@ -19,12 +20,11 @@ import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
  *    (BLOOMX_BACKEND_PUBLIC_KEY o descubrimiento con cache en {NEXT_PUBLIC_BACKEND_URL}/.well-known/bloomx-backend-key.json).
  */
 
-const DEFAULT_BACKEND = 'http://backend.bloomx.arubik.dev';
 
 type Env = Record<string, string | undefined>;
 
 export function backendBaseUrl(env: Env = process.env): string {
-    return (env.NEXT_PUBLIC_BACKEND_URL || DEFAULT_BACKEND).replace(/\/+$/, '');
+    return backendUrl(env);
 }
 
 let cachedPrivate: { raw: string | undefined; key: crypto.KeyObject | null } | null = null;

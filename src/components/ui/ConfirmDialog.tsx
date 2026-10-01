@@ -14,6 +14,8 @@ export interface ConfirmDialogProps {
     destructive?: boolean;
     /** Mientras es true no se puede cerrar ni confirmar de nuevo. */
     busy?: boolean;
+    /** Deshabilita Confirmar (p. ej. hasta marcar una aprobacion explicita). */
+    confirmDisabled?: boolean;
     /** Error a mostrar (role="alert") si la accion fallo. */
     error?: string | null;
     onConfirm: () => void;
@@ -22,7 +24,7 @@ export interface ConfirmDialogProps {
 
 /** Confirmacion accesible (role="dialog", foco atrapado, Escape). Reutiliza Modal/useDialog. */
 export function ConfirmDialog({
-    open, title, description, confirmLabel, cancelLabel, destructive, busy, error, onConfirm, onCancel,
+    open, title, description, confirmLabel, cancelLabel, destructive, busy, confirmDisabled, error, onConfirm, onCancel,
 }: ConfirmDialogProps) {
     const cancelRef = React.useRef<HTMLButtonElement>(null);
     return (
@@ -51,7 +53,7 @@ export function ConfirmDialog({
                         <button
                             type="button"
                             onClick={onConfirm}
-                            disabled={busy}
+                            disabled={busy || confirmDisabled}
                             aria-busy={busy || undefined}
                             className={cn(
                                 'rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50',

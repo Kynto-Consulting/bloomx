@@ -1,7 +1,7 @@
 'use client';
 
-import React, { Suspense } from 'react';
-import { notFound } from 'next/navigation';
+import React, { Suspense, useEffect, useState } from 'react';
+import { notFound, useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
 import { JsonRenderer } from '@/components/expansions/renderer/JsonRenderer';
@@ -9,6 +9,7 @@ import { useExtensionPrefs } from '@/hooks/useExtensionPrefs';
 import { getPreparedManifest } from '@/lib/expansions/prepare-manifest';
 import { isMandatoryExtension } from '@/lib/expansions/client/prefs';
 import { ExtensionsLoadError } from '@/components/expansions/ExtensionsLoadError';
+import { pageAuthOf } from '@/lib/expansions/route-schema';
 
 interface ExtensionPageProps {
     params: Promise<{ slug: string[] }>;
@@ -18,6 +19,27 @@ interface ExtensionPageProps {
 function initialStateOf(state: unknown): Record<string, any> | undefined {
     if (!state || typeof state !== 'object' || Array.isArray(state)) return undefined;
     try { return JSON.stringify(state).length <= 50_000 ? (state as Record<string, any>) : undefined; } catch { return undefined; }
+}
+
+/**
+ * Paginas con `auth: "admin"`: el servidor decide (nivel + MFA + sesion privilegiada) con /api/expansions/page-access; mientras no
+ * responda 'allow' NO se monta el componente de la extension (falla cerrado). Las `none` solo existen en /p/** (aqui: 404).
+ */
+function AdminGate({ extensionId, path, children }: { extensionId: string; path: string; children: React.ReactNode }) {
+    const router = useRouter();
+    const [access, setAccess] = useState<string | null>(null);
+    useEffect(() => {
+        let alive = true;
+        fetch(`/api/expansions/page-access?extensionId=${encodeURIComponent(extensionId)}&path=${encodeURIComponent(path)}`, { cache: 'no-store' })
+            .then((r) => r.json())
+            .then((d) => { if (alive) setAccess(typeof d?.access === 'string' ? d.access : 'not_found'); })
+            .catch(() => { if (alive) setAccess('not_found'); });
+        return () => { alive = false; };
+    }, [extensionId, path]);
+    useEffect(() => { if (access === 'login') router.replace('/login'); }, [access, router]);
+    if (access === 'allow') return <>{children}</>;
+    if (access === 'forbidden' || access === 'not_found') return notFound();
+    return <div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>;
 }
 
 function ExtensionContent({ slug }: { slug: string[] }) {
@@ -46,7 +68,7 @@ function ExtensionContent({ slug }: { slug: string[] }) {
             m.point === 'PAGE' && m.path === routePath
         );
         if (pageMount) {
-            match = { mount: pageMount, extensionId: ext.id, state: prepared.template.state, mandatory: isMandatoryExtension(ext) };
+            match = { mount: pageMount, auth: pageAuthOf(pageMount), extensionId: ext.id, state: prepared.template.state, mandatory: isMandatoryExtension(ext) };
             break;
         }
     }
@@ -58,8 +80,10 @@ function ExtensionContent({ slug }: { slug: string[] }) {
     if (!match || !match.mount.component) {
         return notFound();
     }
+    // auth: none => solo en /p/** (sin sesion ni datos de usuario); nunca dentro de la app.
+    if (match.auth === 'none') return notFound();
 
-    return (
+    const page = (
         <div className="container py-6">
             <JsonRenderer
                 component={match.mount.component}
@@ -68,6 +92,7 @@ function ExtensionContent({ slug }: { slug: string[] }) {
             />
         </div>
     );
+    return match.auth === 'admin' ? <AdminGate extensionId={match.extensionId} path={routePath}>{page}</AdminGate> : page;
 }
 
 export default async function ExtensionPage({ params }: ExtensionPageProps) {

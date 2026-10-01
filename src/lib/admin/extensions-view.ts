@@ -8,6 +8,7 @@ import { manifestTexts } from '@/lib/expansions/manifest-schema';
 import { aiBlockInfo, type AiBlockInfo } from '@/lib/ai/extension-block';
 import type { AiBlockState } from '@/lib/ai/types';
 import { sanitizeVersionInfo, type VersionInfo, type VersionUpgrade } from './extensions-compat';
+import { computePausedExtensions, planInstall, wouldPause, type DepIssue, type InstalledExtension as DepInstalled, type InstallPlan } from '@/lib/expansions/ext-dependencies';
 import { deriveCategory, hasUpdate, parseTemplate, summarizeTemplate, type ExtensionCategory, type ManifestSummary } from './extensions-manifest';
 
 export interface CatalogExtension {
@@ -96,6 +97,10 @@ export interface ExtensionRow {
     deprecated: boolean;
     /** Version mas nueva que exige actualizar el cliente (con lo que falta). */
     upgrade: VersionUpgrade | null;
+    /** Dependencias declaradas por la version (requires.extensions): { id: rango }. */
+    dependencies: Record<string, string>;
+    /** Motivos por los que esta extension activa esta PAUSADA (dependencia ausente, inactiva o incompatible); vacio = no pausada. */
+    pausedBy: Array<DepIssue & { name: string }>;
 }
 
 export interface BuildRowsInput {
@@ -157,6 +162,8 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale, a
             incompatible: inst?.versionInfo?.incompatible ?? cat?.incompatible ?? false,
             deprecated: inst?.versionInfo?.deprecated ?? cat?.deprecated ?? false,
             upgrade: inst?.versionInfo?.upgrade ?? cat?.upgrade ?? null,
+            dependencies: { ...(template?.dependencies ?? {}) },
+            pausedBy: [],
             ...aiFields(template, ai),
         };
     };
@@ -171,7 +178,27 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale, a
         seen.add(inst.extensionId);
         rows.push(make(inst.extensionId, undefined, inst));
     }
+    // Pausa por dependencias: la MISMA funcion pura que usa el backend (ext-dependencies.ts).
+    const paused = computePausedExtensions(rows.filter((r) => r.installed).map(depInstalledOf));
+    const nameOf = new Map(rows.map((r) => [r.id, r.name]));
+    for (const row of rows) row.pausedBy = (paused.get(row.id) ?? []).map((issue) => ({ ...issue, name: nameOf.get(issue.dependency) ?? issue.dependency }));
     return rows;
+}
+
+/** Fila -> entrada del resolutor de dependencias (version instalada; `active` = habilitada). */
+export function depInstalledOf(row: ExtensionRow): DepInstalled {
+    return { id: row.id, version: row.installedVersion ?? row.version ?? '0.0.0', active: row.enabled, dependencies: row.dependencies };
+}
+
+/** Plan para instalar/activar `row` con las filas actuales (catalogo + instaladas). */
+export function dependencyPlanFor(row: ExtensionRow, rows: readonly ExtensionRow[]): InstallPlan {
+    const catalog = new Map(rows.filter((r) => r.version).map((r) => [r.id, { id: r.id, version: r.version as string, dependencies: r.dependencies }]));
+    return planInstall(row.id, catalog, rows.filter((r) => r.installed).map(depInstalledOf));
+}
+
+/** Dependientes que quedarian pausados si `row` se desactiva o desinstala. */
+export function dependentsToPause(row: ExtensionRow, rows: readonly ExtensionRow[]): string[] {
+    return wouldPause(row.id, rows.filter((r) => r.installed).map(depInstalledOf));
 }
 
 const AI_ALL_ON: AiBlockState = { enabled: true, features: { composer: true, 'smart-reply': true, summarize: true, translate: true, organizer: true, other: true }, extensions: {} };

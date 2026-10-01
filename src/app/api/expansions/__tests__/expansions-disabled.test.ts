@@ -6,7 +6,10 @@ const mocks = vi.hoisted(() => ({
     disabled: vi.fn(async (_id: string): Promise<string[]> => []),
 }));
 vi.mock('@/lib/session', () => ({ getCurrentUser: async () => mocks.user }));
-vi.mock('@/lib/conferencing/auth-context', () => ({ getLinkedAuth: async () => ({ auth: {} }) }));
+vi.mock('@/lib/conferencing/auth-context', () => ({ getLinkedAuth: async () => ({ auth: { google: { accessToken: 'USER-TOKEN' } } }) }));
+const tpl = vi.hoisted(() => ({ templates: new Map<string, any>(), level: null as number | null }));
+vi.mock('@/lib/expansions/domain-templates', () => ({ loadDomainTemplates: async () => tpl.templates }));
+vi.mock('@/lib/ext-edge-identity', () => ({ resolveEdgeIdentity: async () => (tpl.level === null ? { id: 'u1', email: 'a@acme.com', level: null, stepUp: false } : { id: 'u1', email: 'a@acme.com', level: tpl.level, stepUp: false }) }));
 vi.mock('@/lib/expansions/user-disabled', () => ({ loadDisabledExtensionsForUser: (id: string) => mocks.disabled(id), MAX_DISABLED_FOR_SERVER: 200 }));
 
 import { POST } from '../route';
@@ -19,6 +22,7 @@ const sent = () => JSON.parse((fetchMock.mock.calls[0] as any)[1].body);
 beforeEach(() => {
     delete process.env.BLOOMX_DOMAIN_PRIVATE_KEY;
     process.env.TOP_DOMAIN = 'acme.com';
+    tpl.templates = new Map(); tpl.level = null;
     mocks.disabled.mockReset();
     mocks.disabled.mockResolvedValue([]);
     fetchMock.mockReset();
@@ -65,5 +69,52 @@ describe('/api/expansions (CALL_BACKEND): preferencias del usuario hacia execute
         mocks.disabled.mockResolvedValue(Array.from({ length: 5000 }, (_, i) => `e${i}`));
         await POST(req({ extensionId: 'zoom', action: 'run' }));
         expect(sent().disabledExtensions).toHaveLength(200);
+    });
+});
+
+describe('M3: acciones de paginas admin se exigen en el servidor', () => {
+    const template = { api: { functions: { loadUsers: { handler: 'listUsers' } } }, mounts: [{ point: 'PAGE', path: 'adm', auth: 'admin', minLevel: 3, component: { type: 'Button', onClick: { type: 'call', function: 'loadUsers' } } }] };
+    it('un usuario sin nivel recibe 403 y NO se llama al backend; con el nivel pasa; el handler directo tambien esta protegido', async () => {
+        tpl.templates = new Map([['ext-adm', template]]);
+        tpl.level = null;
+        expect((await POST(req({ extensionId: 'ext-adm', action: 'loadUsers' }))).status).toBe(403);
+        expect((await POST(req({ extensionId: 'ext-adm', action: 'listUsers' }))).status).toBe(403);
+        tpl.level = 2;
+        expect((await POST(req({ extensionId: 'ext-adm', action: 'loadUsers' }))).status).toBe(403);
+        expect(fetchMock).not.toHaveBeenCalled();
+        tpl.level = 3;
+        expect((await POST(req({ extensionId: 'ext-adm', action: 'loadUsers' }))).status).toBe(200);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+    it('acciones no protegidas siguen pasando sin nivel', async () => {
+        tpl.templates = new Map([['ext-adm', template]]);
+        expect((await POST(req({ extensionId: 'ext-adm', action: 'publicOne' }))).status).toBe(200);
+    });
+});
+
+describe('A1: context.auth (tokens) solo a OAUTH_READ o versiones legadas conocidas', () => {
+    const authOf = () => sent().context?.auth;
+    it('sin permiso y fuera de la lista: no se envia auth', async () => {
+        tpl.templates = new Map([['ext-x', { version: '1.0.0', permissions: ['READ_USER'], mounts: [] }]]);
+        await POST(req({ extensionId: 'ext-x', action: 'run' }));
+        expect(authOf()).toBeUndefined();
+        expect(JSON.stringify(sent())).not.toContain('USER-TOKEN');
+        // sin plantilla conocida tampoco
+        fetchMock.mockClear();
+        await POST(req({ extensionId: 'desconocida', action: 'run' }));
+        expect(authOf()).toBeUndefined();
+    });
+    it('con OAUTH_READ si; una version legada conocida si; una version posterior de la lista no', async () => {
+        tpl.templates = new Map([['ext-r', { version: '1.0.0', permissions: ['OAUTH_READ'] }]]);
+        await POST(req({ extensionId: 'ext-r', action: 'run' }));
+        expect(authOf()).toEqual({ google: { accessToken: 'USER-TOKEN' } });
+        fetchMock.mockClear();
+        tpl.templates = new Map([['core-google-meet', { version: '1.4.0', permissions: ['READ_USER'] }]]);
+        await POST(req({ extensionId: 'core-google-meet', action: 'run' }));
+        expect(authOf()).toEqual({ google: { accessToken: 'USER-TOKEN' } });
+        fetchMock.mockClear();
+        tpl.templates = new Map([['core-google-meet', { version: '2.0.0', permissions: ['READ_USER', 'OAUTH_ACCOUNT:google:meet'] }]]);
+        await POST(req({ extensionId: 'core-google-meet', action: 'run' }));
+        expect(authOf()).toBeUndefined();
     });
 });

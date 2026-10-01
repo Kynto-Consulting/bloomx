@@ -17,7 +17,9 @@
  */
 
 import { UI_COMPONENT_TYPES, isIconRef } from "./ui-schema.ts";
-import { validateSettingsSchema } from "./settings-schema.ts";
+import { normalizeSettingsSchema, validateSettingsSchema } from "./settings-schema.ts";
+import { validateOAuthProviders } from "./oauth-schema.ts";
+import { validateBackendRoutes, validatePageAuth } from "./route-schema.ts";
 import { validateRequires } from "./client-contract.ts";
 
 export type ManifestIssue = { path: string; message: string };
@@ -165,6 +167,7 @@ export const PERMISSION_CATALOG: Record<string, PermissionInfo> = {
     CONTACTS_WRITE: { label: "Modificar contactos", description: "Crea, edita y fusiona contactos del usuario.", risk: "high" },
     FORMATS: { label: "Formatos", description: "Usa utilidades puras de fechas, numeros, ICS, vCard, plantillas y saneo de HTML (sin acceso a datos).", risk: "low" },
     STORAGE: { label: "Almacenamiento propio", description: "Guarda hasta 256 KB de estado de la extension por usuario en el servidor.", risk: "low" },
+    PUBLIC_ROUTE: { label: "Rutas y paginas publicas", description: "Expone rutas o paginas SIN sesion de usuario (auth: none) en el dominio. Cualquiera en Internet puede invocarlas (con limites estrictos y sin datos de usuario). Requiere aprobacion explicita del administrador del dominio.", risk: "high" },
     NOTIFY: { label: "Notificaciones", description: "Muestra avisos (toast) al usuario dentro de la aplicacion.", risk: "low" },
 };
 
@@ -178,6 +181,18 @@ export function describePermissions(permissions: unknown): Array<{ permission: s
             const key = permission.slice("ENV_READ:".length).trim();
             const known = ENV_RE.test(key) && !RESERVED_ENV_RE.test(key);
             return { permission, label: `Variable ${key}`, description: `Lee la credencial o variable ${key} configurada para este dominio.`, risk: "high" as PermissionRisk, known };
+        }
+        if (permission.startsWith("OAUTH_SHARED:")) {
+            const m = /^OAUTH_SHARED:([a-z][a-z0-9-]{1,31})$/.exec(permission);
+            return m
+                ? { permission, label: `Cuentas compartidas de ${m[1]}`, description: `Usa, a traves del nucleo y sin ver nunca sus credenciales, la identidad COMPARTIDA del dominio en ${m[1]} (organizador o cuenta de servicio con delegacion): actua en nombre de la organizacion, no de un usuario.`, risk: "high" as PermissionRisk, known: true }
+                : { permission, label: permission, description: "Permiso desconocido: la plataforma lo ignora.", risk: "high" as PermissionRisk, known: false };
+        }
+        if (permission.startsWith("OAUTH_ACCOUNT:")) {
+            const m = /^OAUTH_ACCOUNT:([a-z][a-z0-9-]{1,31}):([a-z][a-z0-9-]{0,31})$/.exec(permission);
+            return m
+                ? { permission, label: `Cuenta ${m[1]} (${m[2]})`, description: `Usa, a traves del nucleo y sin ver nunca tus tokens, las cuentas ${m[1]} vinculadas del usuario para el grupo de permisos "${m[2]}".`, risk: "high" as PermissionRisk, known: true }
+                : { permission, label: permission, description: "Permiso desconocido: la plataforma lo ignora.", risk: "high" as PermissionRisk, known: false };
         }
         const info = PERMISSION_CATALOG[permission];
         return info
@@ -321,6 +336,16 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
                     if (RESERVED_ENV_RE.test(key)) return err(at, `ENV_READ:${key} esta reservada por la plataforma`);
                     return;
                 }
+                // OAUTH_ACCOUNT:<proveedor>:<grupo-de-scopes> (p. ej. OAUTH_ACCOUNT:google:calendar): acceso, via el intermediario del nucleo, a la cuenta del usuario.
+                // OAUTH_SHARED:<proveedor>: puede pedir al nucleo las identidades COMPARTIDAS del dominio (organizador / cuenta de servicio) de ese proveedor.
+                if (permission.startsWith("OAUTH_SHARED:")) {
+                    if (!/^OAUTH_SHARED:[a-z][a-z0-9-]{1,31}$/.test(permission)) err(at, "Formato: OAUTH_SHARED:<proveedor> (minusculas)");
+                    return;
+                }
+                if (permission.startsWith("OAUTH_ACCOUNT:")) {
+                    if (!/^OAUTH_ACCOUNT:[a-z][a-z0-9-]{1,31}:[a-z][a-z0-9-]{0,31}$/.test(permission)) err(at, "Formato: OAUTH_ACCOUNT:<proveedor>:<grupo> (minusculas)");
+                    return;
+                }
                 if (!KNOWN_PERMISSIONS.includes(permission)) warn(at, `Permiso desconocido: ${permission}`);
             });
         }
@@ -382,6 +407,13 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
 
     // --- Esquema de ajustes tipados (settingsSchema; las acciones apuntan a api.functions) ---
     for (const issue of validateSettingsSchema(m.settingsSchema, "settingsSchema", functionNames)) err(issue.path, issue.message);
+
+    // --- Proveedores OAuth registrados por la extension (el nucleo ejecuta el flujo; ver oauth-schema.ts) ---
+    if (m.oauthProviders !== undefined) {
+        validateOAuthProviders(m.oauthProviders, err, warn, normalizeSettingsSchema(m.settingsSchema).fields, m.id);
+        const caps = isObject(m.requires) && Array.isArray(m.requires.capabilities) ? m.requires.capabilities : [];
+        if (!caps.includes("oauth.provider.v1")) err("requires.capabilities", "oauthProviders exige declarar la capacidad oauth.provider.v1");
+    }
 
     // --- Proveedores de videollamada (kind conferencing-provider) -----------------------------------------------
     if (m.kind !== undefined && !EXTENSION_KINDS.includes(String(m.kind))) warn("kind", `Tipo de extension desconocido; conocidos: ${EXTENSION_KINDS.join(", ")}`);
@@ -469,6 +501,12 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
                     err(at, "Debe declarar 'component' o 'handler'");
                 }
 
+                if (mount.auth !== undefined || mount.minLevel !== undefined) {
+                    validatePageAuth(mount as Record<string, unknown>, at, err, {
+                        permissions: Array.isArray(m.permissions) ? m.permissions.filter((p: unknown): p is string => typeof p === "string") : [],
+                        capabilities: isObject(m.requires) && Array.isArray(m.requires.capabilities) ? m.requires.capabilities.filter((c: unknown): c is string => typeof c === "string") : [],
+                    });
+                }
                 if (mount.handler !== undefined) checkFunctionRef(`${at}.handler`, mount.handler);
                 if (mount.priority !== undefined && typeof mount.priority !== "string" && typeof mount.priority !== "number") {
                     err(`${at}.priority`, "Debe ser string o numero");
@@ -540,19 +578,13 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
     }
 
     if (m.backendRoutes !== undefined) {
-        if (!Array.isArray(m.backendRoutes)) {
-            err("backendRoutes", "Debe ser un arreglo");
-        } else {
-            m.backendRoutes.forEach((route: unknown, index: number) => {
-                const at = `backendRoutes[${index}]`;
-                scope = { scope: "route", index };
-                if (!isObject(route)) return err(at, "Debe ser un objeto");
-                if (typeof route.path !== "string" || !route.path.startsWith("/")) err(`${at}.path`, "Debe empezar con /");
-                checkFunctionRef(`${at}.handler`, route.handler);
-                warn(at, "backendRoutes aun no se sirven (no existe router /api/ext/[id]/*); usa CALL_BACKEND");
-            });
-            scope = null;
-        }
+        const declared = new Set<string>(functionNames);
+        const reqCaps: string[] = isObject(m.requires) && Array.isArray(m.requires.capabilities) ? m.requires.capabilities.filter((c: unknown): c is string => typeof c === "string") : [];
+        const perms: string[] = Array.isArray(m.permissions) ? m.permissions.filter((p: unknown): p is string => typeof p === "string") : [];
+        const secretKeys = normalizeSettingsSchema(m.settingsSchema).fields.filter((f) => f.secret).map((f) => f.key);
+        const envReads = perms.filter((p) => p.startsWith("ENV_READ:")).map((p) => p.slice("ENV_READ:".length).trim());
+        // Carga tolerante (extensiones ya publicadas): una ruta invalida no invalida la extension, solo avisa; el router la ignora.
+        validateBackendRoutes(m.backendRoutes, options.lenientMounts ? warn : err, warn, { functionNames: declared, permissions: perms, secretKeys, envReads, capabilities: reqCaps });
     }
 
     return { ok: errors.length === 0, errors, warnings, scoped };

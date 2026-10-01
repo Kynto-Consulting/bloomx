@@ -33,6 +33,25 @@ const csp = [
     isProd ? 'upgrade-insecure-requests' : '',
 ].filter(Boolean).join('; ');
 
+// Paginas de extension PUBLICAS (/p/**, auth: none): sin sesion ni datos de usuario. CSP mucho mas cerrada (solo mismo origen; Next exige
+// 'unsafe-inline' en scripts por la hidratacion; nada de Google, ni frames, ni formularios, ni base).
+const publicPageCsp = [
+    "default-src 'none'",
+    `script-src 'self' 'unsafe-inline'${isProd ? '' : " 'unsafe-eval'"}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-src 'none'",
+    "frame-ancestors 'none'",
+    isProd ? 'upgrade-insecure-requests' : '',
+].filter(Boolean).join('; ');
+
 const securityHeaders = [
     { key: 'Content-Security-Policy', value: csp },
     { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
@@ -67,6 +86,16 @@ const nextConfig = {
             {
                 source: '/secure/:path*',
                 headers: [
+                    { key: 'Referrer-Policy', value: 'no-referrer' },
+                    { key: 'Cache-Control', value: 'no-store' },
+                    { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+                ],
+            },
+            {
+                source: '/p/:path*',
+                headers: [
+                    { key: 'Content-Security-Policy', value: publicPageCsp },
+                    { key: 'X-Frame-Options', value: 'DENY' },
                     { key: 'Referrer-Policy', value: 'no-referrer' },
                     { key: 'Cache-Control', value: 'no-store' },
                     { key: 'X-Robots-Tag', value: 'noindex, nofollow' },

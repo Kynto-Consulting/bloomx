@@ -8,6 +8,7 @@ import {
 } from '@/components/admin/console';
 import { intParam, useUrlParams } from '@/components/admin/users/useUrlParams';
 import type { AccountRow, AccountStatus, AccountsResponse } from '@/components/admin/users/types';
+import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { AccountDrawer } from './AccountDrawer';
 import { StatusBadge } from './StatusBadge';
 
@@ -44,6 +45,11 @@ export function AccountsPage() {
     }, [q]);
 
     const { data, error, isLoading, mutate } = useAdminQuery<AccountsResponse>(`/api/admin/accounts${buildQuery({ q, provider, status, page, pageSize })}`);
+    // Registro de proveedores OAuth (integrados y de extensiones): nombre amigable e icono de marca; si falla se usa el id.
+    const registry = useAdminQuery<{ providers: Array<{ id: string; displayName: string; icon?: string | null }> }>('/api/admin/oauth/providers');
+    const names = React.useMemo(() => new Map((registry.data?.providers ?? []).map((p) => [p.id, p] as const)), [registry.data]);
+    const providerLabel = (id: string) => names.get(id)?.displayName ?? id;
+    const providerIds = React.useMemo(() => Array.from(new Set([...(registry.data?.providers ?? []).map((p) => p.id), ...(data?.providers ?? []), ...(provider ? [provider] : [])])).sort(), [registry.data, data, provider]);
     const hasFilters = !!(q || provider || status);
     const openRow = data?.accounts.find((a) => a.id === openId) ?? null;
     const dateOf = (iso: string | null) => (iso ? formatDateTime(iso, intlLocale) : t('admin.console.users.accounts.noExpiry'));
@@ -61,7 +67,7 @@ export function AccountsPage() {
                 </div>
             ),
         },
-        { id: 'provider', header: t('admin.console.users.accounts.col.provider'), cell: (a) => <span className="capitalize">{a.provider}</span> },
+        { id: 'provider', header: t('admin.console.users.accounts.col.provider'), cell: (a) => (<span className="inline-flex items-center gap-2"><ExtensionIcon icon={names.get(a.provider)?.icon ?? `brand:${a.provider}`} label={providerLabel(a.provider)} size={16} />{providerLabel(a.provider)}</span>) },
         { id: 'account', header: t('admin.console.users.accounts.col.account'), hideBelow: 'lg', cell: (a) => <code className="text-xs text-muted-foreground">{a.providerAccountId}</code> },
         { id: 'status', header: t('admin.console.users.accounts.col.status'), cell: (a) => <StatusBadge status={a.status} /> },
         { id: 'expires', header: t('admin.console.users.accounts.col.expires'), hideBelow: 'md', cell: (a) => <span className="text-muted-foreground">{dateOf(a.expiresAt)}</span> },
@@ -89,7 +95,7 @@ export function AccountsPage() {
                     label={t('admin.console.users.accounts.provider')}
                     value={provider}
                     onChange={(v) => update({ provider: v }, { resetPage: true })}
-                    options={[{ value: '', label: t('admin.console.users.accounts.allProviders') }, ...(data?.providers ?? (provider ? [provider] : [])).map((p) => ({ value: p, label: p }))]}
+                    options={[{ value: '', label: t('admin.console.users.accounts.allProviders') }, ...providerIds.map((p) => ({ value: p, label: providerLabel(p) }))]}
                 />
                 <FilterSelect
                     label={t('admin.console.users.accounts.status')}

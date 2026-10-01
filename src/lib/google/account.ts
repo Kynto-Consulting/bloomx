@@ -2,6 +2,8 @@ import { prisma } from '@/lib/prisma';
 import { GoogleAuthError, classifyGoogleApiError } from './errors';
 import { pickGoogleAccount } from './pick-account';
 import { apiBase } from '@/lib/conferencing/api-bases';
+import { accountMatchesProvider, getProvider } from '@/lib/oauth/providers';
+import { withAccountRefreshLock } from '@/lib/oauth/tokens';
 
 export { GoogleAuthError, isGoogleAuthError, googleAuthErrorToResponse } from './errors';
 
@@ -13,9 +15,14 @@ type GoogleTokenResult = {
     scope?: string | null;
 };
 
+/** Credenciales del cliente OAuth de Google: registro de proveedores (GoogleLib / tabla de la instancia) y, como respaldo HEREDADO, el entorno. */
+async function googleClientCredentials(): Promise<{ id?: string; secret?: string }> {
+    const provider = await getProvider('google').catch(() => null);
+    return { id: provider?.clientId || process.env.GOOGLE_CLIENT_ID, secret: provider?.clientSecret || process.env.GOOGLE_CLIENT_SECRET };
+}
+
 async function refreshGoogleAccessToken(refreshToken: string) {
-    const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
-    const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+    const { id: GOOGLE_CLIENT_ID, secret: GOOGLE_CLIENT_SECRET } = await googleClientCredentials();
 
     if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
         throw new Error('Google OAuth is not configured');
@@ -61,7 +68,9 @@ export async function getGoogleAccessToken(userId: string): Promise<GoogleTokenR
             provider: 'google',
         },
     });
-    const account = pickGoogleAccount(accounts);
+    // Solo cuentas emitidas por el proveedor Google ACTIVO (hash de identidad): ver oauth/providers.ts#accountMatchesProvider.
+    const activeProvider = await getProvider('google').catch(() => null);
+    const account = pickGoogleAccount(activeProvider ? accounts.filter((a) => accountMatchesProvider(a as { provider_hash?: string | null }, activeProvider)) : []);
 
     if (!account) {
         throw new GoogleAuthError('GOOGLE_NOT_LINKED');
@@ -92,10 +101,16 @@ export async function getGoogleAccessToken(userId: string): Promise<GoogleTokenR
     if (inFlight) return inFlight;
 
     const refreshToken = account.refresh_token;
-    const promise = (async (): Promise<GoogleTokenResult> => {
+    const promise = withAccountRefreshLock(account.id, async (): Promise<GoogleTokenResult> => {
+        // Candado de BD por cuenta: otro proceso pudo refrescar mientras esperabamos (evita refrescos en paralelo que invalidan el refresh token).
+        const again = await prisma.account.findUnique({ where: { id: account.id } });
+        if (again?.access_token && (!again.expires_at || again.expires_at * 1000 > Date.now() + 60_000)) {
+            return { accessToken: again.access_token, refreshToken: again.refresh_token, accountId: again.id, scope: again.scope };
+        }
+        if (!again?.refresh_token) throw new GoogleAuthError('GOOGLE_RECONNECT_REQUIRED');
         let refreshed;
         try {
-            refreshed = await refreshGoogleAccessToken(refreshToken);
+            refreshed = await refreshGoogleAccessToken(again.refresh_token);
         } catch (error) {
             if (error instanceof GoogleAuthError) {
                 // Marcar la cuenta como caida: las siguientes llamadas piden reconexion sin gastar otro refresco.
@@ -123,7 +138,7 @@ export async function getGoogleAccessToken(userId: string): Promise<GoogleTokenR
             accountId: updated.id,
             scope: updated.scope,
         };
-    })().finally(() => {
+    }).finally(() => {
         refreshInFlight.delete(account.id);
     });
 

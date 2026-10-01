@@ -28,6 +28,7 @@ export const CATEGORIES: Record<string, L10n> = {
     audit: L('Auditoría', 'Audit'), security: L('Seguridad', 'Security'),
     domain: L('Dominio, marca y temas', 'Domain, brand and themes'), theme: L('Dominio, marca y temas', 'Domain, brand and themes'), landing: L('Dominio, marca y temas', 'Domain, brand and themes'),
     extensions: L('Extensiones', 'Extensions'),
+    oauth: L('Proveedores OAuth', 'OAuth providers'),
     ai: L('IA de la instancia', 'Instance AI'),
     perms: L('Permisos', 'Permissions'),
     session: L('Sesión privilegiada', 'Privileged session'),

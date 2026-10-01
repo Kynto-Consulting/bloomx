@@ -8,10 +8,11 @@ import {
 } from '@/components/admin/console';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ExtensionCredentialsModal } from '@/components/admin/ExtensionCredentialsModal';
+import { oauthApprovalKeys } from '@/lib/expansions/oauth-schema';
 import { useI18n } from '@/components/I18nProvider';
 import { CATEGORIES } from '@/lib/admin/extensions-manifest';
 import {
-    DEFAULT_FILTERS, STATUS_FILTERS, countByStatus, filterRows, type ExtensionFilters, type ExtensionRow, type StatusFilter,
+    DEFAULT_FILTERS, STATUS_FILTERS, countByStatus, dependencyPlanFor, dependentsToPause, filterRows, type ExtensionFilters, type ExtensionRow, type StatusFilter,
 } from '@/lib/admin/extensions-view';
 import { ExtensionCard, type DialogKind, type RowActions } from './ExtensionCard';
 import { ExtensionDetail } from './ExtensionDetail';
@@ -38,6 +39,8 @@ export function ExtensionsScreen() {
     const [selectedId, setSelectedId] = useState<string | null>(null);
     const [dialog, setDialog] = useState<DialogState | null>(null);
     const [credentialsId, setCredentialsId] = useState<string | null>(null);
+    // PUBLIC_ROUTE (rutas/paginas sin sesion): aprobacion explicita del admin del dominio, desmarcada por defecto en cada dialogo.
+    const [approvePublic, setApprovePublic] = useState(false);
 
     // ?open=<id> (busqueda global): abre el detalle cuando la extension ya esta cargada.
     const openParam = searchParams?.get('open') ?? null;
@@ -61,11 +64,13 @@ export function ExtensionsScreen() {
         readOnly: data.readOnly,
         busyId: actions.busyId,
         onRequest: (kind, row) => setDialog({ kind, id: row.id }),
-        onEnable: (row) => void actions.toggle(row, true),
+        // Activar una extension con dependencias por instalar/activar pasa por el dialogo (lista + confirmacion).
+        onEnable: (row) => { if (dependencyPlanFor(row, data.rows).dependencies.length > 0) setDialog({ kind: 'install', id: row.id }); else void actions.toggle(row, true); },
     };
 
     const closeDialog = useCallback(() => {
         setDialog(null);
+        setApprovePublic(false);
         actions.clearError();
     }, [actions]);
 
@@ -76,10 +81,10 @@ export function ExtensionsScreen() {
             : dialog.kind === 'disable' ? await actions.toggle(dialogRow, false)
             : dialog.kind === 'mandatoryOn' ? await actions.setMandatory(dialogRow, true)
             : dialog.kind === 'mandatoryOff' ? await actions.setMandatory(dialogRow, false)
-            : dialog.kind === 'update' ? await actions.update(dialogRow)
-            : await actions.install(dialogRow);
+            : dialog.kind === 'update' ? await actions.update(dialogRow, { approvePublicRoutes: approvePublic })
+            : await actions.install(dialogRow, { approvePublicRoutes: approvePublic });
         // Pago: install() redirige (o muestra el error en el dialogo); el resto cierra al acabar bien.
-        if (ok) setDialog(null);
+        if (ok) { setDialog(null); setApprovePublic(false); }
     };
 
     const reasonText = data.readOnlyReason === 'noDomain' ? t('admin.console.extensions.readOnly.noDomain') : t('admin.console.extensions.readOnly.body');
@@ -182,6 +187,9 @@ export function ExtensionsScreen() {
             <ActionDialog
                 dialog={dialog}
                 row={dialogRow}
+                rows={data.rows}
+                approvePublic={approvePublic}
+                onApprovePublic={setApprovePublic}
                 busy={dialogBusy}
                 error={dialog ? actions.error : null}
                 onCancel={closeDialog}
@@ -192,8 +200,8 @@ export function ExtensionsScreen() {
 }
 
 function ActionDialog({
-    dialog, row, busy, error, onCancel, onConfirm,
-}: { dialog: DialogState | null; row: ExtensionRow | null; busy: boolean; error: string | null; onCancel: () => void; onConfirm: () => void }) {
+    dialog, row, rows, approvePublic, onApprovePublic, busy, error, onCancel, onConfirm,
+}: { dialog: DialogState | null; row: ExtensionRow | null; rows: readonly ExtensionRow[]; approvePublic: boolean; onApprovePublic: (value: boolean) => void; busy: boolean; error: string | null; onCancel: () => void; onConfirm: () => void }) {
     const { t } = useI18n();
     const open = !!dialog && !!row;
     const name = row?.name ?? '';
@@ -213,6 +221,8 @@ function ActionDialog({
                         {row.isPaid && <p><Badge tone="info">{t('admin.console.extensions.install.paid', { price: row.price, currency: row.currency })}</Badge></p>}
                         <p>{(row.template?.permissions?.length ?? 0) > 0 ? t('admin.console.extensions.install.intro') : t('admin.console.extensions.install.noPermissions')}</p>
                         <div className="max-h-64 overflow-y-auto"><PermissionsList template={row.template} compact /></div>
+                        <DependencyNotes row={row} rows={rows} mode="install" />
+                        <PublicRouteApproval row={row} checked={approvePublic} onChange={onApprovePublic} />
                     </div>
                 );
                 break;
@@ -222,6 +232,7 @@ function ActionDialog({
                 body = (
                     <div className="space-y-3">
                         <p>{t('admin.console.extensions.update.body', { from: row.installedVersion ?? '?', to: row.version ?? '?' })}</p>
+                        <PublicRouteApproval row={row} checked={approvePublic} onChange={onApprovePublic} />
                         <div className="max-h-64 overflow-y-auto"><PermissionsList template={row.template} compact /></div>
                     </div>
                 );
@@ -239,6 +250,7 @@ function ActionDialog({
                             <li>{t('admin.console.extensions.uninstall.wipesSettings')}</li>
                         </ul>
                         <p>{t('admin.console.extensions.uninstall.alternative')}</p>
+                        <DependencyNotes row={row} rows={rows} mode="pause" />
                     </div>
                 );
                 break;
@@ -263,7 +275,7 @@ function ActionDialog({
             case 'disable':
                 title = t('admin.console.extensions.disable.title', { name });
                 confirmLabel = t('admin.console.extensions.disable.confirm');
-                body = <p>{t('admin.console.extensions.disable.body')}</p>;
+                body = <div className="space-y-2"><p>{t('admin.console.extensions.disable.body')}</p><DependencyNotes row={row} rows={rows} mode="pause" /></div>;
                 break;
         }
     }
@@ -277,9 +289,44 @@ function ActionDialog({
             cancelLabel={t('admin.console.common.cancel')}
             destructive={destructive}
             busy={busy}
+            confirmDisabled={(dialog?.kind === 'install' || dialog?.kind === 'update') && needsPublicApproval(row) && !approvePublic}
             error={error}
             onCancel={onCancel}
             onConfirm={onConfirm}
         />
+    );
+}
+
+/** Dependencias: al instalar, lo que se instalara/activara tambien; al desactivar/desinstalar, lo que quedara pausado (nunca borrado). */
+function DependencyNotes({ row, rows, mode }: { row: ExtensionRow; rows: readonly ExtensionRow[]; mode: 'install' | 'pause' }) {
+    const { t } = useI18n();
+    const nameOf = (id: string) => rows.find((r) => r.id === id)?.name ?? id;
+    if (mode === 'install') {
+        const deps = dependencyPlanFor(row, rows).dependencies;
+        if (deps.length === 0) return null;
+        return (
+            <div className="rounded-lg border border-border bg-muted/40 p-3">
+                <p className="font-medium text-foreground">{t('admin.console.extensions.dependencies.installIntro')}</p>
+                <ul className="mt-1 list-disc pl-5">{deps.map((d) => <li key={d.id}>{nameOf(d.id)} <span className="text-muted-foreground">({d.range})</span></li>)}</ul>
+            </div>
+        );
+    }
+    const paused = dependentsToPause(row, rows);
+    if (paused.length === 0) return null;
+    return <p className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-warning">{t('admin.console.extensions.dependencies.willPause', { names: paused.map(nameOf).join(', ') })}</p>;
+}
+
+/** Permisos que exigen aprobacion explicita: rutas publicas, cuentas compartidas de proveedor (OAUTH_SHARED) y OAUTH_ACCOUNT de grupos de riesgo alto. */
+const needsPublicApproval = (row: ExtensionRow | null) => !!row && ((row.template?.permissions ?? []).includes('PUBLIC_ROUTE') || oauthApprovalKeys(row.template?.permissions ?? []).length > 0);
+
+/** PUBLIC_ROUTE: casilla de aprobacion EXPLICITA (riesgo alto); sin marcarla no se puede confirmar. */
+function PublicRouteApproval({ row, checked, onChange }: { row: ExtensionRow; checked: boolean; onChange: (value: boolean) => void }) {
+    const { t } = useI18n();
+    if (!needsPublicApproval(row)) return null;
+    return (
+        <label className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-destructive">
+            <input type="checkbox" className="mt-1" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+            <span>{t('admin.console.extensions.dependencies.approvePublic')}</span>
+        </label>
     );
 }

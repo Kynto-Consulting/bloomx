@@ -21,14 +21,22 @@ import {
     type ClientIdentity,
 } from '../client-contract';
 
-export const CLIENT_API_VERSION = 2;
+// 3 = dependencias entre extensiones (ext.dependencies.v1). 4 = rutas y paginas de extensiones con modos de auth (ext.routes.v1,
+// ext.routes.auth.v1, ext.pages.auth.v1). 5 = proveedores OAuth de extensiones + intermediario (oauth.provider.v1, oauth.broker.v1).
+export const CLIENT_API_VERSION = 5;
 
 /** Capacidades que ESTE cliente implementa (ademas de la linea base). Mantener en orden alfabetico. */
 export const CLIENT_CAPABILITIES: readonly string[] = [
     'ai.json',
     'ai.v1',
     'conferencing.picker',
+    'ext.dependencies.v1',
+    'ext.pages.auth.v1',
+    'ext.routes.auth.v1',
+    'ext.routes.v1',
     'lifecycle.events.v1',
+    'oauth.broker.v1',
+    'oauth.provider.v1',
     'services.host.v1',
     'settings.schema.v1',
     'toolbar.compact',

@@ -14,7 +14,9 @@ import { z } from 'zod';
 export const MAX_BODY_BYTES = 256 * 1024;
 const NO_STORE = { 'Cache-Control': 'no-store' };
 
-export type BridgeErrorCode = 'invalid_args' | 'not_found' | 'forbidden' | 'read_only' | 'conflict' | 'quota_exceeded' | 'rate_limited';
+export type BridgeErrorCode = 'invalid_args' | 'not_found' | 'forbidden' | 'read_only' | 'conflict' | 'quota_exceeded' | 'rate_limited'
+    // Intermediario OAuth (lib/oauth/broker.ts):
+    | 'scope_missing' | 'not_linked' | 'reconnect_required' | 'not_configured' | 'provider_error';
 
 const STATUS_BY_CODE: Record<BridgeErrorCode, number> = {
     invalid_args: 400,
@@ -24,6 +26,11 @@ const STATUS_BY_CODE: Record<BridgeErrorCode, number> = {
     conflict: 409,
     quota_exceeded: 413,
     rate_limited: 429,
+    scope_missing: 403,
+    not_linked: 404,
+    reconnect_required: 409,
+    not_configured: 503,
+    provider_error: 502,
 };
 
 /** Error de negocio tipado: el mensaje nunca llega al cliente (solo `code`). */
@@ -78,6 +85,8 @@ export interface BridgeRouteOptions<S extends z.ZodType> {
     handle: (req: z.infer<S>) => Promise<unknown>;
     /** Peticiones por minuto y usuario (default 300). */
     limitPerMinute?: number;
+    /** Tope del cuerpo en bytes (default 256 KB; el intermediario OAuth admite subidas de hasta ~1 MB). */
+    maxBodyBytes?: number;
     deps?: BridgeDeps;
 }
 
@@ -85,19 +94,20 @@ const json = (body: unknown, status: number, extra: Record<string, string> = {})
     NextResponse.json(body, { status, headers: { ...NO_STORE, ...extra } });
 
 export function errorResponse(code: BridgeErrorCode, retryAfter?: number) {
-    const message = code === 'not_found' ? 'Not found' : code === 'rate_limited' ? 'Too many requests' : code === 'quota_exceeded' ? 'Quota exceeded' : code === 'invalid_args' ? 'Invalid request' : code === 'conflict' ? 'Conflict' : code === 'read_only' ? 'Read only' : 'Forbidden';
+    const message = code === 'not_found' || code === 'not_linked' ? 'Not found' : code === 'rate_limited' ? 'Too many requests' : code === 'quota_exceeded' ? 'Quota exceeded' : code === 'invalid_args' ? 'Invalid request' : code === 'conflict' || code === 'reconnect_required' ? 'Conflict' : code === 'read_only' ? 'Read only' : code === 'not_configured' ? 'Not configured' : code === 'provider_error' ? 'Provider error' : 'Forbidden';
     return json({ error: message, code }, STATUS_BY_CODE[code], code === 'rate_limited' && retryAfter ? { 'Retry-After': String(retryAfter) } : {});
 }
 
 export function createBridgeHandler<S extends z.ZodType>(opts: BridgeRouteOptions<S>) {
     const deps = opts.deps ?? defaultBridgeDeps;
     const limit = opts.limitPerMinute ?? 300;
+    const maxBody = opts.maxBodyBytes ?? MAX_BODY_BYTES;
 
     return async function POST(req: NextRequest): Promise<Response> {
         const declared = Number(req.headers.get('content-length') || 0);
-        if (declared > MAX_BODY_BYTES) return json({ error: 'Payload too large' }, 413);
+        if (declared > maxBody) return json({ error: 'Payload too large' }, 413);
         const raw = await req.text();
-        if (Buffer.byteLength(raw, 'utf8') > MAX_BODY_BYTES) return json({ error: 'Payload too large' }, 413);
+        if (Buffer.byteLength(raw, 'utf8') > maxBody) return json({ error: 'Payload too large' }, 413);
 
         const verified = await deps.verify(req, raw);
         if (!verified.ok) {

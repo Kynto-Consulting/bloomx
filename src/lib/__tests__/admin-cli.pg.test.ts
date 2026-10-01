@@ -47,7 +47,7 @@ describe('tokens de CLI', () => {
         const max = await createCliToken({ permissionLevel: 4, kind: 'user', adminId: id, name: 'max', scopes: ['read'], ttlHours: 99999 });
         const h = (iso: string | null) => (new Date(iso!).getTime() - Date.now()) / 3_600_000;
         expect(h(def.record.expiresAt)).toBeGreaterThan(11.9);
-        expect(h(def.record.expiresAt)).toBeLessThanOrEqual(12);
+        expect(h(def.record.expiresAt)).toBeLessThanOrEqual(12.01); // tolerancia por redondeo de ms
         expect(h(max.record.expiresAt)).toBeLessThanOrEqual(720.01);
         expect(h(max.record.expiresAt)).toBeGreaterThan(719);
     });

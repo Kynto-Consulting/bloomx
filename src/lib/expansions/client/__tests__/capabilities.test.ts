@@ -4,6 +4,8 @@ import { CLIENT_API_VERSION, CLIENT_CAPABILITIES, CLIENT_IDENTITY, clientVersion
 import { buildBackendHeaders } from '@/lib/backend-auth';
 import { canonicalString, generateEd25519KeyPair, parseEd25519PublicKey, sha256Hex, verifyCanonical } from '@/lib/bloomx-signature';
 
+const PENDING_CAPABILITIES: string[] = [];
+
 describe('capacidades del cliente (versionado de extensiones)', () => {
     it('toda capacidad esta registrada y documentada en es y en', () => {
         for (const id of CLIENT_CAPABILITIES) {
@@ -26,7 +28,9 @@ describe('capacidades del cliente (versionado de extensiones)', () => {
             .sort();
         expect([...CLIENT_CAPABILITIES].sort()).toEqual(expected);
         expect([...CLIENT_CAPABILITIES]).toEqual([...CLIENT_CAPABILITIES].sort());
-        expect(Object.values(CAPABILITY_REGISTRY).every((i) => i.since <= CLIENT_API_VERSION), 'una capacidad exige subir CLIENT_API_VERSION').toBe(true);
+        // Capacidades registradas pero AUN NO implementadas en este cliente (se anuncian al completar su codigo; vaciar esta lista al hacerlo).
+        const pending = Object.entries(CAPABILITY_REGISTRY).filter(([, i]) => i.since > CLIENT_API_VERSION).map(([id]) => id).sort();
+        expect(pending).toEqual(PENDING_CAPABILITIES);
     });
 
     it('la identidad incluye la linea base y las cabeceras son compactas y se leen igual en el backend', () => {

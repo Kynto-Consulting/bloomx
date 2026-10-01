@@ -305,6 +305,34 @@ export const platformCommands: CommandDef[] = [
         managerOnly: true, positionals: [pos('state', 'on | off', 'on | off', { values: ['on', 'off'] })], covers: [],
         handler: async ({ args, ctx }) => { requireManager(ctx); return data((await ctx.callOk({ method: 'POST', path: '/domain-key', body: { domainId: await instanceDomainId(), requireSignature: args.positionals[0] === 'on' } })).data); },
     }),
+    def({
+        name: 'oauth providers', risk: 'read', summary: L('Proveedores OAuth registrados (Google y los de extensiones) con su estado; nunca secretos', 'Registered OAuth providers (Google and extension-provided) with their status; never secrets'),
+        covers: ['GET /api/admin/oauth/providers'],
+        handler: async ({ ctx }) => {
+            const r = (await ctx.callOk({ method: 'GET', path: '/oauth/providers' })).data;
+            return table(['id', 'displayName', 'source', 'status', 'secretSource', 'redirectUri'], (r.providers as any[]).map((p) => ({ id: p.id, displayName: p.displayName, source: p.source, status: p.status, secretSource: p.secretSource, redirectUri: p.redirectUri ?? '' })));
+        },
+    }),
+    def({
+        name: 'oauth secret set', risk: 'security', summary: L('Guarda el client secret de un proveedor OAuth (cifrado en esta instancia y anclado a los hosts de sus endpoints). Pide reautenticación', 'Store a provider OAuth client secret (encrypted on this instance and pinned to its endpoint hosts). Requires re-authentication'),
+        acceptsInput: true, positionals: [pos('provider', 'Id del proveedor (p. ej. google)', 'Provider id (e.g. google)')], flags: [str('secret', 'Secreto (o usa --stdin / --file)', 'Secret (or use --stdin / --file)', { secret: true }), str('shared', 'NOMBRE de la credencial compartida a guardar (p. ej. GOOGLE_SERVICE_ACCOUNT_JSON); el valor va en --secret/--stdin/--file. Sin él, el client secret', 'NAME of the shared credential to store (e.g. GOOGLE_SERVICE_ACCOUNT_JSON); the value goes in --secret/--stdin/--file. Omit for the client secret')], covers: ['PUT /api/admin/oauth/providers/[id]/secret'],
+        handler: async ({ args, ctx }) => {
+            const secret = ((args.flags.secret as string | undefined) ?? ctx.input)?.trim();
+            if (!secret) throw new CmdError('input_required', 'Provide the secret with --secret, --stdin or --file', 2);
+            const credential = args.flags.shared as string | undefined;
+            return data((await ctx.callOk({ method: 'PUT', path: `/oauth/providers/${encodeURIComponent(args.positionals[0])}/secret`, body: credential ? { credential, value: secret } : { secret } })).data);
+        },
+    }),
+    def({
+        name: 'oauth approve', risk: 'security', summary: L('Aprueba los hosts actuales de un proveedor OAuth declarado por una extensión (estado pending_approval / needs_reapproval). Pide reautenticación', 'Approve the current hosts of an extension-declared OAuth provider (pending_approval / needs_reapproval). Requires re-authentication'),
+        positionals: [pos('provider', 'Id del proveedor', 'Provider id')], covers: ['POST /api/admin/oauth/providers/[id]/approve'],
+        handler: async ({ args, ctx }) => data((await ctx.callOk({ method: 'POST', path: `/oauth/providers/${encodeURIComponent(args.positionals[0])}/approve`, body: {} })).data),
+    }),
+    def({
+        name: 'oauth secret clear', risk: 'security', summary: L('Borra el client secret guardado de un proveedor OAuth. Pide reautenticación', 'Delete the stored OAuth client secret of a provider. Requires re-authentication'),
+        positionals: [pos('provider', 'Id del proveedor (p. ej. google)', 'Provider id (e.g. google)')], flags: [str('shared', 'NOMBRE de la credencial compartida a borrar; sin él, el client secret', 'NAME of the shared credential to delete; omit for the client secret')], covers: ['DELETE /api/admin/oauth/providers/[id]/secret'],
+        handler: async ({ args, ctx }) => data((await ctx.callOk({ method: 'DELETE', path: `/oauth/providers/${encodeURIComponent(args.positionals[0])}/secret`, ...(args.flags.shared ? { query: { credential: args.flags.shared as string } } : {}) })).data),
+    }),
 ];
 
 void done;

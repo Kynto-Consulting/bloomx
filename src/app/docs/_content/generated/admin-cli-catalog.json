@@ -2319,6 +2319,144 @@
       "flags": []
     },
     {
+      "name": "oauth providers",
+      "category": {
+        "es": "Proveedores OAuth",
+        "en": "OAuth providers"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Proveedores OAuth registrados (Google y los de extensiones) con su estado; nunca secretos",
+        "en": "Registered OAuth providers (Google and extension-provided) with their status; never secrets"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "oauth secret set",
+      "category": {
+        "es": "Proveedores OAuth",
+        "en": "OAuth providers"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Guarda el client secret de un proveedor OAuth (cifrado en esta instancia y anclado a los hosts de sus endpoints). Pide reautenticación",
+        "en": "Store a provider OAuth client secret (encrypted on this instance and pinned to its endpoint hosts). Requires re-authentication"
+      },
+      "managerOnly": false,
+      "acceptsInput": true,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "provider",
+          "description": {
+            "es": "Id del proveedor (p. ej. google)",
+            "en": "Provider id (e.g. google)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "secret",
+          "type": "string",
+          "description": {
+            "es": "Secreto (o usa --stdin / --file)",
+            "en": "Secret (or use --stdin / --file)"
+          },
+          "required": false,
+          "secret": true
+        },
+        {
+          "name": "shared",
+          "type": "string",
+          "description": {
+            "es": "NOMBRE de la credencial compartida a guardar (p. ej. GOOGLE_SERVICE_ACCOUNT_JSON); el valor va en --secret/--stdin/--file. Sin él, el client secret",
+            "en": "NAME of the shared credential to store (e.g. GOOGLE_SERVICE_ACCOUNT_JSON); the value goes in --secret/--stdin/--file. Omit for the client secret"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "oauth approve",
+      "category": {
+        "es": "Proveedores OAuth",
+        "en": "OAuth providers"
+      },
+      "risk": "security",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Aprueba los hosts actuales de un proveedor OAuth declarado por una extensión (estado pending_approval / needs_reapproval). Pide reautenticación",
+        "en": "Approve the current hosts of an extension-declared OAuth provider (pending_approval / needs_reapproval). Requires re-authentication"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "provider",
+          "description": {
+            "es": "Id del proveedor",
+            "en": "Provider id"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": []
+    },
+    {
+      "name": "oauth secret clear",
+      "category": {
+        "es": "Proveedores OAuth",
+        "en": "OAuth providers"
+      },
+      "risk": "security",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Borra el client secret guardado de un proveedor OAuth. Pide reautenticación",
+        "en": "Delete the stored OAuth client secret of a provider. Requires re-authentication"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [
+        {
+          "name": "provider",
+          "description": {
+            "es": "Id del proveedor (p. ej. google)",
+            "en": "Provider id (e.g. google)"
+          },
+          "required": true,
+          "variadic": false
+        }
+      ],
+      "flags": [
+        {
+          "name": "shared",
+          "type": "string",
+          "description": {
+            "es": "NOMBRE de la credencial compartida a borrar; sin él, el client secret",
+            "en": "NAME of the shared credential to delete; omit for the client secret"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
       "name": "domain show",
       "category": {
         "es": "Dominio, marca y temas",

@@ -10,7 +10,7 @@ import type { ExtensionRow } from '@/lib/admin/extensions-view';
 const BACKEND_CODES = new Set([
     'manager_session_required', 'domain_mismatch', 'instance_unavailable', 'PAYMENT_REQUIRED', 'not_installed',
     'extension_not_found', 'backend_unavailable', 'backend_error', 'rate_limited', 'EXTENSION_NOT_ENABLED', 'EXTENSION_INVALID',
-    'client_incompatible', 'version_not_found',
+    'client_incompatible', 'version_not_found', 'dependencies_required', 'EXTENSION_DEPENDENCY_MISSING', 'PUBLIC_ROUTE_APPROVAL_REQUIRED', 'PERMISSION_APPROVAL_REQUIRED',
 ]);
 
 /** Clave i18n del error: codigo propio de la seccion si lo hay; si no, los errores comunes de la consola. */
@@ -40,9 +40,9 @@ export interface ExtensionActions {
     live: string;
     error: string | null;
     clearError: () => void;
-    install: (row: ExtensionRow) => Promise<boolean>;
+    install: (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) => Promise<boolean>;
     /** Aplica la version del catalogo a una extension instalada (conserva credenciales, ajustes y estado). */
-    update: (row: ExtensionRow) => Promise<boolean>;
+    update: (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) => Promise<boolean>;
     uninstall: (row: ExtensionRow) => Promise<boolean>;
     toggle: (row: ExtensionRow, enabled: boolean) => Promise<boolean>;
     /** Politica "obligatoria para todos" del dominio (el usuario no podra desactivarla; el servidor la ejecuta siempre). */
@@ -78,7 +78,7 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
     );
 
     const install = useCallback(
-        (row: ExtensionRow) =>
+        (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) =>
             run(row.id, async () => {
                 if (!domainId) return null;
                 if (!canInstall(row)) throw new ApiError(409, 'client_incompatible');
@@ -104,7 +104,7 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
                     window.location.href = url;
                     return null;
                 }
-                await adminFetch('/api/admin/extensions/install', { body: { domainId, extensionId: row.id } });
+                await adminFetch('/api/admin/extensions/install', { body: { domainId, extensionId: row.id, ...(Object.keys(row.dependencies ?? {}).length > 0 ? { installDependencies: true } : {}), ...(opts?.approvePublicRoutes ? { approvePublicRoutes: true } : {}) } });
                 return row.installed
                     ? t('admin.console.extensions.live.updated', { name: row.name, version: row.version ?? '' })
                     : t('admin.console.extensions.live.installed', { name: row.name });
@@ -113,11 +113,11 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
     );
 
     const update = useCallback(
-        (row: ExtensionRow) =>
+        (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) =>
             run(row.id, async () => {
                 if (!domainId) return null;
                 if (!canUpdate(row)) throw new ApiError(409, 'client_incompatible');
-                await adminFetch('/api/admin/extensions/update', { body: { domainId, extensionId: row.id } });
+                await adminFetch('/api/admin/extensions/update', { body: { domainId, extensionId: row.id, ...(opts?.approvePublicRoutes ? { approvePublicRoutes: true } : {}) } });
                 return t('admin.console.extensions.live.updated', { name: row.name, version: row.version ?? '' });
             }),
         [domainId, run, t],

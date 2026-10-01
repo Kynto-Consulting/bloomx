@@ -315,11 +315,13 @@ describe('migrateLegacyUi', () => {
     });
 });
 
-describe('migrateManifestUi y los 21 manifests reales', () => {
+describe('migrateManifestUi y los manifests reales', () => {
     const hasExt = fs.existsSync(EXT_ROOT);
     const ids = hasExt ? fs.readdirSync(EXT_ROOT).filter((d) => !d.startsWith('_') && fs.existsSync(path.join(EXT_ROOT, d, 'manifest.json'))) : [];
 
-    it.skipIf(!hasExt)('hay 21 extensiones', () => { expect(ids.length).toBe(21); });
+    // Lista explicita (no un numero): al anadir una extension el test dice cual falta o sobra.
+    const EXPECTED = ['appointments', 'calendar', 'composer-helper', 'dlp', 'giphy', 'google-drive', 'google-meet', 'google-sync', 'googlelib', 'hubspot', 'mail-groups', 'notion', 'organizer', 'sealer', 'signature', 'slash-commands', 'smart-reply', 'summarizer', 'translator', 'trello', 'webhooks', 'zoom'];
+    it.skipIf(!hasExt)('las extensiones del repositorio son las esperadas', () => { expect([...ids].sort()).toEqual(EXPECTED); });
 
     it.skipIf(!hasExt).each(ids)('%s: el UI migrado valida sin errores (y el manifest sigue siendo valido)', (id) => {
         const manifest = JSON.parse(fs.readFileSync(path.join(EXT_ROOT, id, 'manifest.json'), 'utf8'));

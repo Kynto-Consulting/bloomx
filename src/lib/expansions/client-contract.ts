@@ -55,6 +55,12 @@ export const CAPABILITY_REGISTRY: Record<string, CapabilityInfo> = {
     "ai.json": { since: 2, es: "ctx.services.ai.json(prompt, schema): respuesta validada contra un esquema JSON.", en: "ctx.services.ai.json(prompt, schema): response validated against a JSON schema." },
     "lifecycle.events.v1": { since: 2, es: "Eventos de ciclo de vida (EMAIL_OPENED, EMAIL_SENT, CONTACT_SAVED, CALENDAR_EVENT_*, APPOINTMENT_BOOKED...).", en: "Lifecycle events (EMAIL_OPENED, EMAIL_SENT, CONTACT_SAVED, CALENDAR_EVENT_*, APPOINTMENT_BOOKED...)." },
     "services.host.v1": { since: 2, es: "Servicios del anfitrion ctx.services.calendar/contacts/storage/notify/formats/mail-label y sus permisos.", en: "Host services ctx.services.calendar/contacts/storage/notify/formats/mail-label and their permissions." },
+    "ext.dependencies.v1": { since: 3, es: "Dependencias entre extensiones (`requires.extensions`): instalacion con dependencias, pausa de dependientes y error EXTENSION_DEPENDENCY_MISSING.", en: "Extension dependencies (`requires.extensions`): install with dependencies, pausing dependents and the EXTENSION_DEPENDENCY_MISSING error." },
+    "oauth.provider.v1": { since: 5, es: "Proveedores OAuth registrados por extensiones (`oauthProviders`): ajustes/credenciales, rutas /api/oauth/[provider]/* y cuentas vinculadas por proveedor.", en: "OAuth providers registered by extensions (`oauthProviders`): settings/credentials, /api/oauth/[provider]/* routes and per-provider linked accounts." },
+    "oauth.broker.v1": { since: 5, es: "Intermediario OAuth: las extensiones piden acciones al nucleo (ctx.services.oauth) y NUNCA reciben tokens.", en: "OAuth broker: extensions request actions from the core (ctx.services.oauth) and NEVER receive tokens." },
+    "ext.routes.v1": { since: 4, es: "Rutas HTTP propias de extensiones (`backendRoutes`) servidas por /api/ext/[extensionId]/[...path] con lista exacta de rutas/metodos, limites y auditoria.", en: "Extension HTTP routes (`backendRoutes`) served at /api/ext/[extensionId]/[...path] with an exact route/method allowlist, limits and auditing." },
+    "ext.routes.auth.v1": { since: 4, es: "Modos de autenticacion de rutas (`auth`: session, admin + minLevel/stepUp, signature, hmac, none con PUBLIC_ROUTE).", en: "Route authentication modes (`auth`: session, admin + minLevel/stepUp, signature, hmac, none with PUBLIC_ROUTE)." },
+    "ext.pages.auth.v1": { since: 4, es: "`auth`/`minLevel` en paginas de extensiones (mounts PAGE y CUSTOM_ROUTE).", en: "`auth`/`minLevel` on extension pages (PAGE and CUSTOM_ROUTE mounts)." },
     "conferencing.picker": { since: 2, es: "Proveedores de videollamada (`kind: conferencing-provider`, `conferencingProviders`, `authModes`) y selector de ubicacion del evento.", en: "Conferencing providers (`kind: conferencing-provider`, `conferencingProviders`, `authModes`) and the event location picker." },
 };
 
@@ -117,7 +123,7 @@ export function parseClientIdentity(headers: { get(name: string): string | null 
 // ---------------------------------------------------------------------------------------------------------------
 
 export type ClientApiComparator = { op: ">=" | ">" | "<=" | "<" | "="; n: number };
-export type ManifestRequires = { clientApi?: number | string; capabilities?: string[] };
+export type ManifestRequires = { clientApi?: number | string; capabilities?: string[]; extensions?: Record<string, string> };
 
 const COMPARATOR_RE = /^(>=|<=|>|<|=)?\s*(\d{1,6})$/;
 
@@ -150,13 +156,73 @@ export function normalizeClientApiRange(value: unknown): string | null {
     return range ? range.map((c) => `${c.op}${c.n}`).join(" ") : null;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// Rangos de version semver minimos (dependencias entre extensiones: `requires.extensions`)
+// ---------------------------------------------------------------------------------------------------------------
+
+export const DEP_EXTENSION_ID_RE = /^[a-z0-9][a-z0-9-]{1,63}$/;
+export const MAX_EXTENSION_DEPENDENCIES = 16;
+export type SemverComparator = { op: ">=" | ">" | "<=" | "<" | "="; v: [number, number, number] };
+
+/** "1.2.3" -> [1,2,3]; null si no es X.Y.Z (sin prerelease: las extensiones publican versiones estables). */
+export function parseSemver(value: unknown): [number, number, number] | null {
+    if (typeof value !== "string" || value.length > 32) return null;
+    const m = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})$/.exec(value.trim());
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+export function compareSemver(a: readonly number[], b: readonly number[]): number {
+    for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+    return 0;
+}
+
+/**
+ * Rango -> comparadores (AND). Soporta: "*" | "1.2.3" | "^1.2.3" | "~1.2.3" | ">=1.0.0 <2.0.0" (operadores >=, >, <=, <, =).
+ * Sin "||", sin prerelease. null = invalido.
+ */
+export function parseVersionRange(value: unknown): SemverComparator[] | null {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (!text || text.length > 60) return null;
+    if (text === "*" || text.toLowerCase() === "x") return [{ op: ">=", v: [0, 0, 0] }];
+    const caret = /^\^(\S+)$/.exec(text);
+    const tilde = /^~(\S+)$/.exec(text);
+    if (caret || tilde) {
+        const v = parseSemver((caret ?? tilde)![1]);
+        if (!v) return null;
+        let upper: [number, number, number];
+        if (tilde) upper = [v[0], v[1] + 1, 0];
+        else if (v[0] > 0) upper = [v[0] + 1, 0, 0];
+        else if (v[1] > 0) upper = [0, v[1] + 1, 0];
+        else upper = [0, 0, v[2] + 1];
+        return [{ op: ">=", v }, { op: "<", v: upper }];
+    }
+    const out: SemverComparator[] = [];
+    for (const token of text.split(/\s+/)) {
+        const m = /^(>=|<=|>|<|=)?(\d{1,6}\.\d{1,6}\.\d{1,6})$/.exec(token);
+        if (!m) return null;
+        out.push({ op: (m[1] as SemverComparator["op"] | undefined) ?? "=", v: parseSemver(m[2])! });
+    }
+    return out.length > 0 && out.length <= 4 ? out : null;
+}
+
+export function versionSatisfies(range: string, version: string): boolean {
+    const comps = parseVersionRange(range);
+    const v = parseSemver(version);
+    if (!comps || !v) return false;
+    return comps.every(({ op, v: n }) => {
+        const c = compareSemver(v, n);
+        return op === ">=" ? c >= 0 : op === ">" ? c > 0 : op === "<=" ? c <= 0 : op === "<" ? c < 0 : c === 0;
+    });
+}
+
 /** Errores de `requires` (publicacion/sync). Capacidades desconocidas = error: hay que registrarlas antes (decision documentada). */
 export function validateRequires(raw: unknown, path = "requires"): Array<{ path: string; message: string; soft?: boolean }> {
     const issues: Array<{ path: string; message: string; soft?: boolean }> = [];
     if (raw === undefined) return issues;
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [{ path, message: "Debe ser un objeto { clientApi?, capabilities? }" }];
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return [{ path, message: "Debe ser un objeto { clientApi?, capabilities?, extensions? }" }];
     const r = raw as Record<string, unknown>;
-    for (const key of Object.keys(r)) if (key !== "clientApi" && key !== "capabilities") issues.push({ path: `${path}.${key}`, message: "Clave desconocida (solo clientApi y capabilities)" });
+    for (const key of Object.keys(r)) if (key !== "clientApi" && key !== "capabilities" && key !== "extensions") issues.push({ path: `${path}.${key}`, message: "Clave desconocida (solo clientApi, capabilities y extensions)" });
     if (r.clientApi !== undefined && !parseClientApiRange(r.clientApi)) issues.push({ path: `${path}.clientApi`, message: "Debe ser un entero >= 1 o una expresion como \">=2\" / \">=2 <4\"" });
     if (r.capabilities !== undefined) {
         if (!Array.isArray(r.capabilities)) issues.push({ path: `${path}.capabilities`, message: "Debe ser un arreglo de strings" });
@@ -172,6 +238,21 @@ export function validateRequires(raw: unknown, path = "requires"): Array<{ path:
             });
         }
     }
+    if (r.extensions !== undefined) {
+        const ext = r.extensions;
+        if (typeof ext !== "object" || ext === null || Array.isArray(ext)) issues.push({ path: `${path}.extensions`, message: "Debe ser un objeto { \"id-extension\": \"^1.0.0\" }" });
+        else {
+            const entries = Object.entries(ext as Record<string, unknown>);
+            if (entries.length > MAX_EXTENSION_DEPENDENCIES) issues.push({ path: `${path}.extensions`, message: `Maximo ${MAX_EXTENSION_DEPENDENCIES} dependencias` });
+            for (const [id, range] of entries) {
+                if (!DEP_EXTENSION_ID_RE.test(id)) issues.push({ path: `${path}.extensions.${id}`, message: "Id de extension invalido ([a-z0-9-], 2-64)" });
+                else if (!parseVersionRange(range)) issues.push({ path: `${path}.extensions.${id}`, message: "Rango semver invalido (ej. \"^1.0.0\", \"~1.2.0\", \">=1.0.0 <2.0.0\", \"*\")" });
+            }
+            // Un cliente sin ext.dependencies.v1 ignoraria las dependencias y activaria la extension rota.
+            const caps = Array.isArray(r.capabilities) ? r.capabilities : [];
+            if (entries.length > 0 && !caps.includes("ext.dependencies.v1")) issues.push({ path: `${path}.capabilities`, message: "Si hay requires.extensions, declara tambien la capacidad ext.dependencies.v1" });
+        }
+    }
     return issues;
 }
 
@@ -182,6 +263,18 @@ export function readRequires(manifest: unknown): { clientApi: string | null; cap
     const r = raw as Record<string, unknown>;
     const caps = Array.isArray(r.capabilities) ? r.capabilities.filter((c): c is string => typeof c === "string" && CAPABILITY_ID_RE.test(c) && c.length <= 40) : [];
     return { clientApi: normalizeClientApiRange(r.clientApi), capabilities: Array.from(new Set(caps)).sort() };
+}
+
+/** `requires.extensions` saneado ({ id: rango }); recibe el bloque `requires` del manifest. Va aparte de readRequires para no alterar la forma guardada en ExtensionVersion. entradas invalidas se descartan. Orden estable por id. */
+export function readExtensionDependencies(requires: unknown): Record<string, string> {
+    const out: Record<string, string> = {};
+    const ext = typeof requires === "object" && requires !== null ? (requires as Record<string, unknown>).extensions : undefined;
+    if (typeof ext !== "object" || ext === null || Array.isArray(ext)) return out;
+    for (const id of Object.keys(ext).sort().slice(0, MAX_EXTENSION_DEPENDENCIES)) {
+        const range = (ext as Record<string, unknown>)[id];
+        if (DEP_EXTENSION_ID_RE.test(id) && typeof range === "string" && parseVersionRange(range)) out[id] = range.trim();
+    }
+    return out;
 }
 
 export type RequiresEvaluation = {

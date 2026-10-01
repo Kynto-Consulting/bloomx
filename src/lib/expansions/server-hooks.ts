@@ -1,3 +1,4 @@
+import { backendUrl as defaultBackendUrl } from '@/lib/backend-url';
 /**
  * Ejecutor (lado frontend-servidor) de los hooks de extensiones: habla con `POST {BACKEND}/api/extension/hooks`.
  *
@@ -77,7 +78,6 @@ export interface HookTransport {
     loadDisabled?: (userId: string) => Promise<string[]>;
 }
 
-const DEFAULT_BACKEND = 'http://backend.bloomx.arubik.dev';
 const MAX_FIELD = 200_000;
 
 function clip(value: unknown): string {
@@ -155,7 +155,7 @@ export async function withUserDisabled(transport: HookTransport): Promise<HookTr
 /** Llamada cruda al backend. Lanza si la respuesta no es 2xx o el cuerpo no es JSON. */
 export async function callBackendHooks(event: HookEvent, context: Record<string, unknown>, transport: HookTransport = {}): Promise<any> {
     const fetchImpl = transport.fetchImpl || fetch;
-    const backendUrl = (transport.backendUrl || process.env.NEXT_PUBLIC_BACKEND_URL || DEFAULT_BACKEND).replace(/\/+$/, '');
+    const backendUrl = (transport.backendUrl || defaultBackendUrl()).replace(/\/+$/, '');
 
     if (transport.internal && !loadDomainPrivateKey()) throw new Error('domain signing key not configured');
 

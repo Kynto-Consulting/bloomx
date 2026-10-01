@@ -21,7 +21,7 @@ export const SCOPE_LEVELS: Record<string, L> = {
     'profile.get': 1, 'profile.sessions': 1, 'profile.sessions.revoke': 1,
     // gestion de cuentas (operator)
     'users.create': 2, 'users.update': 2, 'users.bulk': 2, 'users.export': 2, 'users.sessions': 2, 'users.quota.write': 2,
-    'accounts.unlink': 2, 'accounts.reconnect': 2, 'mail.suppressions.write': 2,
+    'accounts.unlink': 2, 'accounts.reconnect': 2, 'oauth.providers': 3, 'oauth.approve': 3, 'oauth.secret': 4, 'mail.suppressions.write': 2,
     'spam.lists.write': 2, 'spam.lists.import': 2, 'spam.lists.export': 2, 'spam.simulate': 2, 'spam.test': 2,
     // configuracion (admin)
     'users.password': 3, 'audit.export': 3, 'security.status': 3, 'retention.settings.write': 3, 'retention.quota.write': 3, 'spam.config.write': 3,
@@ -68,6 +68,7 @@ export const COMMAND_LEVELS: Record<string, L> = {
     audit: 1, 'audit events': 1, 'audit export': 3,
     'security status': 3, 'security admins': 3, 'security events': 3, 'security policies': 1,
     'security keys': 4, 'security keys register': 4, 'security keys require-signature': 4,
+    'oauth providers': 3, 'oauth approve': 3, 'oauth secret set': 4, 'oauth secret clear': 4,
     // retencion y cuotas
     'retention show': 1, 'retention storage': 1, 'quota show': 1, 'retention set': 3, 'quota set': 3, 'retention run': 4,
     // marca

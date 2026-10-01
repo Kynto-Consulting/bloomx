@@ -4,6 +4,7 @@
  * y orden. Las comparten el servidor (proxy del catalogo), la UI y los tests.
  */
 import { sanitizeRequires } from './extensions-compat';
+import { manifestDependencies } from '@/lib/expansions/ext-dependencies';
 import { describePermissions, KNOWN_MOUNT_POINTS, manifestIcon, type PermissionRisk } from '@/lib/expansions/manifest-schema';
 import { normalizeSettingsSchema, type SettingsSchema } from '@/lib/expansions/settings-schema';
 
@@ -258,6 +259,8 @@ export interface ManifestSummary {
     ai?: { features?: string[]; required?: boolean; purpose?: { es: string; en: string } };
     /** Requisitos del cliente de esta version (manifest.requires), acotados. */
     requires?: { clientApi: string | null; capabilities: string[] };
+    /** Dependencias de otras extensiones (manifest.requires.extensions): { id: rango semver }. */
+    dependencies?: Record<string, string>;
 }
 
 const short = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
@@ -292,6 +295,8 @@ export function summarizeTemplate(template: unknown): ManifestSummary | null {
     if (t.mandatory === true) out.mandatory = true;
     const requires = sanitizeRequires(t.requires);
     if (requires) out.requires = requires;
+    const dependencies = manifestDependencies(t);
+    if (Object.keys(dependencies).length > 0) out.dependencies = dependencies;
     if (t.ai && typeof t.ai === 'object' && !Array.isArray(t.ai)) {
         out.ai = {
             ...(Array.isArray(t.ai.features) ? { features: t.ai.features.filter((f: unknown): f is string => typeof f === 'string').map((f: string) => f.slice(0, 40)).slice(0, 20) } : {}),

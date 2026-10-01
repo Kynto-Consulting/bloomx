@@ -54,6 +54,29 @@ export function backendError(result: BackendResult, notFoundCode = 'not_installe
         const missingCaps = upgrade?.missingCaps.length ? upgrade.missingCaps : (sanitizeUpgrade({ missingCaps: data?.missingCaps })?.missingCaps ?? []);
         return new HttpError(409, 'client_incompatible', undefined, { upgrade, missingCaps });
     }
+    // Dependencias entre extensiones: lista saneada (ids, rangos y acciones acotados), nunca el texto del backend.
+    if (status === 409 && data?.code === 'EXTENSION_DEPENDENCIES_REQUIRED') return new HttpError(409, 'dependencies_required', undefined, { dependencies: sanitizeDeps(data?.dependencies) });
+    if (status === 409 && data?.code === 'EXTENSION_DEPENDENCY_MISSING') return new HttpError(409, 'EXTENSION_DEPENDENCY_MISSING', undefined, { errors: sanitizeDepErrors(data?.errors ?? data?.dependencies) });
+    if (status === 409 && data?.code === 'PUBLIC_ROUTE_APPROVAL_REQUIRED') return new HttpError(409, 'PUBLIC_ROUTE_APPROVAL_REQUIRED');
+    if (status === 409 && data?.code === 'PERMISSION_APPROVAL_REQUIRED') return new HttpError(409, 'PERMISSION_APPROVAL_REQUIRED');
     if (status === 429) return new HttpError(429, 'rate_limited');
     return new HttpError(502, typeof data?.code === 'string' && /^[A-Z_]{1,40}$/.test(data.code) ? data.code : 'backend_error');
+}
+
+const DEP_ID = /^[a-z0-9][a-z0-9-]{1,63}$/;
+const short = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : '');
+function sanitizeDeps(raw: unknown): Array<{ id: string; version: string; range: string; action: 'install' | 'activate' }> {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((d) => d && typeof d.id === 'string' && DEP_ID.test(d.id)).slice(0, 16)
+        .map((d) => ({ id: d.id, version: short(d.version, 32), range: short(d.range, 60), action: d.action === 'activate' ? 'activate' as const : 'install' as const }));
+}
+function sanitizeDepErrors(raw: unknown): Array<{ dependency: string; range: string; reason: string }> {
+    if (!Array.isArray(raw)) return [];
+    return raw.filter((d) => d && typeof d.dependency === 'string' && DEP_ID.test(d.dependency)).slice(0, 16)
+        .map((d) => ({ dependency: d.dependency, range: short(d.range, 60), reason: short(d.reason, 40) }));
+}
+
+/** Ids de extension de una lista del backend (pausadas / por pausar), acotados y validados. */
+export function sanitizeIdList(raw: unknown): string[] {
+    return Array.isArray(raw) ? raw.filter((id): id is string => typeof id === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id)).slice(0, 50) : [];
 }

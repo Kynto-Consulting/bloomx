@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server';
 import { assertLocalPg, createUser, uid } from '../../__tests__/helpers/pg';
 import { prisma } from '../../prisma';
 import { isEncrypted } from '../../encryption';
+import { invalidateProviderCache } from '../../oauth/providers';
 
 /**
  * Postgres REAL embebido (sin servicios externos): el refresh_token cifrado de Account se descifra en la ruta de
@@ -29,7 +30,24 @@ beforeAll(() => {
     for (const m of ['log', 'error', 'warn'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
 afterAll(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
-beforeEach(() => { session = null; vi.unstubAllGlobals(); });
+beforeEach(() => { session = null; vi.unstubAllGlobals(); invalidateProviderCache(); });
+
+/**
+ * fetch HERMETICO: el registro de proveedores consulta {backend}/api/config (config de GoogleLib) ANTES de refrescar el token. Aqui /api/config se
+ * responde en local (404 = sin config -> variables heredadas GOOGLE_*; o la config de GoogleLib) y el resto de llamadas se anotan en `seen`.
+ */
+function hermeticFetch(opts: { config?: unknown; tokenResponse: unknown; seen: any[] }) {
+    return vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/api/config')) {
+            return opts.config === undefined ? new Response('{}', { status: 404 }) : new Response(JSON.stringify(opts.config), { status: 200 });
+        }
+        opts.seen.push({ url: String(url), body: String(init?.body) });
+        return new Response(JSON.stringify(opts.tokenResponse), { status: 200 });
+    });
+}
+
+const googleLibConfig = (clientId: string) => ({ extensions: [{ id: 'core-googlelib', settings: { config: { GOOGLE_CLIENT_ID: clientId } }, template: JSON.stringify({ id: 'core-googlelib', version: '1.0.0', settingsSchema: { fields: [{ key: 'GOOGLE_CLIENT_ID', type: 'string', label: 'ID' }, { key: 'GOOGLE_CLIENT_SECRET', type: 'string', secret: true, label: 'S' }] }, oauthProviders: [{ id: 'google', displayName: 'Google', authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth', tokenUrl: 'https://oauth2.googleapis.com/token', apiBase: 'https://www.googleapis.com', allowedHosts: ['accounts.google.com', 'oauth2.googleapis.com', 'www.googleapis.com'], scopes: [{ id: 'openid', group: 'userinfo', es: 'a', en: 'a', risk: 'low' }], pkce: true, clientIdSetting: 'GOOGLE_CLIENT_ID', clientSecretCredential: 'GOOGLE_CLIENT_SECRET', redirectPath: '/api/auth/callback/google' }] }) }] });
+
 
 describe('Account.refresh_token cifrado -> ruta de creacion', () => {
     it('getLinkedAuth descifra el refresh_token, refresca contra Google (texto plano) y re-guarda cifrado', async () => {
@@ -47,18 +65,17 @@ describe('Account.refresh_token cifrado -> ruta de creacion', () => {
         expect(before.refresh_token).not.toContain('RT-plain-123');
 
         const seen: any[] = [];
-        vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
-            seen.push({ url, body: String(init?.body) });
-            return new Response(JSON.stringify({ access_token: 'NEW-ACCESS', expires_in: 3600, scope: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.created' }), { status: 200 });
-        }));
+        // Sin config del proveedor (backend sin GoogleLib): se usan las variables heredadas GOOGLE_* (comportamiento de siempre).
+        vi.stubGlobal('fetch', hermeticFetch({ seen, tokenResponse: { access_token: 'NEW-ACCESS', expires_in: 3600, scope: 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/meetings.space.created' } }));
 
         const { getLinkedAuth } = await import('../auth-context');
         const r = await getLinkedAuth(user.id);
         expect(r.auth.google).toMatchObject({ accessToken: 'NEW-ACCESS', accountId: acc.id, source: 'user-account' });
         expect(r.auth.google!.scope).toContain('meetings.space.created');
         // Google recibio el refresh_token DESCIFRADO y el cliente OAuth del frontend
-        expect(seen[0].url).toBe('http://127.0.0.1:9/google/token');
-        const params = new URLSearchParams(seen[0].body);
+        const tokenCall = seen.find((c) => c.url === 'http://127.0.0.1:9/google/token');
+        expect(tokenCall, 'llamada al endpoint de token').toBeTruthy();
+        const params = new URLSearchParams(tokenCall.body);
         expect(params.get('refresh_token')).toBe('RT-plain-123');
         expect(params.get('client_id')).toBe('cid-test');
         // y lo guardado sigue cifrado
@@ -66,6 +83,25 @@ describe('Account.refresh_token cifrado -> ruta de creacion', () => {
         expect(isEncrypted(after.access_token)).toBe(true);
         expect(isEncrypted(after.refresh_token)).toBe(true);
         expect(after.access_token).not.toContain('NEW-ACCESS');
+    });
+
+    it('con la config de GoogleLib en el backend usa SU client id (no el heredado) y sigue descifrando/re-guardando cifrado', async () => {
+        const user = await createUser(prisma);
+        const acc = await prisma.account.create({
+            data: { userId: user.id, type: 'oauth', provider: 'google', providerAccountId: uid('g'), access_token: 'OLD-ACCESS', refresh_token: 'RT-lib-456', expires_at: 1, scope: 'openid https://www.googleapis.com/auth/calendar' },
+        });
+        const seen: any[] = [];
+        vi.stubGlobal('fetch', hermeticFetch({ seen, config: googleLibConfig('cid-from-googlelib'), tokenResponse: { access_token: 'NEW-LIB', expires_in: 3600 } }));
+        const { getLinkedAuth } = await import('../auth-context');
+        const r = await getLinkedAuth(user.id);
+        expect(r.auth.google).toMatchObject({ accessToken: 'NEW-LIB', accountId: acc.id });
+        const tokenCall = seen.find((c) => c.url.includes('/google/token'));
+        expect(tokenCall).toBeTruthy();
+        const params = new URLSearchParams(tokenCall.body);
+        expect(params.get('client_id')).toBe('cid-from-googlelib');
+        expect(params.get('client_secret')).toBe('csecret-test'); // endpoints oficiales: el secreto heredado sigue valiendo
+        expect(params.get('refresh_token')).toBe('RT-lib-456');
+        expect(isEncrypted((await rawAccount(acc.id)).refresh_token)).toBe(true);
     });
 
     it('la ruta POST /google-meet llega a la extension con el access token del PROPIO usuario (nunca el de otro)', async () => {

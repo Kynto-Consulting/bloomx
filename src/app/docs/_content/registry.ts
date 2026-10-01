@@ -15,6 +15,7 @@ import ai from './pages/ai';
 import storage from './pages/storage';
 import security from './pages/security';
 import compliance from './pages/compliance';
+import oauthProviders from './pages/oauth-providers';
 import expansions from './pages/expansions';
 import createExtension from './pages/create-extension';
 import extensionUi from './pages/extension-ui';
@@ -48,6 +49,7 @@ export const DOC_CONTENT: Record<string, DocPageContent> = {
     storage,
     security,
     compliance,
+    'oauth-providers': oauthProviders,
     expansions,
     'create-extension': createExtension,
     'extension-ui': extensionUi,

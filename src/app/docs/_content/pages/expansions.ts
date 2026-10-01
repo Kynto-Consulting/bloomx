@@ -634,14 +634,14 @@ const permissionsEn: Block[] = [
 const reqEx = `"requires": { "clientApi": ">=2", "capabilities": ["settings.schema.v1", "ai.v1"] }
 // clientApi: 2 | ">=2" | ">=2 <4"   (sin "requires" = compatible con legacy / without it = legacy-compatible)`;
 const capRows = (l: 'es' | 'en'): string[][] => Object.entries(CAPABILITY_REGISTRY).map(([id, c]) => ['`' + id + '`', String(c.since) + (c.since <= 1 ? (l === 'es' ? ' (línea base)' : ' (baseline)') : ''), c[l]]);
-const legacyList = 'appointments, calendar, composer-helper, dlp, giphy, google-drive, google-meet, hubspot, mail-groups, notion, organizer, sealer, signature, smart-reply, summarizer, translator, trello, webhooks, zoom';
+const legacyList = 'appointments, calendar, composer-helper, dlp, giphy, google-drive, google-meet, google-sync, hubspot, mail-groups, notion, organizer, sealer, signature, smart-reply, summarizer, translator, trello, webhooks, zoom';
 
 const versioningEs: Block[] = [
     { t: 'h2', id: 'client-versioning', text: 'Versionado del cliente y compatibilidad' },
     { t: 'p', text: 'El backend es compartido y guarda **una sola copia** de cada extensión, pero cada instancia (frontend) puede desplegar una versión distinta del cliente. La solución es versionar el cliente y **negociar capacidades**: el cliente dice qué sabe hacer y el backend sirve a cada instancia la versión de la extensión que ese cliente puede ejecutar.' },
     { t: 'h3', id: 'client-identity', text: 'Identidad del cliente' },
     { t: 'ul', items: [
-        '`CLIENT_API_VERSION` (entero; hoy **2**): contrato cliente↔backend de extensiones. Es independiente de la versión de la app y del `BUILD_ID`. `CLIENT_CAPABILITIES` son cadenas estables. Ambos se definen en `src/lib/expansions/client/capabilities.ts`.',
+        '`CLIENT_API_VERSION` (entero; hoy **5**): contrato cliente↔backend de extensiones. Es independiente de la versión de la app y del `BUILD_ID`. `CLIENT_CAPABILITIES` son cadenas estables. Ambos se definen en `src/lib/expansions/client/capabilities.ts`.',
         'Registro único `CAPABILITY_REGISTRY` en `client-contract.ts` (copia idéntica en el frontend, el backend y `bloomx-extensions/_shared`).',
         'Cabeceras `X-BloomX-Client-Api` (entero) y `X-BloomX-Client-Caps` (lista separada por comas, máx. 1024 caracteres y 64 capacidades) en **todas** las llamadas al backend.',
         'Con firma Ed25519 activa, el mensaje firmado pasa a `BLOOMX-SIG-V2` = V1 + dos líneas (api y caps), de modo que no se pueden quitar ni añadir. Sin firma (modo legado) viajan como informativas.',
@@ -691,7 +691,7 @@ const versioningEn: Block[] = [
     { t: 'p', text: 'The backend is shared and keeps **one copy** of each extension, but every instance (frontend) may deploy a different client version. The solution is to version the client and **negotiate capabilities**: the client says what it can do and the backend serves each instance the extension version that client can run.' },
     { t: 'h3', id: 'client-identity', text: 'Client identity' },
     { t: 'ul', items: [
-        '`CLIENT_API_VERSION` (integer; currently **2**): the client↔backend extension contract. It is independent of the app version and of `BUILD_ID`. `CLIENT_CAPABILITIES` are stable strings. Both are defined in `src/lib/expansions/client/capabilities.ts`.',
+        '`CLIENT_API_VERSION` (integer; currently **5**): the client↔backend extension contract. It is independent of the app version and of `BUILD_ID`. `CLIENT_CAPABILITIES` are stable strings. Both are defined in `src/lib/expansions/client/capabilities.ts`.',
         'A single `CAPABILITY_REGISTRY` in `client-contract.ts` (identical copy in the frontend, the backend and `bloomx-extensions/_shared`).',
         'Headers `X-BloomX-Client-Api` (integer) and `X-BloomX-Client-Caps` (comma-separated list, max 1024 characters and 64 capabilities) on **every** backend call.',
         'With Ed25519 signing on, the signed message becomes `BLOOMX-SIG-V2` = V1 + two lines (api and caps), so they can be neither removed nor added. Without signing (legacy mode) they are informative only.',

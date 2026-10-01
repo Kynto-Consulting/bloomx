@@ -86,6 +86,8 @@ const TABLES: TableSpec[] = [
             { name: 'scope', definition: 'TEXT' },
             { name: 'id_token', definition: 'TEXT' },
             { name: 'session_state', definition: 'TEXT' },
+            // Hash de la identidad del proveedor OAuth con el que se obtuvo el token (lib/oauth/providers.ts#providerIdentityHash). Aditiva.
+            { name: 'provider_hash', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Account_pkey', statement: 'ALTER TABLE "Account" ADD CONSTRAINT "Account_pkey" PRIMARY KEY ("id")' },
@@ -530,6 +532,64 @@ const TABLES: TableSpec[] = [
         indexes: [
             'CREATE INDEX IF NOT EXISTS "MoltSession_userId_idx" ON "MoltSession" ("userId")',
             'CREATE INDEX IF NOT EXISTS "MoltSession_accessToken_idx" ON "MoltSession" ("accessToken")',
+        ],
+    },
+    {
+        // Estado de los flujos OAuth en curso (registro de proveedores OAuth de extensiones): SOLO el hash del `state` (nunca el state ni el
+        // verificador PKCE, que viajan en una cookie HttpOnly cifrada). Sirve para que cada state se consuma UNA sola vez (anti-replay).
+        // Aditivo: la app sigue funcionando si la tabla aun no existe (el flujo degrada al nonce de la cookie).
+        name: 'OAuthFlow',
+        createStatement: `CREATE TABLE IF NOT EXISTS "OAuthFlow" (
+            "stateHash" TEXT NOT NULL,
+            "provider" TEXT NOT NULL,
+            "userId" TEXT,
+            "mode" TEXT NOT NULL,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "expiresAt" TIMESTAMPTZ NOT NULL,
+            "consumedAt" TIMESTAMPTZ
+        )`,
+        columns: [
+            { name: 'stateHash', definition: 'TEXT NOT NULL' },
+            { name: 'provider', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT' },
+            { name: 'mode', definition: 'TEXT NOT NULL' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+            { name: 'consumedAt', definition: 'TIMESTAMPTZ' },
+        ],
+        constraints: [
+            { name: 'OAuthFlow_pkey', statement: 'ALTER TABLE "OAuthFlow" ADD CONSTRAINT "OAuthFlow_pkey" PRIMARY KEY ("stateHash")' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "OAuthFlow_expiresAt_idx" ON "OAuthFlow" ("expiresAt")',
+        ],
+    },
+    {
+        // Configuracion OAuth PROPIA de la instancia por proveedor: el client secret (cifrado con la clave de datos de ESTA instancia, AES-256-GCM v3)
+        // y los hosts de los endpoints que el admin aprobo al guardarlo. Si la extension cambia de host, el proveedor queda desactivado hasta
+        // que el admin lo apruebe de nuevo (el secreto nunca viaja a un destino no aprobado). El secreto jamas llega a una extension ni al navegador.
+        name: 'OAuthProviderConfig',
+        createStatement: `CREATE TABLE IF NOT EXISTS "OAuthProviderConfig" (
+            "provider" TEXT NOT NULL,
+            "extensionId" TEXT,
+            "clientSecret" TEXT,
+            "approvedHosts" TEXT NOT NULL DEFAULT '[]',
+            "updatedAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            "updatedBy" TEXT,
+            "extra" TEXT NOT NULL DEFAULT '{}'
+        )`,
+        columns: [
+            { name: 'provider', definition: 'TEXT NOT NULL' },
+            { name: 'extensionId', definition: 'TEXT' },
+            { name: 'clientSecret', definition: 'TEXT' },
+            { name: 'approvedHosts', definition: "TEXT NOT NULL DEFAULT '[]'" },
+            { name: 'updatedAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+            { name: 'updatedBy', definition: 'TEXT' },
+            // Credenciales COMPARTIDAS adicionales (organizador / cuenta de servicio): JSON { NOMBRE: valor cifrado (AES-256-GCM v3) }.
+            { name: 'extra', definition: "TEXT NOT NULL DEFAULT '{}'" },
+        ],
+        constraints: [
+            { name: 'OAuthProviderConfig_pkey', statement: 'ALTER TABLE "OAuthProviderConfig" ADD CONSTRAINT "OAuthProviderConfig_pkey" PRIMARY KEY ("provider")' },
         ],
     },
     {
