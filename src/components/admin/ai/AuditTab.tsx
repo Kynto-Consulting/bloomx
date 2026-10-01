@@ -4,12 +4,15 @@ import { useI18n } from '@/components/I18nProvider';
 import { Card, ErrorState, LoadingState, formatDateTime, useAdminQuery } from '@/components/admin/console';
 import { useErrorText, type TabProps } from './shared';
 
-interface AuditResponse { items: Array<{ id: string; actor: string; action: string; fields: string[]; ts: string | null }> }
+type AuditEntry = { id: string; actor: string; action: string; fields?: string[]; ts: string | null };
+/** La API responde { entries }; se acepta tambien { items } por compatibilidad. */
+interface AuditResponse { entries?: AuditEntry[]; items?: AuditEntry[] }
 
 export function AuditTab(_props: TabProps) {
     const { t, intlLocale } = useI18n();
     const errorText = useErrorText();
     const { data, error, mutate } = useAdminQuery<AuditResponse>('/api/admin/ai/audit');
+    const rows: AuditEntry[] = data?.entries ?? data?.items ?? [];
     return (
         <Card title={t('admin.ai.audit.title')} description={t('admin.ai.audit.description')}>
             {error && !data ? <ErrorState message={errorText(error)} onRetry={() => void mutate()} />
@@ -27,13 +30,13 @@ export function AuditTab(_props: TabProps) {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {data.items.length === 0 && <tr><td colSpan={4} className="px-2 py-3 text-muted-foreground">{t('admin.ai.audit.empty')}</td></tr>}
-                                    {data.items.map((a) => (
+                                    {rows.length === 0 && <tr><td colSpan={4} className="px-2 py-3 text-muted-foreground">{t('admin.ai.audit.empty')}</td></tr>}
+                                    {rows.map((a) => (
                                         <tr key={a.id} className="border-b border-border/50 align-top last:border-0">
                                             <td className="whitespace-nowrap px-2 py-1.5">{formatDateTime(a.ts, intlLocale)}</td>
                                             <td className="px-2 py-1.5">{a.actor}</td>
                                             <td className="px-2 py-1.5">{a.action}</td>
-                                            <td className="break-words px-2 py-1.5 font-mono text-xs text-muted-foreground">{a.fields.join(' ')}</td>
+                                            <td className="break-words px-2 py-1.5 font-mono text-xs text-muted-foreground">{(a.fields ?? []).join(' ')}</td>
                                         </tr>
                                     ))}
                                 </tbody>
