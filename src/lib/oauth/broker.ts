@@ -2,12 +2,13 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { auditLog } from '@/lib/security';
 import { prisma } from '@/lib/prisma';
-import { buildActionPath, validateActionInput, OAUTH_ACTION_LIMITS, type OAuthActionDef } from '@/lib/expansions/oauth-schema';
+import { validateActionInput, OAUTH_ACTION_LIMITS, type OAuthActionDef } from '@/lib/expansions/oauth-schema';
+import { buildActionRequestUrl } from './action-url';
 import { BridgeError, extensionIdString, idString, type BridgeDeps } from '@/lib/expansions/host-services/bridge-route';
 import { ProviderHttpError, providerFetch } from './http';
-import { getProvider, providerScopeGroups, providerUrlOk, type ProviderRuntime } from './providers';
+import { getProvider, providerScopeGroups, type ProviderRuntime } from './providers';
 import { describePrincipals, getSharedAccessToken, type SharedPrincipal } from './principals';
-import { getAccessToken, grantedScopeSet, listUserAccounts, OAuthAccountError } from './tokens';
+import { getAccessToken, grantedScopeSet, listUserAccounts, OAuthAccountError, parseAccountExtras, pickAccount } from './tokens';
 
 /**
  * INTERMEDIARIO OAUTH del nucleo: `services.oauth` / `ctx.libs.<proveedor>` de las extensiones llegan aqui (POST /api/internal/host/oauth,
@@ -79,12 +80,18 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
             // Las identidades compartidas solo se REVELAN a quien tiene el permiso OAUTH_SHARED (no se filtra la configuracion del dominio).
             return req.sharedAllowed === true ? p : { user: p.user, organizer: false, service: false, mode: '', accounts: { organizerEmail: '', impersonateUser: '' } };
         }
-        return accounts.map((a) => ({
-            id: a.id,
-            provider: provider.id,
-            groups: providerScopeGroups(provider, Array.from(grantedScopeSet(a.scope))),
-            status: a.access_token || a.refresh_token ? 'active' : 'needs-reconnect',
-        }));
+        return accounts.map((a) => {
+            // Solo los datos extra marcados `public` (p. ej. el chat_id verificado de Telegram): el resto (webhook, instancia) jamas sale del nucleo.
+            const stored = parseAccountExtras(a.provider_data, provider);
+            const meta = Object.fromEntries(Object.entries(provider.extras).filter(([name, d]) => d.public === true && stored[name] !== undefined).map(([name]) => [name, stored[name]]));
+            return {
+                id: a.id,
+                provider: provider.id,
+                groups: providerScopeGroups(provider, Array.from(grantedScopeSet(a.scope))),
+                status: a.access_token || a.refresh_token ? 'active' : 'needs-reconnect',
+                ...(Object.keys(meta).length ? { meta } : {}),
+            };
+        });
     }
 
     const { action: actionId, params, accountId } = req.args;
@@ -107,6 +114,15 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
         if (!allowed.includes(value)) throw new BridgeError('forbidden');
     }
 
+    // Objetos con campos restringidos por el admin (p. ej. campos de un Lead): cada clave enviada debe estar en la lista del ajuste; lista vacia = ninguna.
+    for (const [name, def] of Object.entries(action.params ?? {})) {
+        if (!def.allowedKeysFromSetting) continue;
+        const value = (params as Record<string, unknown>)[name];
+        if (typeof value !== 'object' || value === null) continue;
+        const allowedKeys = String(provider.settingsConfig[def.allowedKeysFromSetting] ?? '').split(/[\s,;]+/).filter(Boolean);
+        if (Object.keys(value).some((k) => !allowedKeys.includes(k))) throw new BridgeError('forbidden');
+    }
+
     const write = action.write === true || action.method !== 'GET';
     const rl = await deps.rateLimit(`oauth-call:${req.userId}:${req.extensionId}:${provider.id}:${write ? 'w' : 'r'}`, write ? WRITE_LIMIT : READ_LIMIT, 60_000);
     if (!rl.ok) throw new BridgeError('rate_limited', rl.retryAfter);
@@ -116,13 +132,24 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
         if (!hourly.ok) throw new BridgeError('rate_limited', hourly.retryAfter);
     }
 
-    const apiBase = action.apiBase ?? provider.apiBase;
-    if (!apiBase) throw new BridgeError('not_configured');
+    // Acciones con dato extra de la cuenta (host de instancia / credencial en la ruta): solo con la cuenta VINCULADA del usuario.
+    const usesExtras = !!action.apiHostExtra || !!action.pathExtras || action.noAuth === true;
+    if (usesExtras && principal !== 'user') throw new BridgeError('forbidden');
+    if (!action.apiHostExtra && !action.apiBase && !provider.apiBase) throw new BridgeError('not_configured');
     const started = Date.now();
     let status = 0;
     try {
-        const resolveToken = async (): Promise<{ accessToken: string; scope: string | null; accountId?: string }> => {
+        const resolveToken = async (): Promise<{ accessToken: string; scope: string | null; accountId?: string; extras?: Record<string, string> }> => {
             try {
+                if (action.noAuth === true) {
+                    // Sin token OAuth: solo hace falta la cuenta vinculada (sus datos extra y los scopes concedidos); nada se refresca ni se envia como Authorization.
+                    const all = await listUserAccounts(req.userId, provider);
+                    const need = action.requiresScopes ?? [];
+                    const usable = all.filter((a) => (accountId ? a.id === accountId : true) && need.every((sc) => grantedScopeSet(a.scope).has(sc)));
+                    const chosen = pickAccount(usable);
+                    if (!chosen) throw new OAuthAccountError('OAUTH_NOT_LINKED', 404);
+                    return { accessToken: '', scope: chosen.scope, accountId: chosen.id, extras: parseAccountExtras(chosen.provider_data, provider) };
+                }
                 if (principal === 'user') return await getAccessToken(provider, req.userId, { accountId, requiresScopes: action.requiresScopes });
                 return await getSharedAccessToken(provider, principal as SharedPrincipal, action.requiresScopes ?? []);
             } catch (error) {
@@ -134,12 +161,8 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
         const granted = grantedScopeSet(token.scope);
         for (const need of action.requiresScopes ?? []) if (!granted.has(need)) throw new BridgeError('scope_missing');
 
-        const query = new URLSearchParams({ ...(action.fixedQuery ?? {}), ...input.query });
-        const url = `${apiBase.replace(/\/+$/, '')}${buildActionPath(action.path, input.path)}${query.toString() ? `?${query.toString()}` : ''}`;
-        if (!providerUrlOk(provider, url.split('?')[0])) throw new BridgeError('forbidden');
-        // Defensa en profundidad: la ruta efectiva (tras normalizar la URL) debe ser EXACTAMENTE la construida; si un parametro la altera (.., //, %2e) no se envia.
-        const built = url.split('?')[0].replace(/^https:\/\/[^/]+/, '');
-        if (new URL(url).pathname !== built) throw new BridgeError('forbidden');
+        const url = buildActionRequestUrl(provider, action, input, token.extras ?? {});
+        if (!url) throw new BridgeError(usesExtras ? 'not_linked' : 'forbidden');
 
         let payload: { body?: string; contentType?: string } = {};
         if (action.upload) {
@@ -149,21 +172,22 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
             if (typeof content !== 'string' || !content || typeof metadata !== 'object' || metadata === null) throw new BridgeError('invalid_args');
             const mp = buildMultipart(metadata, content, typeof mime === 'string' ? mime : 'application/octet-stream');
             payload = { body: mp.body, contentType: mp.contentType };
-        } else if (Object.keys(input.body).length > 0) {
-            const json = JSON.stringify(input.body);
+        } else if (Object.keys(input.body).length > 0 || action.fixedBody) {
+            // fixedBody (p. ej. allowed_mentions) va DESPUES: quien llama no puede sobrescribirlo.
+            const json = JSON.stringify({ ...input.body, ...(action.fixedBody ?? {}) });
             if (json.length > OAUTH_ACTION_LIMITS.maxBodyBytes) throw new BridgeError('quota_exceeded');
             payload = { body: json, contentType: 'application/json' };
         }
         const send = (accessToken: string) =>
             providerFetch(provider.allowedHosts, url, {
                 method: action.method,
-                headers: { Authorization: `Bearer ${accessToken}`, ...(payload.contentType ? { 'Content-Type': payload.contentType } : {}) },
+                headers: { ...(action.noAuth === true ? {} : { Authorization: `Bearer ${accessToken}` }), ...(payload.contentType ? { 'Content-Type': payload.contentType } : {}) },
                 body: payload.body,
                 maxBytes: clamp(action.maxResponseBytes),
                 timeoutMs: 20_000,
             });
         let res = await send(token.accessToken);
-        if (res.status === 401 && principal === 'user' && token.accountId) {
+        if (res.status === 401 && principal === 'user' && token.accountId && action.noAuth !== true) {
             // Token revocado/caducado antes de tiempo: se fuerza UN refresco y se reintenta una vez.
             await prisma.account.update({ where: { id: token.accountId }, data: { expires_at: 1 } }).catch(() => undefined);
             let again;

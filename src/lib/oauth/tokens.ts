@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/prisma';
 import { getDbPool } from '@/lib/db/pool';
 import { providerFetch, ProviderHttpError } from './http';
+import { safePatternTest } from '@/lib/expansions/oauth-schema';
 import { accountMatchesProvider, type ProviderRuntime } from './providers';
 
 /**
@@ -20,7 +21,7 @@ export class OAuthAccountError extends Error {
     }
 }
 
-type AccountRow = { provider_hash?: string | null; id: string; userId: string; provider: string; providerAccountId: string; access_token: string | null; refresh_token: string | null; expires_at: number | null; scope: string | null; token_type: string | null };
+type AccountRow = { provider_hash?: string | null; provider_data?: string | null; id: string; userId: string; provider: string; providerAccountId: string; access_token: string | null; refresh_token: string | null; expires_at: number | null; scope: string | null; token_type: string | null };
 
 /** Cuenta a usar si hay varias: primero las que conservan refresh_token, luego la de token mas vigente; determinista. */
 export function pickAccount<T extends { id: string; refresh_token?: string | null; access_token?: string | null; expires_at?: number | null }>(accounts: T[]): T | null {
@@ -50,7 +51,22 @@ export function grantedScopeSet(scope: string | null | undefined): Set<string> {
     return new Set((scope ?? '').split(/[\s,]+/).filter(Boolean).map(normalizeScope));
 }
 
-export interface AccessToken { accessToken: string; refreshToken: string | null; accountId: string; scope: string | null }
+/** `extras` = datos extra VALIDADOS de la cuenta (descifrados): SOLO para el nucleo (broker); jamas se entregan a una extension salvo los `public` en accounts().meta. */
+export interface AccessToken { accessToken: string; refreshToken: string | null; accountId: string; scope: string | null; extras: Record<string, string> }
+
+/** Datos extra guardados (JSON cifrado en provider_data) de una cuenta, SOLO los declarados por el proveedor activo y que cumplen su patron (defensa en profundidad). */
+export function parseAccountExtras(raw: string | null | undefined, provider: Pick<ProviderRuntime, 'extras'>): Record<string, string> {
+    const out: Record<string, string> = {};
+    if (!raw || Object.keys(provider.extras ?? {}).length === 0) return out;
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch { return out; }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return out;
+    for (const [name, def] of Object.entries(provider.extras)) {
+        const v = Object.prototype.hasOwnProperty.call(parsed, name) ? (parsed as Record<string, unknown>)[name] : undefined;
+        if (typeof v === 'string' && v.length <= 512 && safePatternTest(def.pattern, v)) out[name] = v;
+    }
+    return out;
+}
 
 export interface TokenRequest { clientId: string; clientSecret: string | null }
 
@@ -173,7 +189,7 @@ export function __setRefreshLock(impl: Lock | null): void {
 }
 
 const inFlight = new Map<string, Promise<AccessToken>>();
-const toAccessToken = (a: AccountRow): AccessToken => ({ accessToken: a.access_token as string, refreshToken: a.refresh_token, accountId: a.id, scope: a.scope });
+const toAccessToken = (a: AccountRow, provider: Pick<ProviderRuntime, 'extras'>): AccessToken => ({ accessToken: a.access_token as string, refreshToken: a.refresh_token, accountId: a.id, scope: a.scope, extras: parseAccountExtras(a.provider_data, provider) });
 const fresh = (a: AccountRow | null): boolean => !!a && !!a.access_token && (!a.expires_at || a.expires_at * 1000 > Date.now() + 60_000);
 
 /**
@@ -199,7 +215,7 @@ export async function getAccessToken(provider: ProviderRuntime, userId: string, 
     const account = opts.accountId ? accounts.find((a) => a.id === opts.accountId) ?? null : pickAccount(covering.length ? covering : accounts);
     if (!account) throw new OAuthAccountError('OAUTH_NOT_LINKED', 404);
     if (!account.access_token && !account.refresh_token) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
-    if (fresh(account)) return toAccessToken(account);
+    if (fresh(account)) return toAccessToken(account, provider);
     if (!account.refresh_token) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
 
     const pending = inFlight.get(account.id);
@@ -209,7 +225,7 @@ export async function getAccessToken(provider: ProviderRuntime, userId: string, 
         const again = (await prisma.account.findUnique({ where: { id: account.id } })) as unknown as AccountRow | null;
         if (!again) throw new OAuthAccountError('OAUTH_NOT_LINKED', 404);
         if (!accountMatchesProvider(again, provider)) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
-        if (fresh(again)) return toAccessToken(again);
+        if (fresh(again)) return toAccessToken(again, provider);
         if (!again.refresh_token) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
         let refreshed: TokenResponse;
         try {
@@ -231,7 +247,7 @@ export async function getAccessToken(provider: ProviderRuntime, userId: string, 
                 token_type: refreshed.token_type || again.token_type,
             },
         })) as unknown as AccountRow;
-        return toAccessToken(updated);
+        return toAccessToken(updated, provider);
     }).finally(() => { inFlight.delete(account.id); });
     inFlight.set(account.id, promise);
     return promise;

@@ -53,6 +53,7 @@ export const CLIENT_CAPABILITIES: readonly string[] = [
     'oauth.provider.v2',
     'services.host.v1',
     'settings.schema.v1',
+    'settings.users.v1',
     'toolbar.compact',
     'ui.input.onSubmit',
     'ui.kit.v2',

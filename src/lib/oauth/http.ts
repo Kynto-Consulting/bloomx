@@ -110,7 +110,7 @@ export async function providerFetch(allowedHosts: readonly string[], url: string
     const timer = setTimeout(() => controller.abort(), req.timeoutMs ?? 10_000);
     const max = req.maxBytes ?? 1_048_576;
     try {
-        const init = { method: req.method ?? 'GET', headers: { Accept: 'application/json', ...(req.headers ?? {}) }, body: req.body, signal: controller.signal };
+        const init = { method: req.method ?? 'GET', headers: { Accept: 'application/json', 'User-Agent': 'BloomX-OAuth/1.0', ...(req.headers ?? {}) }, body: req.body, signal: controller.signal };
         const res = transportOverride
             ? await transportOverride(url, init)
             : await pinnedTransport(url, init);

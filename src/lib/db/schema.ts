@@ -88,6 +88,8 @@ const TABLES: TableSpec[] = [
             { name: 'session_state', definition: 'TEXT' },
             // Hash de la identidad del proveedor OAuth con el que se obtuvo el token (lib/oauth/providers.ts#providerIdentityHash). Aditiva.
             { name: 'provider_hash', definition: 'TEXT' },
+            // Datos extra del proveedor OAuth (JSON cifrado: webhook de Discord, instancia de Salesforce, chat_id de Telegram...). Aditiva. Ver lib/oauth/extras.
+            { name: 'provider_data', definition: 'TEXT' },
         ],
         constraints: [
             { name: 'Account_pkey', statement: 'ALTER TABLE "Account" ADD CONSTRAINT "Account_pkey" PRIMARY KEY ("id")' },

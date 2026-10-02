@@ -2,7 +2,7 @@ import { backendUrl } from '@/lib/backend-url';
 import { createHash } from 'node:crypto';
 import { tryDecrypt, encrypt } from '@/lib/encryption';
 import { normalizeSettingsSchema } from '@/lib/expansions/settings-schema';
-import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, resolveOAuthVariable, substituteOAuthVariables, validateOAuthProviders, type OAuthActionDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef, type OAuthServiceCredentialsDef } from '@/lib/expansions/oauth-schema';
+import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, resolveOAuthVariable, substituteOAuthVariables, validateOAuthProviders, type OAuthActionDef, type OAuthExtraDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef, type OAuthServiceCredentialsDef } from '@/lib/expansions/oauth-schema';
 import { oauthStore } from './store';
 import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { MAX_REGISTRY_BYTES, pinnedBackendKey, validateRegistryResponse, verifyConfigSignature } from './registry-trust';
@@ -53,6 +53,10 @@ export interface ProviderRuntime {
     /** Claims del id_token fijados por configuracion (p. ej. tid = tenant concreto): el emisor con {claim:x} solo vale con ese valor. */
     issuerPins: Record<string, string>;
     serviceCredentials: OAuthServiceCredentialsDef | null;
+    /** Datos extra por cuenta que se conservan (cifrados) de la respuesta del token: ver OAuthExtraDef. */
+    extras: Record<string, OAuthExtraDef>;
+    /** Accion (noAuth) que el nucleo ejecuta al desconectar una cuenta (p. ej. borrar el webhook de Discord). */
+    onUnlink: string | null;
     clientId: string | null;
     clientSecret: string | null;
     /** Nombre (credencial) del client secret segun el manifest. */
@@ -105,10 +109,15 @@ const LEGACY_ENV_HOSTS: Record<string, readonly string[]> = {
 
 const hostOf = (url: string | null | undefined): string | null => { try { return url ? new URL(url).hostname.toLowerCase() : null; } catch { return null; } };
 
-export function endpointHostsOf(def: { authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; apiBase?: string | null; actions?: ReadonlyArray<{ apiBase?: string }> | null }): string[] {
+export function extraPins(extras: Record<string, OAuthExtraDef> | null | undefined): string[] {
+    // Cada dato extra (origen, patron, sufijo de host) forma parte de lo que el admin aprueba y de la identidad de las cuentas: cambiarlo exige reaprobar/revincular.
+    return Object.entries(extras ?? {}).flatMap(([name, d]) => [`extra:${name}=${d.from}|${d.hostSuffix ?? ''}|${d.pattern}`, ...(d.hostSuffix ? [`*${d.hostSuffix}`] : [])]);
+}
+
+export function endpointHostsOf(def: { authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; apiBase?: string | null; actions?: ReadonlyArray<{ apiBase?: string }> | null; extras?: Record<string, OAuthExtraDef> | null }): string[] {
     // Incluye la base propia de cada accion: una accion que apunte a un host nuevo exige que el admin vuelva a aprobar.
     const urls = [def.authorizeUrl, def.tokenUrl, def.revokeUrl, def.userinfoUrl, def.jwksUri, def.apiBase, ...(def.actions ?? []).map((a) => a.apiBase)];
-    return Array.from(new Set(urls.map(hostOf).filter((h): h is string => !!h))).sort();
+    return Array.from(new Set([...urls.map(hostOf).filter((h): h is string => !!h), ...extraPins(def.extras)])).sort();
 }
 
 /**
@@ -120,10 +129,14 @@ export function identityHostsOf(def: { authorizeUrl: string; tokenUrl: string; r
     const urls = [def.authorizeUrl, def.tokenUrl, def.revokeUrl, def.userinfoUrl, def.jwksUri, def.issuer];
     return Array.from(new Set(urls.map(hostOf).filter((h): h is string => !!h))).sort();
 }
-export function providerIdentityHash(def: { id: string; authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; issuer?: string | null }, variableValues: Record<string, string> = {}): string {
+export function providerIdentityHash(def: { id: string; authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; issuer?: string | null }, variableValues: Record<string, string> = {}, extras?: Record<string, OAuthExtraDef> | null): string {
     // Con variables (p. ej. tenant de Microsoft) su valor forma parte de la identidad: cambiar de tenant invalida las cuentas ya vinculadas (hay que volver a vincular).
     const vars = Object.entries(variableValues).sort(([a], [b]) => a.localeCompare(b));
-    return createHash('sha256').update(JSON.stringify(vars.length ? [def.id, identityHostsOf(def), vars] : [def.id, identityHostsOf(def)])).digest('hex');
+    const pins = extraPins(extras).sort();
+    const parts: unknown[] = vars.length ? [def.id, identityHostsOf(def), vars] : [def.id, identityHostsOf(def)];
+    // Sin extras el hash es el de siempre (las cuentas ya vinculadas siguen valiendo).
+    if (pins.length) parts.push({ extras: pins });
+    return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 }
 
 const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -193,7 +206,7 @@ function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, sourc
     const d = { ...raw, authorizeUrl: fill(raw.authorizeUrl) as string, tokenUrl: fill(raw.tokenUrl) as string, revokeUrl: fill(raw.revokeUrl), userinfoUrl: fill(raw.userinfoUrl), jwksUri: fill(raw.jwksUri), issuer: fill(raw.issuer) } as ParsedProvider['def'];
     // Tenant concreto (GUID): el claim tid del id_token debe ser ese; con common/organizations/consumers cualquier tid valido (el emisor lo lleva).
     const issuerPins: Record<string, string> = variableValues.tenant && GUID_RE.test(variableValues.tenant) ? { tid: variableValues.tenant.toLowerCase() } : {};
-    const hosts = endpointHostsOf({ authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, apiBase: d.apiBase, actions: d.actions });
+    const hosts = endpointHostsOf({ authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, apiBase: d.apiBase, actions: d.actions, extras: d.extras });
     return {
         id: d.id,
         displayName: d.displayName,
@@ -220,13 +233,15 @@ function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, sourc
         variableValues,
         issuerPins,
         serviceCredentials: d.serviceCredentials ?? null,
+        extras: { ...(d.extras ?? {}) },
+        onUnlink: typeof d.onUnlink === 'string' ? d.onUnlink : null,
         clientId: null,
         clientSecret: null,
         clientSecretName: (d as { clientSecretCredential?: string }).clientSecretCredential ?? null,
         source,
         extensionId,
         endpointHosts: hosts,
-        identityHash: providerIdentityHash({ id: d.id, authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, issuer: d.issuer }, variableValues),
+        identityHash: providerIdentityHash({ id: d.id, authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, issuer: d.issuer }, variableValues, d.extras),
         status: 'not_configured',
     };
 }

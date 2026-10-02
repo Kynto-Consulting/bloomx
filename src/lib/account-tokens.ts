@@ -14,7 +14,7 @@ import { encrypt, isEncrypted, needsReencrypt, tryDecrypt } from './encryption';
 //    devolveria los campos tal como estan en BD (cifrados). Ningun consumidor actual lo hace.
 // Migracion masiva opcional: scripts/encrypt-account-tokens.ts.
 
-export const ACCOUNT_TOKEN_FIELDS = ['access_token', 'refresh_token', 'id_token'] as const;
+export const ACCOUNT_TOKEN_FIELDS = ['access_token', 'refresh_token', 'id_token', 'provider_data'] as const;
 type Field = (typeof ACCOUNT_TOKEN_FIELDS)[number];
 
 function encryptValue(v: unknown): unknown {

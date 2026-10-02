@@ -175,8 +175,8 @@ describe('cifrado de tokens OAuth de Account (capa de acceso)', () => {
     });
     afterEach(() => restore());
 
-    it('cifra los tres campos y respeta el resto; no cifra dos veces', () => {
-        const data = { access_token: 'ya29.abc', refresh_token: '1//0gxyz', id_token: 'eyJ.x.y', scope: 'a b', expires_at: 5 };
+    it('cifra los campos de token (y los datos extra) y respeta el resto; no cifra dos veces', () => {
+        const data = { access_token: 'ya29.abc', refresh_token: '1//0gxyz', id_token: 'eyJ.x.y', provider_data: '{"webhook_id":"1"}', scope: 'a b', expires_at: 5 };
         const enc = encryptAccountData(data);
         for (const f of ACCOUNT_TOKEN_FIELDS) expect(detectFormat((enc as any)[f]).format).toBe('v3');
         expect(enc.scope).toBe('a b');

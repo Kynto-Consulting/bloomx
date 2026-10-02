@@ -4,12 +4,13 @@ import { getCurrentUser, getSessionCookie, setSessionCookie } from '@/lib/sessio
 import { mfaRequiredFor } from '@/lib/mfa';
 import { refreshPermissions } from '@/lib/permissions';
 import { auditLog, getClientIp, isSafeRelativePath, rateLimitAsync } from '@/lib/security';
-import { checkOAuthEndpointUrl, issuerClaimNames, issuerParamMatches, OAUTH_RESERVED_PARAMS } from '@/lib/expansions/oauth-schema';
+import { checkOAuthEndpointUrl, extractOAuthExtras, issuerClaimNames, issuerParamMatches, OAUTH_RESERVED_PARAMS } from '@/lib/expansions/oauth-schema';
 import { patchAllUserMeetRooms } from '@/lib/google/meet';
 import { codeChallengeS256, PKCE_METHOD } from './pkce';
 import { clearFlowCookie, newFlow, persistFlow, setFlowCookie, verifyAndConsumeFlow, type FlowMode } from './flow-state';
 import { getProvider, usesOfficialEndpoints, type ProviderRuntime } from './providers';
-import { exchangeCode, grantAccountId, normalizeScope, OAuthAccountError, tokenGrants } from './tokens';
+import { exchangeCode, grantAccountId, normalizeScope, OAuthAccountError, parseAccountExtras, tokenGrants } from './tokens';
+import { runOnUnlink } from './unlink';
 import { verifyIdToken, type IdTokenClaims } from './id-token';
 import { providerFetch } from './http';
 
@@ -121,23 +122,43 @@ export async function startOAuth(req: NextRequest, providerId: string, options: 
 
 interface Profile { id: string; email: string | null; verified: boolean | null; name: string | null; picture: string | null }
 
+/** Perfil real de la respuesta de userinfo: algunos proveedores lo envuelven en "data" (Asana) o "resource" (Calendly). */
+export function profileBody(raw: Record<string, any> | null): Record<string, any> | null {
+    if (!raw) return null;
+    if (raw.id !== undefined || raw.sub !== undefined || raw.account_id !== undefined) return raw;
+    for (const wrapped of [raw.data, raw.resource]) if (wrapped && typeof wrapped === 'object' && !Array.isArray(wrapped)) return wrapped as Record<string, any>;
+    return raw;
+}
+
+/** Identificador estable del perfil: id/sub (OIDC y la mayoria), id numerico (GitHub), account_id (Atlassian), gid (Asana) o uri (Calendly). */
+export function profileId(raw: Record<string, any> | null): string | null {
+    const body = profileBody(raw);
+    if (!body) return null;
+    for (const v of [body.id, body.sub, body.account_id, body.gid, body.uri]) {
+        if (typeof v === 'string' && v && v.length <= 256) return v;
+        if (typeof v === 'number' && Number.isSafeInteger(v) && v > 0) return String(v);
+    }
+    return null;
+}
+
 async function loadProfile(provider: ProviderRuntime, accessToken: string, claims: { sub?: string; email?: string; email_verified?: boolean; name?: string; picture?: string } | null): Promise<Profile | null> {
     let raw: Record<string, any> | null = null;
     if (provider.userinfoUrl) {
         const res = await providerFetch(provider.allowedHosts, provider.userinfoUrl, { headers: { Authorization: `Bearer ${accessToken}` }, maxBytes: 200_000 });
         raw = res.ok && res.json && typeof res.json === 'object' ? (res.json as Record<string, any>) : null;
     }
-    const id = raw?.id ?? raw?.sub ?? claims?.sub;
+    const body = profileBody(raw);
+    const id = profileId(raw) ?? claims?.sub;
     if (typeof id !== 'string' || !id) return null;
     // Integridad: si hay id_token validado, el sujeto del userinfo debe ser el mismo (evita mezclar identidades).
     if (claims?.sub && raw && claims.sub !== id) return null;
-    const verified = raw?.verified_email ?? raw?.email_verified ?? claims?.email_verified;
+    const verified = body?.verified_email ?? body?.email_verified ?? claims?.email_verified;
     return {
         id,
-        email: typeof (raw?.email ?? claims?.email) === 'string' ? String(raw?.email ?? claims?.email) : null,
+        email: typeof (body?.email ?? claims?.email) === 'string' ? String(body?.email ?? claims?.email) : null,
         verified: typeof verified === 'boolean' ? verified : null,
-        name: typeof (raw?.name ?? claims?.name) === 'string' ? String(raw?.name ?? claims?.name) : null,
-        picture: typeof (raw?.picture ?? claims?.picture) === 'string' ? String(raw?.picture ?? claims?.picture) : null,
+        name: typeof (body?.name ?? claims?.name) === 'string' ? String(body?.name ?? claims?.name) : null,
+        picture: typeof (body?.picture ?? claims?.picture) === 'string' ? String(body?.picture ?? claims?.picture) : null,
     };
 }
 
@@ -188,6 +209,9 @@ export async function finishOAuth(req: NextRequest, providerId: string): Promise
             return loginError(origin, isGoogle ? 'GoogleAuthFailed' : 'OAuthFailed', provider.id);
         }
 
+        // RFC 6749 §5.1: si la respuesta no trae `scope` (Telegram, Todoist), los scopes concedidos son los pedidos.
+        if (provider.tokenFormat !== 'slack-v2' && typeof tokens.scope !== 'string') tokens = { ...tokens, scope: flow.scopes.join(' ') };
+
         // Slack OAuth v2: sin id_token ni userinfo; la identidad (equipo + usuario) viene en la respuesta del token y se guardan bot y usuario por separado.
         if (provider.tokenFormat === 'slack-v2') return await completeGrants({ origin, provider, tokens, returnTo, currentUserId: currentUser?.id ?? null, ip });
 
@@ -203,6 +227,14 @@ export async function finishOAuth(req: NextRequest, providerId: string): Promise
             claims = verdict.claims;
         }
 
+        // 2b. Datos extra del proveedor (instancia de Salesforce, webhook de Discord, id de Telegram...): validados con el patron del proveedor; si falta o no
+        // cumple, NO se vincula (nada de URLs ni identificadores arbitrarios). Se guardan CIFRADOS por cuenta; los valores nunca se registran.
+        const extras = extractOAuthExtras(provider.extras, tokens, claims);
+        if (!extras) {
+            auditLog('auth.oauth.extras_rejected', { provider: provider.id, ip });
+            return loginError(origin, 'OAuthFailed', provider.id);
+        }
+
         // 3. Perfil
         const profile = await loadProfile(provider, tokens.access_token, claims);
         if (!profile) return loginError(origin, isGoogle ? 'GoogleAuthFailed' : 'OAuthFailed', provider.id);
@@ -216,7 +248,7 @@ export async function finishOAuth(req: NextRequest, providerId: string): Promise
             }
         }
         if (isGoogle) return await completeGoogleIdentity({ req, origin, provider, profile, tokens, returnTo, currentUserId: currentUser?.id ?? null, ip });
-        return await completeLinkOnly({ origin, provider, profile, tokens, returnTo, currentUserId: currentUser?.id ?? null, ip });
+        return await completeLinkOnly({ origin, provider, profile, tokens, extras, returnTo, currentUserId: currentUser?.id ?? null, ip });
     } catch (error) {
         if (error instanceof OAuthAccountError) return loginError(origin, 'OAuthFailed', provider.id);
         console.error('[OAUTH] callback error:', provider.id, error instanceof Error ? error.message.slice(0, 120) : 'unknown');
@@ -232,21 +264,35 @@ export function isOfficialGoogle(provider: Pick<ProviderRuntime, 'id' | 'source'
 type Tokens = Awaited<ReturnType<typeof exchangeCode>>;
 const expiresAt = (t: Tokens) => (t.expires_in ? Math.floor(Date.now() / 1000 + Number(t.expires_in)) : undefined);
 
-async function upsertAccount(provider: ProviderRuntime, userId: string, profile: Profile, t: Tokens) {
+async function upsertAccount(provider: ProviderRuntime, userId: string, profile: Profile, t: Tokens, extras?: Record<string, string>) {
+    // Solo los proveedores que declaran `extras` escriben provider_data (JSON cifrado por la capa de cifrado de Account); el resto no lo toca.
+    let providerData: string | undefined;
+    if (Object.keys(provider.extras ?? {}).length > 0) {
+        const next = extras ?? {};
+        const prev = await prisma.account.findUnique({ where: { provider_providerAccountId: { provider: provider.id, providerAccountId: profile.id } } }).catch(() => null) as { provider_data?: string | null } | null;
+        const before = parseAccountExtras(prev?.provider_data, provider);
+        let stored = next;
+        if (Object.keys(next).length === 0) stored = before; // nueva autorizacion sin datos (p. ej. solo identify en Discord): se conserva lo anterior
+        else if (Object.entries(before).some(([k, v]) => k in next && next[k] !== v)) {
+            // Los datos se REEMPLAZAN (otro webhook/instancia): lo anterior se limpia en el proveedor (onUnlink) para no dejar credenciales vivas huerfanas.
+            if (provider.onUnlink) await runOnUnlink(provider, { provider_data: prev?.provider_data });
+        }
+        providerData = JSON.stringify(stored);
+    }
     await prisma.account.upsert({
         where: { provider_providerAccountId: { provider: provider.id, providerAccountId: profile.id } },
         create: {
             userId, type: 'oauth', provider: provider.id, providerAccountId: profile.id,
-            access_token: t.access_token, refresh_token: t.refresh_token, id_token: t.id_token, scope: t.scope, token_type: t.token_type, expires_at: expiresAt(t), provider_hash: provider.identityHash,
+            access_token: t.access_token, refresh_token: t.refresh_token, id_token: t.id_token, scope: t.scope, token_type: t.token_type, expires_at: expiresAt(t), provider_hash: provider.identityHash, provider_data: providerData,
         },
         update: {
-            access_token: t.access_token, refresh_token: t.refresh_token ?? undefined, id_token: t.id_token, scope: t.scope, expires_at: expiresAt(t), provider_hash: provider.identityHash,
+            access_token: t.access_token, refresh_token: t.refresh_token ?? undefined, id_token: t.id_token, scope: t.scope, expires_at: expiresAt(t), provider_hash: provider.identityHash, provider_data: providerData,
         },
     });
 }
 
 /** Proveedores que no son de inicio de sesion: solo se VINCULAN a un usuario con sesion (el mismo que inicio el flujo). */
-async function completeLinkOnly(a: { origin: string; provider: ProviderRuntime; profile: Profile; tokens: Tokens; returnTo: string; currentUserId: string | null; ip: string }): Promise<NextResponse> {
+async function completeLinkOnly(a: { origin: string; provider: ProviderRuntime; profile: Profile; tokens: Tokens; extras?: Record<string, string>; returnTo: string; currentUserId: string | null; ip: string }): Promise<NextResponse> {
     if (!a.currentUserId) return loginError(a.origin, 'LoginRequired', a.provider.id);
     const existing = await prisma.account.findUnique({ where: { provider_providerAccountId: { provider: a.provider.id, providerAccountId: a.profile.id } } });
     if (existing && existing.userId !== a.currentUserId) {
@@ -254,7 +300,7 @@ async function completeLinkOnly(a: { origin: string; provider: ProviderRuntime; 
         clearFlowCookie(res, a.provider.id);
         return res;
     }
-    await upsertAccount(a.provider, a.currentUserId, a.profile, a.tokens);
+    await upsertAccount(a.provider, a.currentUserId, a.profile, a.tokens, a.extras);
     auditLog('auth.oauth.linked', { provider: a.provider.id, userId: a.currentUserId, ip: a.ip });
     const ok = redirect(a.origin, a.returnTo);
     clearFlowCookie(ok, a.provider.id);

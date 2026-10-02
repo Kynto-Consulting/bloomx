@@ -139,7 +139,7 @@ export class FakeGoogle {
 
 /** BD falsa de Prisma (solo lo que usa el flujo). No cifra: el cifrado en reposo lo cubre account-tokens.test.ts. */
 export function createFakePrisma() {
-    type Acc = { id: string; userId: string; type: string; provider: string; providerAccountId: string; access_token: string | null; refresh_token: string | null; id_token: string | null; expires_at: number | null; scope: string | null; token_type: string | null; provider_hash?: string | null };
+    type Acc = { id: string; userId: string; type: string; provider: string; providerAccountId: string; access_token: string | null; refresh_token: string | null; id_token: string | null; expires_at: number | null; scope: string | null; token_type: string | null; provider_hash?: string | null; provider_data?: string | null };
     const accounts: Acc[] = [];
     const users: Array<{ id: string; email: string; name: string | null; avatar: string | null; password: string }> = [];
     let seq = 0;

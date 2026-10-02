@@ -52,6 +52,12 @@ export type OAuthActionParam = {
     queryName?: string;
     /** Clave de un ajuste NO secreto del settingsSchema con una lista separada por comas: el valor del parametro (string) DEBE estar en ella. Lista vacia = nada permitido (p. ej. canales de Slack). */
     allowedFromSetting?: string;
+    /** Solo `in: body` `type: object`: lista CERRADA de claves permitidas (campos del objeto); cualquier otra se rechaza y los valores deben ser escalares (sin objetos anidados). Requiere oauth.provider.v2. */
+    objectKeys?: string[];
+    /** Con `objectKeys`: clave de un ajuste NO secreto (lista) del admin; las claves del objeto deben estar ADEMAS en ella (vacia = ninguna). El nucleo lo aplica. Requiere oauth.provider.v2. */
+    allowedKeysFromSetting?: string;
+    /** Con `objectKeys`: longitud maxima de cada valor string (por defecto 4000). */
+    maxValueLength?: number;
 };
 
 /**
@@ -82,7 +88,30 @@ export type OAuthActionDef = {
     write?: boolean;
     /** Tope DURO por hora y por usuario+extension de esta accion, aplicado por el nucleo (ademas de la cuota por minuto del intermediario). 1..10000. Requiere oauth.provider.v2. */
     quotaPerHour?: number;
+    /**
+     * Host de la accion = `<valor guardado en la cuenta del usuario del dato extra X><hostSuffix de X>` (p. ej. Salesforce: la instancia que devolvio el token).
+     * El valor se valido al vincular con el patron del proveedor; NUNCA sale de la peticion. Sustituye a `apiBase`. Solo identidad `user`. Requiere oauth.provider.v2.
+     */
+    apiHostExtra?: string;
+    /** Parametros de RUTA que no elige quien llama: `{marcador}` -> dato extra de la cuenta (p. ej. id y token del webhook de Discord). Nunca se devuelven. Requiere oauth.provider.v2. */
+    pathExtras?: Record<string, string>;
+    /** Campos CONSTANTES del cuerpo JSON (p. ej. allowed_mentions de Discord): se aplican DESPUES de los de la peticion y no se pueden sobrescribir. Requiere oauth.provider.v2. */
+    fixedBody?: Record<string, unknown>;
+    /** true = la accion NO usa el token OAuth (no envia Authorization ni lo refresca): la credencial va en la ruta (pathExtras), p. ej. el webhook de Discord. Exige pathExtras. Requiere oauth.provider.v2. */
+    noAuth?: boolean;
 };
+
+/**
+ * Dato EXTRA que el nucleo conserva de la respuesta del token (o de un claim del id_token ya verificado) por cuenta conectada, CIFRADO en reposo.
+ * `from`: ruta con puntos en el JSON del token ("webhook.id") o "claim:<nombre>" (solo con issuer/jwksUri). Se valida con `pattern` (y `maxLength`) al
+ * vincular: si falta o no cumple, la vinculacion falla (salvo required:false). NUNCA llega a una extension, salvo los marcados `public:true` (no
+ * sensibles, p. ej. el chat_id verificado) en `accounts().meta`. Los sensibles solo los usa el nucleo para construir la ruta/host de una accion declarada.
+ * `hostSuffix` (".my.salesforce.com"): `from` es una URL https y se guarda SOLO la etiqueta que precede al sufijo (la "instancia"), que debe cumplir `pattern`.
+ */
+export type OAuthExtraDef = { from: string; pattern: string; maxLength?: number; hostSuffix?: string; required?: boolean; public?: boolean };
+export const OAUTH_EXTRA_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/;
+export const OAUTH_EXTRA_LIMITS = { maxExtras: 6, maxValue: 512 };
+const EXTRA_FROM_RE = /^(?:claim:[a-z][a-z0-9_]{0,31}|[A-Za-z_][A-Za-z0-9_]{0,31}(?:\.[A-Za-z_][A-Za-z0-9_]{0,31}){0,3})$/;
 
 /** Credenciales COMPARTIDAS del dominio que el nucleo guarda cifradas (nunca llegan a una extension) para los modos organizador / cuenta de servicio. */
 export type OAuthPrincipalsDef = {
@@ -140,6 +169,10 @@ export type OAuthProviderDef = {
     variables?: Record<string, OAuthVariableDef>;
     /** Credenciales S2S para la identidad compartida `service` (sin cuenta de servicio de Google). Requiere oauth.provider.v2. */
     serviceCredentials?: OAuthServiceCredentialsDef;
+    /** Datos extra (cifrados por cuenta) que se conservan de la respuesta del token. Requiere oauth.provider.v2. */
+    extras?: Record<string, OAuthExtraDef>;
+    /** Id de una accion (noAuth, sin parametros obligatorios) que el nucleo ejecuta con los datos extra de la cuenta AL DESCONECTAR, antes de borrarla (p. ej. borrar el webhook de Discord). Mejor esfuerzo. Requiere oauth.provider.v2. */
+    onUnlink?: string;
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -257,6 +290,8 @@ export const RESERVED_OAUTH_PROVIDERS: Readonly<Record<string, readonly string[]
     zoom: ["core-zoomlib"],
     slack: ["core-slacklib"],
     github: ["core-githublib"],
+    jira: ["core-jiralib"],
+    calendly: ["core-calendlylib"],
     gitlab: ["core-gitlablib"],
     facebook: ["core-facebooklib"],
     apple: ["core-applelib"],
@@ -264,6 +299,13 @@ export const RESERVED_OAUTH_PROVIDERS: Readonly<Record<string, readonly string[]
     dropbox: ["core-dropboxlib"],
     notion: ["core-notionlib"],
     hubspot: ["core-hubspotlib"],
+    airtable: ["core-airtablelib"],
+    asana: ["core-asanalib"],
+    todoist: ["core-todoistlib"],
+    salesforce: ["core-salesforcelib"],
+    "salesforce-sandbox": ["core-salesforcelib"],
+    discord: ["core-discordlib"],
+    telegram: ["core-telegramlib"],
 });
 /** true si `extensionId` puede registrar el proveedor `providerId` (los no reservados los puede registrar cualquiera, con aprobacion del admin en la instancia). */
 export function mayRegisterOAuthProvider(providerId: string, extensionId: unknown): boolean {
@@ -281,6 +323,61 @@ export function safePatternTest(pattern: string, value: string): boolean {
     }
 }
 
+/**
+ * Etiqueta de host ("instancia") de una URL https RECIBIDA del proveedor, o null. Estricta: sin userinfo, puerto, ruta, consulta, fragmento, mayusculas,
+ * %, unicode ni backslash; el host debe acabar EXACTAMENTE en `hostSuffix` y lo que precede debe cumplir `pattern`.
+ */
+export function hostLabelFromUrl(raw: unknown, hostSuffix: string, pattern: string): string | null {
+    if (typeof raw !== "string" || raw.length > 200 || !hostSuffix.startsWith(".")) return null;
+    const m = /^https:\/\/([a-z0-9.-]+)\/?$/.exec(raw);
+    if (!m) return null;
+    const host = m[1];
+    if (!host.endsWith(hostSuffix) || host.length <= hostSuffix.length) return null;
+    const label = host.slice(0, host.length - hostSuffix.length);
+    if (label.includes("..") || label.startsWith(".") || label.endsWith(".")) return null;
+    return safePatternTest(pattern, label) ? label : null;
+}
+
+function pickPath(source: unknown, path: string[]): unknown {
+    let cur: unknown = source;
+    for (const key of path) {
+        if (key === "__proto__" || key === "constructor" || key === "prototype") return undefined;
+        if (typeof cur !== "object" || cur === null || Array.isArray(cur) || !Object.prototype.hasOwnProperty.call(cur, key)) return undefined;
+        cur = (cur as Record<string, unknown>)[key];
+    }
+    return cur;
+}
+
+/**
+ * Extrae y VALIDA los datos extra de la respuesta del token / claims del id_token. null si alguno requerido falta o no cumple (la vinculacion debe fallar).
+ * Solo devuelve cadenas que cumplen el patron del proveedor y el juego de caracteres imprimible ASCII.
+ */
+export function extractOAuthExtras(extras: Record<string, OAuthExtraDef> | undefined, token: unknown, claims: unknown): Record<string, string> | null {
+    const out: Record<string, string> = {};
+    for (const [name, def] of Object.entries(extras ?? {})) {
+        const raw = def.from.startsWith("claim:") ? pickPath(claims, [def.from.slice(6)]) : pickPath(token, def.from.split("."));
+        if (raw === undefined || raw === null || raw === "") {
+            if (def.required === false) continue;
+            return null;
+        }
+        let value: string | null = null;
+        if (def.hostSuffix) value = hostLabelFromUrl(raw, def.hostSuffix, def.pattern);
+        else {
+            const text = typeof raw === "string" ? raw : typeof raw === "number" && Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : null;
+            if (text !== null && text.length <= Math.min(def.maxLength ?? 256, OAUTH_EXTRA_LIMITS.maxValue) && /^[\x21-\x7e]+$/.test(text) && safePatternTest(def.pattern, text)) value = text;
+        }
+        if (value === null) return null;
+        out[name] = value;
+    }
+    return out;
+}
+
+/** Host efectivo de una accion con `apiHostExtra`: `<instancia><sufijo>` ya validado; null si la cuenta no tiene el dato. */
+export function extraHost(def: OAuthExtraDef | undefined, value: unknown): string | null {
+    if (!def?.hostSuffix || typeof value !== "string" || !safePatternTest(def.pattern, value) || !/^[a-z0-9.-]+$/.test(value) || value.includes("..")) return null;
+    return `${value}${def.hostSuffix}`;
+}
+
 export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, settingsFields?: ReadonlyArray<{ key: string; secret: boolean }>, extensionId?: unknown): void {
     if (raw === undefined) return;
     if (!Array.isArray(raw)) return err("oauthProviders", "Debe ser un arreglo");
@@ -290,7 +387,7 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
         const at = `oauthProviders[${index}]`;
         if (typeof p !== "object" || p === null || Array.isArray(p)) return err(at, "Debe ser un objeto");
         const o = p as Record<string, unknown>;
-        const known = ["id", "displayName", "icon", "authorizeUrl", "tokenUrl", "revokeUrl", "userinfoUrl", "issuer", "jwksUri", "apiBase", "actions", "principals", "allowedHosts", "scopes", "defaultScopes", "pkce", "extraParams", "clientIdSetting", "clientSecretCredential", "redirectPath", "tokenAuth", "tokenFormat", "revokeToken", "variables", "serviceCredentials"];
+        const known = ["id", "displayName", "icon", "authorizeUrl", "tokenUrl", "revokeUrl", "userinfoUrl", "issuer", "jwksUri", "apiBase", "actions", "principals", "allowedHosts", "scopes", "defaultScopes", "pkce", "extraParams", "clientIdSetting", "clientSecretCredential", "redirectPath", "tokenAuth", "tokenFormat", "revokeToken", "variables", "serviceCredentials", "extras", "onUnlink"];
         for (const k of Object.keys(o)) if (!known.includes(k)) warn(`${at}.${k}`, "Clave desconocida (se ignora)");
 
         if (typeof o.id !== "string" || !OAUTH_PROVIDER_ID_RE.test(o.id)) err(`${at}.id`, "Requerido: [a-z][a-z0-9-] (2-32)");
@@ -311,6 +408,38 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
                 if (typeof h !== "string" || !isPublicDnsHost(h)) return err(`${at}.allowedHosts[${i}]`, "Host DNS publico (sin IP, localhost ni red interna; \"*.dominio.tld\" permitido)");
                 hosts.push(h.toLowerCase());
             });
+        }
+        // Datos extra por cuenta (cifrados): ver OAuthExtraDef.
+        const extraDefs: Record<string, OAuthExtraDef> = {};
+        if (o.extras !== undefined) {
+            const ex = o.extras as Record<string, unknown>;
+            if (typeof ex !== "object" || ex === null || Array.isArray(ex)) err(`${at}.extras`, "Debe ser un objeto { nombre: { from, pattern, ... } }");
+            else {
+                const entries = Object.entries(ex);
+                if (entries.length > OAUTH_EXTRA_LIMITS.maxExtras) err(`${at}.extras`, `Maximo ${OAUTH_EXTRA_LIMITS.maxExtras}`);
+                for (const [name, def] of entries) {
+                    const eat = `${at}.extras.${name}`;
+                    if (!OAUTH_EXTRA_NAME_RE.test(name)) { err(eat, "Nombre invalido ([a-z][a-z0-9_], max 32)"); continue; }
+                    if (typeof def !== "object" || def === null || Array.isArray(def)) { err(eat, "Debe ser un objeto"); continue; }
+                    const d = def as Record<string, unknown>;
+                    for (const k of Object.keys(d)) if (!["from", "pattern", "maxLength", "hostSuffix", "required", "public"].includes(k)) err(`${eat}.${k}`, "Clave desconocida");
+                    let ok = true;
+                    if (typeof d.from !== "string" || !EXTRA_FROM_RE.test(d.from)) { err(`${eat}.from`, "Ruta con puntos del JSON del token (p. ej. webhook.id) o claim:<nombre>"); ok = false; }
+                    else if (d.from.startsWith("claim:") && (typeof o.issuer !== "string" || typeof o.jwksUri !== "string")) { err(`${eat}.from`, "Un claim exige issuer y jwksUri (el id_token se verifica)"); ok = false; }
+                    const problem = typeof d.pattern === "string" && d.pattern.length <= 100 ? regexProblem(d.pattern) : "String (max 100)";
+                    if (problem) { err(`${eat}.pattern`, problem); ok = false; }
+                    else if (typeof d.pattern === "string" && !(d.pattern.startsWith("^") && d.pattern.endsWith("$"))) { err(`${eat}.pattern`, "El patron debe estar anclado (^...$)"); ok = false; }
+                    if (d.maxLength !== undefined && (!Number.isInteger(d.maxLength) || (d.maxLength as number) < 1 || (d.maxLength as number) > OAUTH_EXTRA_LIMITS.maxValue)) { err(`${eat}.maxLength`, `Entero 1..${OAUTH_EXTRA_LIMITS.maxValue}`); ok = false; }
+                    for (const k of ["required", "public"] as const) if (d[k] !== undefined && typeof d[k] !== "boolean") { err(`${eat}.${k}`, "Debe ser boolean"); ok = false; }
+                    if (d.hostSuffix !== undefined) {
+                        const suffix = d.hostSuffix;
+                        if (typeof suffix !== "string" || !suffix.startsWith(".") || !isPublicDnsHost(suffix.slice(1)) || suffix.slice(1).startsWith("*")) { err(`${eat}.hostSuffix`, "Sufijo DNS publico que empieza por . (p. ej. .my.salesforce.com)"); ok = false; }
+                        else if (!hosts.some((h) => h === `*${suffix}` || h.startsWith("*.") && suffix.endsWith(h.slice(1)))) { err(`${eat}.hostSuffix`, `allowedHosts debe incluir *${suffix}`); ok = false; }
+                        if (d.public === true) { err(`${eat}.public`, "Un dato de host no es publico"); ok = false; }
+                    }
+                    if (ok) extraDefs[name] = d as unknown as OAuthExtraDef;
+                }
+            }
         }
         // Variables de URL ({tenant}): declaradas en `variables`, solo en la RUTA; se validan con su valor por defecto.
         const varDefaults: Record<string, string> = {};
@@ -409,7 +538,12 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
             else o.defaultScopes.forEach((s: unknown, i: number) => { if (typeof s !== "string" || !scopeIds.has(s)) err(`${at}.defaultScopes[${i}]`, "Debe ser un scope del catalogo"); });
         }
 
-        if (o.actions !== undefined) validateActions(o.actions, `${at}.actions`, err, scopeIds, typeof o.apiBase === "string", hosts, settingsFields);
+        if (o.actions !== undefined) validateActions(o.actions, `${at}.actions`, err, scopeIds, typeof o.apiBase === "string", hosts, settingsFields, extraDefs);
+        if (o.onUnlink !== undefined) {
+            const target = Array.isArray(o.actions) ? (o.actions as Array<Record<string, unknown>>).find((a) => a && a.id === o.onUnlink) : undefined;
+            const needsParams = target && target.params && typeof target.params === "object" ? Object.values(target.params as Record<string, Record<string, unknown>>).some((d) => d && d.required === true) : false;
+            if (!target || target.noAuth !== true || needsParams) err(`${at}.onUnlink`, "Debe ser el id de una accion noAuth sin parametros obligatorios");
+        }
         if (o.principals !== undefined) {
             const pr = o.principals as Record<string, unknown>;
             if (typeof pr !== "object" || pr === null || Array.isArray(pr)) err(`${at}.principals`, "Debe ser un objeto");
@@ -469,10 +603,10 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
 const PARAM_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 const QUERY_NAME_RE = /^\$?[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 
-function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<string>, hasApiBase: boolean, hosts: readonly string[], settingsFields?: ReadonlyArray<{ key: string; secret: boolean }>): void {
+function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<string>, hasApiBase: boolean, hosts: readonly string[], settingsFields?: ReadonlyArray<{ key: string; secret: boolean }>, extraDefs: Record<string, OAuthExtraDef> = {}): void {
     if (!Array.isArray(raw)) return err(at, "Debe ser un arreglo");
     if (raw.length > OAUTH_ACTION_LIMITS.maxActions) err(at, `Maximo ${OAUTH_ACTION_LIMITS.maxActions} acciones`);
-    const everyActionHasBase = raw.every((a) => typeof a === "object" && a !== null && typeof (a as Record<string, unknown>).apiBase === "string");
+    const everyActionHasBase = raw.every((a) => typeof a === "object" && a !== null && (typeof (a as Record<string, unknown>).apiBase === "string" || typeof (a as Record<string, unknown>).apiHostExtra === "string"));
     if (raw.length > 0 && !hasApiBase && !everyActionHasBase) err(at, "Las acciones exigen apiBase (del proveedor o de cada accion)");
     const groups = new Set<string>();
     const seen = new Set<string>();
@@ -488,6 +622,27 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
         if (!(OAUTH_ACTION_METHODS as readonly string[]).includes(String(act.method))) err(`${aat}.method`, `Debe ser uno de ${OAUTH_ACTION_METHODS.join(", ")}`);
         const path = act.path;
         const pathParams = new Set<string>();
+        const pathExtraNames = new Set<string>();
+        if (act.pathExtras !== undefined) {
+            const pe = act.pathExtras as Record<string, unknown>;
+            if (typeof pe !== "object" || pe === null || Array.isArray(pe) || Object.keys(pe).length > 4) err(`${aat}.pathExtras`, "Objeto { marcador: dato extra } (max 4)");
+            else for (const [ph, en] of Object.entries(pe)) {
+                if (!PARAM_NAME_RE.test(ph) || ph === "__proto__" || ph === "constructor") err(`${aat}.pathExtras.${ph}`, "Marcador invalido");
+                else if (typeof en !== "string" || !extraDefs[en] || extraDefs[en].hostSuffix) err(`${aat}.pathExtras.${ph}`, "Debe nombrar un dato extra declarado (no de host) del proveedor");
+                else pathExtraNames.add(ph);
+            }
+        }
+        if (act.apiHostExtra !== undefined) {
+            if (typeof act.apiHostExtra !== "string" || !extraDefs[act.apiHostExtra]?.hostSuffix) err(`${aat}.apiHostExtra`, "Debe nombrar un dato extra declarado con hostSuffix");
+            if (act.apiBase !== undefined) err(`${aat}.apiHostExtra`, "Incompatible con apiBase");
+        }
+        if (act.noAuth !== undefined && typeof act.noAuth !== "boolean") err(`${aat}.noAuth`, "Debe ser boolean");
+        if (act.noAuth === true && pathExtraNames.size === 0) err(`${aat}.noAuth`, "Una accion sin token exige pathExtras (la credencial va en la ruta)");
+        if (act.fixedBody !== undefined) {
+            let size = 0;
+            try { size = JSON.stringify(act.fixedBody).length; } catch { size = Infinity; }
+            if (typeof act.fixedBody !== "object" || act.fixedBody === null || Array.isArray(act.fixedBody) || size > 2000 || act.method === "GET") err(`${aat}.fixedBody`, "Objeto JSON de hasta 2000 caracteres (no en GET)");
+        }
         if (typeof path !== "string" || !path.startsWith("/") || path.length > OAUTH_ACTION_LIMITS.maxPathLength || /[?#\\\s]|\.\.|\/\//.test(path)) err(`${aat}.path`, "Ruta relativa que empieza por / (sin ?, #, .., // ni espacios)");
         else {
             for (const m of path.matchAll(/\{([^}]*)\}/g)) {
@@ -515,6 +670,7 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
                     if (d.in === "path" && d.required !== true) err(`${pat}.required`, "Un parametro de ruta es obligatorio");
                     if (d.in === "query" && (d.type === "object" || d.type === "array")) err(`${pat}.type`, "En query solo escalares");
                     if (d.in === "path" && !pathParams.has(name)) err(pat, `No aparece en path: {${name}}`);
+                    if (pathExtraNames.has(name)) err(pat, "Ya es un pathExtras: no puede ser un parametro de quien llama");
                     if (d.pattern !== undefined) {
                         const problem = typeof d.pattern === "string" && d.pattern.length <= 100 ? regexProblem(d.pattern) : "String (max 100)";
                         if (problem) err(`${pat}.pattern`, problem);
@@ -529,11 +685,21 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
                         else if (typeof d.allowedFromSetting !== "string" || !d.allowedFromSetting) err(`${pat}.allowedFromSetting`, "Clave de un ajuste NO secreto del settingsSchema");
                         else if (settingsFields && !settingsFields.some((f) => f.key === d.allowedFromSetting && !f.secret)) err(`${pat}.allowedFromSetting`, `No existe como ajuste no secreto en settingsSchema: ${d.allowedFromSetting}`);
                     }
+                    if (d.objectKeys !== undefined) {
+                        if (d.in !== "body" || d.type !== "object") err(`${pat}.objectKeys`, "Solo parametros in: body de tipo object");
+                        else if (!Array.isArray(d.objectKeys) || d.objectKeys.length === 0 || d.objectKeys.length > 50 || d.objectKeys.some((k: unknown) => typeof k !== "string" || !/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) || k === "__proto__" || k === "constructor")) err(`${pat}.objectKeys`, "Arreglo de 1..50 nombres de campo simples");
+                        if (d.maxValueLength !== undefined && (!Number.isInteger(d.maxValueLength) || (d.maxValueLength as number) < 1 || (d.maxValueLength as number) > 32000)) err(`${pat}.maxValueLength`, "Entero 1..32000");
+                    } else if (d.allowedKeysFromSetting !== undefined || d.maxValueLength !== undefined) err(`${pat}.allowedKeysFromSetting`, "Exige objectKeys");
+                    if (d.allowedKeysFromSetting !== undefined && d.objectKeys !== undefined) {
+                        if (typeof d.allowedKeysFromSetting !== "string" || !d.allowedKeysFromSetting) err(`${pat}.allowedKeysFromSetting`, "Clave de un ajuste NO secreto del settingsSchema");
+                        else if (settingsFields && !settingsFields.some((f) => f.key === d.allowedKeysFromSetting && !f.secret)) err(`${pat}.allowedKeysFromSetting`, `No existe como ajuste no secreto en settingsSchema: ${d.allowedKeysFromSetting}`);
+                    }
                     if (d.maxLength !== undefined && (!Number.isInteger(d.maxLength) || (d.maxLength as number) < 1 || (d.maxLength as number) > OAUTH_ACTION_LIMITS.maxStringLength)) err(`${pat}.maxLength`, `Entero 1..${OAUTH_ACTION_LIMITS.maxStringLength}`);
                 }
             }
         }
-        for (const p of pathParams) if (!declared.has(p)) err(`${aat}.params`, `Falta declarar el parametro de ruta {${p}}`);
+        for (const p of pathParams) if (!declared.has(p) && !pathExtraNames.has(p)) err(`${aat}.params`, `Falta declarar el parametro de ruta {${p}}`);
+        for (const p of pathExtraNames) if (!pathParams.has(p)) err(`${aat}.pathExtras`, `No aparece en path: {${p}}`);
         if (act.requiresScopes !== undefined) {
             if (!Array.isArray(act.requiresScopes)) err(`${aat}.requiresScopes`, "Debe ser un arreglo");
             else act.requiresScopes.forEach((sc: unknown, j: number) => { if (typeof sc !== "string" || !scopeIds.has(sc)) err(`${aat}.requiresScopes[${j}]`, "Debe ser un scope del catalogo"); });
@@ -615,6 +781,12 @@ export function validateActionInput(action: Pick<OAuthActionDef, "params"> & { b
             if (typeof def.max === "number" && v > def.max) { issues.push({ param: name, code: "max" }); continue; }
         }
         if (def.enum && !(def.enum as Array<string | number>).includes(v as string | number)) { issues.push({ param: name, code: "enum" }); continue; }
+        if (def.objectKeys && typeof v === "object" && v !== null) {
+            // Objeto con lista cerrada de campos (p. ej. campos de un Lead): claves fuera de la lista y valores no escalares se rechazan.
+            const maxValue = def.maxValueLength ?? 4000;
+            const bad = Object.entries(v as Record<string, unknown>).some(([k, val]) => !Object.prototype.hasOwnProperty.call(v, k) || !def.objectKeys!.includes(k) || !(val === null || typeof val === "boolean" || (typeof val === "number" && Number.isFinite(val)) || (typeof val === "string" && val.length <= maxValue)));
+            if (bad) { issues.push({ param: name, code: "unknown" }); continue; }
+        }
         // Un segmento de ruta "." o ".." (que encodeURIComponent deja intacto) saldria de la ruta de la accion al normalizar la URL: jamas se admite.
         if (def.in === "path" && typeof v === "string" && /^\.{1,2}$/.test(v)) { issues.push({ param: name, code: "pattern" }); continue; }
         if (def.in === "path") path[name] = v as string | number;
@@ -636,7 +808,7 @@ export function validateActionInput(action: Pick<OAuthActionDef, "params"> & { b
 // ---------------------------------------------------------------------------------------------------------------
 
 /** Grupos de scopes de riesgo alto/critico: pedirlos con `OAUTH_ACCOUNT:<proveedor>:<grupo>` exige aprobacion explicita del admin. */
-export const HIGH_RISK_OAUTH_GROUPS: readonly string[] = Object.freeze(["gmail", "mail", "drive", "files", "admin", "directory"]);
+export const HIGH_RISK_OAUTH_GROUPS: readonly string[] = Object.freeze(["gmail", "mail", "drive", "files", "admin", "directory", "crm"]);
 
 /** Aprobaciones que piden los permisos OAuth de un manifest: toda `OAUTH_SHARED:*` y las `OAUTH_ACCOUNT:*` de grupos de riesgo alto. */
 export function oauthApprovalKeys(permissions: unknown): string[] {
