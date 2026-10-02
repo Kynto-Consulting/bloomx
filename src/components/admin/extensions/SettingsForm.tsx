@@ -12,12 +12,31 @@ import {
     validateForm, visibleFields, type ActionResult, type FormState, type FormValue, type ObjectItem, type ServerFieldError,
 } from '@/lib/admin/extensions-config';
 import { isDlpSchema } from '@/lib/admin/dlp-preview';
+import { resolveInstanceUrl } from '@/lib/admin/instance-url-hint';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
 import { SETTINGS_LIMITS, localizedText, type SettingField, type SettingsAction } from '@/lib/expansions/settings-schema';
 import { ObjectsEditor } from './ObjectsEditor';
 import { UserMapEditor, UserSelect } from './UserFields';
 import { DlpPreview } from './DlpPreview';
 import { ConfigRequestError, useExtensionConfig } from './useExtensionConfig';
+
+/** URL calculada de la instancia con boton de copiar (el portapapeles puede estar bloqueado: se ignora el fallo). */
+function CopyUrl({ url }: { url: string }) {
+    const { t } = useI18n();
+    const [done, setDone] = useState(false);
+    return (
+        <span className="flex flex-wrap items-center gap-2" data-testid="instance-url">
+            <code className="break-all rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">{url}</code>
+            <button
+                type="button"
+                className={btnOutline}
+                onClick={async () => { try { await navigator.clipboard.writeText(url); setDone(true); setTimeout(() => setDone(false), 1800); } catch { /* portapapeles bloqueado */ } }}
+            >
+                {done ? t('admin.console.extensions.config.urlCopied') : t('admin.console.extensions.config.copyUrl')}
+            </button>
+        </span>
+    );
+}
 
 type Notice = { kind: 'ok' | 'error'; text: string } | null;
 type ActionOutcome = { actionId: string; itemId?: string; label: string; data?: ActionResult; error?: string };
@@ -284,7 +303,10 @@ export function SettingsForm({ row, domainId, readOnly, onGoCredentials }: Setti
     const renderField = (field: SettingField) => {
         const inputId = `${uid}-${field.key}`;
         const label = localizedText(field.label, locale, field.key);
-        const description = localizedText(field.description, locale);
+        const rawDescription = localizedText(field.description, locale);
+        // URL de la instancia citada en la descripcion (p. ej. Interactions Endpoint URL): se muestra con el origen real y se puede copiar.
+        const instanceUrl = resolveInstanceUrl(rawDescription, typeof window !== 'undefined' ? window.location.origin : '');
+        const description = instanceUrl.text;
         const error = fieldError(field);
         const dflt = defaultText(field, locale);
         const value = form[field.key];
@@ -292,6 +314,7 @@ export function SettingsForm({ row, domainId, readOnly, onGoCredentials }: Setti
 
         const extras: React.ReactNode[] = [];
         if (description) extras.push(<span key="d">{description}</span>);
+        if (instanceUrl.url) extras.push(<CopyUrl key="u" url={instanceUrl.url} />);
         if (field.type === 'list') {
             const max = Math.min(field.maxItems ?? SETTINGS_LIMITS.maxListItems, SETTINGS_LIMITS.maxListItems);
             extras.push(<span key="l">{t('admin.console.extensions.config.listHint', { count: listCount(typeof value === 'string' ? value : ''), max })}</span>);

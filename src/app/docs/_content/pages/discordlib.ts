@@ -137,7 +137,7 @@ const es: Block[] = [
         '**Auditoría sin contenido**: `oauth.action` registra acción, grupo, servidor, estado y duración, nunca el contenido de los mensajes ni los parámetros.',
     ] },
     { t: 'h2', id: 'interactions', text: 'Interactions por HTTP' },
-    { t: 'p', text: 'Pega `https://<instancia>/api/ext/core-discordlib/interactions` como **Interactions Endpoint URL** en el portal. La ruta es `POST /interactions` con `auth: hmac`, `algorithm: ed25519` y `signedPayload: timestamp+body`.' },
+    { t: 'p', text: 'Pega `https://<instancia>/api/ext/core-discordlib/interactions` como **Interactions Endpoint URL** en el portal. La ruta es `POST /interactions` con `auth: hmac`, `algorithm: ed25519` y `signedPayload: timestamp+body`. Usa siempre el origen de **tu instancia** (el mismo dominio del webmail), nunca el del backend compartido; los ajustes de la extensión muestran la URL ya calculada con un botón para copiarla. Mientras `core-discordlib` no esté instalada y activa en la instancia, la ruta responde 404 `ROUTE_NOT_FOUND`; sin Public Key, 503; firma inválida o timestamp viejo, 401; PING firmado, 200 `{"type":1}`.' },
     { t: 'ul', items: [
         '**Firma**: se verifica Ed25519 sobre **timestamp + cuerpo crudo** (cabeceras `X-Signature-Ed25519` y `X-Signature-Timestamp`) con `DISCORD_PUBLIC_KEY`; se rechazan timestamps fuera de +-5 min y firmas repetidas. Sin clave configurada responde 503 (nunca acepta sin verificar). Cuerpo máximo 64 KB.',
         '**PING** (`type 1`): se responde con `{ type: 1 }`.',
@@ -215,7 +215,7 @@ const en: Block[] = [
         '**Content-free audit**: `oauth.action` records action, group, server, status and duration, never message content or parameters.',
     ] },
     { t: 'h2', id: 'interactions', text: 'Interactions over HTTP' },
-    { t: 'p', text: 'Paste `https://<instance>/api/ext/core-discordlib/interactions` as the **Interactions Endpoint URL** in the portal. The route is `POST /interactions` with `auth: hmac`, `algorithm: ed25519` and `signedPayload: timestamp+body`.' },
+    { t: 'p', text: 'Paste `https://<instance>/api/ext/core-discordlib/interactions` as the **Interactions Endpoint URL** in the portal. The route is `POST /interactions` with `auth: hmac`, `algorithm: ed25519` and `signedPayload: timestamp+body`. Use your **own instance** origin (the same domain as the webmail), never that of the shared backend; the extension settings show the URL already computed with a copy button. While `core-discordlib` is not installed and enabled on the instance the route answers 404 `ROUTE_NOT_FOUND`; without a Public Key, 503; invalid signature or stale timestamp, 401; signed PING, 200 `{"type":1}`.' },
     { t: 'ul', items: [
         '**Signature**: Ed25519 is verified over **timestamp + raw body** (headers `X-Signature-Ed25519` and `X-Signature-Timestamp`) with `DISCORD_PUBLIC_KEY`; timestamps outside +-5 min and replayed signatures are rejected. With no key configured it answers 503 (it never accepts unverified). Body limit 64 KB.',
         '**PING** (`type 1`): answered with `{ type: 1 }`.',
