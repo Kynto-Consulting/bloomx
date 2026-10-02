@@ -8,7 +8,9 @@ import type { FieldErrorCode, RunLogEntry, SettingIssue, SettingSource } from '@
 const KEY_RE = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 const SOURCES: readonly SettingSource[] = ['domain', 'legacy', 'server-env', 'default', 'unset'];
 const SECRET_SOURCES = ['domain', 'legacy', 'server-env', 'missing'] as const;
-const MAX_VALUES_BYTES = 65536;
+// Un userMap admite hasta 5000 entradas (SETTINGS_LIMITS.maxUserMapEntries): el tope de lo que se acepta del backend lo cubre.
+const MAX_VALUES_BYTES = 800_000;
+const ISO_RE = /^d{4}-d{2}-d{2}T[0-9:.]+Z$/;
 
 export interface ActionResult { status: 'ok' | 'failed'; code?: number; latencyMs?: number; message?: string; report?: string[] }
 
@@ -55,7 +57,9 @@ export interface ConfigResponse {
     runLog: RunLogEntry[];
     ok?: boolean;
     result?: ActionResult;
-    secrets: { name: string; configured: boolean; source: (typeof SECRET_SOURCES)[number] }[];
+    /** Secretos write-only por elemento: fecha de la ultima rotacion por `campo.id.sub` (sin valor). */
+    secretsMeta: Record<string, { updatedAt: string }>;
+    secrets: { name: string; configured: boolean; source: (typeof SECRET_SOURCES)[number]; updatedAt?: string; last4?: string }[];
     checklist: { done: number; total: number; items: { key: string; secret: boolean; ok: boolean }[] };
     meta: { updatedAt: string | null; updatedBy: string | null };
     limits: { maxConfigBytes: number | null };
@@ -86,6 +90,9 @@ export function shapeConfigResponse(data: any): ConfigResponse {
                 name: String(s.name),
                 configured: s.configured === true,
                 source: SECRET_SOURCES.includes(s.source) ? s.source : s.configured === true ? 'domain' : 'missing',
+                // write-only: solo estado, fecha y (si el campo lo declara) los ultimos 4 caracteres.
+                ...(typeof s.updatedAt === 'string' && ISO_RE.test(s.updatedAt) ? { updatedAt: s.updatedAt } : {}),
+                ...(typeof s.last4 === 'string' && s.last4.length === 4 ? { last4: s.last4 } : {}),
             }))
         : [];
     const items = Array.isArray(data?.checklist?.items)
@@ -100,6 +107,7 @@ export function shapeConfigResponse(data: any): ConfigResponse {
         values,
         sources,
         secretsSet: Array.isArray(data?.secretsSet) ? data.secretsSet.filter((n: unknown): n is string => typeof n === 'string' && SECRET_NAME_RE.test(n)).slice(0, 500) : [],
+        secretsMeta: shapeSecretsMeta(data?.secretsMeta),
         runLog: shapeRunLog(data?.runLog),
         ...(typeof data?.ok === 'boolean' ? { ok: data.ok } : {}),
         ...(shapeActionResult(data?.result) ? { result: shapeActionResult(data.result) } : {}),
@@ -111,6 +119,15 @@ export function shapeConfigResponse(data: any): ConfigResponse {
         meta: { updatedAt: text(data?.meta?.updatedAt, 40), updatedBy: text(data?.meta?.updatedBy, 120) },
         limits: { maxConfigBytes: Number.isInteger(maxBytes) && maxBytes > 0 && maxBytes <= 10_000_000 ? maxBytes : null },
     };
+}
+
+function shapeSecretsMeta(raw: unknown): Record<string, { updatedAt: string }> {
+    const out: Record<string, { updatedAt: string }> = {};
+    if (!isObject(raw)) return out;
+    for (const [name, v] of Object.entries(raw).slice(0, 500)) {
+        if (SECRET_NAME_RE.test(name) && isObject(v) && typeof v.updatedAt === 'string' && ISO_RE.test(v.updatedAt)) out[name] = { updatedAt: v.updatedAt };
+    }
+    return out;
 }
 
 export function shapeConfigError(data: any): { error: string; errors?: SettingIssue[] } {

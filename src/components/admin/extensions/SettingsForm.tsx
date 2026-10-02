@@ -8,13 +8,14 @@ import {
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/components/I18nProvider';
 import {
-    buildDiff, buildSecrets, changedKeys, describeFieldError, groupFields, initialForm, isLegacySource, listCount, mapServerErrors, secretSummary,
+    isUserMap, buildDiff, buildSecrets, changedKeys, describeFieldError, groupFields, initialForm, isLegacySource, listCount, mapServerErrors, secretSummary,
     validateForm, visibleFields, type ActionResult, type FormState, type FormValue, type ObjectItem, type ServerFieldError,
 } from '@/lib/admin/extensions-config';
 import { isDlpSchema } from '@/lib/admin/dlp-preview';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
 import { SETTINGS_LIMITS, localizedText, type SettingField, type SettingsAction } from '@/lib/expansions/settings-schema';
 import { ObjectsEditor } from './ObjectsEditor';
+import { UserMapEditor, UserSelect } from './UserFields';
 import { DlpPreview } from './DlpPreview';
 import { ConfigRequestError, useExtensionConfig } from './useExtensionConfig';
 
@@ -206,6 +207,22 @@ export function SettingsForm({ row, domainId, readOnly, onGoCredentials }: Setti
         switch (field.type) {
             case 'boolean':
                 return null; // se pinta con su propia fila (switch)
+            case 'user':
+            case 'users':
+                return (
+                    <UserSelect
+                        field={field}
+                        multi={field.type === 'users'}
+                        value={typeof value === 'string' || Array.isArray(value) ? (value as string | string[]) : undefined}
+                        onChange={(next) => setValue(field.key, next)}
+                        editable={!disabled}
+                        inputId={inputId}
+                        describedBy={described}
+                        invalid={!!error}
+                    />
+                );
+            case 'userMap':
+                return <UserMapEditor field={field} value={isUserMap(value) ? value : undefined} onChange={(next) => setValue(field.key, next)} editable={!disabled} error={error} inputId={inputId} describedBy={described} />;
             case 'enum':
                 return (
                     <select {...common} className={selectClass} value={typeof value === 'string' ? value : ''} onChange={(e) => setValue(field.key, e.target.value)}>

@@ -22,7 +22,18 @@
  *       "legacyEnv": "DLP_KEYWORDS"
  *     }]
  *   }
- * Tipos: string | multiline | number | boolean | enum | multienum | list | json | objects  (alias heredados: text, textarea, password, select).
+ * Tipos: string | multiline | number | boolean | enum | multienum | list | json | objects | user | users
+ *        (alias: text, textarea, password, select; `type: "secret"` y `writeOnly: true` equivalen a `secret: true`).
+ *
+ * `user` / `users` = selector (simple / multiple) de usuarios de la organizacion; lo configura el ADMIN. Se guarda el ID estable (nunca el
+ * correo). El servidor del panel comprueba que el id existe en el dominio y no esta desactivado; `filter: { minLevel?, role? }` acota quien
+ * puede elegirse. Si el usuario desaparece, la UI lo marca "usuario eliminado" y el handler recibe el id tal cual.
+ *
+ * `userMap` = mapa { [userId]: valor } (p. ej. "quien recibe el resumen" o "limite por usuario"): el admin ve una tabla buscable de usuarios y
+ * elige un valor por usuario. `valueType`: boolean | string | number | select (+ `options`, `min`/`max`/`integer`, `maxLength`). Solo ids
+ * estables y entradas EXPLICITAS; quien no tiene entrada usa `default` (valor por defecto del tipo de valor). Tope `maxItems` (<= 5000).
+ * El handler recibe el mapa completo y `ctx.settings.forUser(key, userId)` / `getUserValue(key, userId)` resuelve con `default`.
+ * `secret` write-only: la API solo devuelve { set, updatedAt, last4? } (last4 solo con `revealLast4: true`); un guardado vacio no borra.
  *
  * `objects` = lista editable de registros (p. ej. endpoints de webhooks): `itemFields` son los sub-campos (tipos simples; uno puede ser
  * `secret: true` => se guarda cifrado POR ELEMENTO, write-only, y el handler lo recibe solo dentro del sandbox en el propio elemento).
@@ -32,15 +43,15 @@
  * Registro: `settingsSchema.runLog` activa un registro acotado (sin cuerpos ni secretos) que alimenta "Estado y registro".
  */
 
-export const SETTING_TYPES = ["string", "multiline", "number", "boolean", "enum", "multienum", "list", "json", "objects"] as const;
+export const SETTING_TYPES = ["string", "multiline", "number", "boolean", "enum", "multienum", "list", "json", "objects", "user", "users", "userMap"] as const;
 export type SettingType = (typeof SETTING_TYPES)[number];
-const TYPE_ALIASES: Record<string, SettingType | "secret"> = { text: "string", textarea: "multiline", password: "secret", select: "enum" };
+const TYPE_ALIASES: Record<string, SettingType | "secret"> = { text: "string", textarea: "multiline", password: "secret", secret: "secret", select: "enum" };
 
 export const SETTING_FORMATS = ["email", "url", "domain", "regex"] as const;
 export type SettingFormat = (typeof SETTING_FORMATS)[number];
 
 /** Claves que un ajuste NO puede usar: son sub-objetos reservados de ExtensionOnDomain.settings. */
-export const RESERVED_SETTING_KEYS = ["credentials", "env", "meta", "ui", "config", "configMeta", "authData", "mandatory"];
+export const RESERVED_SETTING_KEYS = ["credentials", "env", "meta", "ui", "config", "configMeta", "authData", "mandatory", "secretMeta", "itemSecrets", "runLog"];
 
 export const SETTINGS_LIMITS = {
     maxFields: 60,
@@ -55,7 +66,16 @@ export const SETTINGS_LIMITS = {
     maxObjectItems: 50,
     maxItemSecretLength: 4096,
     maxActions: 10,
+    /** Selector `users`: maximo de ids por campo. */
+    maxUsers: 50,
+    /** userMap: maximo de entradas por campo y holgura de bytes que cada campo userMap suma al tope de settings.config. */
+    maxUserMapEntries: 5000,
+    maxUserMapBytes: 400000,
 };
+export const USER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export const USER_MAP_VALUE_TYPES = ["boolean", "string", "number", "select"] as const;
+export type UserMapValueType = (typeof USER_MAP_VALUE_TYPES)[number];
+export type UserFilter = { minLevel?: number; role?: string };
 
 /** Registro de ejecuciones (settings.runLog): anillo acotado; NUNCA cuerpos, cabeceras ni secretos. */
 export const RUN_LOG_LIMITS = { defaultLimit: 50, maxLimit: 100, maxMessage: 200 };
@@ -122,6 +142,12 @@ export type SettingField = {
     visibleWhen?: { key: string; in: string[] };
     /** false = no ofrecer "Importar desde el entorno" para este campo. */
     envImport?: boolean;
+    /** Solo type userMap: tipo del valor por usuario (boolean | string | number | select). `default` es el valor de quien no tiene entrada. */
+    valueType?: UserMapValueType;
+    /** Solo type user/users/userMap: acota los usuarios elegibles. */
+    filter?: UserFilter;
+    /** Solo secretos: la API puede devolver los ultimos 4 caracteres (apagado por defecto). */
+    revealLast4?: boolean;
 };
 
 export type SettingTemplate = { id: string; label: LocalizedText; description?: LocalizedText; value: Record<string, unknown> };
@@ -227,6 +253,13 @@ function normalizeOptions(raw: unknown): SettingOption[] {
     return out;
 }
 
+function normalizeUserFilter(raw: Record<string, any>): UserFilter {
+    const out: UserFilter = {};
+    if (typeof raw.minLevel === "number" && Number.isInteger(raw.minLevel) && raw.minLevel >= 0 && raw.minLevel <= 5) out.minLevel = raw.minLevel;
+    if (typeof raw.role === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(raw.role)) out.role = raw.role;
+    return out;
+}
+
 /** Convierte lo que hay en el manifest en campos tipados (tolerante: ignora lo invalido; la validacion estricta es validateSettingsSchema). */
 export function normalizeSettingsSchema(schema: unknown, depth = 0): SettingsSchema {
     const empty: SettingsSchema = { groups: [], fields: [], actions: [], runLog: null };
@@ -235,7 +268,7 @@ export function normalizeSettingsSchema(schema: unknown, depth = 0): SettingsSch
     for (const raw of schema.fields.slice(0, SETTINGS_LIMITS.maxFields)) {
         if (!isObject(raw) || typeof raw.key !== "string" || !KEY_RE.test(raw.key)) continue;
         const alias = typeof raw.type === "string" ? TYPE_ALIASES[raw.type] : undefined;
-        const secret = raw.secret === true || alias === "secret";
+        const secret = raw.secret === true || raw.writeOnly === true || alias === "secret";
         const type: SettingType | null = alias === "secret" ? "string" : ((alias as SettingType | undefined) ?? (SETTING_TYPES.includes(raw.type) ? raw.type : null));
         if (!type) continue;
         const field: SettingField = {
@@ -262,6 +295,9 @@ export function normalizeSettingsSchema(schema: unknown, depth = 0): SettingsSch
                 ? { visibleWhen: { key: raw.visibleWhen.key, in: raw.visibleWhen.in.filter((v: unknown): v is string => typeof v === "string") } }
                 : {}),
             ...(raw.envImport === false ? { envImport: false } : {}),
+            ...(type === "userMap" ? { valueType: USER_MAP_VALUE_TYPES.includes(raw.valueType) ? raw.valueType : "boolean" } : {}),
+            ...((type === "user" || type === "users" || type === "userMap") && isObject(raw.filter) ? { filter: normalizeUserFilter(raw.filter) } : {}),
+            ...(secret && raw.revealLast4 === true ? { revealLast4: true } : {}),
             ...(type === "objects" && depth === 0 && Array.isArray(raw.itemFields)
                 ? { itemFields: normalizeSettingsSchema({ fields: raw.itemFields }, 1).fields.filter((sub) => sub.type !== "objects") }
                 : {}),
@@ -285,6 +321,8 @@ export function normalizeSettingsSchema(schema: unknown, depth = 0): SettingsSch
 
 export const configFields = (fields: SettingField[]): SettingField[] => fields.filter((f) => !f.secret);
 export const secretFields = (fields: SettingField[]): SettingField[] => fields.filter((f) => f.secret);
+/** Tope de bytes de settings.config para un esquema: base + holgura por cada campo userMap. */
+export const configByteLimit = (fields: SettingField[]): number => SETTINGS_LIMITS.maxConfigBytes + fields.filter((f) => f.type === "userMap").length * SETTINGS_LIMITS.maxUserMapBytes;
 
 /** Valida la DECLARACION del esquema (permisivo con el formato heredado). Devuelve problemas con ruta. */
 export function validateSettingsSchema(schema: unknown, basePath = "settingsSchema", functionNames?: Iterable<string>, depth = 0): SettingIssue[] {
@@ -315,7 +353,27 @@ export function validateSettingsSchema(schema: unknown, basePath = "settingsSche
         const alias = typeof raw.type === "string" ? TYPE_ALIASES[raw.type] : undefined;
         const type = alias === "secret" ? "string" : alias ?? raw.type;
         if (!SETTING_TYPES.includes(type)) return bad("type", `Debe ser uno de ${SETTING_TYPES.join(", ")}`);
-        const secret = raw.secret === true || alias === "secret";
+        const secret = raw.secret === true || raw.writeOnly === true || alias === "secret";
+        if (type === "userMap") {
+            if (raw.valueType !== undefined && !USER_MAP_VALUE_TYPES.includes(raw.valueType)) bad("valueType", `Debe ser uno de ${USER_MAP_VALUE_TYPES.join(", ")}`);
+            if (secret) bad("secret", "Un userMap no puede ser secreto");
+            if (raw.maxItems !== undefined && (typeof raw.maxItems !== "number" || !Number.isInteger(raw.maxItems) || raw.maxItems < 1 || raw.maxItems > SETTINGS_LIMITS.maxUserMapEntries)) bad("maxItems", `Entre 1 y ${SETTINGS_LIMITS.maxUserMapEntries}`);
+            const vt = raw.valueType ?? "boolean";
+            if (vt === "select" && normalizeOptions(raw.options).length === 0) bad("options", "Requerido: lista de opciones (valueType select)");
+            if (raw.default !== undefined) {
+                const probe = validateUserMapValue(normalizeSettingsSchema({ fields: [{ ...raw, required: false, default: undefined }] }).fields[0], raw.default);
+                if (probe.ok === false) bad("default", `Valor por defecto invalido: ${probe.message}`);
+            }
+        } else if (raw.valueType !== undefined) bad("valueType", "Solo para userMap");
+        if (raw.revealLast4 !== undefined && (typeof raw.revealLast4 !== "boolean" || !secret)) bad("revealLast4", "Booleano; solo para secretos");
+        if (raw.filter !== undefined) {
+            const f = raw.filter;
+            if (type !== "user" && type !== "users" && type !== "userMap") bad("filter", "Solo para user/users/userMap");
+            else if (!isObject(f) || Object.keys(f).some((k) => k !== "minLevel" && k !== "role")
+                || (f.minLevel !== undefined && !(typeof f.minLevel === "number" && Number.isInteger(f.minLevel) && f.minLevel >= 0 && f.minLevel <= 5))
+                || (f.role !== undefined && !(typeof f.role === "string" && /^[A-Za-z0-9_-]{1,32}$/.test(f.role)))) bad("filter", "Debe ser { minLevel?: 0..5, role?: texto }");
+        }
+        if (secret && (type === "user" || type === "users" || type === "userMap")) bad("secret", "Un selector de usuarios no puede ser secreto");
         if (secret) {
             if (depth === 0 && !ENV_NAME_RE.test(raw.key)) bad("key", "Un campo secreto usa el nombre de variable en MAYUSCULAS (el mismo de ENV_READ)");
             if (raw.default !== undefined) bad("default", "Un campo secreto no puede tener valor por defecto");
@@ -362,6 +420,8 @@ export function validateSettingsSchema(schema: unknown, basePath = "settingsSche
             if (raw.maxItems !== undefined && (typeof raw.maxItems !== "number" || raw.maxItems < 1 || raw.maxItems > SETTINGS_LIMITS.maxObjectItems)) bad("maxItems", `Entre 1 y ${SETTINGS_LIMITS.maxObjectItems}`);
             return;
         }
+        if ((type === "user" || type === "users") && raw.default !== undefined) return bad("default", "Un selector de usuarios no admite valor por defecto");
+        if (type === "userMap") return;
         const needsOptions = type === "enum" || type === "multienum";
         const options = normalizeOptions(raw.options);
         if (needsOptions && options.length === 0) bad("options", "Requerido: lista de opciones");
@@ -424,7 +484,7 @@ function formatProblem(format: SettingFormat | undefined, value: string): string
  * type | control | format | pattern | number | integer | min | max | option | options | list | listItemType | listItemMax | listItemControl |
  * listItem | maxItems | maxChars | required | objects | objectItem | itemId | itemDup | itemUnknown | itemSecret | itemField | json | jsonSize | unsupported
  */
-export type FieldErrorCode = "type" | "control" | "format" | "pattern" | "number" | "integer" | "min" | "max" | "option" | "options" | "list" | "listItemType" | "listItemMax" | "listItemControl" | "listItem" | "maxItems" | "maxChars" | "required" | "objects" | "objectItem" | "itemId" | "itemDup" | "itemUnknown" | "itemSecret" | "itemField" | "json" | "jsonSize" | "unsupported" | "boolean";
+export type FieldErrorCode = "type" | "control" | "format" | "pattern" | "number" | "integer" | "min" | "max" | "option" | "options" | "list" | "listItemType" | "listItemMax" | "listItemControl" | "listItem" | "maxItems" | "maxChars" | "required" | "objects" | "objectItem" | "itemId" | "itemDup" | "itemUnknown" | "itemSecret" | "itemField" | "json" | "jsonSize" | "unsupported" | "boolean" | "userId" | "maxUsers" | "userMap" | "userMapEntry" | "userMissing" | "userDisabled" | "userFilter";
 export type FieldCheck = { ok: true; value: unknown } | { ok: false; message: string; code: FieldErrorCode; params?: Record<string, string | number> };
 
 /** Valida y normaliza el valor de UN campo no secreto (entrada del formulario o de la API). `undefined`/`null` = sin valor. */
@@ -525,6 +585,37 @@ export function validateFieldValue(field: SettingField | undefined, input: unkno
             }
             return { ok: true, value: out };
         }
+        case "user": {
+            if (typeof input !== "string" || !USER_ID_RE.test(input.trim())) return fail("Debe ser el id de un usuario", "userId");
+            return { ok: true, value: input.trim() };
+        }
+        case "users": {
+            const arr = typeof input === "string" ? splitListInput(input) : input;
+            if (!Array.isArray(arr)) return fail("Debe ser una lista de ids de usuario", "list");
+            const cap = Math.min(field.maxItems ?? L.maxUsers, L.maxUsers);
+            const out: string[] = [];
+            for (let i = 0; i < arr.length; i++) {
+                if (typeof arr[i] !== "string" || !USER_ID_RE.test((arr[i] as string).trim())) return fail(`Elemento ${i + 1}: id de usuario no valido`, "userId", { index: i + 1 });
+                const id = (arr[i] as string).trim();
+                if (!out.includes(id)) out.push(id);
+            }
+            if (out.length > cap) return fail(`Maximo ${cap} usuarios`, "maxUsers", { max: cap });
+            return { ok: true, value: out };
+        }
+        case "userMap": {
+            if (!isObject(input)) return fail("Debe ser un objeto { idUsuario: valor }", "userMap");
+            const entries = Object.entries(input);
+            const cap = Math.min(field.maxItems ?? L.maxUserMapEntries, L.maxUserMapEntries);
+            if (entries.length > cap) return fail(`Maximo ${cap} entradas`, "maxItems", { max: cap });
+            const out: Record<string, unknown> = {};
+            for (const [id, raw] of entries) {
+                if (!USER_ID_RE.test(id)) return fail("Id de usuario no valido", "userId");
+                const check = validateUserMapValue(field, raw);
+                if (check.ok === false) return fail(`${id.slice(0, 40)}: ${check.message}`, "userMapEntry", { id: id.slice(0, 40), sub: check.code, ...(check.params ?? {}) });
+                out[id] = check.value;
+            }
+            return { ok: true, value: out };
+        }
         case "json": {
             let value = input;
             if (typeof input === "string") {
@@ -537,6 +628,19 @@ export function validateFieldValue(field: SettingField | undefined, input: unkno
         }
     }
     return fail("Tipo no soportado", "unsupported");
+}
+
+/** Valida el valor por usuario de un userMap segun `valueType` (boolean | string | number | select). */
+export function validateUserMapValue(field: SettingField, input: unknown): FieldCheck {
+    const vt = field.valueType ?? "boolean";
+    const sub: SettingField = { key: field.key, type: vt === "select" ? "enum" : vt, secret: false, label: field.label, ...(field.options ? { options: field.options } : {}), ...(field.min !== undefined ? { min: field.min } : {}), ...(field.max !== undefined ? { max: field.max } : {}), ...(field.integer ? { integer: true } : {}), ...(field.maxLength !== undefined ? { maxLength: field.maxLength } : {}), ...(field.pattern ? { pattern: field.pattern } : {}), ...(field.format ? { format: field.format } : {}) };
+    return validateFieldValue(sub, input);
+}
+
+/** Valor de un usuario en un userMap: su entrada explicita o, si no la hay, `default` (undefined si tampoco). */
+export function userMapValue(field: SettingField, map: unknown, userId: string): unknown {
+    const own = isObject(map) && Object.prototype.hasOwnProperty.call(map, userId) ? map[userId] : undefined;
+    return own !== undefined ? own : field.default;
 }
 
 export type SettingsCheck = { ok: boolean; values: Record<string, unknown>; removed: string[]; errors: SettingIssue[] };
@@ -569,7 +673,7 @@ export type ItemSecretsCheck = { ok: boolean; set: Record<string, string>; remov
 
 /**
  * Valida los secretos por elemento que acompanan a un PUT: { "<campo>.<idElemento>.<subcampo>": "valor" | null }. `items` son los elementos
- * (tras el PUT) de cada campo objects, para exigir que el elemento y el sub-campo secreto existan. null/"" = borrar el secreto.
+ * (tras el PUT) de cada campo objects, para exigir que el elemento y el sub-campo secreto existan. null = borrar el secreto; "" = sin cambio.
  */
 export function validateItemSecrets(fields: SettingField[], items: Record<string, Array<Record<string, unknown>>>, input: unknown, path = "secrets"): ItemSecretsCheck {
     const result: ItemSecretsCheck = { ok: true, set: {}, removed: [], errors: [] };
@@ -582,7 +686,9 @@ export function validateItemSecrets(fields: SettingField[], items: Record<string
         const sub = m ? field?.itemFields?.find((x) => x.key === m[3] && x.secret) : undefined;
         if (!m || !field || !sub) { result.errors.push({ path: at, message: "Secreto no declarado por la extension" }); continue; }
         if (!(items[m[1]] ?? []).some((item) => item.id === m[2])) { result.errors.push({ path: at, message: "El elemento no existe" }); continue; }
-        if (raw === null || raw === "") { result.removed.push(name); continue; }
+        // write-only: "" (campo vacio) = no cambiar; solo `null` (accion explicita Borrar) elimina el secreto.
+        if (raw === "") continue;
+        if (raw === null) { result.removed.push(name); continue; }
         // eslint-disable-next-line no-control-regex
         if (typeof raw !== "string" || !raw.trim() || raw.length > SETTINGS_LIMITS.maxItemSecretLength || /[\u0000-\u001f]/.test(raw)) { result.errors.push({ path: at, message: "Valor no valido" }); continue; }
         result.set[name] = raw.trim();
@@ -662,3 +768,45 @@ export function computeChecklist(fields: SettingField[], effective: Record<strin
 export function configBytes(config: unknown): number {
     try { return JSON.stringify(config)?.length ?? 0; } catch { return Infinity; }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Secretos write-only, selector de usuarios y ajustes POR USUARIO
+// ---------------------------------------------------------------------------------------------------------------
+
+export type SecretCheck = { ok: true; value: string } | { ok: false; message: string; code: FieldErrorCode };
+
+/**
+ * Valida el valor de un secreto antes de cifrarlo: tamano (`maxLength`, tope SETTINGS_LIMITS.maxItemSecretLength), sin caracteres de control y
+ * `pattern`/`format` del campo. NUNCA incluye el valor en el mensaje. Sin campo declarado solo se aplican los topes generales.
+ */
+export function validateSecretValue(field: Pick<SettingField, "maxLength" | "pattern" | "format"> | undefined, input: unknown): SecretCheck {
+    const cap = Math.min(field?.maxLength ?? SETTINGS_LIMITS.maxItemSecretLength, SETTINGS_LIMITS.maxItemSecretLength);
+    if (typeof input !== "string") return { ok: false, message: "Valor no valido", code: "type" };
+    const value = input.trim();
+    if (!value) return { ok: false, message: "Valor no valido", code: "required" };
+    if (value.length > cap) return { ok: false, message: `Maximo ${cap} caracteres`, code: "maxChars" };
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f]/.test(input)) return { ok: false, message: "Valor no valido", code: "control" };
+    const problem = formatProblem(field?.format, value);
+    if (problem) return { ok: false, message: problem, code: "format" };
+    if (field?.pattern && !new RegExp(field.pattern).test(value)) return { ok: false, message: "Formato no valido", code: "pattern" };
+    return { ok: true, value };
+}
+
+/** Ultimos 4 caracteres para mostrar (solo si el campo declara `revealLast4`; secretos de menos de 12 caracteres no revelan nada). */
+export function secretLast4(field: Pick<SettingField, "revealLast4"> | undefined, value: string): string | undefined {
+    return field?.revealLast4 === true && value.length >= 12 ? value.slice(-4) : undefined;
+}
+
+/** Ids de usuario referenciados por los campos user/users de un conjunto de valores (para comprobar que existen en el dominio). */
+export function collectUserRefs(fields: SettingField[], values: Record<string, unknown>): Array<{ key: string; ids: string[]; filter?: UserFilter }> {
+    const out: Array<{ key: string; ids: string[]; filter?: UserFilter }> = [];
+    for (const f of fields) {
+        if (f.type !== "user" && f.type !== "users" && f.type !== "userMap") continue;
+        const v = values[f.key];
+        const ids = typeof v === "string" ? [v] : Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : isObject(v) ? Object.keys(v) : [];
+        if (ids.length > 0) out.push({ key: f.key, ids, ...(f.filter ? { filter: f.filter } : {}) });
+    }
+    return out;
+}
+

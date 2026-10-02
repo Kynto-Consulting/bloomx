@@ -61,12 +61,14 @@ describe('proxy de ajustes por dominio', () => {
     });
 
     it('PUT reenvia solo values y audita NOMBRES de clave, nunca valores', async () => {
+        fetchMock.mockResolvedValueOnce(backend(200, { schema: { fields: [] }, values: {} })); // preflight de ids de usuario (sin campos user)
         fetchMock.mockResolvedValueOnce(backend(200, { success: true, values: { keywords: ['x'] }, sources: { keywords: 'domain' } }));
         const res = await PUT(put({ domainId: 'd', extensionId: 'e', values: { keywords: ['valor-privado'], mode: null }, extra: 'no' }));
         expect(res.status).toBe(200);
-        const [, init] = fetchMock.mock.calls[0];
+        const [, init] = fetchMock.mock.calls[1];
         expect(init.method).toBe('PUT');
         expect(JSON.parse(init.body)).toEqual({ domainId: 'd', extensionId: 'e', values: { keywords: ['valor-privado'], mode: null } });
+        expect(fetchMock.mock.calls[0][1].method).toBe('GET');
         const [event, data] = (auditLog as any).mock.calls[0];
         expect(event).toBe('admin.extension.config');
         expect(data).toMatchObject({ outcome: 'ok', status: 200, set: ['keywords'], removed: ['mode'], action: 'update' });
@@ -81,6 +83,7 @@ describe('proxy de ajustes por dominio', () => {
     });
 
     it('PUT 422 conserva errors[{path,message}] saneados (<=200) y audita el fallo', async () => {
+        fetchMock.mockResolvedValueOnce(backend(200, { schema: { fields: [] }, values: {} })); // preflight de ids de usuario (sin campos user)
         fetchMock.mockResolvedValueOnce(
             backend(422, { error: 'Invalid', errors: [{ path: 'values.keywords', message: 'x'.repeat(500) }, { path: 3, message: 'no' }], detail: 'SECRETO' }),
         );
@@ -129,6 +132,7 @@ describe('proxy de ajustes por dominio', () => {
     });
 
     it('PUT 422 conserva code/params saneados', async () => {
+        fetchMock.mockResolvedValueOnce(backend(200, { schema: { fields: [] }, values: {} })); // preflight de ids de usuario (sin campos user)
         fetchMock.mockResolvedValueOnce(backend(422, { error: 'Invalid', errors: [{ path: 'values.endpoints', message: 'm', code: 'itemField', params: { index: 1, field: 'url', evil: { a: 1 }, 'bad key': 'x' } }, { path: 'secrets.a.b.c', message: 'm', code: '<script>' }] }));
         const data = await (await PUT(put({ domainId: 'd', extensionId: 'e', values: { endpoints: [] } }))).json();
         expect(data.errors[0]).toEqual({ path: 'values.endpoints', message: 'm', code: 'itemField', params: { index: 1, field: 'url' } });

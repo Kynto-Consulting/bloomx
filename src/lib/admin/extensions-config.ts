@@ -13,16 +13,19 @@ import {
  */
 
 export type SimpleValue = string | boolean | string[];
+/** Valor de un campo `userMap`: { [userId]: valor } con entradas EXPLICITAS (boolean | texto numerico/string/select). */
+export type UserMapValue = Record<string, string | boolean>;
 /** Un elemento de un campo `objects`. `secrets`: clave ausente = sin cambio; texto = establecer/reemplazar; null = quitar. */
 export type ObjectItem = { id: string; isNew: boolean; values: Record<string, SimpleValue>; secrets: Record<string, string | null> };
 /** Valor de un control: texto, booleano, lista de ids (multienum) o elementos (objects). */
-export type FormValue = SimpleValue | ObjectItem[];
+export type FormValue = SimpleValue | ObjectItem[] | UserMapValue;
 export type FormState = Record<string, FormValue>;
 
 export type ErrorParams = Record<string, string | number>;
 export type FieldError = { code: FieldErrorCode; params?: ErrorParams; message?: string };
 
 const isItems = (v: unknown): v is ObjectItem[] => Array.isArray(v) && v.every((x) => !!x && typeof x === 'object' && !Array.isArray(x));
+export const isUserMap = (v: unknown): v is UserMapValue => !!v && typeof v === 'object' && !Array.isArray(v);
 const subFields = (field: SettingField): SettingField[] => (field.itemFields ?? []).filter((s) => s.type !== 'objects');
 
 export function isEmptyForm(field: SettingField, value: FormValue | undefined): boolean {
@@ -30,6 +33,7 @@ export function isEmptyForm(field: SettingField, value: FormValue | undefined): 
     if (field.type === 'boolean') return false;
     if (field.type === 'multienum') return false; // [] es un valor valido ("ninguno")
     if (field.type === 'objects') return !Array.isArray(value) || value.length === 0;
+    if (field.type === 'userMap') return !isUserMap(value) || Object.keys(value).length === 0;
     if (Array.isArray(value)) return value.length === 0;
     return typeof value === 'string' && value.trim() === '';
 }
@@ -39,6 +43,7 @@ function toSimple(field: SettingField, value: unknown): SimpleValue {
         case 'boolean':
             return value === true;
         case 'multienum':
+        case 'users':
             return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
         case 'list':
             return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string').join('\n') : typeof value === 'string' ? value : '';
@@ -65,6 +70,11 @@ export function toItem(field: SettingField, raw: Record<string, unknown>, id: st
 
 /** Convierte un valor (guardado o por defecto) al estado de su control. */
 export function toFormValue(field: SettingField, value: unknown): FormValue {
+    if (field.type === 'userMap') {
+        const out: UserMapValue = {};
+        if (isUserMap(value)) for (const [id, v] of Object.entries(value)) if (typeof v === 'boolean' || typeof v === 'string' || typeof v === 'number') out[id] = typeof v === 'number' ? String(v) : v;
+        return out;
+    }
     if (field.type === 'objects') {
         if (!Array.isArray(value)) return [];
         return value
@@ -82,13 +92,14 @@ export function initialForm(schema: SettingsSchema, stored: Record<string, unkno
     const form: FormState = {};
     for (const field of configFields(schema.fields)) {
         const own = stored[field.key];
-        form[field.key] = toFormValue(field, own !== undefined && own !== null ? own : field.default);
+        // En un userMap `default` es el valor de quien NO tiene entrada, no un mapa: el estado inicial solo trae las entradas explicitas.
+        form[field.key] = toFormValue(field, own !== undefined && own !== null ? own : field.type === 'userMap' ? undefined : field.default);
     }
     return form;
 }
 
 const same = (a: FormValue | undefined, b: FormValue | undefined): boolean => {
-    if (Array.isArray(a) || Array.isArray(b)) return JSON.stringify(a) === JSON.stringify(b);
+    if ((a && typeof a === 'object') || (b && typeof b === 'object')) return JSON.stringify(a) === JSON.stringify(b);
     return a === b;
 };
 
@@ -329,10 +340,12 @@ export type ConfigData = {
     imported?: string[];
     /** `campo.id.sub` de los secretos por elemento establecidos (nunca valores). */
     secretsSet: string[];
+    /** Fecha de la ultima rotacion por secreto de elemento (write-only: nunca el valor). */
+    secretsMeta?: Record<string, { updatedAt: string }>;
     runLog: RunLogEntry[];
     ok?: boolean;
     result?: ActionResult;
-    secrets: { name: string; configured: boolean; source: 'domain' | 'legacy' | 'server-env' | 'missing' }[];
+    secrets: { name: string; configured: boolean; source: 'domain' | 'legacy' | 'server-env' | 'missing'; updatedAt?: string; last4?: string }[];
     checklist: { done: number; total: number; items: { key: string; secret: boolean; ok: boolean }[] };
     meta: { updatedAt: string | null; updatedBy: string | null };
     limits: { maxConfigBytes: number | null };

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { AlertTriangle, ArrowRightLeft, CheckCircle2, Eye, EyeOff, KeyRound, Loader2, RotateCcw, Server, Trash2, X } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/components/I18nProvider';
 import {
     MAX_CREDENTIAL_LENGTH,
@@ -39,9 +40,10 @@ type LoadState = 'idle' | 'loading' | 'ready' | 'error';
 const ENDPOINT = '/api/admin/extensions/settings';
 
 export function ExtensionCredentialsModal({ open, onClose, domainId, extension }: ExtensionCredentialsModalProps) {
-    const { t } = useI18n();
+    const { t, intlLocale } = useI18n();
     const uid = useId();
     const extensionId = extension?.id;
+    const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
     const [load, setLoad] = useState<LoadState>('idle');
     const [keys, setKeys] = useState<CredentialKeyStatus[]>([]);
@@ -110,6 +112,17 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
         setSavedNote(null);
         setFormError(null);
         setList(list.includes(name) ? list.filter((n) => n !== name) : [...list, name]);
+    };
+
+    const focusInput = (name: string) => document.getElementById(`${uid}-${name}`)?.focus();
+    const requestRemoval = (name: string) => {
+        if (removals.includes(name)) markRemoval(name); // deshacer: sin confirmacion
+        else setConfirmDelete(name);
+    };
+    const formatWhen = (iso?: string) => {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? '' : new Intl.DateTimeFormat(intlLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(d);
     };
 
     const markRemoval = (name: string) => {
@@ -189,6 +202,7 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
     };
 
     return (
+        <>
         <Modal
             open={open && !!extension}
             onClose={saving ? () => { } : onClose}
@@ -311,8 +325,10 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                                             </p>
 
                                             {key.configured && !removing && (
-                                                <p className="mt-1 font-mono text-xs text-muted-foreground" aria-hidden="true">
-                                                    {t('admin.extensions.credentials.storedMasked')}
+                                                <p className="mt-1 text-xs text-muted-foreground" data-testid={`secret-set-${key.name}`}>
+                                                    <span className="font-medium text-foreground">{t('admin.extensions.credentials.savedWriteOnly')}</span>
+                                                    {key.updatedAt && formatWhen(key.updatedAt) && <> · {t('admin.extensions.credentials.updatedOn', { date: formatWhen(key.updatedAt) })}</>}
+                                                    {key.last4 && <> · {t('admin.extensions.credentials.endsIn', { last4: key.last4 })}</>}
                                                 </p>
                                             )}
 
@@ -324,7 +340,8 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                                                     disabled={removing || saving}
                                                     onChange={(e) => setValue(key.name, e.target.value)}
                                                     placeholder={key.configured ? t('admin.extensions.credentials.placeholderRotate') : t('admin.extensions.credentials.placeholderNew')}
-                                                    autoComplete="off"
+                                                    autoComplete="new-password"
+                                                    data-lpignore="true"
                                                     autoCapitalize="off"
                                                     autoCorrect="off"
                                                     spellCheck={false}
@@ -342,10 +359,21 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                                                 >
                                                     {shown ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
                                                 </button>
+                                                {key.configured && !removing && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => focusInput(key.name)}
+                                                        disabled={saving}
+                                                        aria-label={t('admin.extensions.credentials.replace', { key: key.name })}
+                                                        className="rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground hover:bg-accent disabled:opacity-50"
+                                                    >
+                                                        {t('admin.extensions.credentials.replaceShort')}
+                                                    </button>
+                                                )}
                                                 {key.configured && (
                                                     <button
                                                         type="button"
-                                                        onClick={() => markRemoval(key.name)}
+                                                        onClick={() => requestRemoval(key.name)}
                                                         disabled={saving}
                                                         aria-label={removing ? t('admin.extensions.credentials.undoRemove', { key: key.name }) : t('admin.extensions.credentials.remove', { key: key.name })}
                                                         className={`rounded-md p-2 disabled:opacity-50 ${removing ? 'text-foreground hover:bg-accent' : 'text-destructive hover:bg-destructive/10'}`}
@@ -403,5 +431,16 @@ export function ExtensionCredentialsModal({ open, onClose, domainId, extension }
                 </form>
             )}
         </Modal>
+        <ConfirmDialog
+            open={confirmDelete !== null}
+            title={t('admin.extensions.credentials.deleteTitle', { key: confirmDelete ?? '' })}
+            description={t('admin.extensions.credentials.deleteBody')}
+            confirmLabel={t('admin.extensions.credentials.deleteConfirm')}
+            cancelLabel={t('admin.extensions.credentials.cancel')}
+            destructive
+            onConfirm={() => { if (confirmDelete) markRemoval(confirmDelete); setConfirmDelete(null); }}
+            onCancel={() => setConfirmDelete(null)}
+        />
+        </>
     );
 }

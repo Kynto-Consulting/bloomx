@@ -13,7 +13,7 @@ import { invalidateProviderCache } from '@/lib/oauth/providers';
  *        source = fuente ACTIVA de la variable: 'domain' | 'legacy' | 'server-env' | 'missing' (sin valores).
  *   POST { domainId, extensionId, action: 'migrate-legacy' } -> { success, migrated: [nombres], serverEnv: [nombres], keys }
  *        copia (cifrados, en el backend) los valores heredados del dominio a credenciales del dominio.
- *   PUT  { domainId, extensionId, credentials } -> { success, keys }   (null/"" borra una credencial)
+ *   PUT  { domainId, extensionId, credentials } -> { success, keys }   (null borra una credencial; "" = sin cambio; keys[]: { name, configured, set, updatedAt?, last4? })
  *
  * - Solo admin (requireAdmin). El backend vuelve a comprobar sesion de manager y propiedad del dominio.
  * - Nunca se devuelve un valor: la respuesta se reconstruye con una lista blanca ({ name, configured }).
@@ -25,13 +25,24 @@ const NO_STORE = { 'Cache-Control': 'no-store' };
 
 const SOURCES = ['domain', 'legacy', 'server-env', 'missing'] as const;
 
-function publicKeys(data: any): { name: string; configured: boolean; source: (typeof SOURCES)[number]; movable: boolean }[] {
+const ISO_RE = /^d{4}-d{2}-d{2}T[0-9:.]+Z$/;
+
+function publicKeys(data: any): { name: string; configured: boolean; set: boolean; updatedAt?: string; last4?: string; source: (typeof SOURCES)[number]; movable: boolean }[] {
     if (!data || !Array.isArray(data.keys)) return [];
     return data.keys
         .filter((k: any) => k && typeof k.name === 'string')
         .map((k: any) => {
             const source = SOURCES.includes(k.source) ? k.source : k.configured === true ? 'domain' : 'missing';
-            return { name: String(k.name), configured: k.configured === true, source, movable: k.movable === true };
+            // Write-only: estado, fecha y (solo si el campo lo declara) ultimos 4. Jamas el valor.
+            return {
+                name: String(k.name),
+                configured: k.configured === true,
+                set: k.configured === true,
+                ...(k.configured === true && typeof k.updatedAt === 'string' && ISO_RE.test(k.updatedAt) ? { updatedAt: k.updatedAt } : {}),
+                ...(k.configured === true && typeof k.last4 === 'string' && k.last4.length === 4 ? { last4: k.last4 } : {}),
+                source,
+                movable: k.movable === true,
+            };
         });
 }
 
@@ -152,7 +163,8 @@ export async function PUT(req: Request) {
             status: response.status,
             // Solo nombres de variable (no valores): "set" = rotar/establecer, "removed" = borrar.
             set: entries.filter(([, v]) => typeof v === 'string' && v !== '').map(([k]) => k),
-            removed: entries.filter(([, v]) => v === null || v === '').map(([k]) => k),
+            // Solo `null` borra (accion explicita); "" = sin cambio (write-only).
+            removed: entries.filter(([, v]) => v === null).map(([k]) => k),
         });
 
         return shape(response.status, data);

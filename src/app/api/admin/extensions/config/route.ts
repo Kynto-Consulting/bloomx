@@ -3,6 +3,10 @@ import { NextResponse } from 'next/server';
 import { requireLevel } from '@/lib/admin-auth';
 import { auditLog, getClientIp } from '@/lib/security';
 import { shapeConfigResponse, shapeConfigError } from '@/lib/admin/extensions-config-shape';
+import { collectUserRefs, normalizeSettingsSchema, type SettingIssue } from '@/lib/expansions/settings-schema';
+import { validateUserRefs } from '@/lib/admin/extension-users';
+import { assertInstanceDomain } from '@/lib/admin/extensions-instance';
+import { refreshPermissions } from '@/lib/permissions';
 
 /**
  * Proxy de AJUSTES por dominio de extensiones (no secretos) -> backend /api/extension/config.
@@ -14,6 +18,9 @@ import { shapeConfigResponse, shapeConfigError } from '@/lib/admin/extensions-co
  *   POST { domainId, extensionId, action: 'run-action', actionId, itemId? } -> { ok, result, runLog }
  *   POST { domainId, extensionId, action: 'import-env', keys? } -> { success, imported, ...GET }
  *
+ * - Campos `user` / `users` / `userMap` (selector de usuarios): antes de reenviar, ESTE servidor comprueba contra la base del dominio que cada id
+ *   NUEVO existe, no esta desactivado y cumple el `filter` del schema (422 con code userMissing | userDisabled | userFilter). El backend compartido
+ *   solo valida formato y tipos (no tiene el directorio de usuarios). Exige ademas que `domainId` sea el dominio de esta instancia.
  * - GET = nivel 3 (admin); PUT/POST = nivel 4 (superadmin). El backend vuelve a comprobar sesion de gestor y propiedad del dominio.
  * - La respuesta se reconstruye con lista blanca (lib/admin/extensions-config-shape.ts): nunca pasa un secreto ni un valor del
  *   entorno global; solo nombres de credencial y estado.
@@ -38,6 +45,26 @@ async function readBody(req: Request): Promise<any> {
     } catch {
         return null;
     }
+}
+
+/** Comprueba los ids de usuario del cambio (si el schema declara campos user/users/userMap). null = nada que bloquear. */
+async function userRefIssues(req: Request, domainId: string, extensionId: string, values: Record<string, unknown>): Promise<SettingIssue[] | null> {
+    const query = new URLSearchParams({ domainId, extensionId });
+    let state: any = null;
+    try {
+        const res = await fetch(`${BACKEND_URL()}/api/extension/config?${query}`, { method: 'GET', headers: { Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() }, cache: 'no-store' });
+        if (!res.ok) return null; // el PUT recibira el mismo error de autorizacion
+        state = await res.json().catch(() => null);
+    } catch {
+        return null;
+    }
+    const fields = normalizeSettingsSchema(state?.schema).fields;
+    if (collectUserRefs(fields, values).length === 0) return null;
+    await assertInstanceDomain(domainId, req);
+    await refreshPermissions();
+    const stored = state?.values && typeof state.values === 'object' && !Array.isArray(state.values) ? state.values : {};
+    const issues = await validateUserRefs(fields, values, stored);
+    return issues.length ? issues : null;
 }
 
 const keyNames = (value: unknown): string[] => (Array.isArray(value) ? value.filter((k): k is string => typeof k === 'string' && KEY_RE.test(k)).slice(0, 100) : []);
@@ -84,6 +111,16 @@ export async function PUT(req: Request) {
             return NextResponse.json({ error: 'Missing required fields' }, { status: 400, headers: NO_STORE });
         }
 
+        if (!reset && validValues) {
+            try {
+                const issues = await userRefIssues(req, domainId, extensionId, values as Record<string, unknown>);
+                if (issues) return NextResponse.json(shapeConfigError({ error: 'Invalid settings', errors: issues }), { status: 422, headers: NO_STORE });
+            } catch (error) {
+                const status = typeof (error as { status?: unknown })?.status === 'number' ? (error as { status: number }).status : 503;
+                return NextResponse.json({ error: 'domain_check_failed' }, { status, headers: NO_STORE });
+            }
+        }
+
         const response = await fetch(`${BACKEND_URL()}/api/extension/config`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json', Cookie: req.headers.get('cookie') || '', ...clientVersionHeaders() },
@@ -108,7 +145,8 @@ export async function PUT(req: Request) {
             removed: entries.filter(([, v]) => v === null || v === '').map(([k]) => k).filter((k) => KEY_RE.test(k)).slice(0, 100),
             // Secretos por elemento: solo el NOMBRE (campo.id.sub), nunca el valor.
             secretsSet: secretEntries.filter(([, v]) => typeof v === 'string' && v !== '').map(([k]) => k).slice(0, 100),
-            secretsRemoved: secretEntries.filter(([, v]) => v === null || v === '').map(([k]) => k).slice(0, 100),
+            // Quien rota o borra un secreto queda en la auditoria (userId + hora del registro), nunca con valor.
+            secretsRemoved: secretEntries.filter(([, v]) => v === null).map(([k]) => k).slice(0, 100),
         });
 
         return shape(response.status, data);

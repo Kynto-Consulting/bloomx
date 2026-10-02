@@ -35,9 +35,9 @@ describe('proxy de credenciales: fuentes sin valores', () => {
         const res = await GET(new Request('https://f.test/api/admin/extensions/settings?domainId=d&extensionId=e'));
         const data = await res.json();
         expect(data.keys).toEqual([
-            { name: 'NOTION_API_KEY', configured: true, source: 'domain', movable: false },
-            { name: 'GIPHY_API_KEY', configured: false, source: 'server-env', movable: false },
-            { name: 'X_KEY', configured: false, source: 'missing', movable: false },
+            { name: 'NOTION_API_KEY', configured: true, set: true, source: 'domain', movable: false },
+            { name: 'GIPHY_API_KEY', configured: false, set: false, source: 'server-env', movable: false },
+            { name: 'X_KEY', configured: false, set: false, source: 'missing', movable: false },
         ]);
         expect(JSON.stringify(data)).not.toContain('SECRETO');
     });

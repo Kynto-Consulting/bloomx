@@ -115,6 +115,7 @@ describe('ExtensionCredentialsModal', () => {
 
         await setValue(input('NOTION_API_KEY'), '  secret_nueva  ');
         await click(byLabel('Eliminar NOTION_DATABASE_ID'));
+        await click(byLabel('Marcar para borrar')); // confirmacion explicita antes de marcar el borrado
         await click(document.querySelector('button[type="submit"]'));
 
         const [url, init] = fetchMock.mock.calls[1];
@@ -129,6 +130,51 @@ describe('ExtensionCredentialsModal', () => {
         expect(input('NOTION_API_KEY').value).toBe('');
         expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Sin configurar');
         expect(document.body.innerHTML).not.toContain('secret_nueva');
+    });
+
+    it('write-only: "Guardado - escribe para reemplazar", fecha, last4 opcional, new-password y Reemplazar enfoca el campo', async () => {
+        fetchMock.mockResolvedValueOnce(json(200, { keys: [
+            { name: 'NOTION_API_KEY', configured: true, set: true, updatedAt: '2026-03-04T10:20:00.000Z', last4: 'ab12' },
+            { name: 'NOTION_DATABASE_ID', configured: true, set: true },
+        ] }));
+        await open();
+        const note = document.querySelector('[data-testid="secret-set-NOTION_API_KEY"]')!;
+        expect(note.textContent).toContain('Guardado — escribe para reemplazar');
+        expect(note.textContent).toContain('Actualizado el');
+        expect(note.textContent).toContain('Termina en ab12');
+        expect(document.querySelector('[data-testid="secret-set-NOTION_DATABASE_ID"]')!.textContent).not.toContain('Termina en');
+        expect(input('NOTION_API_KEY').getAttribute('autocomplete')).toBe('new-password');
+        expect(input('NOTION_API_KEY').value).toBe('');
+        await click(byLabel('Reemplazar NOTION_API_KEY'));
+        expect(document.activeElement).toBe(input('NOTION_API_KEY'));
+        expect(document.body.innerHTML).not.toMatch(/secret_|whsec_/);
+    });
+
+    it('borrar pide confirmacion: cancelar no marca nada y no se envia nada; deshacer no pide confirmacion', async () => {
+        fetchMock.mockResolvedValueOnce(json(200, { keys: [{ name: 'NOTION_API_KEY', configured: true }] }));
+        await open();
+        await click(byLabel('Eliminar NOTION_API_KEY'));
+        expect(document.body.textContent).toContain('queda registrada en la auditoría');
+        await click(byLabel('Cancelar'));
+        expect((document.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+        await click(byLabel('Eliminar NOTION_API_KEY'));
+        await click(byLabel('Marcar para borrar'));
+        expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Se eliminará al pulsar');
+        expect((document.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(false);
+        await click(byLabel('Deshacer eliminación de NOTION_API_KEY'));
+        expect((document.querySelector('button[type="submit"]') as HTMLButtonElement).disabled).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('un 422 (pattern del campo) muestra un mensaje de formato sin repetir el valor', async () => {
+        fetchMock
+            .mockResolvedValueOnce(json(200, { keys: [{ name: 'NOTION_API_KEY', configured: false }] }))
+            .mockResolvedValueOnce(json(422, { error: 'Invalid settings' }));
+        await open();
+        await setValue(input('NOTION_API_KEY'), 'valor-con-formato-malo');
+        await click(document.querySelector('button[type="submit"]'));
+        expect(document.querySelector('[role="alert"]')?.textContent).toContain('formato esperado');
+        expect(document.body.textContent).not.toContain('valor-con-formato-malo');
     });
 
     it('errores del servidor se muestran traducidos (403, en ingles)', async () => {

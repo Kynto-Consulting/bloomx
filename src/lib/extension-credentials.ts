@@ -23,6 +23,12 @@ export interface CredentialKeyStatus {
     name: string;
     /** Hay credencial propia del dominio (paso 1). */
     configured: boolean;
+    /** Write-only: guardada (alias de `configured`; el valor jamas vuelve al navegador). */
+    set?: boolean;
+    /** Fecha (ISO) de la ultima rotacion, sin valor. */
+    updatedAt?: string;
+    /** Ultimos 4 caracteres, solo si el campo del schema declara `revealLast4`. */
+    last4?: string;
     /** Fuente activa; ausente en backends antiguos (se deduce de `configured`). */
     source?: CredentialSource;
     /** Hay un valor heredado del dominio que se puede copiar a credenciales del dominio. */
@@ -125,6 +131,7 @@ export function credentialsHttpErrorKey(status: number): string {
         case 401: return 'unauthorized';
         case 403: return 'forbidden';
         case 404: return 'notInstalled';
+        case 422: return 'pattern';
         case 429: return 'tooMany';
         case 503: return 'encryptionUnavailable';
         default: return 'generic';
