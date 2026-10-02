@@ -23,6 +23,7 @@ import createExtension from './pages/create-extension';
 import extensionUi from './pages/extension-ui';
 import extensionPages from './pages/extension-pages';
 import extensionTools from './pages/extension-tools';
+import discordlib from './pages/discordlib';
 import extensionTsdocs from './pages/extension-tsdocs';
 import api from './pages/api';
 import apiBackend from './pages/api-backend';
@@ -65,6 +66,7 @@ export const DOC_CONTENT: Record<string, DocPageContent> = {
     'extension-ui': extensionUi,
     'extension-tools': extensionTools,
     'extension-tools/tsdocs': extensionTsdocs,
+    'extension-tools/discordlib': discordlib,
     api,
     'api-backend': apiBackend,
     operations,

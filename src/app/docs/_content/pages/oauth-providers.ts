@@ -149,6 +149,7 @@ const es: Block[] = [
         ['`oauth.provider.v1`, `oauth.broker.v1`', 'No se anuncian', 'El intermediario lo llama el backend con la concesión; GoogleLib exige ambas.'],
         ['`ext.routes.v1`, `ext.routes.auth.v1`', 'No se anuncian', 'El borde firma `_bx_src`, nivel e IP en la URL.'],
         ['`oauth.provider.v2`', 'No se anuncia', 'MicrosoftLib, ZoomLib y SlackLib: mismo intermediario firmado más las funciones del flujo que solo conoce este núcleo.'],
+        ['`oauth.provider.v3`', 'No se anuncia', 'DiscordLib 1.1.0: credencial de bot y rutas con dispatch, sobre el mismo intermediario firmado.'],
         ['`ext.dependencies.v1`', 'Se anuncia', 'Lógica del backend independiente de la firma.'],
         ['`ai.*`, `services.host.v1`, `lifecycle.events.v1`, `settings.schema.v1`, UI', 'Se anuncian', 'Ya las anunciaba la versión desplegada; sin clave degradan (camino heredado) en lugar de romper. Cambiarlas alteraría las versiones que hoy reciben.'],
     ] },
@@ -203,6 +204,8 @@ const es: Block[] = [
     { t: 'code', lang: 'json', title: 'MicrosoftLib (extracto)', code: msEx },
     { t: 'code', lang: 'js', title: 'ZoomLib (extracto) y uso desde zoom 2.0', code: zoomEx },
     { t: 'code', lang: 'js', title: 'SlackLib (extracto) y uso desde slack-notify', code: slackEx },
+    { t: 'h2', id: 'v3', text: 'Funciones v3 (oauth.provider.v3): credencial de bot y rutas con dispatch' },
+    { t: 'p', text: 'DiscordLib 1.1.0 añade, bajo la capacidad `oauth.provider.v3` (clientApi 12), solo campos nuevos: una **credencial de bot** del proveedor (`botCredential`, token write-only que solo guarda el núcleo), acciones con `credential: "bot"` (cabecera `Authorization: Bot` inyectada por el núcleo, nunca devuelta), `moderation` (acciones apagadas salvo ajuste del admin), `guild` (restricción a servidores permitidos), `pathSettings` y rutas con `dispatch` (tras verificar una firma `hmac` Ed25519 el router entrega el evento a los hooks de otras extensiones). Las instancias sin la capacidad siguen recibiendo la versión anterior. Detalle y ejemplos en [DiscordLib: bot de Discord](/docs/extension-tools/discordlib).' },
     { t: 'h2', id: 'v2', text: 'Funciones v2 (oauth.provider.v2)' },
     { t: 'table', head: ['Necesidad', 'Campo', 'Quién lo usa'], rows: [
         ['Tenant o región en la URL', '`variables` (`{nombre}` solo en la ruta; el valor sale de un ajuste, validado por `pattern` y por un juego de caracteres fijo del núcleo que impide salir del segmento)', 'MicrosoftLib'],
@@ -299,6 +302,7 @@ const en: Block[] = [
         ['`oauth.provider.v1`, `oauth.broker.v1`', 'Not announced', 'The backend calls the broker with the grant; GoogleLib requires both.'],
         ['`ext.routes.v1`, `ext.routes.auth.v1`', 'Not announced', 'The edge signs `_bx_src`, level and IP in the URL.'],
         ['`oauth.provider.v2`', 'Not announced', 'MicrosoftLib, ZoomLib and SlackLib: the same signed broker plus the flow features only this core knows.'],
+        ['`oauth.provider.v3`', 'Not announced', 'DiscordLib 1.1.0: bot credential and dispatch routes, on the same signed broker.'],
         ['`ext.dependencies.v1`', 'Announced', 'Backend logic independent of signing.'],
         ['`ai.*`, `services.host.v1`, `lifecycle.events.v1`, `settings.schema.v1`, UI', 'Announced', 'The deployed version already announced them; without a key they degrade (legacy path) instead of breaking. Changing them would alter the versions those instances get today.'],
     ] },
@@ -353,6 +357,8 @@ const en: Block[] = [
     { t: 'code', lang: 'json', title: 'MicrosoftLib (excerpt)', code: msEx },
     { t: 'code', lang: 'js', title: 'ZoomLib (excerpt) and use from zoom 2.0', code: zoomEx },
     { t: 'code', lang: 'js', title: 'SlackLib (excerpt) and use from slack-notify', code: slackEx },
+    { t: 'h2', id: 'v3', text: 'v3 features (oauth.provider.v3): bot credential and dispatch routes' },
+    { t: 'p', text: 'DiscordLib 1.1.0 adds, under the `oauth.provider.v3` capability (clientApi 12), only new fields: a provider **bot credential** (`botCredential`, a write-only token held only by the core), actions with `credential: "bot"` (the `Authorization: Bot` header is injected by the core and never returned), `moderation` (actions off unless the admin enables them), `guild` (restriction to allowed servers), `pathSettings` and routes with `dispatch` (after verifying an Ed25519 `hmac` signature the router delivers the event to the hooks of other extensions). Instances without the capability keep receiving the previous version. Details and examples in [DiscordLib: Discord bot](/docs/extension-tools/discordlib).' },
     { t: 'h2', id: 'v2', text: 'v2 features (oauth.provider.v2)' },
     { t: 'table', head: ['Need', 'Field', 'Used by'], rows: [
         ['Tenant or region in the URL', '`variables` (`{name}` in the path only; the value comes from a setting, checked by `pattern` and by a fixed core character set that cannot leave the segment)', 'MicrosoftLib'],

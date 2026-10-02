@@ -99,7 +99,43 @@ export type OAuthActionDef = {
     fixedBody?: Record<string, unknown>;
     /** true = la accion NO usa el token OAuth (no envia Authorization ni lo refresca): la credencial va en la ruta (pathExtras), p. ej. el webhook de Discord. Exige pathExtras. Requiere oauth.provider.v2. */
     noAuth?: boolean;
+    /**
+     * "bot" = la accion usa la credencial BOT del proveedor (`botCredential`): el nucleo inyecta `Authorization: Bot <token>` y no hay cuenta de usuario.
+     * Exige un grupo `bot-*` (bot-read | bot-write | bot-mod), el permiso OAUTH_SHARED:<proveedor> y el grupo concedido. Requiere oauth.provider.v3.
+     */
+    credential?: "bot";
+    /** true = accion de MODERACION (kick/ban/roles/borrar mensajes): el nucleo la rechaza salvo que el admin active `botCredential.moderationSetting`. Solo con credential "bot". */
+    moderation?: boolean;
+    /**
+     * Servidor (guild) al que afecta la accion, para aplicar la lista blanca del admin (`allowedGuildsSetting`; vacia = solo el servidor por defecto):
+     * `param` = parametro de ruta con el id del servidor; `channelParam` = parametro de ruta con un id de canal/hilo (el nucleo resuelve su servidor con
+     * GET /channels/{id}; un canal sin servidor, p. ej. un MD, se rechaza); `filterList` = la respuesta es una lista de servidores y se filtra a los permitidos.
+     * Solo con credential "bot".
+     */
+    guild?: { param?: string; channelParam?: string; filterList?: boolean };
+    /** Marcadores de RUTA que salen de un ajuste NO secreto (p. ej. {applicationId}). Valor validado con el juego de caracteres fijo de variables. Solo credential "bot". */
+    pathSettings?: Record<string, string>;
 };
+
+/**
+ * Credencial BOT de un proveedor (Discord): token secreto que SOLO guarda el nucleo (cifrado, anclado a los hosts aprobados) y que se inyecta como
+ * `Authorization: Bot <token>`. Jamas llega a una extension. Los demas ajustes son NO secretos. Requiere oauth.provider.v3.
+ */
+export type OAuthBotDef = {
+    /** Campo secret:true del settingsSchema con el token del bot. */
+    tokenCredential: string;
+    /** Patron ANCLADO que debe cumplir el token al guardarlo (formato, no validez). */
+    tokenPattern: string;
+    /** Ajuste NO secreto con el id de la aplicacion (Application ID). */
+    applicationIdSetting: string;
+    /** Ajuste NO secreto con el servidor por defecto. */
+    defaultGuildSetting?: string;
+    /** Ajuste NO secreto con la lista (comas/espacios) de servidores permitidos; vacia = solo el servidor por defecto. */
+    allowedGuildsSetting?: string;
+    /** Ajuste NO secreto (boolean) que activa las acciones `moderation`. Desactivado por defecto. */
+    moderationSetting?: string;
+};
+export const OAUTH_BOT_GROUP_RE = /^bot-[a-z][a-z0-9-]{0,26}$/;
 
 /**
  * Dato EXTRA que el nucleo conserva de la respuesta del token (o de un claim del id_token ya verificado) por cuenta conectada, CIFRADO en reposo.
@@ -173,6 +209,8 @@ export type OAuthProviderDef = {
     extras?: Record<string, OAuthExtraDef>;
     /** Id de una accion (noAuth, sin parametros obligatorios) que el nucleo ejecuta con los datos extra de la cuenta AL DESCONECTAR, antes de borrarla (p. ej. borrar el webhook de Discord). Mejor esfuerzo. Requiere oauth.provider.v2. */
     onUnlink?: string;
+    /** Credencial BOT (token secreto del nucleo + ajustes de servidores permitidos y moderacion). Requiere oauth.provider.v3. */
+    botCredential?: OAuthBotDef;
 };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -387,7 +425,7 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
         const at = `oauthProviders[${index}]`;
         if (typeof p !== "object" || p === null || Array.isArray(p)) return err(at, "Debe ser un objeto");
         const o = p as Record<string, unknown>;
-        const known = ["id", "displayName", "icon", "authorizeUrl", "tokenUrl", "revokeUrl", "userinfoUrl", "issuer", "jwksUri", "apiBase", "actions", "principals", "allowedHosts", "scopes", "defaultScopes", "pkce", "extraParams", "clientIdSetting", "clientSecretCredential", "redirectPath", "tokenAuth", "tokenFormat", "revokeToken", "variables", "serviceCredentials", "extras", "onUnlink"];
+        const known = ["id", "displayName", "icon", "authorizeUrl", "tokenUrl", "revokeUrl", "userinfoUrl", "issuer", "jwksUri", "apiBase", "actions", "principals", "allowedHosts", "scopes", "defaultScopes", "pkce", "extraParams", "clientIdSetting", "clientSecretCredential", "redirectPath", "tokenAuth", "tokenFormat", "revokeToken", "variables", "serviceCredentials", "extras", "onUnlink", "botCredential"];
         for (const k of Object.keys(o)) if (!known.includes(k)) warn(`${at}.${k}`, "Clave desconocida (se ignora)");
 
         if (typeof o.id !== "string" || !OAUTH_PROVIDER_ID_RE.test(o.id)) err(`${at}.id`, "Requerido: [a-z][a-z0-9-] (2-32)");
@@ -510,6 +548,25 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
                 else if (settingsFields && !settingsFields.some((f) => f.key === sc.clientSecretCredential && f.secret)) err(`${sat}.clientSecretCredential`, `Debe ser un campo secret:true del settingsSchema: ${sc.clientSecretCredential}`);
             }
         }
+        if (o.botCredential !== undefined) {
+            const b = o.botCredential as Record<string, unknown>;
+            const bat = `${at}.botCredential`;
+            if (typeof b !== "object" || b === null || Array.isArray(b)) err(bat, "Debe ser un objeto");
+            else {
+                for (const k of Object.keys(b)) if (!["tokenCredential", "tokenPattern", "applicationIdSetting", "defaultGuildSetting", "allowedGuildsSetting", "moderationSetting"].includes(k)) err(`${bat}.${k}`, "Clave desconocida");
+                if (typeof b.tokenCredential !== "string" || !/^[A-Z][A-Z0-9_]{1,63}$/.test(b.tokenCredential)) err(`${bat}.tokenCredential`, "Nombre en MAYUSCULAS de un campo secret:true");
+                else if (settingsFields && !settingsFields.some((f) => f.key === b.tokenCredential && f.secret)) err(`${bat}.tokenCredential`, `Debe ser un campo secret:true del settingsSchema: ${b.tokenCredential}`);
+                const problem = typeof b.tokenPattern === "string" && b.tokenPattern.length <= 160 ? regexProblem(b.tokenPattern) : "String (max 160)";
+                if (problem) err(`${bat}.tokenPattern`, problem);
+                else if (!(b.tokenPattern as string).startsWith("^") || !(b.tokenPattern as string).endsWith("$")) err(`${bat}.tokenPattern`, "El patron debe estar anclado (^...$)");
+                for (const k of ["applicationIdSetting", "defaultGuildSetting", "allowedGuildsSetting", "moderationSetting"] as const) {
+                    if (b[k] === undefined && k !== "applicationIdSetting") continue;
+                    if (typeof b[k] !== "string" || !b[k]) err(`${bat}.${k}`, "Clave de un ajuste NO secreto del settingsSchema");
+                    else if (settingsFields && !settingsFields.some((f) => f.key === b[k] && !f.secret)) err(`${bat}.${k}`, `No existe como ajuste no secreto en settingsSchema: ${b[k]}`);
+                }
+                if (typeof o.apiBase !== "string") err(bat, "La credencial bot exige apiBase del proveedor");
+            }
+        }
         if (o.apiBase !== undefined) {
             const why = checkOAuthEndpointUrl(o.apiBase, hosts);
             if (why) err(`${at}.apiBase`, why);
@@ -538,7 +595,7 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
             else o.defaultScopes.forEach((s: unknown, i: number) => { if (typeof s !== "string" || !scopeIds.has(s)) err(`${at}.defaultScopes[${i}]`, "Debe ser un scope del catalogo"); });
         }
 
-        if (o.actions !== undefined) validateActions(o.actions, `${at}.actions`, err, scopeIds, typeof o.apiBase === "string", hosts, settingsFields, extraDefs);
+        if (o.actions !== undefined) validateActions(o.actions, `${at}.actions`, err, scopeIds, typeof o.apiBase === "string", hosts, settingsFields, extraDefs, o.botCredential !== undefined);
         if (o.onUnlink !== undefined) {
             const target = Array.isArray(o.actions) ? (o.actions as Array<Record<string, unknown>>).find((a) => a && a.id === o.onUnlink) : undefined;
             const needsParams = target && target.params && typeof target.params === "object" ? Object.values(target.params as Record<string, Record<string, unknown>>).some((d) => d && d.required === true) : false;
@@ -603,7 +660,7 @@ export function validateOAuthProviders(raw: unknown, err: Sink, warn: Sink, sett
 const PARAM_NAME_RE = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 const QUERY_NAME_RE = /^\$?[A-Za-z][A-Za-z0-9_.-]{0,39}$/;
 
-function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<string>, hasApiBase: boolean, hosts: readonly string[], settingsFields?: ReadonlyArray<{ key: string; secret: boolean }>, extraDefs: Record<string, OAuthExtraDef> = {}): void {
+function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<string>, hasApiBase: boolean, hosts: readonly string[], settingsFields?: ReadonlyArray<{ key: string; secret: boolean }>, extraDefs: Record<string, OAuthExtraDef> = {}, hasBot = false): void {
     if (!Array.isArray(raw)) return err(at, "Debe ser un arreglo");
     if (raw.length > OAUTH_ACTION_LIMITS.maxActions) err(at, `Maximo ${OAUTH_ACTION_LIMITS.maxActions} acciones`);
     const everyActionHasBase = raw.every((a) => typeof a === "object" && a !== null && (typeof (a as Record<string, unknown>).apiBase === "string" || typeof (a as Record<string, unknown>).apiHostExtra === "string"));
@@ -623,6 +680,7 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
         const path = act.path;
         const pathParams = new Set<string>();
         const pathExtraNames = new Set<string>();
+        const pathSettingNames = new Set<string>();
         if (act.pathExtras !== undefined) {
             const pe = act.pathExtras as Record<string, unknown>;
             if (typeof pe !== "object" || pe === null || Array.isArray(pe) || Object.keys(pe).length > 4) err(`${aat}.pathExtras`, "Objeto { marcador: dato extra } (max 4)");
@@ -650,6 +708,40 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
                 pathParams.add(m[1]);
             }
             if (/[{}]/.test(path.replace(/\{[A-Za-z][A-Za-z0-9_]{0,31}\}/g, ""))) err(`${aat}.path`, "Llaves mal formadas");
+        }
+        if (act.credential !== undefined) {
+            if (act.credential !== "bot") err(`${aat}.credential`, "Solo \"bot\"");
+            else {
+                if (!hasBot) err(`${aat}.credential`, "El proveedor debe declarar botCredential");
+                if (typeof act.group !== "string" || !OAUTH_BOT_GROUP_RE.test(act.group)) err(`${aat}.group`, "Una accion bot usa un grupo bot-* (bot-read, bot-write, bot-mod)");
+                if (act.noAuth !== undefined || act.pathExtras !== undefined || act.apiHostExtra !== undefined || act.requiresScopes !== undefined) err(`${aat}.credential`, "Incompatible con noAuth, pathExtras, apiHostExtra y requiresScopes");
+                if (act.moderation === true && act.group !== "bot-mod") err(`${aat}.moderation`, "Una accion de moderacion usa el grupo bot-mod");
+                if (act.group === "bot-mod" && act.moderation !== true) err(`${aat}.moderation`, "El grupo bot-mod exige moderation: true");
+                if (act.method !== "GET" && act.write !== true) err(`${aat}.write`, "Las acciones bot que no son GET declaran write: true");
+                if (act.method !== "GET" && typeof act.quotaPerHour !== "number") err(`${aat}.quotaPerHour`, "Las acciones bot de escritura exigen quotaPerHour");
+            }
+        } else {
+            for (const k of ["moderation", "guild", "pathSettings"]) if (act[k] !== undefined) err(`${aat}.${k}`, "Solo con credential: \"bot\"");
+            if (typeof act.group === "string" && OAUTH_BOT_GROUP_RE.test(act.group)) err(`${aat}.group`, "Los grupos bot-* son solo de acciones con credential: \"bot\"");
+        }
+        if (act.moderation !== undefined && typeof act.moderation !== "boolean") err(`${aat}.moderation`, "Debe ser boolean");
+        if (act.guild !== undefined) {
+            const g = act.guild as Record<string, unknown>;
+            if (typeof g !== "object" || g === null || Array.isArray(g) || !Object.keys(g).every((k) => ["param", "channelParam", "filterList"].includes(k))) err(`${aat}.guild`, "Objeto { param | channelParam | filterList }");
+            else {
+                if (["param", "channelParam", "filterList"].filter((k) => g[k] !== undefined).length !== 1) err(`${aat}.guild`, "Exactamente uno de param, channelParam, filterList");
+                for (const k of ["param", "channelParam"] as const) if (g[k] !== undefined && (typeof g[k] !== "string" || !pathParams.has(g[k] as string))) err(`${aat}.guild.${k}`, "Debe nombrar un parametro de ruta de la accion");
+                if (g.filterList !== undefined && (g.filterList !== true || act.method !== "GET")) err(`${aat}.guild.filterList`, "true, solo en GET");
+            }
+        }
+        if (act.pathSettings !== undefined) {
+            const ps = act.pathSettings as Record<string, unknown>;
+            if (typeof ps !== "object" || ps === null || Array.isArray(ps) || Object.keys(ps).length > 2) err(`${aat}.pathSettings`, "Objeto { marcador: ajuste } (max 2)");
+            else for (const [ph, key] of Object.entries(ps)) {
+                if (!PARAM_NAME_RE.test(ph) || ph === "__proto__" || ph === "constructor" || !pathParams.has(ph)) err(`${aat}.pathSettings.${ph}`, "Debe ser un marcador de la ruta");
+                else if (typeof key !== "string" || !key || (settingsFields && !settingsFields.some((f) => f.key === key && !f.secret))) err(`${aat}.pathSettings.${ph}`, "Clave de un ajuste NO secreto del settingsSchema");
+                else pathSettingNames.add(ph);
+            }
         }
         const params = act.params;
         const declared = new Set<string>();
@@ -698,7 +790,7 @@ function validateActions(raw: unknown, at: string, err: Sink, scopeIds: Set<stri
                 }
             }
         }
-        for (const p of pathParams) if (!declared.has(p) && !pathExtraNames.has(p)) err(`${aat}.params`, `Falta declarar el parametro de ruta {${p}}`);
+        for (const p of pathParams) if (!declared.has(p) && !pathExtraNames.has(p) && !pathSettingNames.has(p)) err(`${aat}.params`, `Falta declarar el parametro de ruta {${p}}`);
         for (const p of pathExtraNames) if (!pathParams.has(p)) err(`${aat}.pathExtras`, `No aparece en path: {${p}}`);
         if (act.requiresScopes !== undefined) {
             if (!Array.isArray(act.requiresScopes)) err(`${aat}.requiresScopes`, "Debe ser un arreglo");
@@ -809,6 +901,8 @@ export function validateActionInput(action: Pick<OAuthActionDef, "params"> & { b
 
 /** Grupos de scopes de riesgo alto/critico: pedirlos con `OAUTH_ACCOUNT:<proveedor>:<grupo>` exige aprobacion explicita del admin. */
 export const HIGH_RISK_OAUTH_GROUPS: readonly string[] = Object.freeze(["gmail", "mail", "drive", "files", "admin", "directory", "crm"]);
+/** Los grupos `bot-*` (credencial bot compartida del dominio) siempre exigen aprobacion explicita del admin. */
+export const isHighRiskOAuthGroup = (group: string): boolean => HIGH_RISK_OAUTH_GROUPS.includes(group) || OAUTH_BOT_GROUP_RE.test(group);
 
 /** Aprobaciones que piden los permisos OAuth de un manifest: toda `OAUTH_SHARED:*` y las `OAUTH_ACCOUNT:*` de grupos de riesgo alto. */
 export function oauthApprovalKeys(permissions: unknown): string[] {
@@ -818,7 +912,7 @@ export function oauthApprovalKeys(permissions: unknown): string[] {
         if (typeof p !== "string") continue;
         if (/^OAUTH_SHARED:[a-z][a-z0-9-]{1,31}$/.test(p)) out.add(p);
         const m = /^OAUTH_ACCOUNT:([a-z][a-z0-9-]{1,31}):([a-z][a-z0-9-]{0,31})$/.exec(p);
-        if (m && HIGH_RISK_OAUTH_GROUPS.includes(m[2])) out.add(p);
+        if (m && isHighRiskOAuthGroup(m[2])) out.add(p);
     }
     return Array.from(out).sort();
 }

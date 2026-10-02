@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { safePatternTest } from '@/lib/expansions/oauth-schema';
 import { adminRoute, audit, badRequest, notFound, parseBody, parseQuery } from '@/lib/admin/http';
 import { assertFreshMfa } from '@/lib/admin/stepup';
 import { clearProviderSecret, credentialNamesOf, getProvider, saveProviderSecret, saveSharedCredential } from '@/lib/oauth/providers';
@@ -30,8 +31,10 @@ export const PUT = adminRoute<{ id: string }>({ scope: 'oauth.secret', write: tr
     if (!allowed.includes(input.credential)) throw badRequest('unknown_credential');
     // La cuenta de servicio se valida ANTES de guardarla (formato y tamano), sin devolver el contenido.
     if (input.credential === provider.principals.serviceAccountJson && !parseServiceAccount(input.value)) throw badRequest('invalid_service_account');
+    // Token del bot: solo el FORMATO (patron anclado declarado por el proveedor); el valor nunca se registra ni se devuelve.
+    if (provider.bot && input.credential === provider.bot.tokenCredential && !safePatternTest(provider.bot.tokenPattern, input.value.trim())) throw badRequest('invalid_credential_format');
     if (input.credential === provider.principals.organizerRefreshToken && /\s/.test(input.value)) throw badRequest('invalid_input');
-    if (!(await saveSharedCredential(provider, input.credential, input.value, by))) throw badRequest('storage_unavailable', 'Run db:ensure');
+    if (!(await saveSharedCredential(provider, input.credential, provider.bot && input.credential === provider.bot.tokenCredential ? input.value.trim() : input.value, by))) throw badRequest('storage_unavailable', 'Run db:ensure');
     audit(ctx, 'oauth.secret_saved', { provider: provider.id, extensionId: provider.extensionId, credential: input.credential, approvedHosts: provider.endpointHosts });
     return { success: true, credential: input.credential, approvedHosts: provider.endpointHosts };
 });

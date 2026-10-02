@@ -100,7 +100,9 @@ export interface ProviderRequest {
     timeoutMs?: number;
     maxBytes?: number;
 }
-export interface ProviderResponse { status: number; ok: boolean; text: string; json: unknown | null }
+/** Solo las cabeceras de limite de tasa (X-RateLimit-*, Retry-After), NUNCA las demas: el broker no devuelve cabeceras del proveedor. */
+export interface ProviderRateInfo { remaining?: number; resetAfterMs?: number; retryAfterMs?: number }
+export interface ProviderResponse { status: number; ok: boolean; text: string; json: unknown | null; rate?: ProviderRateInfo }
 
 export async function providerFetch(allowedHosts: readonly string[], url: string, req: ProviderRequest = {}): Promise<ProviderResponse> {
     if (checkOAuthEndpointUrl(url, allowedHosts) !== null) throw new ProviderHttpError('oauth_url_rejected');
@@ -133,7 +135,10 @@ export async function providerFetch(allowedHosts: readonly string[], url: string
         }
         let json: unknown | null = null;
         try { json = text ? JSON.parse(text) : null; } catch { json = null; }
-        return { status: res.status, ok: res.status >= 200 && res.status < 300, text, json };
+        const num = (h: string): number | undefined => { const v = res.headers.get(h); const n = v === null ? NaN : Number(v); return Number.isFinite(n) && n >= 0 ? n : undefined; };
+        const remaining = num('x-ratelimit-remaining'); const reset = num('x-ratelimit-reset-after'); const retry = num('retry-after');
+        const rate: ProviderRateInfo = { ...(remaining !== undefined ? { remaining } : {}), ...(reset !== undefined ? { resetAfterMs: Math.round(reset * 1000) } : {}), ...(retry !== undefined ? { retryAfterMs: Math.round(retry * 1000) } : {}) };
+        return { status: res.status, ok: res.status >= 200 && res.status < 300, text, json, ...(Object.keys(rate).length ? { rate } : {}) };
     } catch (error) {
         if (error instanceof ProviderHttpError) throw error;
         if ((error as { name?: string } | null)?.name === 'AbortError') throw new ProviderHttpError('oauth_timeout');

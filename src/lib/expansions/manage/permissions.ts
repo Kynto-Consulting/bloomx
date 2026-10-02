@@ -56,6 +56,15 @@ export function describePermission(permission: string, locale: ManageLocale = 'e
     const shared = /^OAUTH_SHARED:([a-z][a-z0-9-]{1,31})$/.exec(permission);
     if (shared) return { permission, text: locale === 'en' ? `Act as the organization's shared ${shared[1]} identity (organizer or service account), not as a user` : `Actuar como la identidad compartida de ${shared[1]} de la organizacion (organizador o cuenta de servicio), no como un usuario`, level: 'high', known: true };
     const oauth = /^OAUTH_ACCOUNT:([a-z][a-z0-9-]{1,31}):([a-z][a-z0-9-]{0,31})$/.exec(permission);
+    if (oauth && /^bot-[a-z][a-z0-9-]{0,26}$/.test(oauth[2])) {
+        const kind: Record<string, [string, string]> = {
+            'bot-read': ['read servers, channels, members and messages', 'leer servidores, canales, miembros y mensajes'],
+            'bot-write': ['send messages, add reactions, create threads and register commands', 'enviar mensajes, reaccionar, crear hilos y registrar comandos'],
+            'bot-mod': ['MODERATE: remove members, ban, change roles and delete messages (only if the administrator enables moderation)', 'MODERAR: expulsar, banear, cambiar roles y borrar mensajes (solo si el administrador activa la moderacion)'],
+        };
+        const k = kind[oauth[2]] ?? ['use the bot', 'usar el bot'];
+        return { permission, text: locale === 'en' ? `Use the organization's shared ${oauth[1]} BOT to ${k[0]} (the bot token never leaves the core)` : `Usar el BOT compartido de ${oauth[1]} de la organizacion para ${k[1]} (el token del bot nunca sale del nucleo)`, level: 'high', known: true };
+    }
     if (oauth) return { permission, text: locale === 'en' ? `Use your linked ${oauth[1]} account(s) for "${oauth[2]}" (it never sees your passwords or tokens)` : `Usar tu(s) cuenta(s) ${oauth[1]} vinculada(s) para "${oauth[2]}" (nunca ve tus contrasenas ni tokens)`, level: 'high', known: true };
     const info = Object.prototype.hasOwnProperty.call(PERMISSION_TEXTS, permission) ? PERMISSION_TEXTS[permission] : null;
     if (!info) return { permission, text: permission, level: 'high', known: false };

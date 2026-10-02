@@ -51,9 +51,14 @@ export const ROUTE_LIMITS = {
     maxArrayItems: 200,
 } as const;
 
+/** Destinos de `dispatch`: punto de hook que reciben las extensiones consumidoras. */
+export const ROUTE_DISPATCH_TARGETS = { "discord-interaction": "DISCORD_INTERACTION" } as const;
+export type RouteDispatch = keyof typeof ROUTE_DISPATCH_TARGETS;
+
 export type RouteHmac = {
     header: string;
-    algorithm: "sha256" | "sha512";
+    /** `ed25519` = firma asimetrica (Discord Interactions): `secretCredential` guarda la CLAVE PUBLICA en hexadecimal (64 caracteres). Exige signedPayload "timestamp+body", encoding hex y timestampHeader. */
+    algorithm: "sha256" | "sha512" | "ed25519";
     encoding?: "hex" | "base64";
     prefix?: string;
     secretCredential: string;
@@ -62,7 +67,7 @@ export type RouteHmac = {
     allowReplay?: boolean;
     toleranceSec?: number;
     /** Que firma el tercero: `body` | `timestamp.body` | `v0:timestamp:body` (estilo Slack). */
-    signedPayload?: "body" | "timestamp.body" | "v0:timestamp:body";
+    signedPayload?: "body" | "timestamp.body" | "v0:timestamp:body" | "timestamp+body";
 };
 
 export type InputField = {
@@ -96,6 +101,8 @@ export type ManifestRoute = {
     /** La ruta (aunque sea GET) cambia estado: se rechaza si llega de otro sitio (Sec-Fetch-Site: cross-site). */
     sideEffects?: boolean;
     hmac?: RouteHmac;
+    /** Tras verificar la firma, el router entrega el evento a los hooks de las extensiones instaladas (ver ROUTE_DISPATCH_TARGETS) en lugar de ejecutar `handler`. Solo con hmac ed25519. */
+    dispatch?: RouteDispatch;
     input?: RouteInput;
     maxBodyBytes?: number;
     timeoutMs?: number;
@@ -263,20 +270,34 @@ export function validateBackendRoutes(raw: unknown, err: Sink, warn: Sink, ctx: 
             if (typeof h !== "object" || h === null || Array.isArray(h)) err(`${at}.hmac`, "Requerido con auth: \"hmac\"");
             else {
                 if (typeof h.header !== "string" || !HEADER_RE.test(h.header) || FORBIDDEN_HMAC_HEADERS.has(h.header)) err(`${at}.hmac.header`, "Cabecera en minusculas (no authorization/cookie/host/x-bloomx-*)");
-                if (h.algorithm !== "sha256" && h.algorithm !== "sha512") err(`${at}.hmac.algorithm`, "sha256 o sha512 (sha1/md5 no se admiten)");
+                if (h.algorithm !== "sha256" && h.algorithm !== "sha512" && h.algorithm !== "ed25519") err(`${at}.hmac.algorithm`, "sha256, sha512 o ed25519 (sha1/md5 no se admiten)");
                 if (h.encoding !== undefined && h.encoding !== "hex" && h.encoding !== "base64") err(`${at}.hmac.encoding`, "hex o base64");
                 if (h.prefix !== undefined && (typeof h.prefix !== "string" || h.prefix.length > 20)) err(`${at}.hmac.prefix`, "String (max 20), p. ej. \"sha256=\"");
                 if (typeof h.secretCredential !== "string" || !SECRET_NAME_RE.test(h.secretCredential)) err(`${at}.hmac.secretCredential`, "Nombre en MAYUSCULAS de una credencial del dominio");
                 else if (!ctx.secretKeys.includes(h.secretCredential) && !ctx.envReads.includes(h.secretCredential)) err(`${at}.hmac.secretCredential`, `Debe ser un campo secret:true del settingsSchema o un ENV_READ declarado: ${h.secretCredential}`);
                 if (h.timestampHeader !== undefined && (typeof h.timestampHeader !== "string" || !HEADER_RE.test(h.timestampHeader) || FORBIDDEN_HMAC_HEADERS.has(h.timestampHeader))) err(`${at}.hmac.timestampHeader`, "Cabecera en minusculas");
                 if (h.toleranceSec !== undefined && (!Number.isInteger(h.toleranceSec) || (h.toleranceSec as number) < ROUTE_LIMITS.minToleranceSec || (h.toleranceSec as number) > ROUTE_LIMITS.maxToleranceSec)) err(`${at}.hmac.toleranceSec`, `Entero ${ROUTE_LIMITS.minToleranceSec}..${ROUTE_LIMITS.maxToleranceSec}`);
-                if (h.signedPayload !== undefined && !["body", "timestamp.body", "v0:timestamp:body"].includes(String(h.signedPayload))) err(`${at}.hmac.signedPayload`, "body | timestamp.body | v0:timestamp:body");
+                if (h.signedPayload !== undefined && !["body", "timestamp.body", "v0:timestamp:body", "timestamp+body"].includes(String(h.signedPayload))) err(`${at}.hmac.signedPayload`, "body | timestamp.body | v0:timestamp:body | timestamp+body");
                 if (h.signedPayload !== undefined && h.signedPayload !== "body" && !h.timestampHeader) err(`${at}.hmac.timestampHeader`, "Requerido si el payload firmado incluye el timestamp (anti-replay)");
+                if (h.algorithm === "ed25519") {
+                    if (h.signedPayload !== "timestamp+body") err(`${at}.hmac.signedPayload`, "ed25519 firma timestamp+body (Discord): declara signedPayload: \"timestamp+body\"");
+                    if (h.encoding !== undefined && h.encoding !== "hex") err(`${at}.hmac.encoding`, "ed25519 usa hex");
+                    if (h.prefix !== undefined) err(`${at}.hmac.prefix`, "ed25519 no admite prefix");
+                    if (!h.timestampHeader) err(`${at}.hmac.timestampHeader`, "ed25519 exige timestampHeader (anti-replay)");
+                    if (h.allowReplay === true) err(`${at}.hmac.allowReplay`, "ed25519 no admite allowReplay");
+                } else if (h.signedPayload === "timestamp+body") err(`${at}.hmac.signedPayload`, "timestamp+body solo con algorithm ed25519");
                 if (h.allowReplay !== undefined && typeof h.allowReplay !== "boolean") err(`${at}.hmac.allowReplay`, "Booleano");
                 if (!h.timestampHeader && h.allowReplay !== true) err(`${at}.hmac.timestampHeader`, "Requerido (anti-replay). Si el tercero no envia timestamp, declara allowReplay: true de forma explicita: la deteccion de firma repetida es solo por proceso y NO es una defensa fuerte en serverless");
                 else if (!h.timestampHeader) warn(`${at}.hmac.allowReplay`, "Sin timestampHeader no hay proteccion de repeticion fuerte (la deteccion de firma repetida es por proceso y no es fiable en serverless)");
             }
         } else if (route.hmac !== undefined) err(`${at}.hmac`, "Solo con auth: \"hmac\"");
+        if (route.dispatch !== undefined) {
+            usesAuthFields = true;
+            const hm = route.hmac as Record<string, unknown> | undefined;
+            if (typeof route.dispatch !== "string" || !Object.prototype.hasOwnProperty.call(ROUTE_DISPATCH_TARGETS, route.dispatch)) err(`${at}.dispatch`, `Debe ser uno de ${Object.keys(ROUTE_DISPATCH_TARGETS).join(", ")}`);
+            else if (auth !== "hmac" || !hm || hm.algorithm !== "ed25519") err(`${at}.dispatch`, "Solo con auth: \"hmac\" y algorithm: \"ed25519\"");
+            if (route.dispatch !== undefined && !methods.includes("POST")) err(`${at}.dispatch`, "Una ruta con dispatch es POST");
+        }
         if (auth === "none") {
             hasNone = true;
             if (!ctx.permissions.includes(PUBLIC_ROUTE_PERMISSION)) err(`${at}.auth`, "auth: \"none\" exige declarar el permiso PUBLIC_ROUTE (riesgo alto, aprobacion explicita del admin)");

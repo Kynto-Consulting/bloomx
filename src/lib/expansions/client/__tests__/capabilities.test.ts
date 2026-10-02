@@ -83,7 +83,7 @@ describe('las cabeceras de version van en TODAS las llamadas y dentro de la firm
 
 describe('instancia SIN clave de dominio: solo anuncia lo que funciona sin firmar', () => {
     it('clasificacion: signed-only = grants, oauth.* y rutas; el resto es unsigned-ok', () => {
-        expect([...SIGNED_ONLY_CAPABILITIES].sort()).toEqual(['billing.paypal.v1', 'ext.grants.v1', 'ext.routes.auth.v1', 'ext.routes.v1', 'lifecycle.events.v2', 'marketplace.developer.v1', 'oauth.broker.v1', 'oauth.provider.v1', 'oauth.provider.v2']);
+        expect([...SIGNED_ONLY_CAPABILITIES].sort()).toEqual(['billing.paypal.v1', 'ext.grants.v1', 'ext.routes.auth.v1', 'ext.routes.v1', 'lifecycle.events.v2', 'marketplace.developer.v1', 'oauth.broker.v1', 'oauth.provider.v1', 'oauth.provider.v2', 'oauth.provider.v3']);
         for (const c of CLIENT_CAPABILITIES) expect(CAPABILITY_CLASS[c]).toBeDefined();
     });
     it('el clientApi sin clave es la mayor version cuyo conjunto completo es anunciable (justo antes de la primera signed-only) y ninguna capacidad supera esa version', () => {

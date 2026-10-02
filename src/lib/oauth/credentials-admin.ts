@@ -1,6 +1,7 @@
 import { oauthStore } from './store';
 import { credentialNamesOf, loadProviders, saveProviderSecret, saveSharedCredential, usesOfficialEndpoints, type ProviderRuntime } from './providers';
 import { parseServiceAccount } from './principals';
+import { safePatternTest } from '@/lib/expansions/oauth-schema';
 
 /**
  * Credenciales OAuth que gestiona el NUCLEO (no el backend compartido): client secret, refresh token del organizador y JSON de la cuenta de
@@ -29,7 +30,7 @@ export async function oauthCredentialStatus(extensionId: string): Promise<OAuthC
     return out;
 }
 
-export type DivertResult = { remaining: Record<string, unknown>; applied: string[]; set: string[]; removed: string[]; error?: 'invalid_service_account' | 'storage_unavailable' };
+export type DivertResult = { remaining: Record<string, unknown>; applied: string[]; set: string[]; removed: string[]; error?: 'invalid_service_account' | 'invalid_credential_format' | 'storage_unavailable' };
 
 /** Separa de `credentials` las que gestiona el nucleo y las guarda/borra aqui. El resto se reenvia al backend como siempre. */
 export async function divertOAuthCredentials(extensionId: string, credentials: Record<string, unknown>, by: string | null): Promise<DivertResult> {
@@ -51,7 +52,9 @@ export async function divertOAuthCredentials(extensionId: string, credentials: R
             }
             if (typeof value !== 'string' || value.length > 16_384) return { remaining, applied, set, removed, error: 'invalid_service_account' };
             if (name === p.principals.serviceAccountJson && !parseServiceAccount(value)) return { remaining, applied, set, removed, error: 'invalid_service_account' };
-            const ok = name === p.clientSecretName ? await saveProviderSecret(p, value.trim(), by) : await saveSharedCredential(p, name, value, by);
+            // Token del bot: solo se valida el FORMATO (patron anclado del manifest); jamas se registra ni se devuelve el valor.
+            if (p.bot && name === p.bot.tokenCredential && !safePatternTest(p.bot.tokenPattern, value.trim())) return { remaining, applied, set, removed, error: 'invalid_credential_format' };
+            const ok = name === p.clientSecretName ? await saveProviderSecret(p, value.trim(), by) : await saveSharedCredential(p, name, p.bot && name === p.bot.tokenCredential ? value.trim() : value, by);
             if (!ok) return { remaining, applied, set, removed, error: 'storage_unavailable' };
             set.push(name);
         }

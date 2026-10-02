@@ -1,5 +1,7 @@
 import { SignJWT, importPKCS8 } from 'jose';
 import { providerFetch } from './http';
+import { safePatternTest } from '@/lib/expansions/oauth-schema';
+import { botPolicy } from './bot-broker';
 import { getSharedCredential, getSharedCredentialByName, principalSetting, usesOfficialEndpoints, type ProviderRuntime } from './providers';
 import { clientAuth, OAuthAccountError, type TokenResponse } from './tokens';
 
@@ -35,7 +37,9 @@ export function parseServiceAccount(raw: string): ServiceAccountKey | null {
     }
 }
 
-export interface PrincipalAvailability { user: number; organizer: boolean; service: boolean; mode: string; accounts: { organizerEmail: string; impersonateUser: string } }
+export interface PrincipalAvailability { user: number; organizer: boolean; service: boolean; mode: string; accounts: { organizerEmail: string; impersonateUser: string };
+    /** Solo si el proveedor declara botCredential: token del bot guardado y politica del admin (sin valores sensibles). */
+    bot?: { configured: boolean; guilds: number; moderation: boolean } }
 
 /** Que identidades compartidas hay configuradas (sin valores) y el modo elegido por el admin. */
 export async function describePrincipals(provider: ProviderRuntime, userAccounts: number): Promise<PrincipalAvailability> {
@@ -48,7 +52,15 @@ export async function describePrincipals(provider: ProviderRuntime, userAccounts
         mode: principalSetting(provider, 'authMode'),
         // Cuentas NO secretas (para mostrar "actuando como"); solo se revelan a quien tiene OAUTH_SHARED.
         accounts: { organizerEmail: principalSetting(provider, 'organizerEmail'), impersonateUser: principalSetting(provider, 'impersonateUser') },
+        ...(provider.bot ? { bot: await botAvailability(provider) } : {}),
     };
+}
+
+async function botAvailability(provider: ProviderRuntime): Promise<{ configured: boolean; guilds: number; moderation: boolean }> {
+    const def = provider.bot;
+    const token = def ? await getSharedCredentialByName(provider, def.tokenCredential) : null;
+    const policy = botPolicy(provider);
+    return { configured: !!token && !!def && safePatternTest(def.tokenPattern, token) && provider.status !== 'needs_reapproval' && provider.status !== 'pending_approval', guilds: policy.allowedGuilds.length, moderation: policy.moderation };
 }
 
 /** Credenciales S2S (Zoom account_credentials) del proveedor, o null si falta algo. Nunca salen del nucleo. */

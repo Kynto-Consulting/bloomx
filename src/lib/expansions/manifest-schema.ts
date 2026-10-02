@@ -91,10 +91,14 @@ export const EVENT_PERMISSIONS: Record<string, string> = {
     USER_ENABLED: "READ_USERS",
     EMAIL_SPAM_DETECTED: "READ_EMAIL",
     LABEL_APPLIED: "READ_EMAIL",
+    // Punto de hook NO de ciclo de vida: solo lo dispara el router de rutas (route.dispatch) tras verificar la firma de Discord. Exige la identidad compartida OAUTH_SHARED:discord.
+    DISCORD_INTERACTION: "OAUTH_SHARED:discord",
 };
 
 /** Eventos de servidor que ejecuta /api/extension/hooks (manifest `intercepts` o su alias `hooks`). */
-export const INTERCEPT_POINTS = ["EMAIL_PRE_SEND", "EMAIL_RECEIVED", "CRON", ...LIFECYCLE_EVENTS];
+/** Puntos que dispara el router de rutas de extensiones (nunca /api/extension/hooks): no son eventos de ciclo de vida. */
+export const ROUTE_HOOK_POINTS = ["DISCORD_INTERACTION"];
+export const INTERCEPT_POINTS = ["EMAIL_PRE_SEND", "EMAIL_RECEIVED", "CRON", ...LIFECYCLE_EVENTS, ...ROUTE_HOOK_POINTS];
 export const INTERCEPT_PRIORITIES = ["HIGH", "NORMAL", "LOW", "MONITOR"];
 export const CRON_SCHEDULES = ["hourly", "daily"];
 
@@ -234,6 +238,7 @@ export function describePermissions(permissions: unknown): Array<{ permission: s
         }
         if (permission.startsWith("OAUTH_ACCOUNT:")) {
             const m = /^OAUTH_ACCOUNT:([a-z][a-z0-9-]{1,31}):([a-z][a-z0-9-]{0,31})$/.exec(permission);
+            if (m && /^bot-/.test(m[2])) return { permission, label: `Bot de ${m[1]} (${m[2]})`, description: `Usa, a traves del nucleo y sin ver nunca el token, el BOT compartido del dominio en ${m[1]} para el grupo "${m[2]}"${m[2] === "bot-mod" ? " (moderacion: solo si el administrador la activa en los ajustes)" : ""}. Exige ademas OAUTH_SHARED:${m[1]} y la aprobacion del administrador.`, risk: "high" as PermissionRisk, known: true };
             return m
                 ? { permission, label: `Cuenta ${m[1]} (${m[2]})`, description: `Usa, a traves del nucleo y sin ver nunca tus tokens, las cuentas ${m[1]} vinculadas del usuario para el grupo de permisos "${m[2]}".`, risk: "high" as PermissionRisk, known: true }
                 : { permission, label: permission, description: "Permiso desconocido: la plataforma lo ignora.", risk: "high" as PermissionRisk, known: false };

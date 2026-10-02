@@ -30,7 +30,8 @@ import { hasValidDomainKey } from '@/lib/domain-key';
 // 9 = proveedores OAuth v2 (oauth.provider.v2): MicrosoftLib, ZoomLib y SlackLib.
 // 10 = pagos con PayPal y portal de desarrolladores (billing.paypal.v1, marketplace.developer.v1): los proxies /api/admin/billing y /api/admin/developer firman con la clave de dominio.
 // 11 = marketplace de extensiones (market.catalog.v1): metadatos de tienda en el catalogo publico (informativos, nunca en requires).
-export const CLIENT_API_VERSION = 11;
+// 12 = credencial BOT de proveedores OAuth (oauth.provider.v3): DiscordLib 1.1.0 (acciones con token de bot, solo del nucleo) e Interactions por HTTP.
+export const CLIENT_API_VERSION = 12;
 
 /** Capacidades que ESTE cliente implementa (ademas de la linea base). Mantener en orden alfabetico. */
 export const CLIENT_CAPABILITIES: readonly string[] = [
@@ -51,6 +52,7 @@ export const CLIENT_CAPABILITIES: readonly string[] = [
     'oauth.broker.v1',
     'oauth.provider.v1',
     'oauth.provider.v2',
+    'oauth.provider.v3',
     'services.host.v1',
     'settings.schema.v1',
     'settings.users.v1',
@@ -92,7 +94,7 @@ export const CLIENT_IDENTITY: ClientIdentity = makeClientIdentity(CLIENT_API_VER
  *    no cambian (lo demuestra bloomx-extensions/tests/market-catalog.test.mjs + unsigned-catalog.test.mjs).
  */
 export const CAPABILITY_CLASS: Readonly<Record<string, 'signed-only' | 'unsigned-ok'>> = Object.freeze(
-    Object.fromEntries(CLIENT_CAPABILITIES.map((c): [string, 'signed-only' | 'unsigned-ok'] => [c, (['ext.grants.v1', 'oauth.broker.v1', 'oauth.provider.v1', 'oauth.provider.v2', 'ext.routes.v1', 'ext.routes.auth.v1', 'lifecycle.events.v2', 'billing.paypal.v1', 'marketplace.developer.v1'] as readonly string[]).includes(c) ? 'signed-only' : 'unsigned-ok'])),
+    Object.fromEntries(CLIENT_CAPABILITIES.map((c): [string, 'signed-only' | 'unsigned-ok'] => [c, (['ext.grants.v1', 'oauth.broker.v1', 'oauth.provider.v1', 'oauth.provider.v2', 'oauth.provider.v3', 'ext.routes.v1', 'ext.routes.auth.v1', 'lifecycle.events.v2', 'billing.paypal.v1', 'marketplace.developer.v1'] as readonly string[]).includes(c) ? 'signed-only' : 'unsigned-ok'])),
 );
 export const SIGNED_ONLY_CAPABILITIES: readonly string[] = CLIENT_CAPABILITIES.filter((c) => CAPABILITY_CLASS[c] === 'signed-only');
 

@@ -99,6 +99,7 @@ const page: DocPageContent = {
     es: [
         { t: 'p', text: 'Todo lo necesario para **escribir, validar, probar y gestionar** extensiones sin desplegar nada: SDK con tipos, plantilla, validador por línea de comandos, **playground** y **galería de componentes** en la propia aplicación, y la página **/extensions** para usuarios y autores. La referencia de componentes, expresiones y acciones está en [Kit de componentes y UI](/docs/extension-ui).' },
         { t: 'callout', kind: 'tip', title: 'TSDocs', text: '¿Buscas los tipos exactos? [TSDocs: referencia del SDK](/docs/extension-tools/tsdocs) se genera de los `.d.ts` reales: `Manifest`, puntos de montaje, acciones, expresiones, `ctx.services`... con ejemplos, buscador y enlaces entre tipos.' },
+        { t: 'p', text: 'Para hablar con Discord desde una extensión (bot por REST sin gateway, Interactions por HTTP): [DiscordLib: bot de Discord](/docs/extension-tools/discordlib).' },
         { t: 'h2', id: 'sdk', text: 'SDK y plantilla' },
         { t: 'p', text: 'En `bloomx-extensions/_shared/sdk/`, sin dependencias. `ui.*` (un helper por componente), `act.*` (acciones) y `expr.*` (expresiones) **se generan del catálogo** (`ui-schema.ts`), así que los nombres y los tipos (`ui.d.ts`) nunca se desfasan; un test falla si el catálogo cambia y no se regenera (`npm run sdk:generate`). `ctx.d.ts` tipa `handler(ctx)` y `ctx.services` para `server.js` con JSDoc.' },
         { t: 'code', lang: 'js', title: 'UI como código tipado', code: sdkExample },
@@ -188,6 +189,7 @@ const page: DocPageContent = {
     en: [
         { t: 'p', text: 'Everything needed to **write, validate, test and manage** extensions without deploying anything: an SDK with types, a template, a command-line validator, a **playground** and a **component gallery** inside the app itself, and the **/extensions** page for users and authors. The reference for components, expressions and actions is in [Component kit and UI](/docs/extension-ui).' },
         { t: 'callout', kind: 'tip', title: 'TSDocs', text: 'Looking for the exact types? [TSDocs: SDK reference](/docs/extension-tools/tsdocs) is generated from the real `.d.ts` files: `Manifest`, mount points, actions, expressions, `ctx.services`... with examples, searchable and cross-linked.' },
+        { t: 'p', text: 'To talk to Discord from an extension (REST bot with no gateway, Interactions over HTTP): [DiscordLib: Discord bot](/docs/extension-tools/discordlib).' },
         { t: 'h2', id: 'sdk', text: 'SDK and template' },
         { t: 'p', text: 'In `bloomx-extensions/_shared/sdk/`, dependency-free. `ui.*` (one helper per component), `act.*` (actions) and `expr.*` (expressions) are **generated from the catalogue** (`ui-schema.ts`), so names and types (`ui.d.ts`) never drift; a test fails if the catalogue changes and is not regenerated (`npm run sdk:generate`). `ctx.d.ts` types `handler(ctx)` and `ctx.services` for `server.js` via JSDoc.' },
         { t: 'code', lang: 'js', title: 'UI as typed code', code: exampleEn },

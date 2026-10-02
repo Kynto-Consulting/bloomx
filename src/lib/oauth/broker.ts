@@ -6,6 +6,7 @@ import { validateActionInput, OAUTH_ACTION_LIMITS, type OAuthActionDef } from '@
 import { buildActionRequestUrl } from './action-url';
 import { BridgeError, extensionIdString, idString, type BridgeDeps } from '@/lib/expansions/host-services/bridge-route';
 import { ProviderHttpError, providerFetch } from './http';
+import { handleBotCall } from './bot-broker';
 import { getProvider, providerScopeGroups, type ProviderRuntime } from './providers';
 import { describePrincipals, getSharedAccessToken, type SharedPrincipal } from './principals';
 import { getAccessToken, grantedScopeSet, listUserAccounts, OAuthAccountError, parseAccountExtras, pickAccount } from './tokens';
@@ -71,14 +72,16 @@ export function buildMultipart(metadata: unknown, content: string, mimeType: str
 export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeRequest): Promise<unknown> {
     const provider = await getProvider(req.args.provider);
     if (!provider) throw new BridgeError('not_found');
-    if (provider.status !== 'ready') throw new BridgeError('not_configured');
+    // Las acciones con credencial BOT no necesitan el client id/secret OAuth (solo el token del bot): se admiten con el proveedor sin configurar OAuth.
+    const botCall = req.op === 'call' && !!provider.bot && actionOf(provider, req.args.action)?.credential === 'bot';
+    if (provider.status !== 'ready' && !((botCall || (req.op === 'principals' && !!provider.bot)) && provider.status === 'not_configured')) throw new BridgeError('not_configured');
 
     if (req.op === 'accounts' || req.op === 'principals') {
         const accounts = await listUserAccounts(req.userId, provider);
         if (req.op === 'principals') {
             const p = await describePrincipals(provider, accounts.length);
             // Las identidades compartidas solo se REVELAN a quien tiene el permiso OAUTH_SHARED (no se filtra la configuracion del dominio).
-            return req.sharedAllowed === true ? p : { user: p.user, organizer: false, service: false, mode: '', accounts: { organizerEmail: '', impersonateUser: '' } };
+            return req.sharedAllowed === true ? p : { user: p.user, organizer: false, service: false, mode: '', accounts: { organizerEmail: '', impersonateUser: '' }, ...(p.bot ? { bot: { configured: false, guilds: 0, moderation: false } } : {}) };
         }
         return accounts.map((a) => {
             // Solo los datos extra marcados `public` (p. ej. el chat_id verificado de Telegram): el resto (webhook, instancia) jamas sale del nucleo.
@@ -101,7 +104,12 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
     // Minimo privilegio: el grupo de la accion debe estar entre los que el manifest de la extension concede (firmado por el backend).
     if (!req.grantedGroups.includes(action.group)) throw new BridgeError('forbidden');
     // Identidades compartidas del dominio: permiso aparte (OAUTH_SHARED:<proveedor>) y sin accountId.
-    if (principal !== 'user' && (req.sharedAllowed !== true || accountId)) throw new BridgeError(accountId ? 'invalid_args' : 'forbidden');
+    const isBot = action.credential === 'bot';
+    if (isBot) {
+        // Credencial BOT compartida del dominio: exige OAUTH_SHARED:<proveedor>, no admite cuenta de usuario ni identidades organizer.
+        if (accountId || (req.args.principal !== undefined && req.args.principal !== 'service')) throw new BridgeError('invalid_args');
+        if (req.sharedAllowed !== true) throw new BridgeError('forbidden');
+    } else if (principal !== 'user' && (req.sharedAllowed !== true || accountId)) throw new BridgeError(accountId ? 'invalid_args' : 'forbidden');
 
     const input = validateActionInput(action, params);
     if (!input.ok) throw new BridgeError('invalid_args');
@@ -124,6 +132,7 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
     }
 
     const write = action.write === true || action.method !== 'GET';
+    if (isBot) return handleBotCall({ provider, action, input, userId: req.userId, extensionId: req.extensionId, rateLimit: deps.rateLimit, write });
     const rl = await deps.rateLimit(`oauth-call:${req.userId}:${req.extensionId}:${provider.id}:${write ? 'w' : 'r'}`, write ? WRITE_LIMIT : READ_LIMIT, 60_000);
     if (!rl.ok) throw new BridgeError('rate_limited', rl.retryAfter);
     // Tope duro por hora de la accion (p. ej. mensajes de Slack): lo fija el manifest, no la extension.

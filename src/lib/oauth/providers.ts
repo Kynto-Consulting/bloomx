@@ -2,7 +2,7 @@ import { backendUrl } from '@/lib/backend-url';
 import { createHash } from 'node:crypto';
 import { tryDecrypt, encrypt } from '@/lib/encryption';
 import { normalizeSettingsSchema } from '@/lib/expansions/settings-schema';
-import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, resolveOAuthVariable, substituteOAuthVariables, validateOAuthProviders, type OAuthActionDef, type OAuthExtraDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef, type OAuthServiceCredentialsDef } from '@/lib/expansions/oauth-schema';
+import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, resolveOAuthVariable, substituteOAuthVariables, validateOAuthProviders, type OAuthActionDef, type OAuthBotDef, type OAuthExtraDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef, type OAuthServiceCredentialsDef } from '@/lib/expansions/oauth-schema';
 import { oauthStore } from './store';
 import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { MAX_REGISTRY_BYTES, pinnedBackendKey, validateRegistryResponse, verifyConfigSignature } from './registry-trust';
@@ -57,6 +57,8 @@ export interface ProviderRuntime {
     extras: Record<string, OAuthExtraDef>;
     /** Accion (noAuth) que el nucleo ejecuta al desconectar una cuenta (p. ej. borrar el webhook de Discord). */
     onUnlink: string | null;
+    /** Credencial BOT del proveedor (token secreto solo del nucleo + ajustes de servidores y moderacion), o null. */
+    bot: OAuthBotDef | null;
     clientId: string | null;
     clientSecret: string | null;
     /** Nombre (credencial) del client secret segun el manifest. */
@@ -235,6 +237,7 @@ function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, sourc
         serviceCredentials: d.serviceCredentials ?? null,
         extras: { ...(d.extras ?? {}) },
         onUnlink: typeof d.onUnlink === 'string' ? d.onUnlink : null,
+        bot: d.botCredential ? { ...d.botCredential } : null,
         clientId: null,
         clientSecret: null,
         clientSecretName: (d as { clientSecretCredential?: string }).clientSecretCredential ?? null,
@@ -278,8 +281,8 @@ export async function attachCredentials(runtime: ProviderRuntime, def: { clientI
 }
 
 /** Nombres de credenciales que el admin puede guardar (cifradas, en la instancia) para el proveedor. */
-export function credentialNamesOf(provider: Pick<ProviderRuntime, 'principals' | 'clientSecretName'> & { serviceCredentials?: OAuthServiceCredentialsDef | null }): string[] {
-    return [provider.clientSecretName, provider.principals.organizerRefreshToken, provider.principals.serviceAccountJson, provider.serviceCredentials?.clientSecretCredential].filter((n): n is string => typeof n === 'string' && !!n);
+export function credentialNamesOf(provider: Pick<ProviderRuntime, 'principals' | 'clientSecretName'> & { serviceCredentials?: OAuthServiceCredentialsDef | null; bot?: OAuthBotDef | null }): string[] {
+    return [provider.clientSecretName, provider.principals.organizerRefreshToken, provider.principals.serviceAccountJson, provider.serviceCredentials?.clientSecretCredential, provider.bot?.tokenCredential].filter((n): n is string => typeof n === 'string' && !!n);
 }
 
 /** Setting publico de la extension (p. ej. impersonateUser): ajuste de la instancia/extension > variable de entorno heredada (solo endpoints oficiales). */
