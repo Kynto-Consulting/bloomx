@@ -21,6 +21,7 @@ import { saveAttachmentContentIds } from '@/lib/attachment-content-id';
 import { normalizeContentId } from '@/lib/email-utils';
 import { validateAttachment } from '@/lib/file-type';
 import { buildEmailSentContext, fireLifecycleHook, runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
+import { emitEmailSpamDetected, emitLabelApplied } from '@/lib/expansions/lifecycle-v2';
 import { internalSecretToSend } from '@/lib/internal-auth';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
 import { assignThread, headersOfInbound } from '@/lib/thread-store';
@@ -630,6 +631,10 @@ async function handleEmailReceived(data: any, rawPayload: string) {
         // Content-ID de imagenes inline (best-effort: si la columna aun no existe, no rompe la ingesta).
         // Los adjuntos pendientes los rellena process-attachments leyendo la cabecera del MIME.
         await saveAttachmentContentIds(attachmentContentIds.map((c) => ({ emailId: createdEmail.id, ...c })));
+
+        // Eventos v2 (lifecycle.events.v2): EMAIL_SPAM_DETECTED y LABEL_APPLIED (reglas). Asincronos, idempotentes y aislados: nunca afectan a la ingesta.
+        emitEmailSpamDetected(user.id, { emailId: createdEmail.id, from: formattedFrom }, spamVerdict);
+        void emitLabelApplied(user.id, createdEmail.id, inboundEffects.labelIds, 'rule');
 
         // Hook de extensiones EMAIL_RECEIVED: nunca bloquea ni hace fallar la ingesta.
         const receivedHookContext = { emailId: createdEmail.id, userId: user.id, domain: user.email.split('@')[1] || null };

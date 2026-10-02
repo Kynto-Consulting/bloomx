@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { env } from '@/lib/env';
 import { getRegistrationPolicy } from '@/lib/domain-registration';
 import { auditLog, BCRYPT_COST, getClientIp, isProduction, rateLimitAsync, safeEqual, validateNewPassword } from '@/lib/security';
+import { emitUserCreated } from '@/lib/expansions/lifecycle-v2';
 
 export async function POST(req: NextRequest) {
     const ip = getClientIp(req);
@@ -68,6 +69,7 @@ export async function POST(req: NextRequest) {
         });
 
         auditLog('auth.register.success', { userId: user.id, email: user.email, ip });
+        emitUserCreated(user, 'register'); // asincrono, nunca bloquea ni falla el registro
         return NextResponse.json({ success: true, user: { id: user.id, email: user.email } });
     } catch (error) {
         console.error('Registration error:', error instanceof Error ? error.message : 'unknown');

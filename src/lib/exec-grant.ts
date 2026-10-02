@@ -21,6 +21,7 @@ export const GRANT_HEADER = 'x-bloomx-grant';
 const DOMAIN_TAG = 'BLOOMX-GRANT-V1';
 const PERM_RE = /^[A-Z][A-Z0-9_]{1,40}(?::[A-Za-z0-9._*/-]{1,64}){0,2}$/;
 const MAX_PERMS = 64;
+const EVT_RE = /^[A-Z][A-Z_]{2,40}$/;
 const MAX_TOKEN_CHARS = 8192;
 
 type Env = Record<string, string | undefined>;
@@ -38,6 +39,8 @@ export interface GrantClaims {
     exp: number;
     nonce: string;
     max: number;
+    /** Evento de hook que origino ESTA ejecucion (solo en grants de /api/extension/hooks; lo fija la instancia, la extension no puede pedirlo). */
+    evt?: string;
 }
 
 export function grantTtlSeconds(env: Env = process.env): number {
@@ -55,6 +58,8 @@ export interface IssueInput {
     version: string;
     userId: string | null;
     permissions: unknown;
+    /** Evento de hook de servidor que dispara la ejecucion (EMAIL_RECEIVED, USER_CREATED...). Ausente en /execute. */
+    event?: string;
 }
 
 /** Emite una concesion para UNA ejecucion. null si la instancia no tiene clave de dominio (modo legado). */
@@ -71,6 +76,7 @@ export function issueExecutionGrant(input: IssueInput, env: Env = process.env, n
         v: 1, iss: domain, aud: domain, ext: input.extensionId, ver: input.version, sub: input.userId,
         perms: Array.from(new Set(perms)).sort(), jti: b64urlEncode(crypto.randomBytes(16)), iat, exp: iat + grantTtlSeconds(env),
         nonce: b64urlEncode(crypto.randomBytes(12)), max: grantMaxUses(env),
+        ...(typeof input.event === 'string' && EVT_RE.test(input.event) ? { evt: input.event } : {}),
     };
     const payload = b64urlEncode(Buffer.from(JSON.stringify(claims), 'utf8'));
     return `${GRANT_PREFIX}.${payload}.${signCanonical(key, `${DOMAIN_TAG}\n${payload}`)}`;
@@ -87,6 +93,7 @@ function parseClaims(payload: string): GrantClaims | null {
         if (c.sub !== null && !str(c.sub, 64)) return null;
         if (!Array.isArray(c.perms) || c.perms.length > MAX_PERMS || c.perms.some((p: unknown) => typeof p !== 'string' || !PERM_RE.test(p))) return null;
         if (!Number.isInteger(c.iat) || !Number.isInteger(c.exp) || !Number.isInteger(c.max) || c.max < 1 || c.exp <= c.iat || c.exp - c.iat > 900) return null;
+        if (c.evt !== undefined && (typeof c.evt !== 'string' || !EVT_RE.test(c.evt))) return null;
         return c as GrantClaims;
     } catch {
         return null;
@@ -130,7 +137,7 @@ export function __resetGrantUses(): void { uses.clear(); }
 // ---------------------------------------------------------------------------------------------------------------
 // Que servicios cubre la concesion (derivado de los permisos del manifest; lista cerrada)
 // ---------------------------------------------------------------------------------------------------------------
-export const GRANT_SERVICES = ['calendar', 'contacts', 'storage', 'notify', 'formats', 'ai', 'mail', 'oauth'] as const;
+export const GRANT_SERVICES = ['calendar', 'contacts', 'storage', 'notify', 'formats', 'ai', 'mail', 'oauth', 'users', 'stats'] as const;
 export type GrantService = (typeof GRANT_SERVICES)[number];
 
 export function grantAllowsService(claims: Pick<GrantClaims, 'perms'>, service: string): boolean {
@@ -142,6 +149,8 @@ export function grantAllowsService(claims: Pick<GrantClaims, 'perms'>, service: 
         case 'storage': return p.includes('STORAGE');
         case 'notify': return p.includes('NOTIFY');
         case 'formats': return p.includes('FORMATS');
+        case 'users': return p.includes('READ_USERS');
+        case 'stats': return p.includes('READ_STATS');
         case 'ai': return p.includes('AI') || p.includes('AI_GENERATE');
         case 'mail': return p.includes('READ_EMAIL') || p.includes('MAIL_LABEL');
         case 'oauth': return has((x) => x.startsWith('OAUTH_ACCOUNT:') || x.startsWith('OAUTH_SHARED:'));

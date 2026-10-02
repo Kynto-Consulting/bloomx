@@ -98,10 +98,23 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
 
     const input = validateActionInput(action, params);
     if (!input.ok) throw new BridgeError('invalid_args');
+    // Parametros restringidos por un ajuste del admin (p. ej. canales de Slack permitidos): el valor DEBE estar en la lista; lista vacia = nada permitido.
+    for (const [name, def] of Object.entries(action.params ?? {})) {
+        if (!def.allowedFromSetting) continue;
+        const value = (params as Record<string, unknown>)[name];
+        if (typeof value !== 'string') continue;
+        const allowed = String(provider.settingsConfig[def.allowedFromSetting] ?? '').split(/[\s,;]+/).filter(Boolean);
+        if (!allowed.includes(value)) throw new BridgeError('forbidden');
+    }
 
     const write = action.write === true || action.method !== 'GET';
     const rl = await deps.rateLimit(`oauth-call:${req.userId}:${req.extensionId}:${provider.id}:${write ? 'w' : 'r'}`, write ? WRITE_LIMIT : READ_LIMIT, 60_000);
     if (!rl.ok) throw new BridgeError('rate_limited', rl.retryAfter);
+    // Tope duro por hora de la accion (p. ej. mensajes de Slack): lo fija el manifest, no la extension.
+    if (action.quotaPerHour) {
+        const hourly = await deps.rateLimit(`oauth-quota:${req.userId}:${req.extensionId}:${provider.id}:${action.id}`, action.quotaPerHour, 3_600_000);
+        if (!hourly.ok) throw new BridgeError('rate_limited', hourly.retryAfter);
+    }
 
     const apiBase = action.apiBase ?? provider.apiBase;
     if (!apiBase) throw new BridgeError('not_configured');
@@ -110,7 +123,7 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
     try {
         const resolveToken = async (): Promise<{ accessToken: string; scope: string | null; accountId?: string }> => {
             try {
-                if (principal === 'user') return await getAccessToken(provider, req.userId, { accountId });
+                if (principal === 'user') return await getAccessToken(provider, req.userId, { accountId, requiresScopes: action.requiresScopes });
                 return await getSharedAccessToken(provider, principal as SharedPrincipal, action.requiresScopes ?? []);
             } catch (error) {
                 throw mapAccountError(error);
@@ -124,6 +137,9 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
         const query = new URLSearchParams({ ...(action.fixedQuery ?? {}), ...input.query });
         const url = `${apiBase.replace(/\/+$/, '')}${buildActionPath(action.path, input.path)}${query.toString() ? `?${query.toString()}` : ''}`;
         if (!providerUrlOk(provider, url.split('?')[0])) throw new BridgeError('forbidden');
+        // Defensa en profundidad: la ruta efectiva (tras normalizar la URL) debe ser EXACTAMENTE la construida; si un parametro la altera (.., //, %2e) no se envia.
+        const built = url.split('?')[0].replace(/^https:\/\/[^/]+/, '');
+        if (new URL(url).pathname !== built) throw new BridgeError('forbidden');
 
         let payload: { body?: string; contentType?: string } = {};
         if (action.upload) {
@@ -151,7 +167,7 @@ export async function handleOAuthBridge(deps: BrokerDeps, req: OAuthBridgeReques
             // Token revocado/caducado antes de tiempo: se fuerza UN refresco y se reintenta una vez.
             await prisma.account.update({ where: { id: token.accountId }, data: { expires_at: 1 } }).catch(() => undefined);
             let again;
-            try { again = await getAccessToken(provider, req.userId, { accountId: token.accountId }); } catch (error) { throw mapAccountError(error); }
+            try { again = await getAccessToken(provider, req.userId, { accountId: token.accountId, requiresScopes: action.requiresScopes }); } catch (error) { throw mapAccountError(error); }
             res = await send(again.accessToken);
         }
         status = res.status;

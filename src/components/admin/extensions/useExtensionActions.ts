@@ -1,8 +1,10 @@
 'use client';
 
+import { markPending } from '@/components/admin/billing/pending-purchase';
 import { useCallback, useState } from 'react';
 import { ApiError, adminFetch, apiErrorKey } from '@/components/admin/console';
 import { useI18n } from '@/components/I18nProvider';
+import { safePayPalUrl } from '@/lib/billing/paypal-url';
 import { normalizedOrders } from '@/lib/admin/extensions-manifest';
 import { canActivate, canInstall, canUpdate } from '@/lib/admin/extensions-compat';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
@@ -10,7 +12,7 @@ import type { ExtensionRow } from '@/lib/admin/extensions-view';
 const BACKEND_CODES = new Set([
     'manager_session_required', 'domain_mismatch', 'instance_unavailable', 'PAYMENT_REQUIRED', 'not_installed',
     'extension_not_found', 'backend_unavailable', 'backend_error', 'rate_limited', 'EXTENSION_NOT_ENABLED', 'EXTENSION_INVALID',
-    'client_incompatible', 'version_not_found', 'dependencies_required', 'EXTENSION_DEPENDENCY_MISSING', 'PUBLIC_ROUTE_APPROVAL_REQUIRED', 'PERMISSION_APPROVAL_REQUIRED',
+    'client_incompatible', 'version_not_found', 'reauth_required', 'payments_not_configured', 'payments_unavailable', 'signature_required', 'already_owned', 'not_for_sale', 'invalid_plan', 'dependencies_required', 'EXTENSION_DEPENDENCY_MISSING', 'PUBLIC_ROUTE_APPROVAL_REQUIRED', 'PERMISSION_APPROVAL_REQUIRED',
 ]);
 
 /** Clave i18n del error: codigo propio de la seccion si lo hay; si no, los errores comunes de la consola. */
@@ -21,18 +23,8 @@ export function extensionErrorKey(error: unknown): string {
 
 export type TestResult = { ok: true } | { ok: false; message: string } | { notSupported: string };
 
-const PAYMENT_URL = () => `${(process.env.NEXT_PUBLIC_BACKEND_URL || 'https://backend.bloomx.arubik.dev').replace(/\/+$/, '')}/api/payments/create-preference`;
-
-/** Solo se redirige a https (init_point de Mercado Pago). */
-export function safePaymentUrl(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    try {
-        const u = new URL(value);
-        return u.protocol === 'https:' ? u.toString() : null;
-    } catch {
-        return null;
-    }
-}
+/** Alias historico: solo se redirige a https y a hosts de PayPal conocidos (lista fija en lib/billing/paypal-url.ts). */
+export const safePaymentUrl = safePayPalUrl;
 
 export interface ExtensionActions {
     busyId: string | null;
@@ -40,7 +32,7 @@ export interface ExtensionActions {
     live: string;
     error: string | null;
     clearError: () => void;
-    install: (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) => Promise<boolean>;
+    install: (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean; plan?: 'one_time' | 'month' | 'year' }) => Promise<boolean>;
     /** Aplica la version del catalogo a una extension instalada (conserva credenciales, ajustes y estado). */
     update: (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) => Promise<boolean>;
     uninstall: (row: ExtensionRow) => Promise<boolean>;
@@ -78,31 +70,38 @@ export function useExtensionActions(domainId: string | undefined, refresh: () =>
     );
 
     const install = useCallback(
-        (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean }) =>
+        (row: ExtensionRow, opts?: { approvePublicRoutes?: boolean; plan?: 'one_time' | 'month' | 'year' }) =>
             run(row.id, async () => {
                 if (!domainId) return null;
                 if (!canInstall(row)) throw new ApiError(409, 'client_incompatible');
                 if (row.isPaid && !row.installed) {
-                    // Pago: igual que la pantalla antigua (create-preference del backend -> init_point de Mercado Pago).
-                    let pref: any = null;
+                    // Pago con PayPal: el proxy firmado crea la orden/suscripcion y devuelve approveUrl (solo hosts de PayPal).
+                    // PayPal vuelve a /admin/billing?order=<id> (o ?subscription=<id>), que captura el pago e instala la extension.
+                    let created: { approveUrl?: unknown; id?: unknown; kind?: unknown } | null = null;
+                    let owned = false;
                     try {
-                        const res = await fetch(PAYMENT_URL(), {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ domainId, extensionId: row.id, redirectUrl: window.location.href }),
-                        });
-                        pref = await res.json().catch(() => null);
-                    } catch {
-                        pref = null;
+                        created = await adminFetch<{ approveUrl?: unknown; id?: unknown; kind?: unknown }>('/api/admin/billing/orders', { body: { extensionId: row.id, ...(opts?.plan ? { plan: opts.plan } : {}) } });
+                    } catch (e) {
+                        // Sin step-up reciente: la pantalla de facturacion pide la reautenticacion y continua la compra.
+                        if (e instanceof ApiError && e.code === 'reauth_required') {
+                            window.location.href = `/admin/billing?buy=${encodeURIComponent(row.id)}${opts?.plan ? `&plan=${opts.plan}` : ''}`;
+                            return null;
+                        }
+                        // Ya la compro (p. ej. la desinstalo): se instala por el camino normal, sin volver a cobrar.
+                        if (e instanceof ApiError && e.code === 'already_owned') owned = true;
+                        else throw e;
                     }
-                    const url = safePaymentUrl(pref?.init_point);
-                    if (!url) {
-                        setError(t('admin.console.extensions.errors.paymentFailed'));
+                    if (!owned) {
+                        markPending(created?.kind === 'subscription' ? 'subscription' : 'order', created?.id);
+                        const url = safePayPalUrl(created?.approveUrl);
+                        if (!url) {
+                            setError(t('admin.console.extensions.errors.paymentFailed'));
+                            return null;
+                        }
+                        setLive(t('admin.console.extensions.live.redirectingPayment', { name: row.name }));
+                        window.location.href = url;
                         return null;
                     }
-                    setLive(t('admin.console.extensions.live.redirectingPayment', { name: row.name }));
-                    window.location.href = url;
-                    return null;
                 }
                 await adminFetch('/api/admin/extensions/install', { body: { domainId, extensionId: row.id, ...(Object.keys(row.dependencies ?? {}).length > 0 ? { installDependencies: true } : {}), ...(opts?.approvePublicRoutes ? { approvePublicRoutes: true } : {}) } });
                 return row.installed

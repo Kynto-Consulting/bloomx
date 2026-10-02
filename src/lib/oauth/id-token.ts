@@ -1,5 +1,6 @@
 import { createLocalJWKSet, decodeProtectedHeader, jwtVerify, type JSONWebKeySet, type JWTPayload } from 'jose';
 import { safeEqual } from '@/lib/security';
+import { issuerClaimNames, issuerMatches } from '@/lib/expansions/oauth-schema';
 import { providerFetch } from './http';
 import type { ProviderRuntime } from './providers';
 
@@ -55,7 +56,7 @@ export type IdTokenClaims = JWTPayload & { sub: string; email?: string; email_ve
 export type IdTokenResult = { ok: true; claims: IdTokenClaims } | { ok: false; reason: 'no_oidc_config' | 'bad_header' | 'no_jwks' | 'signature' | 'claims' | 'nonce' | 'azp' };
 
 export async function verifyIdToken(
-    provider: Pick<ProviderRuntime, 'allowedHosts' | 'jwksUri' | 'issuer'>,
+    provider: Pick<ProviderRuntime, 'allowedHosts' | 'jwksUri' | 'issuer'> & { issuerPins?: Record<string, string> },
     idToken: string,
     expect: { clientId: string; nonce: string | null },
     now = Date.now(),
@@ -68,7 +69,11 @@ export async function verifyIdToken(
     if (!jwks) return { ok: false, reason: 'no_jwks' };
     let payload: JWTPayload;
     try {
-        ({ payload } = await jwtVerify(idToken, createLocalJWKSet(jwks), { issuer: provider.issuer, audience: expect.clientId, algorithms: ALGS, clockTolerance: 60, currentDate: new Date(now) }));
+        // Emisor con claim (Microsoft multi-tenant: https://login.microsoftonline.com/{claim:tid}/v2.0): la firma y las demas claims se verifican con jose y el
+        // emisor se compara DESPUES, con el tid del propio token ya firmado, de forma exacta y (con tenant fijo) fijado a ese tenant.
+        const templated = issuerClaimNames(provider.issuer).length > 0;
+        ({ payload } = await jwtVerify(idToken, createLocalJWKSet(jwks), { ...(templated ? {} : { issuer: provider.issuer }), audience: expect.clientId, algorithms: ALGS, clockTolerance: 60, currentDate: new Date(now) }));
+        if (templated && !issuerMatches(provider.issuer, payload.iss, payload as Record<string, unknown>, provider.issuerPins ?? {})) return { ok: false, reason: 'claims' };
     } catch (error) {
         const code = (error as { code?: string } | null)?.code ?? '';
         return { ok: false, reason: /JWS|JWK|signature|NO_MATCHING_KEY|MULTIPLE_MATCHING/i.test(code) ? 'signature' : 'claims' };

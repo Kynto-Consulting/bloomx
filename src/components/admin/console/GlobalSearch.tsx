@@ -6,6 +6,8 @@ import { Puzzle, Search, User } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { useI18n } from '@/components/I18nProvider';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useExtensionNav } from '@/hooks/useExtensionNav';
+import { useConsole } from './ConsoleContext';
 import { adminFetch } from './api';
 import { SEARCH_TARGETS, normalizeSearch } from './nav';
 import { useDebounced } from './ui';
@@ -30,6 +32,9 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     const { t } = useI18n();
     const router = useRouter();
     const { extensions } = useDomainConfig();
+    const consoleLevel = useConsole().me?.permission_level ?? null;
+    // Paginas de administracion que aportan las extensiones (solo las que el nivel del usuario alcanza).
+    const extensionPages = useExtensionNav({ section: 'admin', level: consoleLevel, signedIn: true });
     const [q, setQ] = React.useState('');
     const [active, setActive] = React.useState(0);
     const [users, setUsers] = React.useState<Array<{ id: string; name: string | null; email: string }>>([]);
@@ -61,13 +66,17 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             .filter(({ s, label }) => tokens.length === 0 ? s.id.startsWith('nav:') : match(normalizeSearch(`${label} ${s.keywords}`)))
             .slice(0, 8)
             .map(({ s, label }) => ({ id: s.id, group: 'sections' as const, label, href: s.href, icon: <s.icon className="h-4 w-4" aria-hidden="true" /> }));
+        const pages: Item[] = extensionPages
+            .filter((p) => p.href && !p.disabled && (tokens.length === 0 || match(normalizeSearch(`${p.label} ${p.extensionId}`))))
+            .slice(0, 6)
+            .map((p) => ({ id: `extpage:${p.key}`, group: 'sections' as const, label: p.label, hint: p.extensionId, href: p.href as string, icon: <Puzzle className="h-4 w-4" aria-hidden="true" /> }));
         const exts: Item[] = tokens.length === 0 ? [] : (extensions as any[])
             .filter((e) => match(normalizeSearch(`${e?.name ?? ''} ${e?.id ?? ''}`)))
             .slice(0, 5)
             .map((e) => ({ id: `ext:${e.id}`, group: 'extensions' as const, label: String(e.name || e.id), hint: String(e.id), href: `/admin/extensions?open=${encodeURIComponent(String(e.id))}`, icon: <Puzzle className="h-4 w-4" aria-hidden="true" /> }));
         const usr: Item[] = users.map((u) => ({ id: `user:${u.id}`, group: 'users' as const, label: u.name || u.email, hint: u.name ? u.email : undefined, href: `/admin/users?open=${encodeURIComponent(u.id)}`, icon: <User className="h-4 w-4" aria-hidden="true" /> }));
-        return [...usr, ...sections, ...exts];
-    }, [q, t, extensions, users]);
+        return [...usr, ...sections, ...pages, ...exts];
+    }, [q, t, extensions, users, extensionPages]);
 
     React.useEffect(() => { setActive(0); }, [items.length]);
 

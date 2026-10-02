@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describePermissions, KNOWN_MOUNT_POINTS, LIFECYCLE_EVENTS, normalizeMount, validateManifest } from '../manifest-schema';
+import { describePermissions, EVENT_PERMISSIONS, KNOWN_MOUNT_POINTS, LIFECYCLE_EVENTS, LIFECYCLE_EVENTS_V1, LIFECYCLE_EVENTS_V2, normalizeMount, PERMISSION_CATALOG, validateManifest } from '../manifest-schema';
 import { MOUNT_POINT_CONTEXT } from '../mount-points';
 
 const base = () => ({
@@ -85,10 +85,23 @@ describe('validateManifest', () => {
 
     it('eventos de ciclo de vida y alias hooks son validos; onError block no aplica a ellos', () => {
         for (const point of LIFECYCLE_EVENTS) {
-            expect(validateManifest({ ...base(), hooks: [{ point, handler: 'go' }] }).ok, point).toBe(true);
+            expect(validateManifest({ ...base(), permissions: ['READ_USERS', 'READ_EMAIL'], hooks: [{ point, handler: 'go' }] }).ok, point).toBe(true);
         }
         const blocked = validateManifest({ ...base(), intercepts: [{ point: 'EMAIL_OPENED', handler: 'go', onError: 'block' }] });
         expect(blocked.errors.length + blocked.warnings.length).toBeGreaterThan(0);
+    });
+
+    it('eventos v2: exigen su permiso (USER_* => READ_USERS, EMAIL_SPAM_DETECTED/LABEL_APPLIED => READ_EMAIL) y el catalogo describe READ_USERS como riesgo alto', () => {
+        for (const [point, perm] of Object.entries(EVENT_PERMISSIONS)) {
+            const without = validateManifest({ ...base(), permissions: ['NOTIFY'], hooks: [{ point, handler: 'go' }] });
+            expect(without.ok, point).toBe(false);
+            expect(JSON.stringify(without.errors), point).toContain(perm);
+            expect(validateManifest({ ...base(), permissions: [perm], hooks: [{ point, handler: 'go' }] }).ok, point).toBe(true);
+        }
+        expect(PERMISSION_CATALOG.READ_USERS.risk).toBe('high');
+        expect(LIFECYCLE_EVENTS_V2).toEqual(['USER_CREATED', 'USER_DISABLED', 'USER_ENABLED', 'EMAIL_SPAM_DETECTED', 'LABEL_APPLIED']);
+        // los eventos v1 no cambian
+        expect(LIFECYCLE_EVENTS.slice(0, 9)).toEqual(LIFECYCLE_EVENTS_V1);
     });
 
     it('nuevos puntos de montaje conocidos y documentados en MOUNT_POINT_CONTEXT', () => {

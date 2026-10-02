@@ -1,4 +1,5 @@
 import { execute, query, tolerant, toIso } from './sql';
+import { emitUserDisabled, emitUserEnabled } from '@/lib/expansions/lifecycle-v2';
 
 /**
  * Estado administrativo por usuario (tabla aditiva "UserAdminState", SQL crudo; DDL en lib/db/schema.ts).
@@ -59,7 +60,24 @@ async function upsert(userId: string, sets: { disabled?: boolean; mustChangePass
     }, false);
 }
 
-export const setUserDisabled = (userId: string, disabled: boolean) => upsert(userId, { disabled });
+/**
+ * Deshabilita/habilita. Al CAMBIAR de estado emite USER_DISABLED / USER_ENABLED a las extensiones (asincrono, idempotente por transicion; un
+ * fallo del hook nunca afecta a la operacion). Repetir el mismo estado no vuelve a emitir.
+ */
+export async function setUserDisabled(userId: string, disabled: boolean): Promise<boolean> {
+    const was = await isUserDisabled(userId);
+    const ok = await upsert(userId, { disabled });
+    if (ok && disabled !== was) {
+        try {
+            const { prisma } = await import('@/lib/prisma');
+            const row = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+            if (row) (disabled ? emitUserDisabled : emitUserEnabled)(row);
+        } catch {
+            /* el evento es opcional */
+        }
+    }
+    return ok;
+}
 export const setMustChangePassword = (userId: string, value: boolean) => upsert(userId, { mustChangePassword: value });
 
 /** Registra el ultimo acceso (login correcto). Best-effort. */

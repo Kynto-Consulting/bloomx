@@ -168,7 +168,7 @@ function DetailBody({ row, rows, errors, now, canOpenPlayground, announce, onTog
                             {row.screenshots.map((src, i) => (
                                 <li key={src}>
                                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={src} alt={fmt(s.screenshotAlt, { n: i + 1, name: row.name })} loading="lazy" referrerPolicy="no-referrer" className="h-auto max-h-56 w-full rounded-lg border border-border object-contain" />
+                                    <img src={src} alt={fmt(s.screenshotAlt, { n: i + 1, name: row.name })} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-auto max-h-56 w-full rounded-lg border border-border object-contain" />
                                 </li>
                             ))}
                         </ul>

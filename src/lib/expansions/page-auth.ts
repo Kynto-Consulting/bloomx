@@ -37,7 +37,7 @@ export function evaluatePageAccess(
 // auth: "admin" aplicado EN EL SERVIDOR (no solo ocultar la pagina)
 // ---------------------------------------------------------------------------------------------------------------
 
-type AnyTemplate = { mounts?: unknown; api?: { functions?: Record<string, { handler?: unknown }> }; state?: unknown } & Record<string, unknown>;
+type AnyTemplate = { mounts?: unknown; backendRoutes?: unknown; api?: { functions?: Record<string, { handler?: unknown }> }; state?: unknown } & Record<string, unknown>;
 const isAdminPageMount = (m: any): boolean => !!m && typeof m === 'object' && ['PAGE', 'CUSTOM_ROUTE'].includes(String(m.point)) && pageAuthOf(m) === 'admin';
 const mountMinLevel = (m: any): number => (Number.isInteger(m?.minLevel) ? (m.minLevel as number) : 1);
 
@@ -67,7 +67,23 @@ export function adminProtectedActions(template: AnyTemplate | null | undefined):
             const level = mountMinLevel(m);
             out.set(name, Math.max(out.get(name) ?? 0, level));
             const handler = fns[name]?.handler;
-            if (typeof handler === 'string') out.set(handler, Math.max(out.get(handler) ?? 0, level));
+            if (typeof handler === 'string') {
+                // Mismo handler => mismas claves hermanas: /api/extension/execute las resuelve por handler, asi que quedan igual de protegidas.
+                for (const alias of [handler, ...Object.entries(fns).filter(([, def]) => def?.handler === handler).map(([key]) => key)]) {
+                    out.set(alias, Math.max(out.get(alias) ?? 0, level));
+                }
+            }
+        }
+    }
+    // Rutas HTTP propias con auth "admin" (p. ej. la ruta de la insignia de una entrada de menu de administracion): su handler tambien se puede invocar por
+    // /api/extension/execute con un usuario normal, asi que hereda el mismo nivel (el minimo mas alto manda).
+    const routes = Array.isArray(template?.backendRoutes) ? (template!.backendRoutes as unknown[]) : [];
+    for (const route of routes) {
+        const r = route as { auth?: unknown; handler?: unknown; minLevel?: unknown } | null;
+        if (!r || typeof r !== 'object' || r.auth !== 'admin' || typeof r.handler !== 'string') continue;
+        const level = Number.isInteger(r.minLevel) ? (r.minLevel as number) : 1;
+        for (const name of [r.handler, ...Object.entries(fns).filter(([, def]) => def?.handler === r.handler).map(([key]) => key)]) {
+            out.set(name, Math.max(out.get(name) ?? 0, level));
         }
     }
     return out;

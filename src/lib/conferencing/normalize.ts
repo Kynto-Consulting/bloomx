@@ -13,7 +13,7 @@ import {
     type MeetingAttachment,
 } from './types';
 
-const MODES: readonly string[] = ['server-to-server', 'user-oauth', 'service-account', 'google-account', 'custom-link'];
+const MODES: readonly string[] = ['server-to-server', 'user-oauth', 'service-account', 'google-account', 'microsoft-account', 'custom-link'];
 const MAX_ATTACHMENT_B64 = 300_000;
 
 function str(v: unknown, max: number): string | null {

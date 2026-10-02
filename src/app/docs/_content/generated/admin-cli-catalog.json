@@ -5287,6 +5287,103 @@
       ]
     },
     {
+      "name": "billing status",
+      "category": {
+        "es": "Facturación y desarrollo",
+        "en": "Billing and development"
+      },
+      "risk": "read",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Estado de pagos de la instancia (PayPal y modo de cobro)",
+        "en": "Instance payments state (PayPal and charge mode)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "billing subscriptions",
+      "category": {
+        "es": "Facturación y desarrollo",
+        "en": "Billing and development"
+      },
+      "risk": "read",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Suscripciones de extensiones de pago del dominio",
+        "en": "Paid-extension subscriptions of the domain"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
+      "name": "billing summary",
+      "category": {
+        "es": "Facturación y desarrollo",
+        "en": "Billing and development"
+      },
+      "risk": "read",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Resumen de facturacion (compras y ventas) del periodo",
+        "en": "Billing summary (purchases and sales) for the period"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "from",
+          "type": "string",
+          "description": {
+            "es": "Desde (AAAA-MM-DD)",
+            "en": "From (YYYY-MM-DD)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "to",
+          "type": "string",
+          "description": {
+            "es": "Hasta (AAAA-MM-DD)",
+            "en": "To (YYYY-MM-DD)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
+      "name": "developer overview",
+      "category": {
+        "es": "Facturación y desarrollo",
+        "en": "Billing and development"
+      },
+      "risk": "read",
+      "minLevel": 4,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Portal de desarrollador: terminos aceptados, extensiones y envios",
+        "en": "Developer portal: accepted terms, extensions and submissions"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [],
+      "positionals": [],
+      "flags": []
+    },
+    {
       "name": "perms levels",
       "category": {
         "es": "Permisos",
@@ -5580,6 +5677,14 @@
     }
   ],
   "excluded": {
+    "GET /api/admin/extensions/stars": {
+      "es": "Favoritas del marketplace: preferencia personal de la interfaz web de cada administrador (ligada a su sesion de usuario), sin sentido para un token de CLI ni efecto en la instancia.",
+      "en": "Marketplace stars: a personal web-UI preference of each administrator (tied to their user session), meaningless for a CLI token and with no effect on the instance."
+    },
+    "PUT /api/admin/extensions/stars": {
+      "es": "Favoritas del marketplace: preferencia personal de la interfaz web de cada administrador (ligada a su sesion de usuario), sin sentido para un token de CLI ni efecto en la instancia.",
+      "en": "Marketplace stars: a personal web-UI preference of each administrator (tied to their user session), meaningless for a CLI token and with no effect on the instance."
+    },
     "POST /api/admin/login": {
       "es": "Es el login web del manager (fija la cookie auth_session). La CLI usa POST /api/admin/cli/login (token) y la consola web ya esta autenticada.",
       "en": "It is the manager web login (it sets the auth_session cookie). The CLI uses POST /api/admin/cli/login (token) and the web console is already authenticated."

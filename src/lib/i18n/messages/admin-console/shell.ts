@@ -201,6 +201,8 @@ export const shellEs = {
         profile: 'Mi perfil',
         console: 'Consola de comandos',
         permissions: 'Permisos',
+        billing: 'Facturación',
+        developer: 'Desarrolladores',
     },
     status: {
         label: 'Estado del sistema',
@@ -292,6 +294,8 @@ export const shellEn: DeepString<typeof shellEs> = {
         profile: 'My profile',
         console: 'Command console',
         permissions: 'Permissions',
+        billing: 'Billing',
+        developer: 'Developers',
     },
     status: {
         label: 'System status',

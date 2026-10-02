@@ -3,6 +3,7 @@ import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { NextResponse, type NextRequest } from 'next/server';
 import { resolveEdgeIdentity } from '@/lib/ext-edge-identity';
 import { stripAdminMounts } from '@/lib/expansions/page-auth';
+import { stripAdminNavEntries } from '@/lib/expansions/nav-entries';
 import { getPublicAiState } from '@/lib/ai/settings';
 import { annotateExtensionsWithAi } from '@/lib/ai/extension-block';
 import { splitPausedConfigExtensions } from '@/lib/expansions/dependency-filter';
@@ -44,7 +45,12 @@ export async function GET(req: Request) {
         // auth: "admin" en paginas: quien no tiene el nivel NO recibe el arbol de componentes ni el estado inicial de esas paginas (no basta ocultarlas).
         if (data && Array.isArray(data.extensions)) {
             const identity = await resolveEdgeIdentity(req as NextRequest).catch(() => null);
-            data.extensions = stripAdminMounts(data.extensions, identity?.level ?? null);
+            const level = identity?.level ?? null;
+            // Primero las entradas de navegacion (necesitan ver el mount para saber que la pagina es de administracion) y despues los mounts.
+            data.extensions = stripAdminNavEntries(data.extensions, level);
+            data.extensions = stripAdminMounts(data.extensions, level);
+            // Nivel de administrador del que pregunta (solo para ocultar entradas en el cliente; el servidor ya filtro y cada pagina/ruta vuelve a comprobarlo).
+            data.viewer = { level };
         }
         return NextResponse.json(data, { headers: { 'Cache-Control': 'no-store' } });
 

@@ -368,7 +368,7 @@ export async function createMailboxes(c: HCtx, id: string) {
         if (existing.has(email)) { already.push(email); continue; }
         try {
             const r = await createUserAccount({
-                email, password: body.passwordMode === 'generic' ? body.genericPassword : undefined, mustChangePassword: body.mustChange,
+                email, password: body.passwordMode === 'generic' ? body.genericPassword : undefined, mustChangePassword: body.mustChange, source: 'import',
             });
             created.push({ email: r.user.email, password: body.passwordMode === 'generic' ? body.genericPassword! : r.temporaryPassword!, mustChange: r.mustChangePassword });
         } catch (e) {

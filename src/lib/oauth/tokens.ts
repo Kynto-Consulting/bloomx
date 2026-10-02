@@ -39,7 +39,13 @@ const SCOPE_ALIASES: Record<string, string> = {
     'https://www.googleapis.com/auth/userinfo.email': 'email',
     'https://www.googleapis.com/auth/userinfo.profile': 'profile',
 };
-export const normalizeScope = (scope: string): string => SCOPE_ALIASES[scope] ?? scope;
+/** Microsoft puede devolver los scopes de Graph con el recurso delante (https://graph.microsoft.com/Mail.Read): se normalizan al nombre corto del catalogo. */
+const SCOPE_RESOURCE_PREFIXES = ['https://graph.microsoft.com/'];
+export const normalizeScope = (scope: string): string => {
+    if (SCOPE_ALIASES[scope]) return SCOPE_ALIASES[scope];
+    for (const prefix of SCOPE_RESOURCE_PREFIXES) if (scope.startsWith(prefix) && scope.length > prefix.length) return scope.slice(prefix.length);
+    return scope;
+};
 export function grantedScopeSet(scope: string | null | undefined): Set<string> {
     return new Set((scope ?? '').split(/[\s,]+/).filter(Boolean).map(normalizeScope));
 }
@@ -48,11 +54,70 @@ export interface AccessToken { accessToken: string; refreshToken: string | null;
 
 export interface TokenRequest { clientId: string; clientSecret: string | null }
 
-async function postForm(provider: ProviderRuntime, url: string, form: Record<string, string>) {
-    return providerFetch(provider.allowedHosts, url, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString(), maxBytes: 100_000 });
+/**
+ * Autenticacion del cliente en los endpoints de token/revocacion. "post" = client_id/client_secret en el cuerpo (client_secret_post);
+ * "basic" = Authorization: Basic base64(urlencode(id):urlencode(secret)) (RFC 6749 §2.3.1, client_secret_basic; Zoom) y entonces NI el id NI el secreto
+ * van en el cuerpo. El secreto nunca va en la URL.
+ */
+export function clientAuth(provider: Pick<ProviderRuntime, 'tokenAuth' | 'clientId' | 'clientSecret'>, form: Record<string, string>): { headers: Record<string, string>; form: Record<string, string> } {
+    const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded' };
+    const out = { ...form };
+    if (provider.tokenAuth === 'basic' && provider.clientId && provider.clientSecret) {
+        headers.Authorization = `Basic ${Buffer.from(`${encodeURIComponent(provider.clientId)}:${encodeURIComponent(provider.clientSecret)}`).toString('base64')}`;
+        delete out.client_id;
+        delete out.client_secret;
+    }
+    return { headers, form: out };
 }
 
-export interface TokenResponse { access_token: string; expires_in?: number; refresh_token?: string; scope?: string; token_type?: string; id_token?: string }
+async function postForm(provider: ProviderRuntime, url: string, form: Record<string, string>) {
+    const auth = clientAuth(provider, form);
+    return providerFetch(provider.allowedHosts, url, { method: 'POST', headers: auth.headers, body: new URLSearchParams(auth.form).toString(), maxBytes: 100_000 });
+}
+
+export interface TokenResponse {
+    access_token: string; expires_in?: number; refresh_token?: string; scope?: string; token_type?: string; id_token?: string;
+    /** Slack OAuth v2 (tokenFormat slack-v2): espacio de trabajo y token de USUARIO ademas del token de bot de nivel superior. */
+    ok?: boolean;
+    team?: { id?: string; name?: string } | null;
+    is_enterprise_install?: boolean;
+    authed_user?: { id?: string; scope?: string; access_token?: string; refresh_token?: string; expires_in?: number; token_type?: string } | null;
+}
+
+export interface TokenGrant { kind: 'default' | 'bot' | 'user'; access_token: string; refresh_token?: string; expires_in?: number; scope?: string; token_type?: string; id_token?: string }
+export interface GrantedIdentity { grants: TokenGrant[]; /** Slack: id de equipo y de usuario (para el id de cuenta). */ teamId?: string; userId?: string; teamName?: string }
+
+/** Slack: errores de refresco que significan "vuelve a vincular". */
+const SLACK_RECONNECT = ['invalid_refresh_token', 'token_revoked', 'token_expired', 'invalid_auth', 'account_inactive', 'bad_refresh_token'];
+
+/**
+ * Convierte la respuesta del token en concesiones. "standard": una (token y refresh tal cual). "slack-v2": hasta dos filas independientes — token de BOT
+ * (scopes del bot tal cual) y token de USUARIO (scopes con prefijo "user:" para que no se confundan con los del bot: chat:write existe en ambos).
+ */
+export function tokenGrants(provider: Pick<ProviderRuntime, 'tokenFormat'>, t: TokenResponse): GrantedIdentity | null {
+    if (provider.tokenFormat !== 'slack-v2') return { grants: [{ kind: 'default', access_token: t.access_token, refresh_token: t.refresh_token, expires_in: t.expires_in, scope: t.scope, token_type: t.token_type, id_token: t.id_token }] };
+    const teamId = t.team?.id;
+    const userId = t.authed_user?.id;
+    if (t.is_enterprise_install === true || typeof teamId !== 'string' || !/^[A-Z0-9]{2,20}$/.test(teamId) || typeof userId !== 'string' || !/^[A-Z0-9]{2,20}$/.test(userId)) return null;
+    const grants: TokenGrant[] = [];
+    if (t.token_type === 'bot' && typeof t.access_token === 'string' && t.access_token) grants.push({ kind: 'bot', access_token: t.access_token, refresh_token: t.refresh_token, expires_in: t.expires_in, scope: t.scope, token_type: 'bot' });
+    const u = t.authed_user;
+    if (u && typeof u.access_token === 'string' && u.access_token) {
+        grants.push({ kind: 'user', access_token: u.access_token, refresh_token: u.refresh_token, expires_in: u.expires_in, scope: (u.scope ?? '').split(/[\s,]+/).filter(Boolean).map((x) => `user:${x}`).join(','), token_type: 'user' });
+    }
+    return grants.length ? { grants, teamId, userId, teamName: typeof t.team?.name === 'string' ? t.team.name : undefined } : null;
+}
+
+/** Cuenta (providerAccountId) de una concesion: Slack separa bot/usuario por equipo y usuario; el resto usa el id del perfil. */
+export function grantAccountId(identity: GrantedIdentity, grant: TokenGrant, profileId: string): string {
+    return grant.kind === 'default' ? profileId : `${identity.teamId}:${identity.userId}:${grant.kind}`;
+}
+
+function tokenFailed(provider: Pick<ProviderRuntime, 'tokenFormat'>, data: Record<string, unknown> | null, ok: boolean): boolean {
+    if (!ok || !data || typeof data.error === 'string' || data.ok === false) return true;
+    if (provider.tokenFormat === 'slack-v2') return !(typeof data.access_token === 'string' || typeof (data.authed_user as { access_token?: unknown } | null | undefined)?.access_token === 'string');
+    return typeof data.access_token !== 'string';
+}
 
 /** Intercambio de `code` (grant authorization_code) con PKCE si aplica. El secreto va en el cuerpo (client_secret_post), jamas en la URL. */
 export async function exchangeCode(provider: ProviderRuntime, input: { code: string; redirectUri: string; verifier: string | null }): Promise<TokenResponse> {
@@ -62,9 +127,9 @@ export async function exchangeCode(provider: ProviderRuntime, input: { code: str
     if (input.verifier) form.code_verifier = input.verifier;
     const res = await postForm(provider, provider.tokenUrl, form);
     const data = res.json as Record<string, unknown> | null;
-    if (!res.ok || !data || typeof data.error === 'string' || typeof data.access_token !== 'string') {
-        throw new OAuthAccountError('OAUTH_PROVIDER_UNAVAILABLE', 502);
-    }
+    if (tokenFailed(provider, data, res.ok)) throw new OAuthAccountError('OAUTH_PROVIDER_UNAVAILABLE', 502);
+    // Slack sin token de bot de nivel superior (solo scopes de usuario): el principal es el token del usuario.
+    if (provider.tokenFormat === 'slack-v2' && typeof data!.access_token !== 'string') data!.access_token = '';
     return data as unknown as TokenResponse;
 }
 
@@ -75,9 +140,9 @@ async function refreshWith(provider: ProviderRuntime, refreshToken: string): Pro
     let res;
     try { res = await postForm(provider, provider.tokenUrl, form); } catch (e) { if (e instanceof ProviderHttpError) throw new OAuthAccountError('OAUTH_PROVIDER_UNAVAILABLE', 502); throw e; }
     const data = res.json as Record<string, unknown> | null;
-    if (!res.ok || !data || typeof data.error === 'string' || typeof data.access_token !== 'string') {
-        // invalid_grant = el usuario revoco el acceso, cambio la contrasena o el token caduco/rotado.
-        if (data?.error === "invalid_grant") throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
+    if (!res.ok || !data || typeof data.error === 'string' || data.ok === false || typeof data.access_token !== 'string') {
+        // invalid_grant = el usuario revoco el acceso, cambio la contrasena o el token caduco/rotado (Slack: invalid_refresh_token...).
+        if (data?.error === "invalid_grant" || (provider.tokenFormat === 'slack-v2' && typeof data?.error === 'string' && SLACK_RECONNECT.includes(data.error))) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
         throw new OAuthAccountError('OAUTH_PROVIDER_UNAVAILABLE', 502);
     }
     return data as unknown as TokenResponse;
@@ -126,9 +191,12 @@ export async function listUserAccounts(userId: string, provider: Pick<ProviderRu
 }
 
 /** Token de acceso vigente de la cuenta del usuario (refresca si hace falta). `accountId` fija una cuenta concreta (siempre del usuario). */
-export async function getAccessToken(provider: ProviderRuntime, userId: string, opts: { accountId?: string } = {}): Promise<AccessToken> {
+export async function getAccessToken(provider: ProviderRuntime, userId: string, opts: { accountId?: string; requiresScopes?: readonly string[] } = {}): Promise<AccessToken> {
     const accounts = await listUserAccounts(userId, provider);
-    const account = opts.accountId ? accounts.find((a) => a.id === opts.accountId) ?? null : pickAccount(accounts);
+    // Si el usuario tiene varias cuentas del proveedor (Slack: bot y usuario), se prefiere la que cubre los scopes de la accion.
+    const need = opts.requiresScopes ?? [];
+    const covering = need.length ? accounts.filter((a) => { const g = grantedScopeSet(a.scope); return need.every((sc) => g.has(sc)); }) : [];
+    const account = opts.accountId ? accounts.find((a) => a.id === opts.accountId) ?? null : pickAccount(covering.length ? covering : accounts);
     if (!account) throw new OAuthAccountError('OAUTH_NOT_LINKED', 404);
     if (!account.access_token && !account.refresh_token) throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
     if (fresh(account)) return toAccessToken(account);
@@ -169,18 +237,29 @@ export async function getAccessToken(provider: ProviderRuntime, userId: string, 
     return promise;
 }
 
-export type RevokeOutcome = 'revoked' | 'not_supported' | 'failed' | 'no_token';
+export type RevokeOutcome = 'revoked' | 'not_supported' | 'failed' | 'no_token' | 'shared';
 
-/** RFC 7009: revoca en el proveedor el refresh_token (o el access_token). Best-effort con timeout: un fallo jamas impide desvincular. */
+/**
+ * RFC 7009: revoca en el proveedor el refresh_token (o el access_token segun `revokeToken`). Best-effort con timeout: un fallo jamas impide desvincular.
+ * Slack (auth.revoke): POST con el token en Authorization: Bearer y respuesta {ok:true}. Sin `revokeUrl` (Microsoft no tiene endpoint estandar de
+ * revocacion de tokens de aplicacion) devuelve 'not_supported': el acceso se retira localmente y el usuario/admin lo quita en el proveedor.
+ */
 export async function revokeAtProvider(provider: ProviderRuntime, tokens: { refresh_token?: string | null; access_token?: string | null }): Promise<RevokeOutcome> {
-    const token = tokens.refresh_token || tokens.access_token;
+    const useAccess = provider.revokeToken === 'access' || provider.tokenFormat === 'slack-v2';
+    const token = useAccess ? tokens.access_token || tokens.refresh_token : tokens.refresh_token || tokens.access_token;
     if (!token) return 'no_token';
     if (!provider.revokeUrl) return 'not_supported';
     try {
-        const form: Record<string, string> = { token, token_type_hint: tokens.refresh_token ? 'refresh_token' : 'access_token' };
+        if (provider.tokenFormat === 'slack-v2') {
+            const res = await providerFetch(provider.allowedHosts, provider.revokeUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${token}` }, body: '', timeoutMs: 5000, maxBytes: 20_000 });
+            return res.ok && (res.json as { ok?: boolean } | null)?.ok === true ? 'revoked' : 'failed';
+        }
+        const isRefresh = token === tokens.refresh_token;
+        const form: Record<string, string> = { token, token_type_hint: isRefresh ? 'refresh_token' : 'access_token' };
         if (provider.clientId) form.client_id = provider.clientId;
         if (provider.clientSecret) form.client_secret = provider.clientSecret;
-        const res = await providerFetch(provider.allowedHosts, provider.revokeUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString(), timeoutMs: 5000, maxBytes: 20_000 });
+        const auth = clientAuth(provider, form);
+        const res = await providerFetch(provider.allowedHosts, provider.revokeUrl, { method: 'POST', headers: auth.headers, body: new URLSearchParams(auth.form).toString(), timeoutMs: 5000, maxBytes: 20_000 });
         return res.ok ? 'revoked' : 'failed';
     } catch {
         return 'failed';

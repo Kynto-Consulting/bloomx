@@ -14,7 +14,7 @@ export function JoinMeetingButton({ url, className }: { url: unknown; className?
     const { t } = useI18n();
     const info = recognizeMeetingUrl(url);
     if (!info) return null;
-    const icon = info.provider === 'google-meet' ? 'google-meet' : info.provider === 'zoom' ? 'zoom' : 'link';
+    const icon = info.provider === 'google-meet' ? 'google-meet' : info.provider === 'zoom' ? 'zoom' : info.provider === 'teams' ? 'microsoft-teams' : 'link';
     return (
         <a
             href={info.url}

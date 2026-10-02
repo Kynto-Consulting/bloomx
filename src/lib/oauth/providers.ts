@@ -2,7 +2,7 @@ import { backendUrl } from '@/lib/backend-url';
 import { createHash } from 'node:crypto';
 import { tryDecrypt, encrypt } from '@/lib/encryption';
 import { normalizeSettingsSchema } from '@/lib/expansions/settings-schema';
-import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, validateOAuthProviders, type OAuthActionDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef } from '@/lib/expansions/oauth-schema';
+import { checkOAuthEndpointUrl, mayRegisterOAuthProvider, resolveOAuthVariable, substituteOAuthVariables, validateOAuthProviders, type OAuthActionDef, type OAuthPrincipalsDef, type OAuthProviderDef, type OAuthScopeDef, type OAuthServiceCredentialsDef } from '@/lib/expansions/oauth-schema';
 import { oauthStore } from './store';
 import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
 import { MAX_REGISTRY_BYTES, pinnedBackendKey, validateRegistryResponse, verifyConfigSignature } from './registry-trust';
@@ -44,6 +44,15 @@ export interface ProviderRuntime {
     pkce: boolean;
     extraParams: Record<string, string>;
     redirectPath: string;
+    /** Autenticacion del cliente en token/revoke ('basic' = cabecera Authorization: Basic). */
+    tokenAuth: 'post' | 'basic';
+    tokenFormat: 'standard' | 'slack-v2';
+    revokeToken: 'refresh' | 'access';
+    /** Valores efectivos de las variables de URL ({tenant}) ya sustituidos en authorize/token/revoke/userinfo/jwks/issuer. */
+    variableValues: Record<string, string>;
+    /** Claims del id_token fijados por configuracion (p. ej. tid = tenant concreto): el emisor con {claim:x} solo vale con ese valor. */
+    issuerPins: Record<string, string>;
+    serviceCredentials: OAuthServiceCredentialsDef | null;
     clientId: string | null;
     clientSecret: string | null;
     /** Nombre (credencial) del client secret segun el manifest. */
@@ -111,8 +120,19 @@ export function identityHostsOf(def: { authorizeUrl: string; tokenUrl: string; r
     const urls = [def.authorizeUrl, def.tokenUrl, def.revokeUrl, def.userinfoUrl, def.jwksUri, def.issuer];
     return Array.from(new Set(urls.map(hostOf).filter((h): h is string => !!h))).sort();
 }
-export function providerIdentityHash(def: { id: string; authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; issuer?: string | null }): string {
-    return createHash('sha256').update(JSON.stringify([def.id, identityHostsOf(def)])).digest('hex');
+export function providerIdentityHash(def: { id: string; authorizeUrl: string; tokenUrl: string; revokeUrl?: string | null; userinfoUrl?: string | null; jwksUri?: string | null; issuer?: string | null }, variableValues: Record<string, string> = {}): string {
+    // Con variables (p. ej. tenant de Microsoft) su valor forma parte de la identidad: cambiar de tenant invalida las cuentas ya vinculadas (hay que volver a vincular).
+    const vars = Object.entries(variableValues).sort(([a], [b]) => a.localeCompare(b));
+    return createHash('sha256').update(JSON.stringify(vars.length ? [def.id, identityHostsOf(def), vars] : [def.id, identityHostsOf(def)])).digest('hex');
+}
+
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Valores efectivos de las variables de URL de un proveedor a partir de los ajustes publicos de su extension. */
+export function resolveProviderVariables(def: Pick<OAuthProviderDef, 'variables'>, settings: Record<string, any> | undefined): Record<string, string> {
+    const out: Record<string, string> = {};
+    const cfg = settings?.config && typeof settings.config === 'object' ? (settings.config as Record<string, unknown>) : {};
+    for (const [name, v] of Object.entries(def.variables ?? {})) out[name] = resolveOAuthVariable(v, cfg[v.setting]);
+    return out;
 }
 
 /**
@@ -165,8 +185,14 @@ export function parseExtensionProviders(extensions: readonly ExtensionLike[]): M
     return out;
 }
 
-function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, source: 'extension' | 'builtin', extensionId: string | null): ProviderRuntime {
-    const d = def as ParsedProvider['def'];
+function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, source: 'extension' | 'builtin', extensionId: string | null, settings?: Record<string, any>): ProviderRuntime {
+    const raw = def as ParsedProvider['def'];
+    const variableValues = resolveProviderVariables(raw, settings);
+    const fill = (u: string | undefined): string | undefined => (typeof u === 'string' ? substituteOAuthVariables(u, variableValues) : u);
+    // Con variables, las URLs se resuelven AQUI (una vez); el resto del nucleo solo ve URLs concretas.
+    const d = { ...raw, authorizeUrl: fill(raw.authorizeUrl) as string, tokenUrl: fill(raw.tokenUrl) as string, revokeUrl: fill(raw.revokeUrl), userinfoUrl: fill(raw.userinfoUrl), jwksUri: fill(raw.jwksUri), issuer: fill(raw.issuer) } as ParsedProvider['def'];
+    // Tenant concreto (GUID): el claim tid del id_token debe ser ese; con common/organizations/consumers cualquier tid valido (el emisor lo lleva).
+    const issuerPins: Record<string, string> = variableValues.tenant && GUID_RE.test(variableValues.tenant) ? { tid: variableValues.tenant.toLowerCase() } : {};
     const hosts = endpointHostsOf({ authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, apiBase: d.apiBase, actions: d.actions });
     return {
         id: d.id,
@@ -188,13 +214,19 @@ function toRuntime(def: ParsedProvider['def'] | typeof BUILTIN_GOOGLE_DEF, sourc
         pkce: d.pkce,
         extraParams: { ...(d.extraParams ?? {}) },
         redirectPath: d.redirectPath ?? `/api/oauth/${d.id}/callback`,
+        tokenAuth: d.tokenAuth === 'basic' ? 'basic' : 'post',
+        tokenFormat: d.tokenFormat === 'slack-v2' ? 'slack-v2' : 'standard',
+        revokeToken: d.revokeToken === 'access' ? 'access' : 'refresh',
+        variableValues,
+        issuerPins,
+        serviceCredentials: d.serviceCredentials ?? null,
         clientId: null,
         clientSecret: null,
         clientSecretName: (d as { clientSecretCredential?: string }).clientSecretCredential ?? null,
         source,
         extensionId,
         endpointHosts: hosts,
-        identityHash: providerIdentityHash({ id: d.id, authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, issuer: d.issuer }),
+        identityHash: providerIdentityHash({ id: d.id, authorizeUrl: d.authorizeUrl, tokenUrl: d.tokenUrl, revokeUrl: d.revokeUrl, userinfoUrl: d.userinfoUrl, jwksUri: d.jwksUri, issuer: d.issuer }, variableValues),
         status: 'not_configured',
     };
 }
@@ -231,8 +263,8 @@ export async function attachCredentials(runtime: ProviderRuntime, def: { clientI
 }
 
 /** Nombres de credenciales que el admin puede guardar (cifradas, en la instancia) para el proveedor. */
-export function credentialNamesOf(provider: Pick<ProviderRuntime, 'principals' | 'clientSecretName'>): string[] {
-    return [provider.clientSecretName, provider.principals.organizerRefreshToken, provider.principals.serviceAccountJson].filter((n): n is string => typeof n === 'string' && !!n);
+export function credentialNamesOf(provider: Pick<ProviderRuntime, 'principals' | 'clientSecretName'> & { serviceCredentials?: OAuthServiceCredentialsDef | null }): string[] {
+    return [provider.clientSecretName, provider.principals.organizerRefreshToken, provider.principals.serviceAccountJson, provider.serviceCredentials?.clientSecretCredential].filter((n): n is string => typeof n === 'string' && !!n);
 }
 
 /** Setting publico de la extension (p. ej. impersonateUser): ajuste de la instancia/extension > variable de entorno heredada (solo endpoints oficiales). */
@@ -251,6 +283,10 @@ export function principalSetting(provider: ProviderRuntime, key: keyof OAuthPrin
 export async function getSharedCredential(provider: ProviderRuntime, key: 'organizerRefreshToken' | 'serviceAccountJson', env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
     const name = provider.principals[key];
     if (!name) return null;
+    return getSharedCredentialByName(provider, name, env);
+}
+/** Credencial compartida por su NOMBRE (el declarado en el manifest): tabla de la instancia anclada a los hosts aprobados > entorno (solo endpoints oficiales). */
+export async function getSharedCredentialByName(provider: ProviderRuntime, name: string, env: NodeJS.ProcessEnv = process.env): Promise<string | null> {
     const row = await oauthStore().getProviderConfig(provider.id).catch(() => null);
     if (row?.extra?.[name]) {
         if (JSON.stringify([...row.approvedHosts].sort()) !== JSON.stringify(provider.endpointHosts)) return null;
@@ -310,7 +346,7 @@ export async function loadProviders(): Promise<Map<string, ProviderRuntime>> {
     let exts: ExtensionLike[] = [];
     try { exts = await source(); } catch { exts = cache ? [] : []; /* backend caido: solo integrados (nada deja de funcionar) */ }
     for (const [id, parsed] of parseExtensionProviders(exts)) {
-        map.set(id, await attachCredentials(toRuntime(parsed.def, 'extension', parsed.extensionId), parsed.def, parsed.settings));
+        map.set(id, await attachCredentials(toRuntime(parsed.def, 'extension', parsed.extensionId, parsed.settings), parsed.def, parsed.settings));
     }
     if (!map.has('google')) map.set('google', await attachCredentials(toRuntime(BUILTIN_GOOGLE_DEF as unknown as ParsedProvider['def'], 'builtin', null), BUILTIN_GOOGLE_DEF, {}));
     cache = { at: Date.now(), map };

@@ -17,6 +17,9 @@ const ES = {
     pattern: 'El formato no es valido', email: 'Escribe un correo valido', url: 'Escribe una URL valida', invalidTag: 'Valor no valido', saved: 'Guardado', error: 'No se pudo completar',
     endBeforeStart: 'El fin debe ser posterior al inicio', extensions: 'Extensiones', manageExtensions: 'Gestionar extensiones', pinToBar: 'Anclar a la barra', unpinFromBar: 'Quitar de la barra', searchActions: 'Buscar acciones', noActions: 'No hay acciones', pinKeyHint: 'P: anclar o quitar', actionsCount: '{n} acciones',
     extensionError: 'Esta extension no se pudo mostrar', extensionErrorHelp: 'El resto de la aplicacion sigue funcionando. Avisa al autor de la extension.', details: 'Detalles', errors: 'errores',
+    breadcrumbs: 'Migas de pan', resizePanes: 'Cambiar el tamano de los paneles', filterBy: 'Filtrar por', allValues: 'Todos', resultsCount: '{n} resultados', clearSelection: 'Quitar seleccion',
+    stepsLabel: 'Pasos', stepComplete: 'completado', stepCurrent: 'actual', stepUpcoming: 'pendiente', stepError: 'con error', trendUp: 'sube', trendDown: 'baja', trendFlat: 'sin cambios',
+    treeLabel: 'Arbol', expand: 'Expandir', collapse: 'Contraer', loadError: 'No se pudieron cargar los datos',
 };
 export type KitStrings = typeof ES;
 
@@ -30,6 +33,9 @@ const EN: KitStrings = {
     pattern: 'The format is not valid', email: 'Enter a valid email', url: 'Enter a valid URL', invalidTag: 'Invalid value', saved: 'Saved', error: 'Could not complete',
     endBeforeStart: 'The end must be after the start', extensions: 'Extensions', manageExtensions: 'Manage extensions', pinToBar: 'Pin to the bar', unpinFromBar: 'Remove from the bar', searchActions: 'Search actions', noActions: 'No actions', pinKeyHint: 'P: pin or unpin', actionsCount: '{n} actions',
     extensionError: 'This extension could not be displayed', extensionErrorHelp: 'The rest of the app keeps working. Let the extension author know.', details: 'Details', errors: 'errors',
+    breadcrumbs: 'Breadcrumbs', resizePanes: 'Resize the panels', filterBy: 'Filter by', allValues: 'All', resultsCount: '{n} results', clearSelection: 'Clear selection',
+    stepsLabel: 'Steps', stepComplete: 'completed', stepCurrent: 'current', stepUpcoming: 'upcoming', stepError: 'with error', trendUp: 'up', trendDown: 'down', trendFlat: 'unchanged',
+    treeLabel: 'Tree', expand: 'Expand', collapse: 'Collapse', loadError: 'The data could not be loaded',
 };
 
 export function getKitStrings(locale: string | undefined): KitStrings {

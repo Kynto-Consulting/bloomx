@@ -566,7 +566,7 @@ export function resolveTemplate(input: string, scope: ExpressionScope): any {
 export const LAZY_KEYS: ReadonlySet<string> = new Set([
     'children', 'template', 'itemTemplate', 'empty', 'true', 'false', 'else', 'content', 'cases', 'default',
     'onLoad', 'onClick', 'onChange', 'onSubmit', 'onSelect', 'onSuccess', 'onError', 'onConfirm', 'onCancel',
-    'onUpload', 'actions', 'action', 'footer', 'trigger', 'overlays', 'onRowClick', 'onRemove', 'onClose', 'onFinish',
+    'onUpload', 'actions', 'action', 'footer', 'trigger', 'overlays', 'onRowClick', 'onRemove', 'onClose', 'onFinish', 'onRetry', 'startPane', 'endPane',
 ]);
 
 /** Resuelve recursivamente strings, arreglos y objetos planos. Con `lazy`, las claves indicadas quedan sin resolver. */

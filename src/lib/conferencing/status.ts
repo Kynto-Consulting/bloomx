@@ -9,8 +9,10 @@
 import { callExtension, type CallExtensionInit } from './bridge';
 import { getLinkedAuth, type LinkedAuthResult } from './auth-context';
 import { zoomOAuthConfigured } from '@/lib/zoom/account';
+import { getProvider } from '@/lib/oauth/providers';
 import {
     PROVIDER_INFO,
+    isConferencingProviderId,
     type ConferencingAuthMode,
     type ConferencingCredentialSource,
     type ConferencingProviderId,
@@ -23,11 +25,12 @@ export interface Actor {
     domain: string;
 }
 
-const MODES: readonly ConferencingAuthMode[] = ['server-to-server', 'user-oauth', 'service-account', 'google-account', 'custom-link'];
+const MODES: readonly ConferencingAuthMode[] = ['server-to-server', 'user-oauth', 'service-account', 'google-account', 'microsoft-account', 'custom-link'];
 const SOURCES: readonly ConferencingCredentialSource[] = ['instance', 'user-oauth', 'extension', 'none'];
 
-const DEFAULT_MODES: Record<'zoom' | 'google-meet', ConferencingAuthMode[]> = {
+const DEFAULT_MODES: Record<'zoom' | 'google-meet' | 'microsoft-teams', ConferencingAuthMode[]> = {
     zoom: ['server-to-server', 'user-oauth'],
+    'microsoft-teams': ['microsoft-account'],
     'google-meet': ['service-account', 'google-account'],
 };
 
@@ -41,22 +44,45 @@ function pickMode(v: unknown): ConferencingAuthMode | null {
     return typeof v === 'string' && (MODES as readonly string[]).includes(v) ? (v as ConferencingAuthMode) : null;
 }
 
-function oauthConfigured(provider: 'zoom' | 'google-meet', env: Record<string, string | undefined>): boolean {
+function oauthConfigured(provider: 'zoom' | 'google-meet' | 'microsoft-teams', env: Record<string, string | undefined>): boolean {
+    // Teams: la cuenta Microsoft se vincula en Ajustes > Cuentas vinculadas (OAuth v2 del backend); no hay ruta OAuth directa del host.
+    if (provider === 'microsoft-teams') return false;
     return provider === 'zoom' ? zoomOAuthConfigured(env) : Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
+}
+
+/**
+ * Proveedores de conferencia cuyas cuentas de usuario gestiona un PROVEEDOR OAUTH DE EXTENSION (core-zoomlib para zoom 2.x, core-microsoftlib para Teams):
+ * el flujo es /api/oauth/<proveedor>/start del nucleo. Solo si ese proveedor esta registrado por su extension oficial y listo (client id/secreto y hosts
+ * aprobados por el admin); si no, zoom sigue con su ruta heredada y Teams remite a Ajustes.
+ */
+const LIB_PROVIDER: Partial<Record<'zoom' | 'google-meet' | 'microsoft-teams', { provider: string; extensionId: string }>> = {
+    zoom: { provider: 'zoom', extensionId: 'core-zoomlib' },
+    'microsoft-teams': { provider: 'microsoft', extensionId: 'core-microsoftlib' },
+};
+async function libConnectUrl(id: 'zoom' | 'google-meet' | 'microsoft-teams'): Promise<string | null> {
+    const lib = LIB_PROVIDER[id];
+    if (!lib) return null;
+    try {
+        const p = await getProvider(lib.provider);
+        return p && p.source === 'extension' && p.extensionId === lib.extensionId && p.status === 'ready' ? `/api/oauth/${lib.provider}/start` : null;
+    } catch {
+        return null;
+    }
 }
 
 async function providerStatus(
     actor: Actor,
-    id: 'zoom' | 'google-meet',
+    id: 'zoom' | 'google-meet' | 'microsoft-teams',
     linkedResult: LinkedAuthResult,
     deps: StatusDeps,
 ): Promise<ConferencingProviderStatus> {
     const info = PROVIDER_INFO[id];
     const env = deps.env ?? process.env;
     const call = deps.call ?? callExtension;
-    const linkKey = id === 'zoom' ? 'zoom' : 'google';
-    const linked = linkedResult.auth[linkKey];
-    const problem = linkedResult.problems[linkKey];
+    // Teams: el host no inyecta tokens; MicrosoftLib (backend) resuelve la cuenta del usuario de la sesion.
+    const linkKey = id === 'zoom' ? 'zoom' : id === 'google-meet' ? 'google' : null;
+    const linked = linkKey ? linkedResult.auth[linkKey] : undefined;
+    const problem = linkKey ? linkedResult.problems[linkKey] : undefined;
 
     const base: ConferencingProviderStatus = {
         id,
@@ -70,9 +96,12 @@ async function providerStatus(
         extensionId: info.extensionId,
         modes: DEFAULT_MODES[id].map((m) => ({ id: m, available: true })),
     };
-    const connect: ConferencingProviderStatus['connect'] = oauthConfigured(id, env)
-        ? { type: 'oauth', url: id === 'zoom' ? '/api/auth/zoom' : '/api/auth/google' }
-        : { type: 'settings', section: 'integrations' };
+    const libUrl = deps.env ? null : await libConnectUrl(id);
+    const connect: ConferencingProviderStatus['connect'] = libUrl
+        ? { type: 'oauth', url: libUrl }
+        : oauthConfigured(id, env)
+            ? { type: 'oauth', url: id === 'zoom' ? '/api/auth/zoom' : '/api/auth/google' }
+            : { type: 'settings', section: 'integrations' };
 
     const res = await call({
         domain: actor.domain,
@@ -81,7 +110,7 @@ async function providerStatus(
         extensionId: info.extensionId!,
         action: 'status',
         params: {},
-        context: { auth: linked ? { [linkKey]: linked } : {} },
+        context: { auth: linked && linkKey ? { [linkKey]: linked } : {} },
         timeoutMs: 8_000,
     });
 
@@ -143,9 +172,10 @@ export async function listProviderStatuses(actor: Actor, opts: { force?: boolean
     if (!opts.force && !opts.deps && hit && hit.until > Date.now()) return hit.value;
 
     const linkedResult = await (deps.linked ?? getLinkedAuth)(actor.userId);
-    const [meet, zoom] = await Promise.all([
+    const [meet, zoom, teams] = await Promise.all([
         providerStatus(actor, 'google-meet', linkedResult, deps),
         providerStatus(actor, 'zoom', linkedResult, deps),
+        providerStatus(actor, 'microsoft-teams', linkedResult, deps),
     ]);
     const custom: ConferencingProviderStatus = {
         id: 'custom',
@@ -159,7 +189,7 @@ export async function listProviderStatuses(actor: Actor, opts: { force?: boolean
         extensionId: null,
         connect: null,
     };
-    const value: ConferencingProviderStatus[] = [meet, zoom, custom];
+    const value: ConferencingProviderStatus[] = [meet, zoom, teams, custom];
     if (!opts.deps) cache.set(key, { until: Date.now() + CACHE_TTL_MS, value });
     return value;
 }
@@ -169,5 +199,5 @@ export function invalidateStatusCache(actor: Pick<Actor, 'userId' | 'domain'>) {
 }
 
 export function providerIdOrNull(id: string): ConferencingProviderId | null {
-    return id === 'google-meet' || id === 'zoom' || id === 'custom' ? id : null;
+    return isConferencingProviderId(id) ? id : null;
 }

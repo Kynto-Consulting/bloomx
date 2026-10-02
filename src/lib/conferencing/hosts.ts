@@ -99,12 +99,13 @@ export function findMeetingUrlInText(text: unknown): string | null {
     return null;
 }
 
-/** Proveedor del registro del host que corresponde a un enlace reconocido (null para teams/webex/jitsi/otros). */
+/** Proveedor del registro del host que corresponde a un enlace reconocido (null para webex/jitsi/otros). */
 export function providerIdForLink(raw: unknown): ConferencingProviderId | null {
     const info = recognizeMeetingUrl(raw);
     if (!info) return null;
     if (info.provider === 'google-meet') return 'google-meet';
     if (info.provider === 'zoom') return 'zoom';
+    if (info.provider === 'teams') return 'microsoft-teams';
     return null;
 }
 

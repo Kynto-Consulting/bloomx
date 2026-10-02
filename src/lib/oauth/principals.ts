@@ -1,7 +1,7 @@
 import { SignJWT, importPKCS8 } from 'jose';
 import { providerFetch } from './http';
-import { getSharedCredential, principalSetting, usesOfficialEndpoints, type ProviderRuntime } from './providers';
-import { OAuthAccountError, type TokenResponse } from './tokens';
+import { getSharedCredential, getSharedCredentialByName, principalSetting, usesOfficialEndpoints, type ProviderRuntime } from './providers';
+import { clientAuth, OAuthAccountError, type TokenResponse } from './tokens';
 
 /**
  * IDENTIDADES COMPARTIDAS del dominio (ademas de la cuenta vinculada de cada usuario), para los casos en que no hay un usuario concreto:
@@ -40,14 +40,26 @@ export interface PrincipalAvailability { user: number; organizer: boolean; servi
 /** Que identidades compartidas hay configuradas (sin valores) y el modo elegido por el admin. */
 export async function describePrincipals(provider: ProviderRuntime, userAccounts: number): Promise<PrincipalAvailability> {
     const [refresh, sa] = await Promise.all([getSharedCredential(provider, 'organizerRefreshToken'), getSharedCredential(provider, 'serviceAccountJson')]);
+    const s2s = provider.serviceCredentials ? await serviceCredentialsOf(provider) : null;
     return {
         user: userAccounts,
         organizer: !!refresh && !!provider.clientId && !!provider.clientSecret,
-        service: !!sa && !!parseServiceAccount(sa) && !!principalSetting(provider, 'impersonateUser'),
+        service: s2s ? true : !!sa && !!parseServiceAccount(sa) && !!principalSetting(provider, 'impersonateUser'),
         mode: principalSetting(provider, 'authMode'),
         // Cuentas NO secretas (para mostrar "actuando como"); solo se revelan a quien tiene OAUTH_SHARED.
         accounts: { organizerEmail: principalSetting(provider, 'organizerEmail'), impersonateUser: principalSetting(provider, 'impersonateUser') },
     };
+}
+
+/** Credenciales S2S (Zoom account_credentials) del proveedor, o null si falta algo. Nunca salen del nucleo. */
+async function serviceCredentialsOf(provider: ProviderRuntime): Promise<{ accountId: string; clientId: string; clientSecret: string } | null> {
+    const def = provider.serviceCredentials;
+    if (!def) return null;
+    const cfg = provider.settingsConfig;
+    const accountId = typeof cfg[def.accountIdSetting] === 'string' ? (cfg[def.accountIdSetting] as string).trim() : '';
+    const clientId = typeof cfg[def.clientIdSetting] === 'string' ? (cfg[def.clientIdSetting] as string).trim() : '';
+    const clientSecret = await getSharedCredentialByName(provider, def.clientSecretCredential);
+    return /^[A-Za-z0-9_-]{4,64}$/.test(accountId) && /^[A-Za-z0-9_-]{4,128}$/.test(clientId) && clientSecret ? { accountId, clientId, clientSecret } : null;
 }
 
 function exchange<T extends Cached>(key: string, mint: () => Promise<T>): Promise<Cached> {
@@ -60,8 +72,10 @@ function exchange<T extends Cached>(key: string, mint: () => Promise<T>): Promis
     return p;
 }
 
-async function postToken(provider: ProviderRuntime, form: Record<string, string>): Promise<TokenResponse> {
-    const res = await providerFetch(provider.allowedHosts, provider.tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(form).toString(), maxBytes: 100_000 });
+async function postToken(provider: ProviderRuntime, form: Record<string, string>, auth?: { clientId: string; clientSecret: string }): Promise<TokenResponse> {
+    // S2S: SIEMPRE client_secret_basic con las credenciales de la aplicacion S2S (distintas del cliente OAuth de usuario).
+    const sent = auth ? clientAuth({ tokenAuth: 'basic', clientId: auth.clientId, clientSecret: auth.clientSecret }, form) : { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, form };
+    const res = await providerFetch(provider.allowedHosts, provider.tokenUrl, { method: 'POST', headers: sent.headers, body: new URLSearchParams(sent.form).toString(), maxBytes: 100_000 });
     const data = res.json as Record<string, unknown> | null;
     if (!res.ok || !data || typeof data.access_token !== 'string') {
         if (data?.error === 'invalid_grant' || data?.error === 'unauthorized_client' || data?.error === 'invalid_client') throw new OAuthAccountError('OAUTH_RECONNECT_REQUIRED', 401);
@@ -95,6 +109,17 @@ export function sharedScopesAllowed(provider: Pick<ProviderRuntime, 'id' | 'scop
 export async function getSharedAccessToken(provider: ProviderRuntime, principal: SharedPrincipal, scopes: readonly string[]): Promise<{ accessToken: string; scope: string | null }> {
     if (!sharedScopesAllowed(provider, scopes)) throw new OAuthAccountError('OAUTH_SCOPE_MISSING', 403);
     if (!provider.clientId && principal === 'organizer') throw new OAuthAccountError('OAUTH_NOT_CONFIGURED', 500);
+    if (principal === 'service' && provider.serviceCredentials) {
+        const creds = await serviceCredentialsOf(provider);
+        if (!creds) throw new OAuthAccountError('OAUTH_NOT_CONFIGURED', 503);
+        const c = await exchange(`s2s:${provider.id}:${creds.accountId}:${creds.clientId}`, async () => {
+            const t = await postToken(provider, { grant_type: provider.serviceCredentials!.grant, account_id: creds.accountId }, { clientId: creds.clientId, clientSecret: creds.clientSecret });
+            // Las aplicaciones S2S administradas por el admin devuelven los scopes con sufijo ":admin"; se normalizan al nombre del catalogo.
+            const scope = (t.scope ?? '').split(/[\s,]+/).filter(Boolean).map((x) => x.replace(/:admin$/, '')).join(' ');
+            return { token: t.access_token, scope: scope || null, exp: Date.now() + (t.expires_in ?? 3000) * 1000 };
+        });
+        return { accessToken: c.token, scope: c.scope };
+    }
     if (principal === 'organizer') {
         const refresh = await getSharedCredential(provider, 'organizerRefreshToken');
         if (!refresh || !provider.clientId || !provider.clientSecret) throw new OAuthAccountError('OAUTH_NOT_CONFIGURED', 503);

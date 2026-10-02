@@ -7,7 +7,7 @@
  */
 import { backendBaseUrl } from '@/lib/backend-auth';
 
-export const CONFERENCING_EXTENSIONS = ['core-zoom', 'core-google-meet', 'core-calendar'] as const;
+export const CONFERENCING_EXTENSIONS = ['core-zoom', 'core-google-meet', 'core-microsoft-teams', 'core-calendar'] as const;
 export type ConferencingExtensionId = (typeof CONFERENCING_EXTENSIONS)[number];
 
 export interface AdminInstall {

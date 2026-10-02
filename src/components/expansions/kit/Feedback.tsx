@@ -96,7 +96,7 @@ export function Avatar({ src, name, initials, alt, size, tone }: AvatarProps) {
         return (
             <span className={`${box} bg-muted`}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={url} alt={label} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="size-full object-cover" />
+                <img src={url} alt={label} loading="lazy" decoding="async" referrerPolicy="no-referrer" onError={() => setFailed(true)} className="size-full object-cover" />
             </span>
         );
     }

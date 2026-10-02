@@ -25,6 +25,7 @@ function memoryStore(): StorageStore & { data: Map<string, { value: string; byte
             return { ok: true, usedBytes: next };
         },
         delete: async (u, e, key) => data.delete(k(u, e, key)),
+        listShared: async (e, prefix, limit) => [...data].filter(([id]) => { const p = id.split('|'); return p[1] === e && p.slice(2).join('|').startsWith(prefix); }).map(([id, v]) => ({ key: id.split('|').slice(2).join('|'), value: v.value })).slice(0, limit),
         list: async (u, e, prefix, limit) => ({
             keys: [...data.keys()].filter((id) => id.startsWith(`${u}|${e}|${prefix}`)).map((id) => id.split('|').slice(2).join('|')).sort().slice(0, limit),
             usedBytes: used(u, e),

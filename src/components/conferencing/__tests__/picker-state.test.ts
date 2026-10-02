@@ -159,10 +159,11 @@ describe('enlace propio', () => {
         expect(other.status).toBe('unrecognized');
         expect(meetingFromCustomLink((other as any).info)).toMatchObject({ provider: 'custom', joinUrl: 'https://sala.example.com/abc', meetingId: '' });
     });
-    it('meetingFromLink solo reconoce Zoom y Meet del registro', () => {
+    it('meetingFromLink solo reconoce Zoom, Meet y Teams del registro', () => {
         expect(meetingFromLink('https://meet.google.com/abc-defg-hij')).toMatchObject({ provider: 'google-meet', providerName: 'Google Meet' });
         expect(meetingFromLink('https://us02web.zoom.us/j/123')).toMatchObject({ provider: 'zoom' });
-        expect(meetingFromLink('https://teams.microsoft.com/l/meetup-join/x')).toBeNull();
+        expect(meetingFromLink('https://teams.microsoft.com/l/meetup-join/x')).toMatchObject({ provider: 'microsoft-teams', providerName: 'Microsoft Teams' });
+        expect(meetingFromLink('https://webex.com/meet/x')).toBeNull();
         expect(meetingFromLink('Sala 3')).toBeNull();
     });
     it('canDeleteRemote y locationWithoutLink', () => {

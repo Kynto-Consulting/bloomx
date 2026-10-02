@@ -155,12 +155,16 @@ export function useDomainConfig() {
     const extensions = useMemo(() => allExtensions.filter((e) => e?.aiBlock?.blocked !== true), [allExtensions]);
 
     const retry = useCallback(() => { void mutate(); }, [mutate]);
+    // Nivel de administrador del usuario (1..4) segun /api/config; null = no es administrador o aun no se sabe (falla cerrado: no se muestran entradas admin).
+    const rawLevel = data?.viewer?.level;
+    const viewerLevel = typeof rawLevel === 'number' && Number.isInteger(rawLevel) && rawLevel >= 1 && rawLevel <= 4 ? rawLevel : null;
 
     return {
         config,
         themeConfig,
         extensions,
         allExtensions,
+        viewerLevel,
         isLoading,
         isError,
         error: (error ?? null) as DomainConfigError | null,

@@ -3,19 +3,22 @@ import { SigningNotice } from '@/components/admin/SigningNotice';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Info, Puzzle } from 'lucide-react';
+import { Info } from 'lucide-react';
 import {
-    Badge, Card, EmptyState, ErrorState, FilterBar, FilterSelect, LoadingState, PageHeader, SearchInput, StatCard, apiErrorKey, btnOutline, useConsole,
+    Badge, ErrorState, PageHeader, StatCard, apiErrorKey, useConsole,
 } from '@/components/admin/console';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { ExtensionCredentialsModal } from '@/components/admin/ExtensionCredentialsModal';
-import { oauthApprovalKeys } from '@/lib/expansions/oauth-schema';
 import { useI18n } from '@/components/I18nProvider';
-import { CATEGORIES } from '@/lib/admin/extensions-manifest';
 import {
-    DEFAULT_FILTERS, STATUS_FILTERS, countByStatus, dependencyPlanFor, dependentsToPause, filterRows, type ExtensionFilters, type ExtensionRow, type StatusFilter,
+    countByStatus, dependencyPlanFor, dependentsToPause, type ExtensionRow,
 } from '@/lib/admin/extensions-view';
-import { ExtensionCard, type DialogKind, type RowActions } from './ExtensionCard';
+import { planSuiteInstall, requiresExplicitApproval } from '@/lib/admin/marketplace/market-model';
+import { type DialogKind, type RowActions } from './ExtensionCard';
+import { MarketplaceCatalog } from './market/MarketplaceCatalog';
+import { SuiteInstallDialog, type SuiteInstallProgress } from './market/SuiteInstallDialog';
+import { useExtensionStars } from './market/useExtensionStars';
+import { useMarketState } from './market/useMarketState';
 import { ExtensionDetail } from './ExtensionDetail';
 import { OrderPanel } from './OrderPanel';
 import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
@@ -36,8 +39,18 @@ export function ExtensionsScreen() {
     const data = useExtensionsData(domain.id);
     const actions = useExtensionActions(domain.id, data.refresh);
 
-    const [filters, setFilters] = useState<ExtensionFilters>(DEFAULT_FILTERS);
-    const [selectedId, setSelectedId] = useState<string | null>(null);
+    // Estado del marketplace en la URL (?q=&cat=&suite=&publisher=&view=...); la ficha abierta es ?ext=<id>.
+    const market = useMarketState(searchParams);
+    const stars = useExtensionStars();
+    const selectedId = market.state.ext || null;
+    const updateMarket = market.update;
+    const setSelectedId = useCallback((id: string | null) => updateMarket({ ext: id ?? '' }), [updateMarket]);
+    const [starLive, setStarLive] = useState('');
+    const [suiteId, setSuiteId] = useState<string | null>(null);
+    const [suiteApproved, setSuiteApproved] = useState(false);
+    const [suiteProgress, setSuiteProgress] = useState<SuiteInstallProgress | null>(null);
+    const [suiteError, setSuiteError] = useState<string | null>(null);
+    const [suiteBusy, setSuiteBusy] = useState(false);
     const [dialog, setDialog] = useState<DialogState | null>(null);
     const [credentialsId, setCredentialsId] = useState<string | null>(null);
     // PUBLIC_ROUTE (rutas/paginas sin sesion): aprobacion explicita del admin del dominio, desmarcada por defecto en cada dialogo.
@@ -51,14 +64,13 @@ export function ExtensionsScreen() {
             setSelectedId(openParam);
             setConsumedOpen(openParam);
         }
-    }, [openParam, consumedOpen, data.rows]);
+    }, [openParam, consumedOpen, data.rows, setSelectedId]);
 
     const byId = useMemo(() => new Map(data.rows.map((r) => [r.id, r])), [data.rows]);
     const selected = selectedId ? byId.get(selectedId) ?? null : null;
     const dialogRow = dialog ? byId.get(dialog.id) ?? null : null;
     const credentialsRow = credentialsId ? byId.get(credentialsId) ?? null : null;
 
-    const visible = useMemo(() => filterRows(data.rows, filters), [data.rows, filters]);
     const counts = useMemo(() => countByStatus(data.rows), [data.rows]);
 
     const rowActions: RowActions = {
@@ -88,6 +100,43 @@ export function ExtensionsScreen() {
         if (ok) { setDialog(null); setApprovePublic(false); }
     };
 
+    // Favoritas: optimista (la estrella cambia al instante y vuelve atras si el servidor la rechaza).
+    const toggleStar = useCallback(async (row: Pick<ExtensionRow, 'id' | 'name'>) => {
+        const next = !stars.starred.has(row.id);
+        const ok = await stars.toggle(row.id, next);
+        setStarLive(ok ? t(next ? 'admin.console.extensions.market.stars.added' : 'admin.console.extensions.market.stars.removed', { name: row.name }) : t('admin.console.extensions.market.stars.saveError'));
+    }, [stars, t]);
+
+    // Instalar la suite: plan puro (orden con dependencias, permisos, aprobaciones) y ejecucion en orden con las mismas acciones de siempre.
+    const suiteGroup = useMemo(() => (suiteId ? data.rows.filter((r) => r.market.suite?.id === suiteId) : []), [suiteId, data.rows]);
+    const suitePlan = useMemo(() => (suiteId ? planSuiteInstall(suiteGroup, data.rows) : null), [suiteId, suiteGroup, data.rows]);
+    const closeSuite = () => { if (!suiteBusy) { setSuiteId(null); setSuiteProgress(null); setSuiteError(null); } };
+    const confirmSuite = async () => {
+        if (!suitePlan || suitePlan.steps.length === 0) return;
+        setSuiteBusy(true);
+        setSuiteError(null);
+        const total = suitePlan.steps.length;
+        let done = 0;
+        for (const step of suitePlan.steps) {
+            const row = byId.get(step.id);
+            if (!row) continue;
+            setSuiteProgress({ done, total, name: row.name });
+            const approve = suiteApproved && requiresExplicitApproval(row);
+            const ok = step.action === 'activate' ? await actions.toggle(row, true) : await actions.install(row, { approvePublicRoutes: approve });
+            if (!ok) {
+                setSuiteBusy(false);
+                setSuiteProgress(null);
+                setSuiteError(t('admin.console.extensions.market.suiteInstall.stopped', { name: row.name }));
+                return;
+            }
+            done += 1;
+        }
+        setSuiteBusy(false);
+        setSuiteProgress(null);
+        setStarLive(t('admin.console.extensions.market.suiteInstall.done', { name: suiteGroup[0]?.market.suite?.name ?? '', count: done }));
+        setSuiteId(null);
+    };
+
     const reasonText = data.readOnlyReason === 'noDomain' ? t('admin.console.extensions.readOnly.noDomain') : t('admin.console.extensions.readOnly.body');
     const dialogBusy = actions.busyId !== null;
 
@@ -100,6 +149,7 @@ export function ExtensionsScreen() {
             <div role="status" aria-live="polite" className={actions.live ? 'rounded-lg border border-success/30 bg-success/10 px-3 py-2 text-sm text-success' : 'sr-only'}>
                 {actions.live}
             </div>
+            <div role="status" aria-live="polite" className={starLive ? 'rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm text-foreground' : 'sr-only'}>{starLive}</div>
             {actions.error && !dialog && <ErrorState message={actions.error} />}
 
             {data.readOnly && !data.loading && (
@@ -120,52 +170,20 @@ export function ExtensionsScreen() {
                 <StatCard label={t('admin.console.extensions.summary.errors')} value={counts.errors} tone={counts.errors > 0 ? 'danger' : 'neutral'} loading={data.loading} />
             </section>
 
-            <Card title={t('admin.console.extensions.catalog.title')} id="catalog">
-                <FilterBar label={t('admin.console.extensions.filters.label')} className="mb-4">
-                    <SearchInput
-                        value={filters.query}
-                        onChange={(query) => setFilters((f) => ({ ...f, query }))}
-                        label={t('admin.console.extensions.search.label')}
-                        placeholder={t('admin.console.extensions.search.placeholder')}
-                    />
-                    <FilterSelect
-                        label={t('admin.console.extensions.filters.category')}
-                        value={filters.category}
-                        onChange={(category) => setFilters((f) => ({ ...f, category: category as ExtensionFilters['category'] }))}
-                        options={[{ value: 'all', label: t('admin.console.common.all') }, ...CATEGORIES.map((c) => ({ value: c, label: t(`admin.console.extensions.filters.categories.${c}`) }))]}
-                    />
-                    <FilterSelect
-                        label={t('admin.console.extensions.filters.status')}
-                        value={filters.status}
-                        onChange={(status) => setFilters((f) => ({ ...f, status: status as StatusFilter }))}
-                        options={STATUS_FILTERS.map((s) => ({ value: s, label: t(`admin.console.extensions.filters.statuses.${s}`) }))}
-                    />
-                </FilterBar>
-
-                {data.loading ? (
-                    <LoadingState />
-                ) : data.catalogError ? (
-                    <ErrorState message={t('admin.console.extensions.catalog.loadError')} onRetry={data.retry} />
-                ) : data.configError ? (
-                    <ErrorState message={t('admin.console.extensions.catalog.configError')} onRetry={data.retry} />
-                ) : visible.length === 0 ? (
-                    <EmptyState
-                        icon={<Puzzle className="h-10 w-10" />}
-                        title={data.rows.length === 0 ? t('admin.console.extensions.catalog.empty') : t('admin.console.common.emptyTitle')}
-                        description={data.rows.length === 0 ? undefined : t('admin.console.extensions.catalog.emptyFiltered')}
-                        action={data.rows.length > 0 ? <button type="button" className={btnOutline} onClick={() => setFilters(DEFAULT_FILTERS)}>{t('admin.console.common.clearFilters')}</button> : undefined}
-                    />
-                ) : (
-                    <>
-                        <p role="status" className="mb-3 text-xs text-muted-foreground">{t('admin.console.extensions.catalog.count', { count: visible.length })}</p>
-                        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-                            {visible.map((row) => (
-                                <ExtensionCard key={row.id} row={row} actions={rowActions} onOpen={(r) => setSelectedId(r.id)} />
-                            ))}
-                        </ul>
-                    </>
-                )}
-            </Card>
+            <MarketplaceCatalog
+                rows={data.rows}
+                loading={data.loading}
+                catalogError={!!data.catalogError}
+                configError={!data.catalogError && data.configError}
+                onRetry={data.retry}
+                state={market.state}
+                update={market.update}
+                stars={stars}
+                onToggleStar={toggleStar}
+                actions={rowActions}
+                onOpen={(r) => setSelectedId(r.id)}
+                onInstallSuite={(id) => { setSuiteId(id); setSuiteApproved(false); setSuiteError(null); setSuiteProgress(null); }}
+            />
 
             {!data.readOnly && !data.loading && <OrderPanel rows={data.rows} busy={actions.busyId !== null} onReorder={(ids, name, pos) => void actions.reorder(ids, name, pos)} />}
 
@@ -177,6 +195,14 @@ export function ExtensionsScreen() {
                 testSupport={{ supported: data.testSupported, reason: data.testReason }}
                 onTest={actions.test}
                 onOpenCredentials={(row) => setCredentialsId(row.id)}
+                market={selected ? {
+                    rows: data.rows,
+                    starred: stars.starred.has(selected.id),
+                    onToggleStar: toggleStar,
+                    onOpenPublisher: (publisher) => market.update({ ext: '', section: 'publisher', publisher, suite: '', cat: 'all', q: '' }),
+                    onOpenSuite: (suite) => market.update({ ext: '', section: 'suites', suite, publisher: '', cat: 'all', q: '' }),
+                    onOpenRow: (r) => setSelectedId(r.id),
+                } : undefined}
             />
 
             <ExtensionCredentialsModal
@@ -184,6 +210,19 @@ export function ExtensionsScreen() {
                 onClose={() => setCredentialsId(null)}
                 domainId={domain.id}
                 extension={credentialsRow ? { id: credentialsRow.id, name: credentialsRow.name } : null}
+            />
+
+            <SuiteInstallDialog
+                open={!!suiteId && !!suitePlan}
+                suiteName={suiteGroup[0]?.market.suite?.name ?? ''}
+                plan={suitePlan}
+                approved={suiteApproved}
+                onApprove={setSuiteApproved}
+                busy={suiteBusy}
+                progress={suiteProgress}
+                error={suiteError}
+                onCancel={closeSuite}
+                onConfirm={() => void confirmSuite()}
             />
 
             <ActionDialog
@@ -319,7 +358,7 @@ function DependencyNotes({ row, rows, mode }: { row: ExtensionRow; rows: readonl
 }
 
 /** Permisos que exigen aprobacion explicita: rutas publicas, cuentas compartidas de proveedor (OAUTH_SHARED) y OAUTH_ACCOUNT de grupos de riesgo alto. */
-const needsPublicApproval = (row: ExtensionRow | null) => !!row && ((row.template?.permissions ?? []).includes('PUBLIC_ROUTE') || oauthApprovalKeys(row.template?.permissions ?? []).length > 0);
+const needsPublicApproval = (row: ExtensionRow | null) => !!row && requiresExplicitApproval(row);
 
 /** PUBLIC_ROUTE: casilla de aprobacion EXPLICITA (riesgo alto); sin marcarla no se puede confirmar. */
 function PublicRouteApproval({ row, checked, onChange }: { row: ExtensionRow; checked: boolean; onChange: (value: boolean) => void }) {

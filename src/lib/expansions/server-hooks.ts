@@ -36,7 +36,9 @@ import { MAX_DISABLED_FOR_SERVER, loadDisabledExtensionsForUser } from './user-d
 export type LifecycleEvent =
     | 'EMAIL_OPENED' | 'EMAIL_SENT' | 'COMPOSE_OPENED'
     | 'CALENDAR_EVENT_CREATED' | 'CALENDAR_EVENT_UPDATED' | 'CALENDAR_EVENT_CANCELLED'
-    | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED';
+    | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED'
+    // v2 (capacidad lifecycle.events.v2): ver lifecycle-v2.ts
+    | 'USER_CREATED' | 'USER_DISABLED' | 'USER_ENABLED' | 'EMAIL_SPAM_DETECTED' | 'LABEL_APPLIED';
 export type HookEvent = 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON' | LifecycleEvent;
 
 export interface PreSendMessage {
@@ -341,6 +343,75 @@ export function buildAppointmentBookedContext(input: { bookingId: unknown; sched
     };
     const eventId = str(input.calendarEventId, 100);
     if (eventId) out.calendarEventId = eventId;
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Eventos v2 (lifecycle.events.v2). Payload VERSIONADO (`v: 1`) y minimo: nunca contrasenas, hashes, asuntos ni cuerpos.
+// `eventKey` es determinista por hecho (no por intento): los consumidores lo usan para ser idempotentes ante reintentos.
+// ---------------------------------------------------------------------------------------------------------------
+export const LIFECYCLE_V2_VERSION = 1;
+const emailDomain = (email: string) => email.split('@')[1] || '';
+
+export const USER_CREATED_SOURCES = ['register', 'admin', 'import'] as const;
+export function buildUserCreatedContext(input: { userId: unknown; email: unknown; source?: unknown; createdAt?: unknown }): Record<string, unknown> {
+    const userId = str(input.userId, 64);
+    const email = addressOnly(input.email);
+    const source = (USER_CREATED_SOURCES as readonly string[]).includes(input.source as string) ? (input.source as string) : 'admin';
+    return { v: LIFECYCLE_V2_VERSION, eventKey: `uc:${userId}`, subjectUserId: userId, email, emailDomain: emailDomain(email), source, createdAt: iso(input.createdAt) || new Date().toISOString() };
+}
+
+export function buildUserDisabledContext(input: { userId: unknown; email: unknown; disabledAt?: unknown }): Record<string, unknown> {
+    const userId = str(input.userId, 64);
+    const email = addressOnly(input.email);
+    const disabledAt = iso(input.disabledAt) || new Date().toISOString();
+    return { v: LIFECYCLE_V2_VERSION, eventKey: `ud:${userId}:${Date.parse(disabledAt).toString(36)}`, subjectUserId: userId, email, emailDomain: emailDomain(email), disabledAt };
+}
+
+export function buildUserEnabledContext(input: { userId: unknown; email: unknown; enabledAt?: unknown }): Record<string, unknown> {
+    const userId = str(input.userId, 64);
+    const email = addressOnly(input.email);
+    const enabledAt = iso(input.enabledAt) || new Date().toISOString();
+    return { v: LIFECYCLE_V2_VERSION, eventKey: `ue:${userId}:${Date.parse(enabledAt).toString(36)}`, subjectUserId: userId, email, emailDomain: emailDomain(email), enabledAt };
+}
+
+export const SPAM_VERDICTS = ['spam', 'phishing', 'suspicious'] as const;
+export const SPAM_ACTIONS = ['junk', 'quarantine', 'flag'] as const;
+/** Sin cuerpo, asunto ni destinatarios: solo remitente (direccion y dominio), veredicto, puntuacion y codigos de motivo. */
+export function buildEmailSpamDetectedContext(input: { emailId: unknown; from?: unknown; verdict?: unknown; score?: unknown; action?: unknown; reasons?: unknown }): Record<string, unknown> {
+    const emailId = str(input.emailId, 64);
+    const fromEmail = addressOnly(input.from);
+    const score = typeof input.score === 'number' && Number.isFinite(input.score) ? Math.max(0, Math.min(100, Math.round(input.score * 100) / 100)) : undefined;
+    const reasons = Array.isArray(input.reasons) ? input.reasons.filter((x): x is string => typeof x === 'string' && /^[a-z0-9_.:-]{1,40}$/i.test(x)).slice(0, 10) : [];
+    const out: Record<string, unknown> = {
+        v: LIFECYCLE_V2_VERSION,
+        eventKey: `sp:${emailId}`,
+        emailId,
+        fromEmail,
+        fromDomain: emailDomain(fromEmail),
+        verdict: (SPAM_VERDICTS as readonly string[]).includes(input.verdict as string) ? input.verdict : 'spam',
+        action: (SPAM_ACTIONS as readonly string[]).includes(input.action as string) ? input.action : 'junk',
+        reasons,
+    };
+    if (score !== undefined) out.score = score;
+    return out;
+}
+
+export const LABEL_SOURCES = ['user', 'rule', 'extension', 'system'] as const;
+export function buildLabelAppliedContext(input: { emailId: unknown; labelId: unknown; labelName?: unknown; source?: unknown; ruleId?: unknown }): Record<string, unknown> {
+    const emailId = str(input.emailId, 64);
+    const labelId = str(input.labelId, 64);
+    const out: Record<string, unknown> = {
+        v: LIFECYCLE_V2_VERSION,
+        eventKey: `lb:${emailId}:${labelId}`,
+        emailId,
+        labelId,
+        source: (LABEL_SOURCES as readonly string[]).includes(input.source as string) ? input.source : 'user',
+    };
+    const name = str(input.labelName, 100);
+    if (name) out.labelName = name;
+    const ruleId = str(input.ruleId, 64);
+    if (ruleId) out.ruleId = ruleId;
     return out;
 }
 

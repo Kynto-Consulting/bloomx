@@ -65,6 +65,7 @@ export const BRAND_ICONS: Readonly<Record<string, BrandIcon>> = {
 
 export const NEUTRAL_BRANDS: Readonly<Record<string, NeutralBrand>> = {
     slack: { slug: 'slack', name: "Slack", initial: 'S', lucide: 'Hash' },
+    microsoft: { slug: 'microsoft', name: "Microsoft", initial: 'M', lucide: 'LayoutGrid' },
     microsoftteams: { slug: 'microsoftteams', name: "Microsoft Teams", initial: 'T', lucide: 'Users' },
     microsoftoutlook: { slug: 'microsoftoutlook', name: "Microsoft Outlook", initial: 'O', lucide: 'Mail' },
     salesforce: { slug: 'salesforce', name: "Salesforce", initial: 'S', lucide: 'Cloud' },

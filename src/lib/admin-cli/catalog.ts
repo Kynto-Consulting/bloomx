@@ -7,6 +7,7 @@ import { extensionCommands } from './commands/extensions';
 import { aiCommands } from './commands/ai';
 import { spamCommands } from './commands/spam';
 import { transferCommands } from './commands/transfer';
+import { paymentsCommands } from './commands/payments';
 import { permsCommands } from './commands/perms';
 import { sessionCommands } from './commands/session';
 import { commandLevel } from '../admin-levels';
@@ -24,6 +25,7 @@ export const CATEGORIES: Record<string, L10n> = {
     users: L('Usuarios', 'Users'), accounts: L('Cuentas vinculadas', 'Linked accounts'), search: L('Usuarios', 'Users'),
     overview: L('Sistema', 'System'), system: L('Sistema', 'System'), config: L('Sistema', 'System'),
     mail: L('Correo', 'Mail'), spam: L('Spam y remitentes', 'Spam and senders'), transfer: L('Importar / exportar', 'Import / export'), jobs: L('Importar / exportar', 'Import / export'),
+    billing: L('Facturación y desarrollo', 'Billing and development'), developer: L('Facturación y desarrollo', 'Billing and development'),
     retention: L('Retención y cuotas', 'Retention and quotas'), quota: L('Retención y cuotas', 'Retention and quotas'),
     audit: L('Auditoría', 'Audit'), security: L('Seguridad', 'Security'),
     domain: L('Dominio, marca y temas', 'Domain, brand and themes'), theme: L('Dominio, marca y temas', 'Domain, brand and themes'), landing: L('Dominio, marca y temas', 'Domain, brand and themes'),
@@ -81,7 +83,7 @@ const helpCommand: CommandDef = def({
 });
 
 export const COMMANDS: readonly CommandDef[] = [
-    helpCommand, ...coreCommands, ...usersCommands, ...platformCommands, ...brandCommands, ...extensionCommands, ...aiCommands, ...spamCommands, ...transferCommands, ...permsCommands, ...sessionCommands,
+    helpCommand, ...coreCommands, ...usersCommands, ...platformCommands, ...brandCommands, ...extensionCommands, ...aiCommands, ...spamCommands, ...transferCommands, ...paymentsCommands, ...permsCommands, ...sessionCommands,
 ];
 
 /** Catalogo serializable (sin handlers) para GET /api/admin/cli/commands, la UI y la documentacion. */

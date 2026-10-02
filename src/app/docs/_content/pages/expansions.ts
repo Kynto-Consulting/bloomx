@@ -328,12 +328,33 @@ const servicesEs: Block[] = [
         ['`toast`', '`NOTIFY`', '`{message, title?, level?, url?}`: `message` 1–200, `title` ≤80, `level` `info` (por defecto), `success`, `warning` o `error`; `url` ruta relativa `/...` (sin `//`) o `https://`', '`{delivered:true}`'],
     ] },
     { t: 'p', text: 'El aviso se guarda y la interfaz lo muestra como toast (`GET /api/expansions/notifications`). Tope de **20 pendientes** por usuario y extensión y **30 por minuto** por extensión (`rate_limited`).' },
+    { t: 'h3', id: 'services-users', text: 'services.users (solo lectura)' },
+    { t: 'p', text: 'Permiso **`READ_USERS`** (riesgo **alto**: lo aprueba el administrador al instalar o actualizar la extensión). Lista y consulta las cuentas de **este** dominio: la fuente es la propia instancia (su base de datos) a través del puente firmado con la `executionGrant`, así que no hay forma de consultar otro dominio. Exige la capacidad `lifecycle.events.v2` (cliente con `clientApi` ≥ 7).' },
+    { t: 'table', head: ['Operación', 'Permiso', 'Argumentos y límites', 'Resultado'], rows: [
+        ['`list`', '`READ_USERS`', '`{limit?, cursor?, search?}`: `limit` 1–100 (50); `cursor` opaco de la página anterior; `search` 1–100 caracteres sobre correo o nombre', '`{users:[{id,email,name,createdAt}], nextCursor}` (`nextCursor` es `null` en la última página)'],
+        ['`get`', '`READ_USERS`', '`get("ana@acme.com")`, `get("<id>")`, `{id}` o `{email}` (exactamente uno)', '`{user}` (`null` si no existe)'],
+    ] },
+    { t: 'ul', items: [
+        '**Campos mínimos:** `id`, `email`, `name` y `createdAt`. Nunca contraseña ni hash, tokens, MFA, ajustes ni nivel de permiso.',
+        '**Paginación estable** por cursor (fecha de alta + id): un alta durante el recorrido ni duplica ni salta filas.',
+        '**Cuotas:** 30 llamadas por ejecución, **120 consultas por minuto por extensión** (`USERS_ERROR: rate_limited`) y límite por usuario en la ruta. Cada consulta queda en la auditoría (`extension.users.read`: quién, extensión, operación y número de filas; sin datos de las cuentas).',
+        '**Permisos reales en dos sitios:** el backend (manifest) y la instancia (la `executionGrant` firmada por ella lleva los permisos); sin `READ_USERS` falla con `USERS_PERMISSION_DENIED`.',
+        '**Solo dominios firmados.** En modo legado `ctx.services.users` no existe: degrada.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'Recorrer todas las cuentas', code: `let cursor = null;
+do {
+    const page = await ctx.services.users.list({ limit: 100, cursor: cursor ?? undefined });
+    for (const u of page.users) { /* u.id, u.email, u.name, u.createdAt */ }
+    cursor = page.nextCursor;
+} while (cursor);` },
+    { t: 'h3', id: 'services-shared', text: 'Estado compartido del dominio (storage.listShared)' },
+    { t: 'p', text: 'Las claves de `services.storage` que empiezan por `shared/` se guardan en el espacio del usuario, pero **cualquier ejecución de la misma extensión** puede leerlas con `listShared({prefix: "shared/...", limit?})` (1–200, solo valores, sin quién las escribió). **Solo se escriben (`set`/`delete`) desde un hook de servidor**: la concesión firmada por la instancia lleva el evento que originó la ejecución, y sin él la escritura falla con `STORAGE_ERROR: forbidden`; así un usuario no puede añadirse a listas compartidas desde el navegador. `mail-groups` lo usa para el alta automática en grupos.' },
     { t: 'h3', id: 'services-example', text: 'Ejemplo completo' },
     { t: 'p', text: 'Busca un hueco libre, crea el evento y avisa al usuario. Es el patrón de `summarizer` (que solo crea eventos tras confirmación explícita), simplificado.' },
     { t: 'code', lang: 'javascript', title: 'Calendario y aviso, con degradación', code: tr(servicesCode, 'es') },
     { t: 'h3', id: 'services-limits', text: 'Límites por invocación' },
     { t: 'table', head: ['Límite', 'Valor'], rows: [
-        ['Presupuesto de llamadas', '`calendar` 60, `contacts` 60, `storage` 100, `notify` 10, `formats` 200 (y 30 remotas: `renderTemplate` y `sanitizeHtml`). Cuentan también las fallidas'],
+        ['Presupuesto de llamadas', '`calendar` 60, `contacts` 60, `storage` 100, `notify` 10, `users` 30, `formats` 200 (y 30 remotas: `renderTemplate` y `sanitizeHtml`). Cuentan también las fallidas'],
         ['Timeout por llamada', '15 s (`<SERVICIO>_SERVICE_TIMEOUT`)'],
         ['Tamaño de respuesta', '512 KB (`<SERVICIO>_RESPONSE_TOO_LARGE`)'],
         ['Cuota de `storage`', '256 KB por usuario y extensión; valor ≤ 64 KB'],
@@ -383,6 +404,21 @@ const servicesEs: Block[] = [
     ] },
     { t: 'code', lang: 'json', title: 'manifest.json: declarar el evento (alias hooks)', code: lifecycleManifest },
     { t: 'code', lang: 'javascript', title: 'server.js: onContactSaved (patrón de hubspot)', code: tr(lifecycleCode, 'es') },
+    { t: 'h3', id: 'lifecycle-v2', text: 'Eventos v2 (lifecycle.events.v2)' },
+    { t: 'p', text: 'Cinco eventos más, con payload **versionado** (`v: 1`) y mínimo. Cada uno exige un **permiso** en el manifest (si falta, `validateManifest` da error y el backend no invoca el handler) y la capacidad `lifecycle.events.v2` (`requires.clientApi` ≥ 7: los clientes antiguos siguen recibiendo la versión anterior de la extensión). No existe `USER_DELETED`: la plataforma no borra cuentas, solo las deshabilita.' },
+    { t: 'table', head: ['Evento', 'Permiso', 'Contexto', 'Dónde se dispara'], rows: [
+        ['`USER_CREATED`', '`READ_USERS`', '`{v, eventKey, subjectUserId, email, emailDomain, source, createdAt}`; `source`: `register`, `admin` o `import`', 'Autoregistro (`POST /api/register`), alta del administrador y creación de buzones al importar (`createUserAccount`)'],
+        ['`USER_DISABLED`, `USER_ENABLED`', '`READ_USERS`', '`{v, eventKey, subjectUserId, email, emailDomain, disabledAt | enabledAt}`', 'Solo cuando el estado **cambia** (consola de administración); repetir el mismo estado no emite'],
+        ['`EMAIL_SPAM_DETECTED`', '`READ_EMAIL`', '`{v, eventKey, emailId, fromEmail, fromDomain, verdict, action, score?, reasons[]}`; `verdict`: `spam`, `phishing` o `suspicious`; `action`: `junk` o `flag`', 'El motor anti-spam clasifica un correo entrante como spam o sospechoso. Sin asunto, cuerpo ni destinatarios'],
+        ['`LABEL_APPLIED`', '`READ_EMAIL`', '`{v, eventKey, emailId, labelId, labelName?, source, ruleId?}`; `source`: `user`, `rule` o `system`', 'Etiqueta aplicada por una regla al recibir o con "Aplicar ahora" (máx. 50 correos por llamada) o por el usuario (editar etiquetas, "Mover a")'],
+    ] },
+    { t: 'ul', items: [
+        '**El handler corre COMO el usuario afectado** en `USER_*` (`ctx.userId == subjectUserId`) y como el dueño del buzón en el resto; `ctx.services.users` permite leer el directorio.',
+        '**Procedencia: `ctx.hook = {event, eventKey}`** lo fija solo el servidor (en `/execute` es siempre `null`, aunque el cliente envíe `context.hook`). Un handler que actúa sobre eventos v2 debe exigir `ctx.hook?.event === "..."`: el resto del contexto puede venir de un cliente.',
+        '**Idempotencia:** `eventKey` es determinista por hecho (`uc:<id>`, `sp:<correo>`, `lb:<correo>:<etiqueta>`, …). El frontend descarta repeticiones del mismo hecho durante 10 min (60 s en etiquetas) y los consumidores deben deduplicar por `eventKey` (los webhooks usan un `id`/`X-BloomX-Delivery` estable derivado de él).',
+        '**Asíncronos y aislados:** `after()`, timeout de 5 s en la llamada, ≤ 60 por minuto, y un fallo (backend caído, handler roto, timeout) solo deja una línea de log: **nunca** bloquea ni revierte el registro, el alta, la deshabilitación, la ingesta ni el etiquetado.',
+        '**Privacidad por defecto:** sin contraseñas, hashes, tokens, asuntos ni cuerpos (lista blanca en el frontend y otra vez en el backend). La importación de correo y lo que hagan las extensiones con `services.*` no emiten estos eventos (anti-bucle).',
+    ] },
     { t: 'h3', id: 'lifecycle-rules', text: 'Reglas y límites' },
     { t: 'ul', items: [
         '**No bloqueantes.** No pueden impedir ni modificar la acción: `stop` y `modify` se ignoran (solo `EMAIL_PRE_SEND` los admite). `onError: "block"` se ignora y `validateManifest` lo avisa. El frontend los lanza en segundo plano (`after()`), así que no retrasan la respuesta al usuario.',
@@ -442,6 +478,7 @@ const permissionsRowsEs: string[][] = [
 ];
 
 const permissionsEs: Block[] = [
+    { t: 'p', text: 'Una extensión puede declarar páginas completas (`PAGE`) y entradas de navegación (`navEntries`, capacidades `ui.pages.v1` y `nav.entries.v1`): ver la guía [Página completa y navegación](/docs/extension-pages).' },
     { t: 'h2', id: 'permissions', text: 'Permisos' },
     { t: 'p', text: 'El manifest declara los permisos que la extensión necesita. El catálogo (`PERMISSION_CATALOG` en el schema) da a cada uno una **etiqueta**, una **descripción** y un **riesgo**; es lo que ve el administrador del dominio.' },
     { t: 'table', head: ['Permiso', 'Etiqueta', 'Descripción', 'Riesgo'], rows: permissionsRowsEs },
@@ -505,12 +542,33 @@ const servicesEn: Block[] = [
         ['`toast`', '`NOTIFY`', '`{message, title?, level?, url?}`: `message` 1–200, `title` ≤80, `level` `info` (default), `success`, `warning` or `error`; `url` a relative `/...` path (no `//`) or `https://`', '`{delivered:true}`'],
     ] },
     { t: 'p', text: 'The notice is stored and the UI shows it as a toast (`GET /api/expansions/notifications`). Cap of **20 pending** per user and extension and **30 per minute** per extension (`rate_limited`).' },
+    { t: 'h3', id: 'services-users', text: 'services.users (read-only)' },
+    { t: 'p', text: '**`READ_USERS`** permission (**high** risk: the administrator approves it when installing or updating the extension). It lists and looks up the accounts of **this** domain: the source is the instance itself (its own database) through the bridge signed with the `executionGrant`, so there is no way to query another domain. Requires the `lifecycle.events.v2` capability (client with `clientApi` ≥ 7).' },
+    { t: 'table', head: ['Operation', 'Permission', 'Arguments and limits', 'Result'], rows: [
+        ['`list`', '`READ_USERS`', '`{limit?, cursor?, search?}`: `limit` 1–100 (50); `cursor` opaque, from the previous page; `search` 1–100 characters over email or name', '`{users:[{id,email,name,createdAt}], nextCursor}` (`nextCursor` is `null` on the last page)'],
+        ['`get`', '`READ_USERS`', '`get("ana@acme.com")`, `get("<id>")`, `{id}` or `{email}` (exactly one)', '`{user}` (`null` if it does not exist)'],
+    ] },
+    { t: 'ul', items: [
+        '**Minimal fields:** `id`, `email`, `name` and `createdAt`. Never a password or hash, tokens, MFA, settings or permission level.',
+        '**Stable pagination** by cursor (creation date + id): a sign-up during the walk neither duplicates nor skips rows.',
+        '**Quotas:** 30 calls per execution, **120 queries per minute per extension** (`USERS_ERROR: rate_limited`) and a per-user limit on the route. Every query is audited (`extension.users.read`: who, extension, operation and row count; no account data).',
+        '**Permissions are enforced twice:** by the backend (manifest) and by the instance (the `executionGrant` it signs carries the permissions); without `READ_USERS` it fails with `USERS_PERMISSION_DENIED`.',
+        '**Signed domains only.** In legacy mode `ctx.services.users` does not exist: degrade.',
+    ] },
+    { t: 'code', lang: 'javascript', title: 'Walking every account', code: `let cursor = null;
+do {
+    const page = await ctx.services.users.list({ limit: 100, cursor: cursor ?? undefined });
+    for (const u of page.users) { /* u.id, u.email, u.name, u.createdAt */ }
+    cursor = page.nextCursor;
+} while (cursor);` },
+    { t: 'h3', id: 'services-shared', text: 'Shared domain state (storage.listShared)' },
+    { t: 'p', text: '`services.storage` keys starting with `shared/` are stored in the user\'s space, but **any execution of the same extension** can read them with `listShared({prefix: "shared/...", limit?})` (1–200, values only, without who wrote them). They are **only written (`set`/`delete`) from a server hook**: the grant signed by the instance carries the event that originated the execution, and without it the write fails with `STORAGE_ERROR: forbidden`; so a user cannot add themselves to shared lists from the browser. `mail-groups` uses it for automatic group sign-up.' },
     { t: 'h3', id: 'services-example', text: 'Complete example' },
     { t: 'p', text: 'Finds a free slot, creates the event and notifies the user. It is the `summarizer` pattern (which only creates events after explicit confirmation), simplified.' },
     { t: 'code', lang: 'javascript', title: 'Calendar and notice, with degradation', code: tr(servicesCode, 'en') },
     { t: 'h3', id: 'services-limits', text: 'Per-invocation limits' },
     { t: 'table', head: ['Limit', 'Value'], rows: [
-        ['Call budget', '`calendar` 60, `contacts` 60, `storage` 100, `notify` 10, `formats` 200 (and 30 remote: `renderTemplate` and `sanitizeHtml`). Failed calls count too'],
+        ['Call budget', '`calendar` 60, `contacts` 60, `storage` 100, `notify` 10, `users` 30, `formats` 200 (and 30 remote: `renderTemplate` and `sanitizeHtml`). Failed calls count too'],
         ['Timeout per call', '15 s (`<SERVICE>_SERVICE_TIMEOUT`)'],
         ['Response size', '512 KB (`<SERVICE>_RESPONSE_TOO_LARGE`)'],
         ['`storage` quota', '256 KB per user and extension; value ≤ 64 KB'],
@@ -560,6 +618,21 @@ const servicesEn: Block[] = [
     ] },
     { t: 'code', lang: 'json', title: 'manifest.json: declaring the event (hooks alias)', code: lifecycleManifest },
     { t: 'code', lang: 'javascript', title: 'server.js: onContactSaved (hubspot pattern)', code: tr(lifecycleCode, 'en') },
+    { t: 'h3', id: 'lifecycle-v2', text: 'v2 events (lifecycle.events.v2)' },
+    { t: 'p', text: 'Five more events with a **versioned** (`v: 1`), minimal payload. Each one requires a **permission** in the manifest (if missing, `validateManifest` errors and the backend does not invoke the handler) and the `lifecycle.events.v2` capability (`requires.clientApi` ≥ 7: old clients keep receiving the previous version of the extension). There is no `USER_DELETED`: the platform does not delete accounts, it only disables them.' },
+    { t: 'table', head: ['Event', 'Permission', 'Context', 'Where it fires'], rows: [
+        ['`USER_CREATED`', '`READ_USERS`', '`{v, eventKey, subjectUserId, email, emailDomain, source, createdAt}`; `source`: `register`, `admin` or `import`', 'Self sign-up (`POST /api/register`), admin creation and mailbox creation on import (`createUserAccount`)'],
+        ['`USER_DISABLED`, `USER_ENABLED`', '`READ_USERS`', '`{v, eventKey, subjectUserId, email, emailDomain, disabledAt | enabledAt}`', 'Only when the state **changes** (admin console); repeating the same state does not emit'],
+        ['`EMAIL_SPAM_DETECTED`', '`READ_EMAIL`', '`{v, eventKey, emailId, fromEmail, fromDomain, verdict, action, score?, reasons[]}`; `verdict`: `spam`, `phishing` or `suspicious`; `action`: `junk` or `flag`', 'The anti-spam engine classifies an incoming email as spam or suspicious. No subject, body or recipients'],
+        ['`LABEL_APPLIED`', '`READ_EMAIL`', '`{v, eventKey, emailId, labelId, labelName?, source, ruleId?}`; `source`: `user`, `rule` or `system`', 'Label applied by a rule on receipt or with "Apply now" (max 50 emails per call) or by the user (edit labels, "Move to")'],
+    ] },
+    { t: 'ul', items: [
+        '**The handler runs AS the affected user** in `USER_*` (`ctx.userId == subjectUserId`) and as the mailbox owner in the rest; `ctx.services.users` lets it read the directory.',
+        '**Provenance: `ctx.hook = {event, eventKey}`** is set only by the server (in `/execute` it is always `null`, even if the client sends `context.hook`). A handler acting on v2 events must require `ctx.hook?.event === "..."`: the rest of the context may come from a client.',
+        '**Idempotency:** `eventKey` is deterministic per fact (`uc:<id>`, `sp:<email>`, `lb:<email>:<label>`, …). The frontend drops repeats of the same fact for 10 min (60 s for labels) and consumers must dedupe by `eventKey` (webhooks use a stable `id`/`X-BloomX-Delivery` derived from it).',
+        '**Asynchronous and isolated:** `after()`, 5 s call timeout, ≤ 60 per minute, and a failure (backend down, broken handler, timeout) only leaves a log line: it **never** blocks or rolls back sign-up, creation, disabling, ingestion or labelling.',
+        '**Privacy by default:** no passwords, hashes, tokens, subjects or bodies (allowlist in the frontend and again in the backend). Mail import and what extensions do with `services.*` do not emit these events (anti-loop).',
+    ] },
     { t: 'h3', id: 'lifecycle-rules', text: 'Rules and limits' },
     { t: 'ul', items: [
         '**Non-blocking.** They cannot prevent or modify the action: `stop` and `modify` are ignored (only `EMAIL_PRE_SEND` accepts them). `onError: "block"` is ignored and `validateManifest` warns about it. The frontend fires them in the background (`after()`), so they do not delay the user\'s response.',
@@ -619,6 +692,7 @@ const permissionsRowsEn: string[][] = [
 ];
 
 const permissionsEn: Block[] = [
+    { t: 'p', text: 'An extension can declare full pages (`PAGE`) and navigation entries (`navEntries`, capabilities `ui.pages.v1` and `nav.entries.v1`): see the guide [Full page and navigation](/docs/extension-pages).' },
     { t: 'h2', id: 'permissions', text: 'Permissions' },
     { t: 'p', text: 'The manifest declares the permissions the extension needs. The catalogue (`PERMISSION_CATALOG` in the schema) gives each one a **label**, a **description** and a **risk**; this is what the domain administrator sees.' },
     { t: 'table', head: ['Permission', 'Label', 'Description', 'Risk'], rows: permissionsRowsEn },
@@ -634,7 +708,7 @@ const permissionsEn: Block[] = [
 const reqEx = `"requires": { "clientApi": ">=2", "capabilities": ["settings.schema.v1", "ai.v1"] }
 // clientApi: 2 | ">=2" | ">=2 <4"   (sin "requires" = compatible con legacy / without it = legacy-compatible)`;
 const capRows = (l: 'es' | 'en'): string[][] => Object.entries(CAPABILITY_REGISTRY).map(([id, c]) => ['`' + id + '`', String(c.since) + (c.since <= 1 ? (l === 'es' ? ' (línea base)' : ' (baseline)') : ''), c[l]]);
-const legacyList = 'appointments, calendar, composer-helper, dlp, giphy, google-drive, google-meet, google-sync, hubspot, mail-groups, notion, organizer, sealer, signature, smart-reply, summarizer, translator, trello, webhooks, zoom';
+const legacyList = 'appointments, calendar, composer-helper, dlp, giphy, google-drive, google-meet, google-sync, hubspot, mail-groups, notion, organizer, sealer, signature, slash-commands, smart-reply, summarizer, translator, trello, webhooks, zoom';
 
 const versioningEs: Block[] = [
     { t: 'h2', id: 'client-versioning', text: 'Versionado del cliente y compatibilidad' },

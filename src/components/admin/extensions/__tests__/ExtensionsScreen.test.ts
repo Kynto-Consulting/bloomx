@@ -110,7 +110,7 @@ function route(url: string, init: any) {
     }
     if (p === '/api/admin/extensions/test') return res(state.testResult.status, state.testResult.body);
     if (p === '/api/admin/extensions/settings') return res(200, { keys: [{ name: 'NOTION_API_KEY', configured: true, source: 'domain', movable: false }] });
-    if (url.includes('/api/payments/create-preference')) return res(200, { init_point: 'https://pay.test/checkout' });
+    if (p === '/api/admin/billing/orders') return res(201, { kind: 'order', id: 'ord1', approveUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=T1', amountCents: 500, currency: 'USD' });
     return res(404, {});
 }
 
@@ -167,7 +167,8 @@ async function render(locale: 'es' | 'en' = 'es') {
 beforeEach(() => {
     calls.length = 0;
     state = freshState();
-    nav.params = new URLSearchParams();
+    window.history.replaceState(null, '', '/');
+    nav.params = new URLSearchParams('sec=categories');
     fetchMock.mockReset();
     fetchMock.mockImplementation(async (url: string, init: any) => route(String(url), init));
     vi.stubGlobal('fetch', fetchMock);
@@ -184,7 +185,8 @@ afterEach(async () => {
 describe('catalogo: busqueda y filtros', () => {
     it('muestra tarjetas con nombre, version, estado y precio, y el resumen', async () => {
         await render();
-        expect(cardNames()).toEqual(['Notion', 'Giphy', 'Pro IA', 'Agenda']);
+        // Orden por defecto del marketplace: relevancia (sin consulta: populares y luego nombre) => alfabetico mientras no haya datos de uso.
+        expect(cardNames()).toEqual(['Agenda', 'Giphy', 'Notion', 'Pro IA']);
         const notion = card('Notion');
         expect(notion.textContent).toContain('v1.2.0 → v1.3.0 disponible');
         expect(notion.textContent).toContain('Activada');
@@ -223,7 +225,7 @@ describe('catalogo: busqueda y filtros', () => {
         await setValue(status, 'disabled');
         expect(cardNames()).toEqual(['Giphy']);
         await setValue(status, 'available');
-        expect(cardNames()).toEqual(['Pro IA', 'Agenda']);
+        expect(cardNames()).toEqual(['Agenda', 'Pro IA']);
         await setValue(status, 'paid');
         expect(cardNames()).toEqual(['Pro IA']);
         await setValue(status, 'errors');
@@ -330,15 +332,15 @@ describe('instalar, desinstalar, activar, actualizar (siempre con confirmacion)'
         expect(buttonNamed('Actualizar Notion')).toBeUndefined();
     });
 
-    it('extension de pago: create-preference y redireccion a init_point (sin llamar a install)', async () => {
+    it('extension de pago: orden por el proxy de facturacion y redireccion a PayPal (sin llamar a install)', async () => {
         await render();
         await click(buttonNamed('Instalar Pro IA'.replace('Instalar', 'Instalar')));
         const d = dialog()!;
         expect(d.textContent).toContain('Comprar e instalar Pro IA');
         expect(d.textContent).toContain('5 USD');
         await click(Array.from(d.querySelectorAll('button')).find((b) => b.textContent === 'Continuar al pago')!);
-        const pay = calls.find((c) => c.url.includes('/api/payments/create-preference'))!;
-        expect(pay.body).toMatchObject({ domainId: 'dom1', extensionId: 'pro' });
+        const pay = calls.find((c) => c.url.includes('/api/admin/billing/orders'))!;
+        expect(pay.body).toEqual({ extensionId: 'pro' });
         expect(posts('/extensions/install')).toHaveLength(0);
     });
 
@@ -371,8 +373,8 @@ describe('detalle con pestanas', () => {
         expect(tab('Resumen')!.getAttribute('tabindex')).toBe('-1');
 
         await key(tab('Permisos')!, 'ArrowRight');
-        expect(tab('Credenciales')!.getAttribute('aria-selected')).toBe('true');
-        await key(tab('Credenciales')!, 'End');
+        expect(tab('Versiones')!.getAttribute('aria-selected')).toBe('true');
+        await key(tab('Versiones')!, 'End');
         expect(tab('Estado y registro')!.getAttribute('aria-selected')).toBe('true');
         await key(tab('Estado y registro')!, 'Home');
         expect(tab('Resumen')!.getAttribute('aria-selected')).toBe('true');
@@ -436,7 +438,7 @@ describe('detalle con pestanas', () => {
     });
 
     it('?open=<id> (busqueda global) abre el detalle', async () => {
-        nav.params = new URLSearchParams('open=giphy');
+        nav.params = new URLSearchParams('sec=categories&open=giphy');
         await render();
         expect(dialog()!.textContent).toContain('Giphy');
     });

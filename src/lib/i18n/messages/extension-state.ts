@@ -20,6 +20,19 @@ export const extensionStateEs = {
         openAdmin: 'Abrir la consola de administración',
         hint: 'Las extensiones que tu organización marca como obligatorias no se pueden desactivar.',
     },
+    // Entradas de navegación de las extensiones (barra lateral, menú móvil y consola de administración).
+    nav: {
+        sectionTools: 'Herramientas',
+        adminGroup: 'Extensiones',
+        pausedAi: 'En pausa: la IA está desactivada',
+        pausedDependency: 'En pausa: falta una extensión de la que depende',
+        pending: '{n} pendientes',
+        pageTitle: 'Página de extensión',
+        pageNotFound: 'Esta página ya no existe o la extensión está desactivada.',
+        pageLoading: 'Cargando la página…',
+        home: 'Inicio',
+        adminHome: 'Consola',
+    },
 };
 
 export const extensionStateEn: typeof extensionStateEs = {
@@ -39,5 +52,17 @@ export const extensionStateEn: typeof extensionStateEs = {
         adminDescription: 'Install, configure and mark extensions as mandatory for the whole organization.',
         openAdmin: 'Open the administration console',
         hint: 'Extensions your organization marks as mandatory cannot be turned off.',
+    },
+    nav: {
+        sectionTools: 'Tools',
+        adminGroup: 'Extensions',
+        pausedAi: 'Paused: AI is turned off',
+        pausedDependency: 'Paused: a required extension is missing',
+        pending: '{n} pending',
+        pageTitle: 'Extension page',
+        pageNotFound: 'This page no longer exists or the extension is turned off.',
+        pageLoading: 'Loading the page…',
+        home: 'Home',
+        adminHome: 'Console',
     },
 };

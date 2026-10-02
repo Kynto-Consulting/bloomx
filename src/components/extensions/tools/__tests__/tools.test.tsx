@@ -310,7 +310,7 @@ describe('Galeria de componentes', { timeout: 60000 }, () => {
         expect(document.body.textContent).toContain('Ningun componente coincide');
         await typeInto(q<HTMLInputElement>('#gal-search'), '');
         await typeInto(q<HTMLSelectElement>('#gal-category'), 'chart');
-        expect(qa('article').map((a) => a.id)).toEqual(['c-BAR_CHART', 'c-SPARKLINE', 'c-DONUT']);
+        expect(qa('article').map((a) => a.id)).toEqual(['c-BAR_CHART', 'c-CHART', 'c-SPARKLINE', 'c-DONUT']);
     });
 
     it('la tabla de props sale del schema (tipo, valores permitidos y defecto)', async () => {
@@ -330,13 +330,14 @@ describe('Galeria de componentes', { timeout: 60000 }, () => {
         await mount(h(ComponentsPage));
         await flush();
         await typeInto(q<HTMLInputElement>('#gal-search'), 'SPARKLINE');
-        await click(byText('Copiar JSON', 'button'));
+        // la busqueda tambien encuentra componentes que mencionan `sparkline` (KPI_CARD): se actua sobre la ficha de SPARKLINE
+        await click(byText('Copiar JSON', 'button', q('#c-SPARKLINE')!));
         expect(writeText).toHaveBeenCalledTimes(1);
         expect((writeText.mock.calls[0] as any[])[0]).toContain('"SPARKLINE"');
         expect(q('#c-SPARKLINE [role="status"]')!.textContent).toBe('JSON copiado');
 
         writeText.mockRejectedValueOnce(new Error('denied'));
-        await click(byText('Copiar JSON', 'button'));
+        await click(byText('Copiar JSON', 'button', q('#c-SPARKLINE')!));
         expect(q('#c-SPARKLINE [role="status"]')!.textContent).toBe('No se pudo copiar');
     });
 
@@ -344,7 +345,7 @@ describe('Galeria de componentes', { timeout: 60000 }, () => {
         await mount(h(ComponentsPage));
         await flush();
         await typeInto(q<HTMLInputElement>('#gal-search'), 'DONUT');
-        await click(byText('Abrir en el playground', 'button'));
+        await click(byText('Abrir en el playground', 'button', q('#c-DONUT')!));
         expect(push).toHaveBeenCalledWith('/extensions/playground');
         expect(window.localStorage.getItem(PENDING_KEY)).toContain('"DONUT"');
     });

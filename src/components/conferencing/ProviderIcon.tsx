@@ -5,10 +5,10 @@ import { ExtensionIcon, nearestIconSize } from '@/components/expansions/Extensio
  * Iconos por proveedor de videoconferencia. Zoom y Google Meet usan su logotipo real del registro de marcas (ExtensionIcon,
  * con garantia de contraste segun el tema); el resto (enlace, desconocidos) usa un glifo propio en `currentColor`.
  */
-export type ProviderIconKey = 'google-meet' | 'zoom' | 'link' | string;
+export type ProviderIconKey = 'google-meet' | 'zoom' | 'microsoft-teams' | 'link' | string;
 
 /** Logotipo real (registro de marcas) de los proveedores que lo tienen; el resto usa el glifo generico de abajo. */
-const BRAND_OF: Record<string, string> = { zoom: 'brand:zoom', 'google-meet': 'brand:googlemeet' };
+const BRAND_OF: Record<string, string> = { zoom: 'brand:zoom', 'google-meet': 'brand:googlemeet', 'microsoft-teams': 'brand:microsoftteams' };
 
 /** Tamano en px a partir de las clases h-N del llamante (h-4 = 16 px). */
 function sizeFromClass(className: string): 16 | 20 | 24 | 32 {

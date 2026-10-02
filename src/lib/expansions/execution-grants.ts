@@ -8,10 +8,10 @@ import { loadDomainTemplates } from '@/lib/expansions/domain-templates';
 
 type Template = { id?: unknown; version?: unknown; permissions?: unknown; intercepts?: unknown; hooks?: unknown } | null | undefined;
 
-export function grantForTemplate(host: string, fallbackId: string, template: Template, userId: string | null): string | null {
+export function grantForTemplate(host: string, fallbackId: string, template: Template, userId: string | null, event?: string): string | null {
     if (!template || typeof template.version !== 'string') return null;
     const ext = typeof template.id === 'string' && template.id ? template.id : fallbackId;
-    return issueExecutionGrant({ domain: host, extensionId: ext, version: template.version, userId, permissions: template.permissions });
+    return issueExecutionGrant({ domain: host, extensionId: ext, version: template.version, userId, permissions: template.permissions, event });
 }
 
 /** Grants por extension para un evento de hooks (solo las que lo interceptan; maximo 40). Nunca lanza. */
@@ -24,7 +24,7 @@ export async function grantsForHooks(host: string, event: string, userId: string
             const t = template as Template;
             const items = [...(Array.isArray(t?.intercepts) ? t!.intercepts : []), ...(Array.isArray(t?.hooks) ? t!.hooks : [])] as Array<{ point?: unknown }>;
             if (!items.some((i) => i && i.point === event)) continue;
-            const grant = grantForTemplate(host, id, t, userId);
+            const grant = grantForTemplate(host, id, t, userId, event);
             if (grant) out[typeof t?.id === 'string' && t.id ? t.id : id] = grant;
             if (Object.keys(out).length >= 40) break;
         }

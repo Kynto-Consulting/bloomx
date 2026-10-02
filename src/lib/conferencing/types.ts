@@ -7,9 +7,9 @@
  * componente `ConferencingPicker`. Este archivo es puro (sin React, sin Prisma) y lo comparten cliente y servidor.
  */
 
-export type ConferencingProviderId = 'google-meet' | 'zoom' | 'custom';
+export type ConferencingProviderId = 'google-meet' | 'zoom' | 'microsoft-teams' | 'custom';
 
-export const CONFERENCING_PROVIDER_IDS: readonly ConferencingProviderId[] = ['google-meet', 'zoom', 'custom'];
+export const CONFERENCING_PROVIDER_IDS: readonly ConferencingProviderId[] = ['google-meet', 'zoom', 'microsoft-teams', 'custom'];
 
 export function isConferencingProviderId(value: unknown): value is ConferencingProviderId {
     return typeof value === 'string' && (CONFERENCING_PROVIDER_IDS as readonly string[]).includes(value);
@@ -72,6 +72,7 @@ export type ConferencingAuthMode =
     | 'user-oauth' // Zoom: cuenta Zoom del propio usuario
     | 'service-account' // Google: JSON de cuenta de servicio (+ delegacion)
     | 'google-account' // Google: cuenta organizadora de la instancia o cuenta del propio usuario
+    | 'microsoft-account' // Teams: cuenta Microsoft vinculada del propio usuario (MicrosoftLib; sin modo de instancia)
     | 'custom-link'; // enlace propio sin credenciales
 
 /** De donde salen las credenciales que se usaran (para que el panel lo muestre). */
@@ -158,10 +159,14 @@ export interface ConferencingProviderInfo {
 export const PROVIDER_INFO: Record<ConferencingProviderId, ConferencingProviderInfo> = {
     'google-meet': { id: 'google-meet', name: 'Google Meet', icon: 'google-meet', extensionId: 'core-google-meet' },
     zoom: { id: 'zoom', name: 'Zoom', icon: 'zoom', extensionId: 'core-zoom' },
+    'microsoft-teams': { id: 'microsoft-teams', name: 'Microsoft Teams', icon: 'microsoft-teams', extensionId: 'core-microsoft-teams' },
     custom: { id: 'custom', name: 'Enlace propio', icon: 'link', extensionId: null },
 };
 
-/** Equivalencia con los valores historicos de AppointmentSchedule.conferencing ('meet' | 'zoom'). */
+/**
+ * Equivalencia con los valores historicos de AppointmentSchedule.conferencing ('meet' | 'zoom' | 'custom').
+ * Microsoft Teams NO forma parte de ese dominio legado (las citas aun no lo soportan): estos helpers lo ignoran a proposito.
+ */
 export function providerFromLegacyValue(value: unknown): ConferencingProviderId | null {
     if (value === 'meet' || value === 'google-meet') return 'google-meet';
     if (value === 'zoom') return 'zoom';
@@ -169,6 +174,9 @@ export function providerFromLegacyValue(value: unknown): ConferencingProviderId 
     return null;
 }
 
-export function legacyValueFromProvider(id: ConferencingProviderId): 'meet' | 'zoom' | 'custom' {
+export function legacyValueFromProvider(id: Exclude<ConferencingProviderId, 'microsoft-teams'>): 'meet' | 'zoom' | 'custom';
+export function legacyValueFromProvider(id: ConferencingProviderId): 'meet' | 'zoom' | 'custom' | null;
+export function legacyValueFromProvider(id: ConferencingProviderId): 'meet' | 'zoom' | 'custom' | null {
+    if (id === 'microsoft-teams') return null;
     return id === 'google-meet' ? 'meet' : id;
 }

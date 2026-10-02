@@ -3,6 +3,14 @@
  * (catalog.test.ts: toda ruta del admin esta cubierta por un comando o excluida aqui) y la documentacion (/docs/admin-cli).
  */
 export const EXCLUDED: Record<string, { es: string; en: string }> = {
+    'GET /api/admin/extensions/stars': {
+        es: 'Favoritas del marketplace: preferencia personal de la interfaz web de cada administrador (ligada a su sesion de usuario), sin sentido para un token de CLI ni efecto en la instancia.',
+        en: 'Marketplace stars: a personal web-UI preference of each administrator (tied to their user session), meaningless for a CLI token and with no effect on the instance.',
+    },
+    'PUT /api/admin/extensions/stars': {
+        es: 'Favoritas del marketplace: preferencia personal de la interfaz web de cada administrador (ligada a su sesion de usuario), sin sentido para un token de CLI ni efecto en la instancia.',
+        en: 'Marketplace stars: a personal web-UI preference of each administrator (tied to their user session), meaningless for a CLI token and with no effect on the instance.',
+    },
     'POST /api/admin/login': {
         es: 'Es el login web del manager (fija la cookie auth_session). La CLI usa POST /api/admin/cli/login (token) y la consola web ya esta autenticada.',
         en: 'It is the manager web login (it sets the auth_session cookie). The CLI uses POST /api/admin/cli/login (token) and the web console is already authenticated.',

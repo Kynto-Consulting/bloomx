@@ -3,6 +3,7 @@ import { getCurrentUser } from '@/lib/session';
 import { parseBatchIds } from '@/lib/batch-validation';
 import { getAccessibleMailboxUserIds } from '@/lib/mailbox-access';
 import { moveEmailsToLabel } from '@/lib/labels/behavior';
+import { emitLabelApplied } from '@/lib/expansions/lifecycle-v2';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,5 +21,7 @@ export async function POST(req: NextRequest, { params }: Ctx) {
     const boxes = await getAccessibleMailboxUserIds(user.id);
     const r = await moveEmailsToLabel(boxes, ids, id);
     if (!r) return NextResponse.json({ error: 'Label not found' }, { status: 404 });
+    // LABEL_APPLIED v2 (maximo 20 correos por llamada para acotar la rafaga; el limite por minuto del hook cubre el resto).
+    for (const emailId of r.moved.slice(0, 20)) void emitLabelApplied(user.id, emailId, [id], 'user');
     return NextResponse.json({ count: r.moved.length, ids: r.moved, behavior: r.behavior });
 }

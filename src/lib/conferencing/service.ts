@@ -84,7 +84,8 @@ export function customMeeting(input: CreateMeetingInput): ConferencingMeeting {
     };
 }
 
-function extensionAuthFor(provider: 'google-meet' | 'zoom', linked: LinkedAuthResult) {
+function extensionAuthFor(provider: 'google-meet' | 'zoom' | 'microsoft-teams', linked: LinkedAuthResult) {
+    if (provider === 'microsoft-teams') return {}; // MicrosoftLib resuelve la cuenta del usuario de la sesion en el backend
     const entry = provider === 'zoom' ? linked.auth.zoom : linked.auth.google;
     return entry ? { [provider === 'zoom' ? 'zoom' : 'google']: entry } : {};
 }
@@ -129,7 +130,7 @@ export async function createMeeting(
 
 async function createViaProvider(
     actor: Actor,
-    provider: 'google-meet' | 'zoom',
+    provider: 'google-meet' | 'zoom' | 'microsoft-teams',
     input: CreateMeetingInput,
     key: string | null,
     deps: ServiceDeps,
@@ -161,6 +162,8 @@ async function createViaProvider(
 
     // Extension ausente / backend caido: adaptador del host con la cuenta vinculada DEL PROPIO usuario.
     if (res.kind === 'not_installed' || res.kind === 'unreachable') {
+        // Teams no tiene adaptador del host: sin la extension no se puede crear la reunion.
+        if (provider === 'microsoft-teams') throw new ConferencingError('unavailable', 'The Microsoft Teams extension is not available');
         const entry = provider === 'zoom' ? linked.auth.zoom : linked.auth.google;
         if (entry) {
             return provider === 'zoom' ? createZoomWithUserToken(entry.accessToken, input) : createGoogleMeetWithUserToken(entry.accessToken);
@@ -203,7 +206,7 @@ export async function deleteMeeting(actor: Actor, provider: ConferencingProvider
 }
 
 /** `testConnection` de la extension (solo admin: la ruta exige requireAdmin). Usa la cuenta del admin como usuario. */
-export async function testConnection(actor: Actor, provider: 'google-meet' | 'zoom', deps: ServiceDeps = {}): Promise<{ mode?: string; detail?: string }> {
+export async function testConnection(actor: Actor, provider: 'google-meet' | 'zoom' | 'microsoft-teams', deps: ServiceDeps = {}): Promise<{ mode?: string; detail?: string }> {
     const linked = await (deps.linked ?? getLinkedAuth)(actor.userId);
     const call = deps.call ?? callExtension;
     const res = await call({

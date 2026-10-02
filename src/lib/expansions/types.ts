@@ -57,7 +57,8 @@ export interface ExtensionIntercept {
     point: 'EMAIL_PRE_SEND' | 'EMAIL_RECEIVED' | 'CRON'
         | 'EMAIL_OPENED' | 'EMAIL_SENT' | 'COMPOSE_OPENED'
         | 'CALENDAR_EVENT_CREATED' | 'CALENDAR_EVENT_UPDATED' | 'CALENDAR_EVENT_CANCELLED'
-        | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED';
+        | 'CONTACT_SAVED' | 'CONTACT_DELETED' | 'APPOINTMENT_BOOKED'
+        | 'USER_CREATED' | 'USER_DISABLED' | 'USER_ENABLED' | 'EMAIL_SPAM_DETECTED' | 'LABEL_APPLIED';
     handler: string;
     priority?: 'HIGH' | 'NORMAL' | 'LOW' | 'MONITOR' | number;
     /** EMAIL_PRE_SEND: "block" impide el envio si el handler falla (p.ej. DLP). */

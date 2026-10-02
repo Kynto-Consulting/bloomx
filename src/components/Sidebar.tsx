@@ -10,6 +10,8 @@ import * as Icons from 'lucide-react';
 import { useExpansions } from '@/hooks/useExpansions';
 import { cn } from '@/lib/utils';
 import { ExtensionLoader } from './expansions/ExtensionLoader';
+import { ExtensionNavLinks } from './expansions/nav/ExtensionNavLinks';
+import { useExtensionNav, useNavBadges } from '@/hooks/useExtensionNav';
 import { CronTrigger } from '@/components/CronTrigger';
 import { useCompose } from '@/contexts/ComposeContext';
 import { useCache } from '@/contexts/CacheContext';
@@ -41,16 +43,17 @@ interface SidebarProps {
     onClose?: () => void;
 }
 
-type SidebarSectionKey = 'main' | 'workspace' | 'labels';
+type SidebarSectionKey = 'main' | 'workspace' | 'tools' | 'labels';
 
 const SIDEBAR_SECTION_STATE_KEY = 'bloomx:sidebar:sections:v1';
 const SIDEBAR_SECTION_ORDER_KEY = 'bloomx:sidebar:section-order:v1';
 const DEFAULT_SECTION_STATE: Record<SidebarSectionKey, boolean> = {
     main: false,
     workspace: false,
+    tools: false,
     labels: false,
 };
-const DEFAULT_SECTION_ORDER: SidebarSectionKey[] = ['main', 'workspace', 'labels'];
+const DEFAULT_SECTION_ORDER: SidebarSectionKey[] = ['main', 'workspace', 'tools', 'labels'];
 
 export function Sidebar({ onClose }: SidebarProps) {
     return (
@@ -181,6 +184,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                     ...prev,
                     main: Boolean(parsed?.main),
                     workspace: Boolean(parsed?.workspace),
+                    tools: Boolean(parsed?.tools),
                     labels: Boolean(parsed?.labels),
                 }));
             }
@@ -194,6 +198,8 @@ function SidebarContent({ onClose }: SidebarProps) {
                 const parsed = JSON.parse(storedOrder);
                 if (Array.isArray(parsed)) {
                     const nextOrder = parsed.filter((value: string) => DEFAULT_SECTION_ORDER.includes(value as SidebarSectionKey));
+                    // Una seccion nueva (herramientas de extensiones) entra justo despues del espacio de trabajo, respetando el orden que el usuario ya eligio.
+                    if (!nextOrder.includes('tools')) nextOrder.splice(nextOrder.includes('workspace') ? nextOrder.indexOf('workspace') + 1 : nextOrder.length, 0, 'tools');
                     const missing = DEFAULT_SECTION_ORDER.filter((key) => !nextOrder.includes(key));
                     const merged = [...nextOrder, ...missing] as SidebarSectionKey[];
                     if (merged.length > 0) {
@@ -223,13 +229,22 @@ function SidebarContent({ onClose }: SidebarProps) {
         }));
     };
 
+    // "Herramientas" solo existe si alguna extension aporta entradas: el resto de secciones no deben notar el hueco.
+    const isMobileDrawer = Boolean(onClose);
+    const extensionNav = useExtensionNav({ mobileOnly: isMobileDrawer });
+    const navMain = extensionNav.filter((item) => item.section === 'main');
+    const navWorkspace = extensionNav.filter((item) => item.section === 'workspace');
+    const navTools = extensionNav.filter((item) => item.section === 'tools');
+    const navBadges = useNavBadges(extensionNav);
+    const visibleOrder = sectionOrder.filter((key) => key !== 'tools' || navTools.length > 0);
+
     const moveSection = (section: SidebarSectionKey, direction: -1 | 1) => {
         setSectionOrder((prev) => {
+            const visible = prev.filter((key) => key !== 'tools' || navTools.length > 0);
+            const target = visible[visible.indexOf(section) + direction];
             const currentIndex = prev.indexOf(section);
-            if (currentIndex === -1) return prev;
-
-            const nextIndex = currentIndex + direction;
-            if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+            const nextIndex = target ? prev.indexOf(target) : -1;
+            if (currentIndex === -1 || nextIndex === -1) return prev;
 
             const updated = [...prev];
             const [entry] = updated.splice(currentIndex, 1);
@@ -241,12 +256,13 @@ function SidebarContent({ onClose }: SidebarProps) {
     const sectionMeta: Record<SidebarSectionKey, { title: string }> = {
         main: { title: t('sidebar.sections.mailboxes') },
         workspace: { title: t('sidebar.sections.workspace') },
+        tools: { title: t('extensionState.nav.sectionTools') },
         labels: { title: t('sidebar.sections.labels') },
     };
 
     const renderSectionHeader = (section: SidebarSectionKey, extraAction?: React.ReactNode) => {
         const isCollapsed = collapsedSections[section];
-        const index = sectionOrder.indexOf(section);
+        const index = visibleOrder.indexOf(section);
 
         return (
             <div className="px-2 mb-1 flex items-center gap-1">
@@ -275,7 +291,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                 <button
                     type="button"
                     onClick={() => moveSection(section, 1)}
-                    disabled={index >= sectionOrder.length - 1}
+                    disabled={index >= visibleOrder.length - 1}
                     className="p-1 rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground disabled:opacity-30 disabled:cursor-not-allowed"
                     title={t('sidebar.moveDown')}
                     aria-label={t('sidebar.moveSectionDown', { name: sectionMeta[section].title })}
@@ -529,6 +545,7 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 </div>
                                             );
                                         })}
+                                        <ExtensionNavLinks items={navMain} badges={navBadges} pathname={pathname} onNavigate={onClose} />
                                     </div>
                                 )}
                             </div>
@@ -555,6 +572,21 @@ function SidebarContent({ onClose }: SidebarProps) {
                                                 {item.name}
                                             </Link>
                                         ))}
+                                        <ExtensionNavLinks items={navWorkspace} badges={navBadges} pathname={pathname} onNavigate={onClose} />
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    }
+
+                    if (section === 'tools') {
+                        if (navTools.length === 0) return null;
+                        return (
+                            <div key={section} className="mt-5">
+                                {renderSectionHeader('tools')}
+                                {!collapsedSections.tools && (
+                                    <div className="mt-1 flex flex-col gap-1">
+                                        <ExtensionNavLinks items={navTools} badges={navBadges} pathname={pathname} onNavigate={onClose} />
                                     </div>
                                 )}
                             </div>

@@ -8,6 +8,9 @@ import { Drawer } from '@/components/ui/Drawer';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/components/I18nProvider';
 import { useDomainConfig } from '@/hooks/useDomainConfig';
+import { useExtensionNav, useNavBadges } from '@/hooks/useExtensionNav';
+import { ExtensionNavLinks, isNavItemActive } from '@/components/expansions/nav/ExtensionNavLinks';
+import type { NavItemView } from '@/lib/expansions/nav-entries';
 import { cn } from '@/lib/utils';
 import { ApiError, useAdminQuery } from './api';
 import { ConsoleContext, useConsole, type ConsoleContextValue, type ConsoleMe } from './ConsoleContext';
@@ -31,7 +34,7 @@ function typingTarget(el: EventTarget | null): boolean {
     return /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) || n.isContentEditable;
 }
 
-function NavList({ pathname, onNavigate }: { pathname: string; onNavigate: (href: string) => void }) {
+function NavList({ pathname, onNavigate, extensionItems = [], badges = {} }: { pathname: string; onNavigate: (href: string) => void; extensionItems?: readonly NavItemView[]; badges?: Record<string, number | null> }) {
     const { t } = useI18n();
     // El menu oculta lo que el permission_level no permite (las rutas lo rechazan igualmente con 403). Sin nivel conocido: se muestra todo.
     const level = useConsole().me?.permission_level ?? 4;
@@ -72,6 +75,12 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate: (href
                     </div>
                 );
             })}
+            {extensionItems.length > 0 && (
+                <div className="mt-4" data-console-extension-nav="">
+                    <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('extensionState.nav.adminGroup')}</p>
+                    <ExtensionNavLinks items={extensionItems} badges={badges} pathname={pathname} onNavigate={() => undefined} onItemClick={onNavigate} />
+                </div>
+            )}
         </nav>
     );
 }
@@ -100,6 +109,9 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
     const [density] = useDensity();
     const gate = useAdminQuery<{ me: ConsoleMe }>('/api/admin/me', { revalidateOnFocus: false });
     const ended = useSessionEnded();
+    // Entradas de menu de las extensiones (section "admin"): el servidor ya no envia las que el nivel no alcanza; aqui se vuelven a filtrar por el nivel real de la sesion.
+    const extensionItems = useExtensionNav({ section: 'admin', level: gate.data?.me?.permission_level ?? null, signedIn: gate.data !== undefined });
+    const extensionBadges = useNavBadges(extensionItems);
 
     const [menuOpen, setMenuOpen] = React.useState(false);
     const [searchOpen, setSearchOpen] = React.useState(false);
@@ -198,7 +210,8 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
     }
 
     const current = navItemFor(pathname);
-    const sectionLabel = current ? t(`admin.console.shell.nav.${current.id}`) : '';
+    const extensionCurrent = current ? undefined : extensionItems.find((item) => isNavItemActive(pathname, item.href));
+    const sectionLabel = current ? t(`admin.console.shell.nav.${current.id}`) : extensionCurrent?.label ?? '';
 
     return (
         <ConsoleContext.Provider value={ctx}>
@@ -210,7 +223,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                 {/* Barra lateral (escritorio) */}
                 <aside className="hidden w-64 shrink-0 border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col">
                     <div className="border-b border-sidebar-border px-4 py-4"><BrandMark name={domain.displayName} logo={domain.logo} /></div>
-                    <div className="flex-1 overflow-y-auto py-4"><NavList pathname={pathname} onNavigate={navigate} /></div>
+                    <div className="flex-1 overflow-y-auto py-4"><NavList pathname={pathname} onNavigate={navigate} extensionItems={extensionItems} badges={extensionBadges} /></div>
                 </aside>
 
                 {/* Cajon de navegacion (movil / tablet) */}
@@ -221,7 +234,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                             <X className="h-4 w-4" aria-hidden="true" />
                         </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto py-4"><NavList pathname={pathname} onNavigate={navigate} /></div>
+                    <div className="flex-1 overflow-y-auto py-4"><NavList pathname={pathname} onNavigate={navigate} extensionItems={extensionItems} badges={extensionBadges} /></div>
                 </Drawer>
 
                 <div className="flex min-w-0 flex-1 flex-col">
@@ -244,7 +257,7 @@ export function ConsoleShell({ children }: { children: React.ReactNode }) {
                                         {t('admin.console.shell.consoleName')}
                                     </Link>
                                 </li>
-                                {current && current.id !== 'overview' && (
+                                {(current ? current.id !== 'overview' : Boolean(extensionCurrent)) && (
                                     <li className="flex min-w-0 items-center gap-1">
                                         <ChevronRight className="hidden h-3.5 w-3.5 shrink-0 text-muted-foreground sm:block" aria-hidden="true" />
                                         <span className="truncate font-medium text-foreground" aria-current={crumbTail ? undefined : 'page'}>{sectionLabel}</span>

@@ -14,6 +14,8 @@ export const PERMISSION_TEXTS: Record<string, PermissionText> = {
     MAIL_LABEL: { es: 'Poner o quitar etiquetas en tu correo', en: 'Add or remove labels on your email', level: 'medium' },
     READ_USER: { es: 'Ver tu identificador y tu direccion de correo', en: 'See your ID and email address', level: 'low' },
     READ_USER_NAME: { es: 'Ver tu nombre', en: 'See your name', level: 'low' },
+    READ_USERS: { es: 'Ver las cuentas del dominio (correo, nombre y fecha de alta) y enterarse de altas y bajas', en: 'See the accounts of the domain (email, name and creation date) and learn about new and disabled accounts', level: 'high' },
+    READ_STATS: { es: 'Ver metricas agregadas del dominio (usuarios, correos por dia y spam bloqueado), sin contenido ni direcciones', en: 'See aggregate domain metrics (users, mail per day and blocked spam), with no content or addresses', level: 'medium' },
     AI_GENERATE: { es: 'Enviar texto a la inteligencia artificial para generar contenido', en: 'Send text to the AI service to generate content', level: 'medium' },
     HTTP_REQUEST: { es: 'Conectarse a servicios externos', en: 'Connect to external services', level: 'high' },
     OAUTH_READ: { es: 'Usar las cuentas de terceros conectadas por tu organizacion', en: 'Use third-party accounts connected by your organization', level: 'high' },

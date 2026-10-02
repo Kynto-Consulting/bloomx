@@ -10,13 +10,13 @@ import { ConferencingAdminPanel } from '@/components/conferencing/ConferencingAd
 import { useConferencingProviders } from '@/components/conferencing/useConferencingProviders';
 import { MODE_KEY, SOURCE_KEY, STATE_LABEL_KEY, providerReasonKey, providerState, resolveConnectHref } from '@/components/conferencing/picker-state';
 
-const SHOWN: readonly ConferencingProviderId[] = ['zoom', 'google-meet'];
+const SHOWN: readonly ConferencingProviderId[] = ['zoom', 'google-meet', 'microsoft-teams'];
 
 const BTN =
     'inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium text-foreground/80 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60';
 
 /** Endpoint para desvincular la cuenta del usuario (solo existe para Google). */
-const UNLINK_URL: Partial<Record<ConferencingProviderId, string>> = { 'google-meet': '/api/auth/unlink/google', zoom: '/api/auth/unlink/zoom' };
+const UNLINK_URL: Partial<Record<ConferencingProviderId, string>> = { 'google-meet': '/api/auth/unlink/google', zoom: '/api/auth/unlink/zoom', 'microsoft-teams': '/api/oauth/microsoft/unlink' };
 
 export interface IntegrationsSettingsProps {
     /** Sustituye a window.location.assign (pruebas). */

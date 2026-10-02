@@ -9,6 +9,7 @@ import { evaluateConditions, countLeaves, type Tri } from './conditions';
 import { evaluateRules, type Rule, type RuleEffects } from './engine';
 import { loadRuleContexts, needsFromRules, type LoadOptions, type StoredEmailContext } from './context';
 import { bumpRuleStats, isMissingRelation, markRuleRun } from './store';
+import { emitLabelApplied } from '@/lib/expansions/lifecycle-v2';
 
 export const SCAN_FOLDERS = ['inbox', 'archive'] as const;
 export const MAX_PAGE = 200;
@@ -199,6 +200,8 @@ export async function applyRulesToEmailIds(
             }
         });
         result.changed++;
+        // LABEL_APPLIED v2 (asincrono, nunca bloquea). Acotado a 50 correos por llamada: "Aplicar ahora" sobre todo el buzon no inunda a las extensiones.
+        if (add.length && result.changed <= 50) void emitLabelApplied(userId, id, add, 'rule', { ruleId: fx.appliedRuleIds.length === 1 ? fx.appliedRuleIds[0] : null });
         for (const rid of fx.appliedRuleIds) result.perRule[rid] = (result.perRule[rid] ?? 0) + 1;
         await markRuleRun(id, userId);
     }

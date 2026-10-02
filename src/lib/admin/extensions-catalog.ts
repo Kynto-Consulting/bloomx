@@ -1,4 +1,5 @@
-import { clientVersionHeaders } from '@/lib/expansions/client/capabilities';
+import { catalogClientHeaders } from '@/lib/expansions/client/capabilities';
+import { sanitizeMarket } from '@/lib/admin/marketplace/market-meta';
 import { HttpError } from '@/lib/admin/http';
 import { backendUrl } from '@/lib/admin/extensions-instance';
 import { sanitizeUpgrade } from '@/lib/admin/extensions-compat';
@@ -42,6 +43,7 @@ export function shapeCatalog(data: unknown): CatalogExtension[] {
             incompatible: raw.incompatible === true,
             deprecated: raw.deprecated === true,
             upgrade: sanitizeUpgrade(raw.upgrade),
+            market: sanitizeMarket(raw.market, id),
         });
     }
     return out;
@@ -51,7 +53,7 @@ export async function fetchCatalog(opts: { fresh?: boolean } = {}): Promise<Cata
     if (!opts.fresh && cache && Date.now() - cache.at < TTL_MS) return cache.items;
     let res: Response;
     try {
-        res = await fetch(`${backendUrl()}/api/admin/extensions/public-list`, { cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS), headers: clientVersionHeaders() });
+        res = await fetch(`${backendUrl()}/api/admin/extensions/public-list`, { cache: 'no-store', signal: AbortSignal.timeout(TIMEOUT_MS), headers: catalogClientHeaders() });
     } catch {
         throw new HttpError(502, 'backend_unavailable');
     }

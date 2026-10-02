@@ -219,3 +219,27 @@ describe('nucleo del simulador', () => {
         expect(list[0].time).toBe('10:00:00');
     });
 });
+
+describe('componentes de pagina completa en docs y simulador', () => {
+    const PAGE_TYPES = ['PAGE_HEADER', 'SPLIT_PANE', 'KPI_CARD', 'CHART', 'TIMELINE', 'TREE', 'STEPPER'];
+    it('cada uno tiene ejemplo interactivo (preset) valido, descripcion en ingles y pagina en el kit', async () => {
+        const { EN_DOC } = await import('../kit');
+        for (const type of PAGE_TYPES) {
+            expect(KIT_TYPES, type).toContain(type);
+            expect(EN_DOC[type], `EN_DOC.${type}`).toBeTruthy();
+            expect(presetsFor(type).some((p) => p.kind === 'example'), `${type} sin ejemplo`).toBe(true);
+        }
+    });
+    it('la TABLE avanzada tiene un ejemplo con busqueda, filtros y acciones masivas', () => {
+        const json = presetsFor('TABLE').filter((p) => p.kind === 'example').map((p) => JSON.stringify(p.node)).join('');
+        for (const key of ['searchable', 'bulkActions', 'defaultSort', 'onRetry']) expect(json, key).toContain(key);
+    });
+    it('la pagina principal de extension-ui los lista (es y en) con la nota de alias', () => {
+        for (const locale of ['es', 'en'] as const) {
+            const text = JSON.stringify(DOC_CONTENT['extension-ui'][locale]);
+            expect(text).toContain('page-components');
+            for (const type of PAGE_TYPES) expect(text, `${locale}/${type}`).toContain(`/docs/extension-ui/${typeToSlug(type)}`);
+            expect(text).toContain('EMPTY_STATE');
+        }
+    });
+});

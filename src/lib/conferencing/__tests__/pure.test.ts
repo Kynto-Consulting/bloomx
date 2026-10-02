@@ -60,7 +60,8 @@ describe('hosts: validacion de enlaces de reunion', () => {
     it('providerIdForLink / meetingProviderName / safeConferenceUrl', () => {
         expect(providerIdForLink('https://meet.google.com/abc-defg-hij')).toBe('google-meet');
         expect(providerIdForLink('https://x.zoom.us/j/1')).toBe('zoom');
-        expect(providerIdForLink('https://teams.microsoft.com/l/meetup-join/x')).toBeNull();
+        expect(providerIdForLink('https://teams.microsoft.com/l/meetup-join/x')).toBe('microsoft-teams');
+        expect(providerIdForLink('https://webex.com/meet/x')).toBeNull();
         expect(meetingProviderName('https://empresa.example.org/sala')).toBe('empresa.example.org');
         expect(safeConferenceUrl('https://empresa.example.org/sala')).toBe('https://empresa.example.org/sala');
         expect(safeConferenceUrl('http://empresa.example.org/sala')).toBeNull();
@@ -159,5 +160,37 @@ describe('compatibilidad de datos', () => {
         expect(providerFromLegacyValue(null)).toBeNull();
         expect(legacyValueFromProvider('google-meet')).toBe('meet');
         expect(legacyValueFromProvider('zoom')).toBe('zoom');
+        expect(legacyValueFromProvider('custom')).toBe('custom');
+        // Teams no es un valor historico de las citas: no se mapea ni en un sentido ni en el otro
+        expect(legacyValueFromProvider('microsoft-teams')).toBeNull();
+        expect(providerFromLegacyValue('microsoft-teams')).toBeNull();
+        expect(providerFromLegacyValue('teams')).toBeNull();
+    });
+});
+
+describe('registro: Microsoft Teams', () => {
+    it('esta registrado con su extension, nombre e icono, sin alterar zoom/meet/custom', async () => {
+        const t = await import('../types');
+        expect(t.CONFERENCING_PROVIDER_IDS).toEqual(['google-meet', 'zoom', 'microsoft-teams', 'custom']);
+        expect(t.isConferencingProviderId('microsoft-teams')).toBe(true);
+        expect(t.isConferencingProviderId('teams')).toBe(false);
+        expect(t.PROVIDER_INFO['microsoft-teams']).toEqual({ id: 'microsoft-teams', name: 'Microsoft Teams', icon: 'microsoft-teams', extensionId: 'core-microsoft-teams' });
+        expect(t.PROVIDER_INFO.zoom.extensionId).toBe('core-zoom');
+        expect(t.PROVIDER_INFO['google-meet'].extensionId).toBe('core-google-meet');
+        expect(t.PROVIDER_INFO.custom.extensionId).toBeNull();
+    });
+    it('enlaces de union: hosts validos e invalidos', () => {
+        for (const u of ['https://teams.microsoft.com/l/meetup-join/19%3ameeting', 'https://teams.live.com/meet/9876543210', 'https://gov.teams.microsoft.com/l/meetup-join/x']) {
+            expect(recognizeMeetingUrl(u)?.provider).toBe('teams');
+        }
+        for (const u of ['http://teams.microsoft.com/l/meetup-join/x', 'https://teams.microsoft.com.evil.com/l/meetup-join/x', 'https://evilteams.microsoft.com.example/meet/1', 'https://teams.microsoft.com/otra/ruta', 'https://u:p@teams.microsoft.com/l/meetup-join/x']) {
+            expect(recognizeMeetingUrl(u)).toBeNull();
+        }
+    });
+    it('normaliza el resultado de la extension y rechaza enlaces ajenos', async () => {
+        const { normalizeMeeting } = await import('../normalize');
+        const m = normalizeMeeting('microsoft-teams', { joinUrl: 'https://teams.microsoft.com/l/meetup-join/19%3ax', meetingId: 'AAMk', mode: 'microsoft-account' });
+        expect(m).toMatchObject({ provider: 'microsoft-teams', providerName: 'Microsoft Teams', meetingId: 'AAMk', mode: 'microsoft-account' });
+        expect(() => normalizeMeeting('microsoft-teams', { joinUrl: 'javascript:alert(1)' })).toThrow(/invalid meeting link/);
     });
 });

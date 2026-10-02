@@ -320,7 +320,7 @@ describe('migrateManifestUi y los manifests reales', () => {
     const ids = hasExt ? fs.readdirSync(EXT_ROOT).filter((d) => !d.startsWith('_') && fs.existsSync(path.join(EXT_ROOT, d, 'manifest.json'))) : [];
 
     // Lista explicita (no un numero): al anadir una extension el test dice cual falta o sobra.
-    const EXPECTED = ['appointments', 'calendar', 'composer-helper', 'dlp', 'giphy', 'google-drive', 'google-meet', 'google-sync', 'googlelib', 'hubspot', 'mail-groups', 'notion', 'organizer', 'sealer', 'signature', 'slash-commands', 'smart-reply', 'summarizer', 'translator', 'trello', 'webhooks', 'zoom'];
+    const EXPECTED = ['appointments', 'calendar', 'composer-helper', 'dlp', 'domain-metrics', 'giphy', 'google-drive', 'google-meet', 'google-sync', 'googlelib', 'hubspot', 'mail-groups', 'microsoft-teams', 'microsoftlib', 'notion', 'organizer', 'quick-notes', 'sealer', 'signature', 'slack-notify', 'slacklib', 'slash-commands', 'smart-reply', 'summarizer', 'translator', 'trello', 'webhooks', 'zoom', 'zoomlib'];
     it.skipIf(!hasExt)('las extensiones del repositorio son las esperadas', () => { expect([...ids].sort()).toEqual(EXPECTED); });
 
     it.skipIf(!hasExt).each(ids)('%s: el UI migrado valida sin errores (y el manifest sigue siendo valido)', (id) => {

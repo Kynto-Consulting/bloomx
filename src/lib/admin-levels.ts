@@ -17,7 +17,7 @@ export const SCOPE_LEVELS: Record<string, L> = {
     // lectura
     me: 1, overview: 1, system: 1, search: 1, 'users.list': 1, 'users.detail': 1, 'users.quota.read': 1, 'accounts.list': 1, 'audit.read': 1,
     'mail.metrics': 1, 'mail.dns': 1, 'mail.webhooks': 1, 'mail.suppressions': 1, 'retention.settings.read': 1, 'retention.quota.read': 1, 'retention.storage': 1,
-    'spam.config.read': 1, 'spam.events.read': 1, 'spam.stats.read': 1, 'spam.lists.read': 1, 'extensions.catalog': 1, 'extensions.status': 1, 'ai.read': 1,
+    'spam.config.read': 1, 'spam.events.read': 1, 'spam.stats.read': 1, 'spam.lists.read': 1, 'extensions.catalog': 1, 'extensions.status': 1, 'extensions.stars': 1, 'ai.read': 1,
     'profile.get': 1, 'profile.sessions': 1, 'profile.sessions.revoke': 1,
     // gestion de cuentas (operator)
     'users.create': 2, 'users.update': 2, 'users.bulk': 2, 'users.export': 2, 'users.sessions': 2, 'users.quota.write': 2,
@@ -31,6 +31,8 @@ export const SCOPE_LEVELS: Record<string, L> = {
     'permissions.read': 3, 'permissions.write': 3, 'permissions.history': 3, 'profile.password': 1, 'privileged.read': 1, 'privileged.close': 1,
     // seguridad critica / destructivo global (superadmin)
     'users.mfa_reset': 4, 'permissions.unlock': 4, 'privileged.policy': 4, 'retention.run.dry': 4, 'extensions.mandatory': 4, 'domain-key.get': 4, 'signing.status': 1, 'domain-key.write': 4,
+    // pagos y portal de desarrolladores (dueno del dominio; el step-up lo aplica el proxy por ruta)
+    'billing.read': 4, 'billing.write': 4, 'developer.read': 4, 'developer.write': 4,
 };
 
 /** Un scope desconocido exige nivel 3 (equivale al antiguo requireAdmin). */
@@ -87,6 +89,8 @@ export const COMMAND_LEVELS: Record<string, L> = {
     'spam config': 1, 'spam events': 1, 'spam stats': 1, 'spam list': 1,
     'spam simulate': 2, 'spam test': 2, 'spam list add': 2, 'spam list remove': 2, 'spam list import': 2, 'spam list export': 2,
     'spam config set': 3, 'spam config reset': 3,
+    // facturacion y portal de desarrollador (solo lectura; dueno del dominio)
+    'billing status': 4, 'billing subscriptions': 4, 'billing summary': 4, 'developer overview': 4,
     // importar / exportar correo (buzones)
     jobs: 3, 'jobs show': 3, 'jobs watch': 3,
     'transfer config': 3, 'transfer mailboxes': 3, 'transfer jobs': 3, 'transfer job': 3, 'transfer report': 3, 'transfer preview': 3, 'transfer cancel': 3, 'transfer resume': 3,

@@ -9,6 +9,7 @@ import type { ExtensionRow } from '@/lib/admin/extensions-view';
 import { blockReason } from "@/lib/admin/extensions-compat";
 import { CompatNotice, useCompatLocale } from "./CompatNotice";
 import { AiRequirementSummary, aiBadgeLabel, aiBlockTitle, useAiText } from './AiRequirementSummary';
+import { PublisherLine, StarButton, SuiteChip, installsLabel } from './market/MarketParts';
 
 export type DialogKind = 'install' | 'update' | 'uninstall' | 'disable' | 'mandatoryOn' | 'mandatoryOff';
 
@@ -88,11 +89,21 @@ export function ExtensionActionButtons({ row, actions }: { row: ExtensionRow; ac
     );
 }
 
-export function ExtensionCard({ row, actions, onOpen }: { row: ExtensionRow; actions: RowActions; onOpen: (row: ExtensionRow) => void }) {
+/** Extras de marketplace de la tarjeta: favorita, editor, suite y vista en lista. Opcionales (sin ellos la tarjeta es la de siempre). */
+export interface CardMarket {
+    starred: boolean;
+    onToggleStar: (row: Pick<ExtensionRow, 'id' | 'name'>) => void;
+    onOpenPublisher: (publisherId: string) => void;
+    onOpenSuite: (suiteId: string) => void;
+    layout: 'grid' | 'list';
+}
+
+export function ExtensionCard({ row, actions, onOpen, market }: { row: ExtensionRow; actions: RowActions; onOpen: (row: ExtensionRow) => void; market?: CardMarket }) {
     const { t } = useI18n();
+    const list = market?.layout === 'list';
     return (
         <li>
-            <article aria-label={row.name} className="flex h-full flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm">
+            <article aria-label={row.name} className={`flex h-full flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm`}>
                 <div className="flex items-start gap-3">
                     <ExtensionIcon icon={row.icon} label={row.name} size={32} />
                     <div className="min-w-0 flex-1">
@@ -108,15 +119,23 @@ export function ExtensionCard({ row, actions, onOpen }: { row: ExtensionRow; act
                             {' · '}
                             {row.isPaid ? t('admin.console.extensions.card.price', { price: row.price, currency: row.currency }) : t('admin.console.extensions.card.free')}
                         </p>
+                        {market && (
+                            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <PublisherLine publisher={row.market.publisher} onOpen={market.onOpenPublisher} />
+                                {row.market.installCount > 0 && <span className="text-xs text-muted-foreground">{installsLabel(t, row.market.installCount)}</span>}
+                            </div>
+                        )}
                     </div>
+                    {market && <StarButton row={row} starred={market.starred} onToggle={market.onToggleStar} />}
                 </div>
+                {market && row.market.suite && <div className="mt-2"><SuiteChip suite={row.market.suite} onOpen={market.onOpenSuite} /></div>}
                 <div className="mt-3 flex flex-wrap gap-1.5">
                     <StatusBadges row={row} />
                     {row.hasCredentials === true && (
                         <Badge><KeyRound className="h-3 w-3" aria-hidden="true" />{t('admin.console.extensions.card.credentialsConfigured')}</Badge>
                     )}
                 </div>
-                <p className="mt-3 line-clamp-3 flex-1 text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
+                <p className={`mt-3 flex-1 text-sm text-muted-foreground ${list ? 'line-clamp-2' : 'line-clamp-3'}`}>{row.description || t('admin.console.extensions.card.noDescription')}</p>
                 {row.requiresAi && <div className="mt-2"><AiRequirementSummary row={row} /></div>}
                 <div className="mt-2"><CompatNotice row={row} /></div>
                 {!row.inCatalog && <p className="mt-2 text-xs text-muted-foreground">{t('admin.console.extensions.catalog.notInCatalog')}</p>}

@@ -13,6 +13,9 @@ import { BridgeError, op } from './bridge-route';
 export const STORAGE_QUOTA_BYTES = 256 * 1024;
 export const STORAGE_MAX_VALUE_BYTES = 64 * 1024;
 export const STORAGE_MAX_KEYS = 1000;
+/** Prefijo de las claves COMPARTIDAS: legibles por la extension para todo el dominio (listShared), escribibles SOLO desde un hook de servidor. */
+export const SHARED_PREFIX = 'shared/';
+export const SHARED_MAX_LIMIT = 200;
 
 const key = z.string().regex(/^[A-Za-z0-9_.:\/-]{1,128}$/);
 
@@ -21,6 +24,8 @@ export const storageRequest = z.discriminatedUnion('op', [
     op('set', z.strictObject({ key, value: z.unknown() }).refine((a) => 'value' in a && a.value !== undefined, 'value required')),
     op('delete', z.strictObject({ key })),
     op('list', z.strictObject({ prefix: z.string().regex(/^[A-Za-z0-9_.:\/-]{0,128}$/).optional(), limit: z.number().int().min(1).max(100).default(50) }).default({ limit: 50 })),
+    // Lectura de las entradas COMPARTIDAS (`shared/...`) que la extension escribio en el espacio de cada usuario del dominio (solo valores, sin userId).
+    op('listShared', z.strictObject({ prefix: z.string().regex(/^shared\/[A-Za-z0-9_.:\/-]{0,120}$/), limit: z.number().int().min(1).max(SHARED_MAX_LIMIT).default(100) })),
 ]);
 export type StorageRequest = z.infer<typeof storageRequest>;
 
@@ -33,6 +38,8 @@ export interface StorageStore {
     set(userId: string, extensionId: string, key: string, valueJson: string, bytes: number): Promise<SetResult>;
     delete(userId: string, extensionId: string, key: string): Promise<boolean>;
     list(userId: string, extensionId: string, prefix: string, limit: number): Promise<{ keys: string[]; usedBytes: number }>;
+    /** Valores de las claves `shared/...` de TODOS los usuarios para esa extension (orden estable por fecha, usuario y clave). Sin identidad del propietario. */
+    listShared(extensionId: string, prefix: string, limit: number): Promise<Array<{ key: string; value: string }>>;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -86,6 +93,14 @@ export function createPgStorageStore(getPool: () => Promise<PoolLike> | PoolLike
             const r = await (await pool()).query('DELETE FROM "ExtensionStorage" WHERE "userId" = $1 AND "extensionId" = $2 AND "key" = $3', [userId, extensionId, k]);
             return (r.rowCount ?? 0) > 0;
         },
+        async listShared(extensionId, prefix, limit) {
+            const escaped = prefix.replace(/[\\%_]/g, (c) => `\\${c}`);
+            const r = await (await pool()).query(
+                'SELECT "key", "value" FROM "ExtensionStorage" WHERE "extensionId" = $1 AND "key" LIKE $2 ESCAPE \'\\\' ORDER BY "updatedAt", "userId", "key" LIMIT $3',
+                [extensionId, `${escaped}%`, limit],
+            );
+            return r.rows.map((row) => ({ key: String(row.key), value: String(row.value) }));
+        },
         async list(userId, extensionId, prefix, limit) {
             const p = await pool();
             const escaped = prefix.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -107,8 +122,11 @@ export async function defaultStorageStore(): Promise<StorageStore> {
 // ---------------------------------------------------------------------------------------------------------------
 const byteLen = (s: string) => Buffer.byteLength(s, 'utf8');
 
-export async function handleStorage(store: StorageStore, req: StorageRequest): Promise<unknown> {
+export async function handleStorage(store: StorageStore, req: StorageRequest, ctx: { grant?: { evt?: string } } = {}): Promise<unknown> {
     const { userId, extensionId } = req;
+    // Las claves compartidas solo se escriben desde un hook de servidor: la concesion (firmada por esta instancia) lleva el evento que origino la
+    // ejecucion. Un usuario que invoca el handler por /execute no puede anadirse a listas compartidas ni falsificar entradas.
+    if ((req.op === 'set' || req.op === 'delete') && req.args.key.startsWith(SHARED_PREFIX) && !ctx.grant?.evt) throw new BridgeError('forbidden');
     switch (req.op) {
         case 'get': {
             const raw = await store.get(userId, extensionId, req.args.key);
@@ -127,6 +145,14 @@ export async function handleStorage(store: StorageStore, req: StorageRequest): P
         }
         case 'delete':
             return { deleted: await store.delete(userId, extensionId, req.args.key) };
+        case 'listShared': {
+            const rows = await store.listShared(extensionId, req.args.prefix, req.args.limit);
+            const items: Array<{ key: string; value: unknown }> = [];
+            for (const row of rows) {
+                try { items.push({ key: row.key, value: JSON.parse(row.value) }); } catch { /* valor corrupto: se omite */ }
+            }
+            return { items };
+        }
         case 'list': {
             const r = await store.list(userId, extensionId, req.args.prefix ?? '', req.args.limit);
             return { keys: r.keys, usedBytes: r.usedBytes, quotaBytes: STORAGE_QUOTA_BYTES };

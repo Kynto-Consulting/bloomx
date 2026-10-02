@@ -5,6 +5,7 @@ import { badRequest, conflict } from './http';
 import { setMustChangePassword } from './user-state';
 import { generateTemporaryPassword } from './temp-password';
 import { userEmailTaken } from './users-store';
+import { emitUserCreated } from '@/lib/expansions/lifecycle-v2';
 
 /**
  * Alta de usuario de la consola de administracion: UNICA implementacion (la usan POST /api/admin/users y la creacion de
@@ -20,6 +21,8 @@ export interface CreateUserInput {
     password?: string;
     /** Por defecto: true si la contrasena se genero, false si la fijo el admin. */
     mustChangePassword?: boolean;
+    /** Origen del alta para el evento USER_CREATED de extensiones. Por defecto 'admin'. */
+    source?: 'admin' | 'import';
 }
 
 export interface CreatedUser {
@@ -51,6 +54,8 @@ export async function createUserAccount(input: CreateUserInput): Promise<Created
     const mustChange = input.mustChangePassword ?? generated;
     let mustChangeApplied = false;
     if (mustChange) mustChangeApplied = await setMustChangePassword(user.id, true);
+
+    emitUserCreated(user, input.source ?? 'admin'); // asincrono: nunca bloquea ni falla el alta
 
     return {
         user: { id: user.id, email: user.email, name: user.name },

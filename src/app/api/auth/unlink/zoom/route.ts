@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from '@/lib/session';
-import { auditLog, getClientIp } from '@/lib/security';
+import { getClientIp } from '@/lib/security';
+import { unlinkUserProvider } from '@/lib/oauth/unlink';
 import { invalidateStatusCache } from '@/lib/conferencing/status';
 import { resolveDomain } from '@/lib/conferencing/http';
 
@@ -15,9 +15,9 @@ export async function DELETE(req: NextRequest) {
     }
 
     try {
-        await prisma.account.deleteMany({ where: { userId: user.id, provider: 'zoom' } });
+        // Revoca en Zoom (access token) cuando ZoomLib esta registrado y SIEMPRE borra las cuentas del usuario; audita 'auth.oauth.unlinked' sin tokens.
+        await unlinkUserProvider(user.id, 'zoom', getClientIp(req));
         invalidateStatusCache({ userId: user.id, domain: resolveDomain(req) });
-        auditLog('auth.oauth.unlinked', { provider: 'zoom', userId: user.id, ip: getClientIp(req) });
         return NextResponse.json({ success: true, message: 'Zoom account unlinked' });
     } catch (error) {
         console.error('Unlink Error:', error instanceof Error ? error.message : 'error');

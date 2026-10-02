@@ -16,10 +16,11 @@
  *  - `warnings`: se carga, pero conviene corregirlo (vocabulario desconocido, version de manifest desconocida).
  */
 
-import { UI_COMPONENT_TYPES, isIconRef } from "./ui-schema.ts";
+import { PAGE_UI_CAPABILITY, UI_COMPONENT_TYPES, isIconRef, pageUiReason } from "./ui-schema.ts";
 import { normalizeSettingsSchema, validateSettingsSchema } from "./settings-schema.ts";
 import { validateOAuthProviders } from "./oauth-schema.ts";
 import { validateBackendRoutes, validatePageAuth } from "./route-schema.ts";
+import { validateNavEntries } from "./nav-schema.ts";
 import { validateRequires } from "./client-contract.ts";
 
 export type ManifestIssue = { path: string; message: string };
@@ -68,11 +69,29 @@ export const KNOWN_MOUNT_POINTS = [
  * Eventos de ciclo de vida (no bloqueantes, contexto minimo). Se disparan desde el servidor del frontend o desde la UI,
  * y solo llegan a extensiones de dominios FIRMADOS. Un handler no puede bloquear ni modificar nada en estos eventos.
  */
-export const LIFECYCLE_EVENTS = [
+export const LIFECYCLE_EVENTS_V1 = [
     "EMAIL_OPENED", "EMAIL_SENT", "COMPOSE_OPENED",
     "CALENDAR_EVENT_CREATED", "CALENDAR_EVENT_UPDATED", "CALENDAR_EVENT_CANCELLED",
     "CONTACT_SAVED", "CONTACT_DELETED", "APPOINTMENT_BOOKED",
 ];
+
+/**
+ * Eventos de ciclo de vida v2 (capacidad `lifecycle.events.v2`, clientApi >= 7): alta/baja de cuentas, correo clasificado como spam y
+ * etiqueta aplicada. Cada uno exige un permiso en el manifest (EVENT_PERMISSIONS). No hay USER_DELETED: la plataforma no borra cuentas
+ * (solo las deshabilita y rehabilita), asi que no existe un punto de origen que emitir.
+ */
+export const LIFECYCLE_EVENTS_V2 = ["USER_CREATED", "USER_DISABLED", "USER_ENABLED", "EMAIL_SPAM_DETECTED", "LABEL_APPLIED"];
+
+export const LIFECYCLE_EVENTS = [...LIFECYCLE_EVENTS_V1, ...LIFECYCLE_EVENTS_V2];
+
+/** Permiso que debe declarar un manifest para interceptar el evento (el runtime tambien lo exige: sin permiso no se invoca). */
+export const EVENT_PERMISSIONS: Record<string, string> = {
+    USER_CREATED: "READ_USERS",
+    USER_DISABLED: "READ_USERS",
+    USER_ENABLED: "READ_USERS",
+    EMAIL_SPAM_DETECTED: "READ_EMAIL",
+    LABEL_APPLIED: "READ_EMAIL",
+};
 
 /** Eventos de servidor que ejecuta /api/extension/hooks (manifest `intercepts` o su alias `hooks`). */
 export const INTERCEPT_POINTS = ["EMAIL_PRE_SEND", "EMAIL_RECEIVED", "CRON", ...LIFECYCLE_EVENTS];
@@ -112,10 +131,33 @@ export const MANIFEST_LIMITS = {
     maxScreenshotUrl: 2000,
     maxChangelog: 20,
     maxChangelogNotes: 1000,
+    maxCategories: 3,
     maxConferencingProviders: 10,
     /** Tope de objetos/arreglos visitados por el recorrido (un manifest es dato controlado por quien lo publica). */
     maxWalkNodes: 50000,
 } as const;
+
+/**
+ * Metadatos de MARKETPLACE (capacidad de cliente `market.catalog.v1`, clientApi 11). Son OPCIONALES e INFORMATIVOS: el backend los entrega aparte
+ * (campo `catalog` del catalogo publico) solo a clientes que declaran la capacidad; el manifest ejecutable no cambia, asi que NINGUNA extension los
+ * declara en `requires` (un manifest que pidiera market.catalog.v1 dejaria de servirse a las instancias antiguas: ver feature-rules.mjs).
+ *  - `publisher`: { id, name, icon?, url?, verified?, official? }. `official`/`verified` solo se aceptan en extensiones de la plataforma (`core-*`).
+ *  - `suite`: { id, name, icon? } agrupa productos de una misma marca (carpeta del marketplace).
+ *  - `categories`: hasta 3 ids de CATEGORY_IDS (la primera es la principal). `category` (singular) sigue valiendo.
+ */
+export const PUBLISHER_ID_RE = /^[a-z][a-z0-9-]{1,39}$/;
+export const PLATFORM_EXTENSION_PREFIX = "core-";
+export const DEFAULT_PUBLISHER = Object.freeze({ id: "bloomx", name: "Bloomx", official: true, verified: true });
+export type CatalogPublisher = { id: string; name: string; icon?: string; url?: string; verified: boolean; official: boolean };
+export type CatalogSuite = { id: string; name: string; icon: string | null };
+export type CatalogMeta = {
+    publisher: CatalogPublisher;
+    suite: CatalogSuite | null;
+    categories: string[];
+    tags: string[];
+    screenshots: string[];
+    changelog: Array<{ version: string; date?: string; notes: string[] }>;
+};
 
 /** Handlers estandar de un proveedor de videollamada (ver _shared/CONFERENCING-CONTRACT.md). */
 export const CONFERENCING_HANDLERS = ["status", "testConnection", "createMeeting", "updateMeeting", "deleteMeeting"];
@@ -151,6 +193,8 @@ export const PERMISSION_CATALOG: Record<string, PermissionInfo> = {
     READ_EMAIL: { label: "Leer correo", description: "Lee remitente, asunto y fragmento de los correos de la bandeja del usuario.", risk: "high" },
     MAIL_LABEL: { label: "Etiquetar correo", description: "Aplica o deshace etiquetas de categoria en correos del usuario (no mueve, borra ni envia).", risk: "medium" },
     READ_USER: { label: "Ver datos del usuario", description: "Ve el identificador y el correo del usuario que ejecuta la extension.", risk: "low" },
+    READ_USERS: { label: "Ver las cuentas del dominio", description: "Lista y consulta las cuentas de ESTE dominio (id, correo, nombre y fecha de alta; nunca contrasenas ni tokens) con ctx.services.users, y recibe los eventos USER_CREATED / USER_DISABLED / USER_ENABLED. Solo lectura, paginado y con cuota. Requiere aprobacion explicita del administrador.", risk: "high" },
+    READ_STATS: { label: "Ver metricas del dominio", description: "Lee metricas AGREGADAS de este dominio con ctx.services.stats: usuarios (total, altas, activos), correos recibidos y enviados por dia y spam bloqueado. Nunca asuntos, remitentes, direcciones ni contenido. Solo lectura; los usuarios que no son administradores no pueden obtenerlas.", risk: "medium" },
     READ_USER_NAME: { label: "Ver nombre del usuario", description: "Ve el nombre del usuario.", risk: "low" },
     AI_GENERATE: { label: "Usar IA", description: "Usa el servicio de IA de esta instancia (services.ai): envia texto al proveedor configurado por el administrador en /admin/ai, con cuotas, guardarrailes y limite de llamadas. Si la IA esta desactivada la extension se bloquea (salvo ai.required=false).", risk: "medium" },
     HTTP_REQUEST: { label: "Llamadas HTTP externas", description: "Hace peticiones HTTPS a servicios externos (filtradas contra SSRF).", risk: "high" },
@@ -205,7 +249,7 @@ export function describePermissions(permissions: unknown): Array<{ permission: s
  * Variables de plataforma que ninguna extension puede pedir con ENV_READ:* (el runtime las deniega tambien).
  * Un manifest es dato controlado por quien sube la extension.
  */
-export const RESERVED_ENV_RE = /^(DATABASE_URL|DIRECT_URL|SHADOW_DATABASE_URL|POSTGRES_.*|PG.*|B2_.*|ADMIN_.*|MP_.*|NEXTAUTH_.*|AUTH_.*|DATA_ENCRYPTION_KEY|AI_.*|OPENAI_.*|RESEND_.*|VERCEL.*|NEXT_.*|NODE_.*|EXTENSION_.*|INTERNAL_.*|JWT_.*|SESSION_.*|AWS_.*|GITHUB_.*|NPM_.*|PATH|HOME|USER.*)$/i;
+export const RESERVED_ENV_RE = /^(DATABASE_URL|DIRECT_URL|SHADOW_DATABASE_URL|POSTGRES_.*|PG.*|B2_.*|ADMIN_.*|MP_.*|PAYPAL_.*|PAYMENTS_.*|PLATFORM_.*|NEXTAUTH_.*|AUTH_.*|DATA_ENCRYPTION_KEY|AI_.*|OPENAI_.*|RESEND_.*|VERCEL.*|NEXT_.*|NODE_.*|EXTENSION_.*|INTERNAL_.*|JWT_.*|SESSION_.*|AWS_.*|GITHUB_.*|NPM_.*|PATH|HOME|USER.*)$/i;
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/;
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.+-]{1,40})?$/;
@@ -356,6 +400,10 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
 
     // --- Requisitos del cliente (`requires`: version del contrato cliente<->backend y capacidades; ver client-contract.ts) ---
     for (const issue of validateRequires(m.requires)) (issue.soft && options.lenientCatalog ? warn : err)(issue.path, issue.message);
+    // market.catalog.v1 es solo de catalogo (metadatos informativos): declararla en `requires` ocultaria la extension a las instancias antiguas.
+    if (isObject(m.requires) && Array.isArray(m.requires.capabilities) && m.requires.capabilities.includes("market.catalog.v1")) {
+        (options.lenientCatalog ? warn : err)("requires.capabilities", "market.catalog.v1 es solo de catalogo: no la declares en requires (las instancias antiguas dejarian de recibir la extension)");
+    }
 
     // --- Auth --------------------------------------------------------------------------------------------------
     if (m.auth !== undefined) {
@@ -442,6 +490,8 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
     }
 
     // --- Recorrido de componentes / acciones -------------------------------------------------------------------
+    const declaredCaps: string[] = isObject(m.requires) && Array.isArray(m.requires.capabilities) ? m.requires.capabilities.filter((c: unknown): c is string => typeof c === "string") : [];
+    let pageUiReported = false;
     let walked = 0;
     const walk = (node: unknown, at: string, depth: number) => {
         if (depth > MAX_DEPTH) return err(at, "Anidamiento demasiado profundo");
@@ -465,6 +515,13 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
 
         if (typeof node.type === "string" && COMPONENT_TYPE_RE.test(node.type) && ("props" in node || "children" in node)) {
             if (!KNOWN_COMPONENT_TYPES.includes(node.type)) warn(`${at}.type`, `Componente desconocido: ${node.type}`);
+            // Componentes de pagina completa: un cliente sin ui.pages.v1 no los pinta; hay que declarar la capacidad para no servirlos a esos clientes.
+            const pageUi = pageUiReason(node);
+            if (pageUi && !pageUiReported && !declaredCaps.includes(PAGE_UI_CAPABILITY)) {
+                pageUiReported = true;
+                // Carga de extensiones ya publicadas: aviso (no se apaga la extension); publicar: error.
+                (options.lenientMounts ? warn : err)("requires.capabilities", `${pageUi} exige declarar la capacidad ${PAGE_UI_CAPABILITY} (${at})`);
+            }
         }
 
         for (const [key, value] of Object.entries(node)) {
@@ -551,6 +608,9 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
                 if (item.schedule !== undefined && !CRON_SCHEDULES.includes(String(item.schedule))) {
                     err(`${at}.schedule`, `Debe ser ${CRON_SCHEDULES.join(" o ")}`);
                 }
+                if (typeof item.point === "string" && EVENT_PERMISSIONS[item.point] && !(Array.isArray(m.permissions) && m.permissions.includes(EVENT_PERMISSIONS[item.point]))) {
+                    err(`${at}.point`, `El evento ${item.point} requiere el permiso ${EVENT_PERMISSIONS[item.point]} en permissions`);
+                }
                 if (typeof item.point === "string" && LIFECYCLE_EVENTS.includes(item.point) && item.onError === "block") {
                     warn(`${at}.onError`, "Los eventos de ciclo de vida no bloquean: onError=block se ignora");
                 }
@@ -585,6 +645,16 @@ export function validateManifest(input: unknown, options: ValidateManifestOption
         const envReads = perms.filter((p) => p.startsWith("ENV_READ:")).map((p) => p.slice("ENV_READ:".length).trim());
         // Carga tolerante (extensiones ya publicadas): una ruta invalida no invalida la extension, solo avisa; el router la ignora.
         validateBackendRoutes(m.backendRoutes, options.lenientMounts ? warn : err, warn, { functionNames: declared, permissions: perms, secretKeys, envReads, capabilities: reqCaps });
+    }
+
+    // --- Entradas de navegacion (barra lateral del correo y menu de administracion; ver nav-schema.ts) ------------------------
+    if (m.navEntries !== undefined) {
+        // Carga tolerante: una entrada invalida no apaga la extension (readNavEntries la descarta); publicar es estricto.
+        validateNavEntries(m.navEntries, options.lenientMounts ? warn : err, warn, {
+            mounts: Array.isArray(m.mounts) ? m.mounts : [],
+            routes: Array.isArray(m.backendRoutes) ? m.backendRoutes : [],
+            capabilities: declaredCaps,
+        });
     }
 
     return { ok: errors.length === 0, errors, warnings, scoped };
@@ -690,6 +760,50 @@ function validateCatalogFields(m: Record<string, any>, err: IssueSink, warn: Iss
 
     if (m.mandatory !== undefined && typeof m.mandatory !== "boolean") err("mandatory", "Debe ser true o false (obligatoria para todos los usuarios del dominio)");
 
+    // --- Metadatos de marketplace (market.catalog.v1; informativos, ver MANIFEST_LIMITS) ---
+    const platform = typeof m.id === "string" && m.id.startsWith(PLATFORM_EXTENSION_PREFIX);
+    const okIcon = (v: unknown) => typeof v === "string" && (isIconRef(v) || LEGACY_ICON_RE.test(v));
+    const okLabel = (v: unknown) => typeof v === "string" && v.trim().length > 0 && v.length <= 60 && !/[<>\u0000-\u001f]/.test(v);
+    if (m.publisher !== undefined) {
+        const p = m.publisher;
+        if (!isObject(p)) err("publisher", "Debe ser un objeto { id, name, icon?, url?, verified?, official? }");
+        else {
+            for (const key of Object.keys(p)) if (!["id", "name", "icon", "url", "verified", "official"].includes(key)) warn(`publisher.${key}`, "Clave desconocida en publisher");
+            if (typeof p.id !== "string" || !PUBLISHER_ID_RE.test(p.id)) err("publisher.id", "Requerido: [a-z0-9-] (2-40, empieza por letra)");
+            if (!okLabel(p.name)) err("publisher.name", "Requerido: texto sin HTML (max 60)");
+            if (p.icon !== undefined && !okIcon(p.icon)) err("publisher.icon", "Debe ser brand:/lucide:/initials: o un nombre Lucide (sin URLs)");
+            if (p.url !== undefined && !isSafeScreenshotUrl(p.url)) err("publisher.url", "Debe ser una URL absoluta https (max 2000)");
+            for (const flag of ["verified", "official"]) {
+                if (p[flag] === undefined) continue;
+                if (typeof p[flag] !== "boolean") err(`publisher.${flag}`, "Debe ser true o false");
+                else if (p[flag] === true && !platform) err(`publisher.${flag}`, `Solo las extensiones de la plataforma (id ${PLATFORM_EXTENSION_PREFIX}*) pueden declararse ${flag === "official" ? "oficiales" : "verificadas"}`);
+            }
+        }
+    }
+    if (m.suite !== undefined) {
+        const s = m.suite;
+        if (!isObject(s)) err("suite", "Debe ser un objeto { id, name, icon? }");
+        else {
+            for (const key of Object.keys(s)) if (!["id", "name", "icon"].includes(key)) warn(`suite.${key}`, "Clave desconocida en suite");
+            if (typeof s.id !== "string" || !PUBLISHER_ID_RE.test(s.id)) err("suite.id", "Requerido: [a-z0-9-] (2-40, empieza por letra)");
+            else if (!platform && s.id !== (isObject(m.publisher) && typeof m.publisher.id === "string" ? m.publisher.id : "community")) warn("suite.id", "En extensiones que no son de la plataforma la suite se ignora salvo que coincida con el id del publisher");
+            if (!okLabel(s.name)) err("suite.name", "Requerido: texto sin HTML (max 60)");
+            if (s.icon !== undefined && !okIcon(s.icon)) err("suite.icon", "Debe ser brand:/lucide:/initials: o un nombre Lucide (sin URLs)");
+        }
+    }
+    if (m.categories !== undefined) {
+        if (!Array.isArray(m.categories)) err("categories", `Debe ser un arreglo de ids (${CATEGORY_IDS.join(", ")})`);
+        else {
+            if (m.categories.length === 0 || m.categories.length > MANIFEST_LIMITS.maxCategories) err("categories", `Entre 1 y ${MANIFEST_LIMITS.maxCategories} categorias`);
+            const seen = new Set<string>();
+            m.categories.slice(0, MANIFEST_LIMITS.maxCategories + 1).forEach((c: unknown, i: number) => {
+                if (typeof c !== "string" || !CATEGORY_IDS.includes(c)) return err(`categories[${i}]`, `Debe ser uno de ${CATEGORY_IDS.join(", ")}`);
+                if (seen.has(c)) err(`categories[${i}]`, `Categoria duplicada: ${c}`);
+                seen.add(c);
+            });
+        }
+    }
+
     // Icono de la extension: `brand:<slug>` | `lucide:<Nombre>` | `initials:<XY>` o (compatibilidad) un nombre Lucide sin esquema.
     if (m.icon !== undefined && !(typeof m.icon === "string" && (isIconRef(m.icon) || LEGACY_ICON_RE.test(m.icon)))) {
         err("icon", 'Debe ser "brand:<slug>", "lucide:<Nombre>", "initials:<XY>" o un nombre de icono Lucide (sin URLs ni imagenes remotas)');
@@ -745,6 +859,62 @@ export function manifestTexts(manifest: unknown, lang: string): { name: string; 
 export function manifestIcon(manifest: unknown): string | null {
     const icon = isObject(manifest) ? manifest.icon : undefined;
     return typeof icon === "string" && (isIconRef(icon) || LEGACY_ICON_RE.test(icon)) ? icon : null;
+}
+
+/** Lista de textos de una nota de changelog (acepta texto o lista), acotada. */
+function noteList(notes: unknown): string[] {
+    const list = Array.isArray(notes) ? notes : notes === undefined ? [] : [notes];
+    return list.filter((n): n is string => typeof n === "string" && n.trim().length > 0).map((n) => n.trim().slice(0, MANIFEST_LIMITS.maxChangelogNotes)).slice(0, 50);
+}
+
+/**
+ * Metadatos de marketplace SANEADOS de un manifest (nunca lanza). El backend los entrega en el campo `catalog` del catalogo publico y el
+ * frontend los vuelve a sanear. `official`/`verified` NO se toman del manifest tal cual: `official` sale del id (solo `core-*` con publisher `bloomx`).
+ * Sin `publisher`, las `core-*` pertenecen a la plataforma (Bloomx oficial) y el resto queda como publicador "community" sin verificar.
+ */
+export function readCatalogMeta(manifest: unknown): CatalogMeta {
+    const m = isObject(manifest) ? manifest : {};
+    const id = typeof m.id === "string" ? m.id : "";
+    const platform = id.startsWith(PLATFORM_EXTENSION_PREFIX);
+    const text = (v: unknown, max: number) => (typeof v === "string" && !/[<>\u0000-\u001f]/.test(v) ? v.trim().slice(0, max) : "");
+    const icon = (v: unknown) => (typeof v === "string" && (isIconRef(v) || LEGACY_ICON_RE.test(v)) ? v : undefined);
+
+    let publisher: CatalogPublisher;
+    const p = isObject(m.publisher) ? m.publisher : null;
+    if (p && typeof p.id === "string" && PUBLISHER_ID_RE.test(p.id) && text(p.name, 60)) {
+        const official = platform && p.id === DEFAULT_PUBLISHER.id;
+        publisher = {
+            id: p.id,
+            name: text(p.name, 60),
+            ...(icon(p.icon) ? { icon: icon(p.icon) as string } : {}),
+            ...(isSafeScreenshotUrl(p.url) ? { url: p.url as string } : {}),
+            verified: official || (platform && p.verified === true),
+            official,
+        };
+    } else {
+        publisher = platform ? { ...DEFAULT_PUBLISHER } : { id: "community", name: "Community", verified: false, official: false };
+    }
+
+    let suite: CatalogSuite | null = null;
+    const s = isObject(m.suite) ? m.suite : null;
+    // Las suites son marca: una extension de terceros solo puede formar la suite de SU publisher (nunca "bloomx", "google", etc.).
+    const suiteAllowed = (sid: string) => platform || (sid === publisher.id && sid !== DEFAULT_PUBLISHER.id);
+    if (s && typeof s.id === "string" && PUBLISHER_ID_RE.test(s.id) && suiteAllowed(s.id) && text(s.name, 60)) suite = { id: s.id, name: text(s.name, 60), icon: icon(s.icon) ?? null };
+
+    let categories: string[] = Array.isArray(m.categories) ? m.categories.filter((c: unknown): c is string => typeof c === "string" && CATEGORY_IDS.includes(c)) : [];
+    if (categories.length === 0 && typeof m.category === "string") {
+        const alias = CATEGORY_ALIASES[strip(m.category)];
+        if (alias) categories = [alias];
+    }
+    categories = Array.from(new Set(categories)).slice(0, MANIFEST_LIMITS.maxCategories);
+
+    const tags = Array.isArray(m.tags) ? Array.from(new Set(m.tags.map((t: unknown) => text(t, MANIFEST_LIMITS.maxTag)).filter(Boolean))).slice(0, MANIFEST_LIMITS.maxTags) : [];
+    const screenshots = Array.isArray(m.screenshots) ? (m.screenshots.filter(isSafeScreenshotUrl) as string[]).slice(0, MANIFEST_LIMITS.maxScreenshots) : [];
+    const changelog = Array.isArray(m.changelog)
+        ? m.changelog.filter((e: unknown) => isObject(e) && typeof e.version === "string" && e.version.trim()).slice(0, MANIFEST_LIMITS.maxChangelog)
+            .map((e: Record<string, any>) => ({ version: String(e.version).trim().slice(0, 40), ...(typeof e.date === "string" && e.date.length <= 40 ? { date: e.date } : {}), notes: noteList(e.notes) }))
+        : [];
+    return { publisher, suite, categories, tags, screenshots, changelog };
 }
 
 /** Texto legible de los errores (para logs y respuestas 400). */

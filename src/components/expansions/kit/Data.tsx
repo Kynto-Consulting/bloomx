@@ -8,10 +8,11 @@ import * as React from 'react';
 import { DENSITIES, GAPS, TEXT_ALIGNS } from '@/lib/expansions/ui-schema';
 import { useI18n } from '@/components/I18nProvider';
 import { KitIcon } from './Icon';
-import { useKitStrings } from './strings';
+import { Link } from './Typography';
+import { formatKit, useKitStrings } from './strings';
 import {
-    DENSITY_CELL_CLASS, FOCUS_RING_CLASS, GAP_CLASS, GRID_COLUMNS_CLASS, MAX_HEIGHT_CLASS, ROW_HOVER_CLASS, ROW_SELECTED_CLASS,
-    SURFACE_CLASS, TEXT_ALIGN_CLASS, TONE_SOFT, TONE_TEXT, CHECK_CLASS, buttonClasses, pick, toTone,
+    DENSITY_CELL_CLASS, FIELD_CLASS, FOCUS_RING_CLASS, GAP_CLASS, GRID_COLUMNS_CLASS, MAX_HEIGHT_CLASS, ROW_HOVER_CLASS, ROW_SELECTED_CLASS,
+    SURFACE_CLASS, TEXT_ALIGN_CLASS, TONE_BG, TONE_SOFT, TONE_TEXT, CHECK_CLASS, buttonClasses, pick, toTone,
     type Density, type Tone,
 } from './tokens';
 
@@ -30,7 +31,9 @@ function safeText(value: unknown): string {
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-const TABLE_FORMATS = ['text', 'number', 'date', 'datetime', 'boolean', 'badge', 'code'] as const;
+const TABLE_FORMATS = ['text', 'number', 'date', 'datetime', 'boolean', 'badge', 'code', 'link', 'status'] as const;
+/** Valores distintos maximos para ofrecer el filtro desplegable de una columna. */
+const MAX_FILTER_VALUES = 30;
 const COLUMN_WIDTHS = ['xs', 'sm', 'md', 'lg'] as const;
 const WIDTH_CLASS: Record<(typeof COLUMN_WIDTHS)[number], string> = { xs: 'w-20 min-w-20', sm: 'w-32 min-w-32', md: 'w-48 min-w-48', lg: 'w-80 min-w-80' };
 const MAX_ROWS = 5000;
@@ -41,8 +44,14 @@ export interface TableColumn {
     label?: string;
     sortable?: boolean;
     align?: 'start' | 'center' | 'end';
-    format?: 'text' | 'number' | 'date' | 'datetime' | 'boolean' | 'badge' | 'code';
+    format?: (typeof TABLE_FORMATS)[number];
     tone?: Tone;
+    /** Valor de la celda -> tono (formatos badge y status). */
+    toneMap?: Record<string, Tone>;
+    /** Formato link: clave de la fila con la URL. */
+    hrefKey?: string;
+    /** Filtro desplegable con los valores distintos de la columna. */
+    filter?: boolean;
     width?: 'xs' | 'sm' | 'md' | 'lg';
 }
 export interface TableAction {
@@ -50,6 +59,12 @@ export interface TableAction {
     icon?: string;
     tone?: Tone;
     onPress?: (row: Record<string, unknown>) => void;
+}
+export interface TableBulkAction {
+    label: string;
+    icon?: string;
+    tone?: Tone;
+    onPress?: (rows: Array<Record<string, unknown>>, keys: string[]) => void;
 }
 export interface TableProps {
     columns?: TableColumn[];
@@ -68,9 +83,21 @@ export interface TableProps {
     actions?: TableAction[];
     onRowPress?: (row: Record<string, unknown>) => void;
     caption?: string;
+    /** Caja de busqueda que filtra por cualquier columna. */
+    searchable?: boolean;
+    searchPlaceholder?: string;
+    defaultSort?: { key?: string; dir?: 'asc' | 'desc' };
+    /** Acciones sobre las filas seleccionadas (seleccion multiple). */
+    bulkActions?: TableBulkAction[];
+    /** Mensaje de error de carga: sustituye a las filas. */
+    error?: string;
+    onRetry?: () => void;
 }
 
-interface NormColumn { key: string; label: string; sortable: boolean; align: 'start' | 'center' | 'end'; format: (typeof TABLE_FORMATS)[number]; tone: Tone | undefined; width: (typeof COLUMN_WIDTHS)[number] | undefined }
+interface NormColumn {
+    key: string; label: string; sortable: boolean; align: 'start' | 'center' | 'end'; format: (typeof TABLE_FORMATS)[number]; tone: Tone | undefined;
+    width: (typeof COLUMN_WIDTHS)[number] | undefined; toneMap: Record<string, Tone>; hrefKey: string | undefined; filter: boolean;
+}
 interface NormRow { id: string; index: number; data: Record<string, unknown> }
 
 function parseDate(value: unknown): Date | null {
@@ -125,6 +152,9 @@ export function Table(props: TableProps) {
             format: pick(c.format, TABLE_FORMATS, 'text'),
             tone: c.tone === undefined ? undefined : toTone(c.tone),
             width: c.width === undefined ? undefined : pick(c.width, COLUMN_WIDTHS, 'md'),
+            toneMap: isRecord(c.toneMap) ? Object.fromEntries(Object.entries(c.toneMap).filter(([k]) => k !== '__proto__').map(([k, v]) => [k, toTone(v)])) : {},
+            hrefKey: typeof c.hrefKey === 'string' && c.hrefKey ? c.hrefKey : undefined,
+            filter: c.filter === true,
         }));
     }, [columns]);
 
@@ -142,19 +172,45 @@ export function Table(props: TableProps) {
         return { allRows: list, truncated: source.length > MAX_ROWS };
     }, [rows, data, rowKey]);
 
+    // --- busqueda y filtros por columna
+    const [query, setQuery] = React.useState('');
+    const [filters, setFilters] = React.useState<Record<string, string>>({});
+    const searchable = props.searchable === true;
+    const filterOptions = React.useMemo(() => {
+        const out: Record<string, string[]> = {};
+        for (const col of cols) {
+            if (!col.filter) continue;
+            const values = new Set<string>();
+            for (const row of allRows) { const v = safeText(row.data[col.key]); if (v !== '') values.add(v); if (values.size > MAX_FILTER_VALUES) break; }
+            if (values.size > 0 && values.size <= MAX_FILTER_VALUES) out[col.key] = [...values].sort((a, b) => a.localeCompare(b, intlLocale, { numeric: true, sensitivity: 'base' }));
+        }
+        return out;
+    }, [cols, allRows, intlLocale]);
+    const filtered = React.useMemo(() => {
+        const needle = query.trim().toLowerCase();
+        const active = Object.entries(filters).filter(([k, v]) => v !== '' && k in filterOptions);
+        if (!needle && active.length === 0) return allRows;
+        return allRows.filter((row) => {
+            if (active.some(([k, v]) => safeText(row.data[k]) !== v)) return false;
+            return !needle || cols.some((col) => safeText(row.data[col.key]).toLowerCase().includes(needle));
+        });
+    }, [allRows, cols, query, filters, filterOptions]);
+    const filtering = filtered !== allRows;
+
     // --- orden
-    const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(null);
+    const initialSort = props.defaultSort && typeof props.defaultSort.key === 'string' ? { key: props.defaultSort.key, dir: (props.defaultSort.dir === 'desc' ? 'desc' : 'asc') as 'asc' | 'desc' } : null;
+    const [sort, setSort] = React.useState<{ key: string; dir: 'asc' | 'desc' } | null>(initialSort);
     const sorted = React.useMemo(() => {
-        if (!sort) return allRows;
+        if (!sort) return filtered;
         const col = cols.find((c) => c.key === sort.key);
-        if (!col) return allRows;
+        if (!col) return filtered;
         const mul = sort.dir === 'asc' ? 1 : -1;
-        return [...allRows].sort((a, b) => {
+        return [...filtered].sort((a, b) => {
             const ea = isEmpty(a.data[col.key]), eb = isEmpty(b.data[col.key]);
             if (ea !== eb) return ea ? 1 : -1; // vacios al final en ambos sentidos
             return mul * compareValues(a.data[col.key], b.data[col.key], col.format, intlLocale) || a.index - b.index;
         });
-    }, [allRows, cols, sort, intlLocale]);
+    }, [filtered, cols, sort, intlLocale]);
     const toggleSort = (key: string) => setSort((cur) => (!cur || cur.key !== key ? { key, dir: 'asc' } : cur.dir === 'asc' ? { key, dir: 'desc' } : null));
 
     // --- paginacion
@@ -189,7 +245,7 @@ export function Table(props: TableProps) {
     const colCount = cols.length + (selectable !== 'none' ? 1 : 0) + (rowActions.length ? 1 : 0);
     const yes = en ? 'Yes' : 'Si', no = 'No';
 
-    const renderValue = (col: NormColumn, raw: unknown, selectedRow: boolean): React.ReactNode => {
+    const renderValue = (col: NormColumn, raw: unknown, selectedRow: boolean, rowData: Record<string, unknown> = {}): React.ReactNode => {
         const text = safeText(raw);
         switch (col.format) {
             case 'number': {
@@ -217,7 +273,20 @@ export function Table(props: TableProps) {
             }
             case 'badge':
                 if (text === '') return '';
-                return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TONE_SOFT[col.tone ?? 'neutral']}`}>{text}</span>;
+                return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${TONE_SOFT[col.toneMap[text] ?? col.tone ?? 'neutral']}`}>{text}</span>;
+            case 'status':
+                if (text === '') return '';
+                return (
+                    <span className="inline-flex items-center gap-2">
+                        <span aria-hidden="true" className={`inline-block size-2 shrink-0 rounded-full ${TONE_BG[col.toneMap[text] ?? col.tone ?? 'neutral']}`} />
+                        <span>{text}</span>
+                    </span>
+                );
+            case 'link': {
+                if (text === '') return '';
+                const href = col.hrefKey ? rowData[col.hrefKey] : raw;
+                return <Link label={text} url={typeof href === 'string' ? href : undefined} />;
+            }
             case 'code':
                 if (text === '') return '';
                 return <code className="rounded bg-code px-1.5 py-0.5 font-mono text-xs text-code-foreground">{text}</code>;
@@ -237,9 +306,56 @@ export function Table(props: TableProps) {
 
     const ariaLabelRow = strings.selectRow;
     const rangeText = selectedKeys.size > 0 ? `${selectedKeys.size} ${strings.rowsSelected}` : '';
+    const errorText = typeof props.error === 'string' ? props.error.trim() : '';
+    const bulk = (Array.isArray(props.bulkActions) ? props.bulkActions : []).filter((a): a is TableBulkAction => isRecord(a) && typeof a.label === 'string' && a.label !== '');
+    const selectedRows = selectable === 'multiple' ? allRows.filter((r) => selectedKeys.has(r.id)) : [];
+    const filterKeys = Object.keys(filterOptions);
+    const hasToolbar = searchable || filterKeys.length > 0;
+    const resetPage = () => setPage(0);
 
     return (
         <div className="flex w-full flex-col gap-2">
+            {hasToolbar && (
+                <div className="flex flex-wrap items-center gap-2">
+                    {searchable && (
+                        <input
+                            type="search" value={query} onChange={(e) => { setQuery(e.target.value); resetPage(); }}
+                            aria-label={typeof props.searchPlaceholder === 'string' && props.searchPlaceholder ? props.searchPlaceholder : strings.search}
+                            placeholder={typeof props.searchPlaceholder === 'string' && props.searchPlaceholder ? props.searchPlaceholder : strings.search}
+                            className={`${FIELD_CLASS} h-9 w-full sm:max-w-xs`}
+                        />
+                    )}
+                    {filterKeys.map((key) => {
+                        const col = cols.find((c) => c.key === key)!;
+                        return (
+                            <select
+                                key={key} value={filters[key] ?? ''} aria-label={`${strings.filterBy} ${col.label}`}
+                                onChange={(e) => { setFilters((cur) => ({ ...cur, [key]: e.target.value })); resetPage(); }}
+                                className={`${FIELD_CLASS} h-9 w-auto max-w-full`}
+                            >
+                                <option value="">{col.label}: {strings.allValues}</option>
+                                {filterOptions[key].map((v) => <option key={v} value={v}>{v}</option>)}
+                            </select>
+                        );
+                    })}
+                    <span role="status" aria-live="polite" className="sr-only">{filtering ? formatKit(strings.resultsCount, { n: sorted.length }) : ''}</span>
+                </div>
+            )}
+            {selectable === 'multiple' && bulk.length > 0 && selectedRows.length > 0 && (
+                <div role="toolbar" aria-label={`${selectedRows.length} ${strings.rowsSelected}`} className={`${SURFACE_CLASS} flex flex-wrap items-center gap-2 px-3 py-2 text-sm`}>
+                    <span className="font-medium">{selectedRows.length} {strings.rowsSelected}</span>
+                    {bulk.map((action, k) => (
+                        <button
+                            key={k} type="button"
+                            className={buttonClasses({ variant: 'outline', tone: toTone(action.tone), size: 'sm' })}
+                            onClick={() => action.onPress?.(selectedRows.map((r) => r.data), selectedRows.map((r) => r.id))}
+                        >
+                            {action.icon ? <KitIcon name={action.icon} size="sm" /> : null}{action.label}
+                        </button>
+                    ))}
+                    <button type="button" className={buttonClasses({ variant: 'ghost', size: 'sm' })} onClick={() => emit([])}>{strings.clearSelection}</button>
+                </div>
+            )}
             <div className={`${SURFACE_CLASS} overflow-x-auto`}>
                 <table className="w-full border-collapse text-sm" aria-busy={loading || undefined} aria-rowcount={loading ? undefined : sorted.length + 1}>
                     <caption className={props.caption ? 'px-4 py-2 text-left text-sm font-medium text-foreground' : 'sr-only'}>{props.caption || (en ? 'Data table' : 'Tabla de datos')}</caption>
@@ -284,10 +400,21 @@ export function Table(props: TableProps) {
                                 ))}
                             </tr>
                         ))}
-                        {!loading && visible.length === 0 && (
-                            <tr><td colSpan={Math.max(colCount, 1)} className={`${cell} py-8 text-center text-muted-foreground`}>{typeof props.emptyText === 'string' && props.emptyText ? props.emptyText : strings.empty}</td></tr>
+                        {!loading && errorText && (
+                            <tr>
+                                <td colSpan={Math.max(colCount, 1)} className={`${cell} py-6`}>
+                                    <div role="alert" className="flex flex-wrap items-center justify-center gap-3 text-center text-card-foreground">
+                                        <KitIcon name="CircleAlert" size="md" className="text-destructive" />
+                                        <span>{errorText}</span>
+                                        {typeof props.onRetry === 'function' && <button type="button" className={buttonClasses({ variant: 'outline', size: 'sm' })} onClick={() => props.onRetry?.()}>{strings.retry}</button>}
+                                    </div>
+                                </td>
+                            </tr>
                         )}
-                        {!loading && visible.map((row, i) => {
+                        {!loading && !errorText && visible.length === 0 && (
+                            <tr><td colSpan={Math.max(colCount, 1)} className={`${cell} py-8 text-center text-muted-foreground`}>{filtering ? strings.noResults : typeof props.emptyText === 'string' && props.emptyText ? props.emptyText : strings.empty}</td></tr>
+                        )}
+                        {!loading && !errorText && visible.map((row, i) => {
                             const isSel = selectedKeys.has(row.id);
                             return (
                                 <tr
@@ -309,7 +436,7 @@ export function Table(props: TableProps) {
                                     )}
                                     {cols.map((col) => (
                                         <td key={col.key} className={`${cell} ${TEXT_ALIGN_CLASS[col.align]} ${col.tone && col.format !== 'badge' && !isSel ? TONE_TEXT[col.tone] : ''}`}>
-                                            {renderValue(col, row.data[col.key], isSel)}
+                                            {renderValue(col, row.data[col.key], isSel, row.data)}
                                         </td>
                                     ))}
                                     {rowActions.length > 0 && (

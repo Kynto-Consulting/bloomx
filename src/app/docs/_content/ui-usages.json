@@ -79,7 +79,9 @@
       },
       "alsoIn": [
         "composer-helper/manifest.json",
-        "giphy/manifest.json"
+        "domain-metrics/manifest.json",
+        "giphy/manifest.json",
+        "quick-notes/manifest.json"
       ]
     },
     "ROW": {
@@ -112,8 +114,10 @@
       },
       "alsoIn": [
         "composer-helper/manifest.json",
+        "domain-metrics/manifest.json",
         "giphy/manifest.json",
-        "organizer/manifest.json"
+        "organizer/manifest.json",
+        "quick-notes/manifest.json"
       ]
     },
     "GRID": {
@@ -150,134 +154,694 @@
           }
         ]
       },
-      "alsoIn": []
+      "alsoIn": [
+        "domain-metrics/manifest.json"
+      ]
     },
     "CARD": {
-      "file": "composer-helper/manifest.json",
-      "extensionId": "core-composer-helper",
-      "point": "OVERLAY",
-      "path": "mounts[1].component.children[0].children[3].props.true[0]",
+      "file": "quick-notes/manifest.json",
+      "extensionId": "core-quick-notes",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[1].props.endPane.props.false.props.true",
       "node": {
         "type": "CARD",
         "props": {
-          "title": {
-            "es": "Vista previa",
-            "en": "Preview"
-          },
-          "icon": "FileText",
-          "density": "compact",
-          "footer": [
-            {
-              "type": "BUTTON",
-              "props": {
-                "label": {
-                  "es": "Insertar",
-                  "en": "Insert"
-                },
-                "icon": "Check",
-                "variant": "solid",
-                "onClick": {
-                  "action": "INSERT_CONTENT",
-                  "content": "${state.generated}",
-                  "closeOverlay": true
-                }
-              }
-            },
-            {
-              "type": "BUTTON",
-              "props": {
-                "label": {
-                  "es": "Regenerar",
-                  "en": "Regenerate"
-                },
-                "icon": "RefreshCw",
-                "variant": "outline",
-                "onClick": {
-                  "action": "CALL_BACKEND",
-                  "function": "generateContent",
-                  "key": "generate",
-                  "toastOnError": false,
-                  "args": {
-                    "prompt": "${state.prompt || context.slashArgs}",
-                    "tone": "${state.tone}",
-                    "length": "${state.length}",
-                    "lang": "${context.locale}",
-                    "emailContent": "${context.emailContent}",
-                    "subject": "${context.subject}",
-                    "to": "${context.to}"
-                  },
-                  "onSuccess": {
-                    "actions": [
-                      {
-                        "action": "SET_STATE",
-                        "key": "generated",
-                        "value": "${result.success ? result.content : null}"
-                      },
-                      {
-                        "action": "SET_STATE",
-                        "key": "genError",
-                        "value": "${result.success ? null : result.error}"
-                      }
-                    ]
-                  },
-                  "onError": {
-                    "actions": [
-                      {
-                        "action": "SET_STATE",
-                        "key": "generated",
-                        "value": null
-                      },
-                      {
-                        "action": "SET_STATE",
-                        "key": "genError",
-                        "value": "${error}"
-                      }
-                    ]
-                  }
-                }
-              }
-            },
-            {
-              "type": "BUTTON",
-              "props": {
-                "label": {
-                  "es": "Descartar",
-                  "en": "Discard"
-                },
-                "icon": "X",
-                "variant": "ghost",
-                "onClick": {
-                  "action": "SET_STATE",
-                  "key": "generated",
-                  "value": null
-                }
-              }
-            }
-          ]
+          "title": "${state.selected.title}"
         },
         "children": [
           {
             "type": "TEXT",
             "props": {
-              "content": "${state.generated}"
+              "content": "${state.selected.body}"
             }
+          },
+          {
+            "type": "ROW",
+            "props": {
+              "gap": 2
+            },
+            "children": [
+              {
+                "type": "BUTTON",
+                "props": {
+                  "label": {
+                    "es": "Editar",
+                    "en": "Edit"
+                  },
+                  "icon": "Pencil",
+                  "variant": "outline",
+                  "onClick": [
+                    {
+                      "action": "SET_STATE",
+                      "key": "draft",
+                      "value": "${state.selected}"
+                    },
+                    {
+                      "action": "SET_STATE",
+                      "key": "mode",
+                      "value": "edit"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "BUTTON",
+                "props": {
+                  "label": {
+                    "es": "Eliminar",
+                    "en": "Delete"
+                  },
+                  "icon": "Trash2",
+                  "tone": "danger",
+                  "variant": "outline",
+                  "onClick": {
+                    "action": "CONFIRM",
+                    "message": {
+                      "es": "¿Eliminar esta nota?",
+                      "en": "Delete this note?"
+                    },
+                    "onConfirm": {
+                      "action": "CALL_BACKEND",
+                      "function": "deleteNote",
+                      "args": {
+                        "ids": [
+                          "${state.selected.id}"
+                        ]
+                      },
+                      "key": "deleteNote",
+                      "onSuccess": [
+                        {
+                          "action": "SET_STATE",
+                          "key": "selected",
+                          "value": null
+                        },
+                        {
+                          "action": "SET_STATE",
+                          "key": "mode",
+                          "value": "none"
+                        },
+                        {
+                          "action": "SET_STATE",
+                          "key": "checked",
+                          "value": []
+                        },
+                        {
+                          "action": "CALL_BACKEND",
+                          "function": "listNotes",
+                          "key": "listNotes",
+                          "resultKey": "notesData",
+                          "toastOnError": false
+                        },
+                        {
+                          "action": "TOAST",
+                          "message": {
+                            "es": "Notas eliminadas",
+                            "en": "Notes deleted"
+                          },
+                          "tone": "success"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
           }
         ]
+      },
+      "alsoIn": [
+        "composer-helper/manifest.json",
+        "domain-metrics/manifest.json"
+      ]
+    },
+    "PAGE_HEADER": {
+      "file": "quick-notes/manifest.json",
+      "extensionId": "core-quick-notes",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[0]",
+      "node": {
+        "type": "PAGE_HEADER",
+        "props": {
+          "title": {
+            "es": "Notas rápidas",
+            "en": "Quick notes"
+          },
+          "description": {
+            "es": "Tus notas personales, solo visibles para ti.",
+            "en": "Your personal notes, visible only to you."
+          },
+          "icon": "lucide:NotebookPen",
+          "breadcrumbs": [
+            {
+              "label": {
+                "es": "Inicio",
+                "en": "Home"
+              },
+              "url": "/"
+            },
+            {
+              "label": {
+                "es": "Notas rápidas",
+                "en": "Quick notes"
+              }
+            }
+          ],
+          "actions": {
+            "type": "BUTTON",
+            "props": {
+              "label": {
+                "es": "Nueva nota",
+                "en": "New note"
+              },
+              "icon": "Plus",
+              "hidden": "${state.mode == 'edit'}",
+              "onClick": [
+                {
+                  "action": "SET_STATE",
+                  "key": "draft",
+                  "value": {}
+                },
+                {
+                  "action": "SET_STATE",
+                  "key": "mode",
+                  "value": "edit"
+                }
+              ]
+            }
+          },
+          "loading": "${state.$loading.listNotes}",
+          "error": "${state.$error.listNotes}",
+          "onRetry": {
+            "action": "CALL_BACKEND",
+            "function": "listNotes",
+            "key": "listNotes",
+            "resultKey": "notesData",
+            "toastOnError": false
+          }
+        }
+      },
+      "alsoIn": [
+        "domain-metrics/manifest.json"
+      ]
+    },
+    "SPLIT_PANE": {
+      "file": "quick-notes/manifest.json",
+      "extensionId": "core-quick-notes",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[1]",
+      "node": {
+        "type": "SPLIT_PANE",
+        "props": {
+          "ratio": "2:1",
+          "gap": 6,
+          "startLabel": {
+            "es": "Lista de notas",
+            "en": "Notes list"
+          },
+          "endLabel": {
+            "es": "Detalle de la nota",
+            "en": "Note detail"
+          },
+          "startPane": {
+            "type": "CONDITIONAL",
+            "props": {
+              "condition": "${state.notesData && state.notesData.count == 0 && !state.$error.listNotes}",
+              "true": {
+                "type": "EMPTY",
+                "props": {
+                  "icon": "NotebookPen",
+                  "title": {
+                    "es": "Aún no tienes notas",
+                    "en": "You have no notes yet"
+                  },
+                  "description": {
+                    "es": "Crea tu primera nota para empezar.",
+                    "en": "Create your first note to get started."
+                  },
+                  "actionLabel": {
+                    "es": "Nueva nota",
+                    "en": "New note"
+                  },
+                  "action": [
+                    {
+                      "action": "SET_STATE",
+                      "key": "draft",
+                      "value": {}
+                    },
+                    {
+                      "action": "SET_STATE",
+                      "key": "mode",
+                      "value": "edit"
+                    }
+                  ]
+                }
+              },
+              "false": {
+                "type": "TABLE",
+                "props": {
+                  "caption": {
+                    "es": "Notas",
+                    "en": "Notes"
+                  },
+                  "columns": [
+                    {
+                      "key": "title",
+                      "label": {
+                        "es": "Título",
+                        "en": "Title"
+                      },
+                      "sortable": true
+                    },
+                    {
+                      "key": "preview",
+                      "label": {
+                        "es": "Texto",
+                        "en": "Text"
+                      }
+                    },
+                    {
+                      "key": "updatedAt",
+                      "label": {
+                        "es": "Modificada",
+                        "en": "Modified"
+                      },
+                      "sortable": true,
+                      "format": "datetime"
+                    }
+                  ],
+                  "data": "${state.notesData.notes}",
+                  "rowKey": "id",
+                  "selectable": "multiple",
+                  "bind": "checked",
+                  "searchable": true,
+                  "searchPlaceholder": {
+                    "es": "Buscar notas",
+                    "en": "Search notes"
+                  },
+                  "defaultSort": {
+                    "key": "updatedAt",
+                    "dir": "desc"
+                  },
+                  "pageSize": 10,
+                  "emptyText": {
+                    "es": "Ninguna nota coincide",
+                    "en": "No notes match"
+                  },
+                  "loading": "${state.$loading.listNotes}",
+                  "error": "${state.$error.listNotes}",
+                  "onRetry": {
+                    "action": "CALL_BACKEND",
+                    "function": "listNotes",
+                    "key": "listNotes",
+                    "resultKey": "notesData",
+                    "toastOnError": false
+                  },
+                  "onRowClick": [
+                    {
+                      "action": "SET_STATE",
+                      "key": "selected",
+                      "value": "${row}"
+                    },
+                    {
+                      "action": "SET_STATE",
+                      "key": "mode",
+                      "value": "view"
+                    }
+                  ],
+                  "actions": [
+                    {
+                      "label": {
+                        "es": "Eliminar",
+                        "en": "Delete"
+                      },
+                      "icon": "Trash2",
+                      "tone": "danger",
+                      "onClick": {
+                        "action": "CONFIRM",
+                        "message": {
+                          "es": "¿Eliminar esta nota?",
+                          "en": "Delete this note?"
+                        },
+                        "onConfirm": {
+                          "action": "CALL_BACKEND",
+                          "function": "deleteNote",
+                          "args": {
+                            "ids": [
+                              "${row.id}"
+                            ]
+                          },
+                          "key": "deleteNote",
+                          "onSuccess": [
+                            {
+                              "action": "SET_STATE",
+                              "key": "selected",
+                              "value": null
+                            },
+                            {
+                              "action": "SET_STATE",
+                              "key": "mode",
+                              "value": "none"
+                            },
+                            {
+                              "action": "SET_STATE",
+                              "key": "checked",
+                              "value": []
+                            },
+                            {
+                              "action": "CALL_BACKEND",
+                              "function": "listNotes",
+                              "key": "listNotes",
+                              "resultKey": "notesData",
+                              "toastOnError": false
+                            },
+                            {
+                              "action": "TOAST",
+                              "message": {
+                                "es": "Notas eliminadas",
+                                "en": "Notes deleted"
+                              },
+                              "tone": "success"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ],
+                  "bulkActions": [
+                    {
+                      "label": {
+                        "es": "Eliminar seleccionadas",
+                        "en": "Delete selected"
+                      },
+                      "icon": "Trash2",
+                      "tone": "danger",
+                      "onClick": {
+                        "action": "CONFIRM",
+                        "message": {
+                          "es": "¿Eliminar las notas seleccionadas?",
+                          "en": "Delete the selected notes?"
+                        },
+                        "onConfirm": {
+                          "action": "CALL_BACKEND",
+                          "function": "deleteNote",
+                          "args": {
+                            "ids": "${state.checked}"
+                          },
+                          "key": "deleteNote",
+                          "onSuccess": [
+                            {
+                              "action": "SET_STATE",
+                              "key": "selected",
+                              "value": null
+                            },
+                            {
+                              "action": "SET_STATE",
+                              "key": "mode",
+                              "value": "none"
+                            },
+                            {
+                              "action": "SET_STATE",
+                              "key": "checked",
+                              "value": []
+                            },
+                            {
+                              "action": "CALL_BACKEND",
+                              "function": "listNotes",
+                              "key": "listNotes",
+                              "resultKey": "notesData",
+                              "toastOnError": false
+                            },
+                            {
+                              "action": "TOAST",
+                              "message": {
+                                "es": "Notas eliminadas",
+                                "en": "Notes deleted"
+                              },
+                              "tone": "success"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "endPane": {
+            "type": "CONDITIONAL",
+            "props": {
+              "condition": "${state.mode == 'edit'}",
+              "true": {
+                "type": "CARD",
+                "props": {
+                  "title": {
+                    "es": "Nota",
+                    "en": "Note"
+                  }
+                },
+                "children": [
+                  {
+                    "type": "FORM",
+                    "props": {
+                      "fields": [
+                        {
+                          "name": "title",
+                          "label": {
+                            "es": "Título",
+                            "en": "Title"
+                          },
+                          "type": "text",
+                          "required": true,
+                          "defaultValue": "${state.draft.title}",
+                          "rules": {
+                            "required": true,
+                            "maxLength": 120,
+                            "message": {
+                              "es": "El título es obligatorio (máximo 120 caracteres)",
+                              "en": "The title is required (maximum 120 characters)"
+                            }
+                          }
+                        },
+                        {
+                          "name": "body",
+                          "label": {
+                            "es": "Texto",
+                            "en": "Text"
+                          },
+                          "type": "textarea",
+                          "rows": 8,
+                          "defaultValue": "${state.draft.body}",
+                          "rules": {
+                            "maxLength": 2000,
+                            "message": {
+                              "es": "Máximo 2000 caracteres",
+                              "en": "Maximum 2000 characters"
+                            }
+                          }
+                        }
+                      ],
+                      "submitLabel": {
+                        "es": "Guardar",
+                        "en": "Save"
+                      },
+                      "cancelLabel": {
+                        "es": "Cancelar",
+                        "en": "Cancel"
+                      },
+                      "validateOn": "blur",
+                      "onSubmit": {
+                        "action": "CALL_BACKEND",
+                        "function": "saveNote",
+                        "args": {
+                          "id": "${state.draft.id}"
+                        },
+                        "key": "saveNote",
+                        "retry": {
+                          "attempts": 1
+                        },
+                        "onSuccess": [
+                          {
+                            "action": "SET_STATE",
+                            "key": "selected",
+                            "value": "${result.note}"
+                          },
+                          {
+                            "action": "SET_STATE",
+                            "key": "mode",
+                            "value": "view"
+                          },
+                          {
+                            "action": "CALL_BACKEND",
+                            "function": "listNotes",
+                            "key": "listNotes",
+                            "resultKey": "notesData",
+                            "toastOnError": false
+                          },
+                          {
+                            "action": "TOAST",
+                            "message": {
+                              "es": "Nota guardada",
+                              "en": "Note saved"
+                            },
+                            "tone": "success"
+                          }
+                        ]
+                      },
+                      "onCancel": {
+                        "action": "SET_STATE",
+                        "key": "mode",
+                        "value": "${state.selected ? 'view' : 'none'}"
+                      }
+                    }
+                  }
+                ]
+              },
+              "false": {
+                "type": "CONDITIONAL",
+                "props": {
+                  "condition": "${state.selected}",
+                  "true": {
+                    "type": "CARD",
+                    "props": {
+                      "title": "${state.selected.title}"
+                    },
+                    "children": [
+                      {
+                        "type": "TEXT",
+                        "props": {
+                          "content": "${state.selected.body}"
+                        }
+                      },
+                      {
+                        "type": "ROW",
+                        "props": {
+                          "gap": 2
+                        },
+                        "children": [
+                          {
+                            "type": "BUTTON",
+                            "props": {
+                              "label": {
+                                "es": "Editar",
+                                "en": "Edit"
+                              },
+                              "icon": "Pencil",
+                              "variant": "outline",
+                              "onClick": [
+                                {
+                                  "action": "SET_STATE",
+                                  "key": "draft",
+                                  "value": "${state.selected}"
+                                },
+                                {
+                                  "action": "SET_STATE",
+                                  "key": "mode",
+                                  "value": "edit"
+                                }
+                              ]
+                            }
+                          },
+                          {
+                            "type": "BUTTON",
+                            "props": {
+                              "label": {
+                                "es": "Eliminar",
+                                "en": "Delete"
+                              },
+                              "icon": "Trash2",
+                              "tone": "danger",
+                              "variant": "outline",
+                              "onClick": {
+                                "action": "CONFIRM",
+                                "message": {
+                                  "es": "¿Eliminar esta nota?",
+                                  "en": "Delete this note?"
+                                },
+                                "onConfirm": {
+                                  "action": "CALL_BACKEND",
+                                  "function": "deleteNote",
+                                  "args": {
+                                    "ids": [
+                                      "${state.selected.id}"
+                                    ]
+                                  },
+                                  "key": "deleteNote",
+                                  "onSuccess": [
+                                    {
+                                      "action": "SET_STATE",
+                                      "key": "selected",
+                                      "value": null
+                                    },
+                                    {
+                                      "action": "SET_STATE",
+                                      "key": "mode",
+                                      "value": "none"
+                                    },
+                                    {
+                                      "action": "SET_STATE",
+                                      "key": "checked",
+                                      "value": []
+                                    },
+                                    {
+                                      "action": "CALL_BACKEND",
+                                      "function": "listNotes",
+                                      "key": "listNotes",
+                                      "resultKey": "notesData",
+                                      "toastOnError": false
+                                    },
+                                    {
+                                      "action": "TOAST",
+                                      "message": {
+                                        "es": "Notas eliminadas",
+                                        "en": "Notes deleted"
+                                      },
+                                      "tone": "success"
+                                    }
+                                  ]
+                                }
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "false": {
+                    "type": "EMPTY",
+                    "props": {
+                      "icon": "NotebookPen",
+                      "title": {
+                        "es": "Selecciona una nota",
+                        "en": "Select a note"
+                      },
+                      "description": {
+                        "es": "Elige una nota de la lista para verla aquí.",
+                        "en": "Pick a note from the list to see it here."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "alsoIn": []
     },
     "SPACER": {
-      "file": "google-meet/manifest.json",
-      "extensionId": "core-google-meet",
+      "file": "microsoft-teams/manifest.json",
+      "extensionId": "core-microsoft-teams",
       "point": "OVERLAY",
-      "path": "mounts[2].component.props.children[0].props.true[0].props.true[1]",
+      "path": "mounts[2].component.props.children[0].props.true[1]",
       "node": {
         "type": "SPACER",
         "props": {
-          "size": 12
+          "size": 3
         }
       },
       "alsoIn": [
+        "google-meet/manifest.json",
         "zoom/manifest.json"
       ]
     },
@@ -295,11 +859,13 @@
       "alsoIn": [
         "appointments/manifest.json",
         "composer-helper/manifest.json",
+        "domain-metrics/manifest.json",
         "giphy/manifest.json",
         "google-drive/manifest.json",
         "google-meet/manifest.json",
         "hubspot/manifest.json",
         "notion/manifest.json",
+        "quick-notes/manifest.json",
         "translator/manifest.json"
       ]
     },
@@ -336,12 +902,15 @@
         "appointments/manifest.json",
         "calendar/manifest.json",
         "composer-helper/manifest.json",
+        "domain-metrics/manifest.json",
         "giphy/manifest.json",
         "google-meet/manifest.json",
         "google-sync/manifest.json",
         "hubspot/manifest.json",
+        "microsoft-teams/manifest.json",
         "notion/manifest.json",
         "organizer/manifest.json",
+        "quick-notes/manifest.json",
         "summarizer/manifest.json",
         "translator/manifest.json",
         "trello/manifest.json",
@@ -483,7 +1052,8 @@
         }
       },
       "alsoIn": [
-        "composer-helper/manifest.json"
+        "composer-helper/manifest.json",
+        "domain-metrics/manifest.json"
       ]
     },
     "FORM": {
@@ -518,8 +1088,97 @@
         "calendar/manifest.json",
         "google-meet/manifest.json",
         "hubspot/manifest.json",
+        "microsoft-teams/manifest.json",
+        "quick-notes/manifest.json",
         "trello/manifest.json",
         "zoom/manifest.json"
+      ]
+    },
+    "TABLE": {
+      "file": "domain-metrics/manifest.json",
+      "extensionId": "core-domain-metrics",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[5].children[0]",
+      "node": {
+        "type": "TABLE",
+        "props": {
+          "caption": {
+            "es": "Detalle diario de correo y spam",
+            "en": "Daily mail and spam detail"
+          },
+          "columns": [
+            {
+              "key": "date",
+              "label": {
+                "es": "Fecha",
+                "en": "Date"
+              },
+              "sortable": true,
+              "format": "date"
+            },
+            {
+              "key": "received",
+              "label": {
+                "es": "Recibidos",
+                "en": "Received"
+              },
+              "sortable": true,
+              "format": "number",
+              "align": "end"
+            },
+            {
+              "key": "sent",
+              "label": {
+                "es": "Enviados",
+                "en": "Sent"
+              },
+              "sortable": true,
+              "format": "number",
+              "align": "end"
+            },
+            {
+              "key": "spamBlocked",
+              "label": {
+                "es": "Spam bloqueado",
+                "en": "Blocked spam"
+              },
+              "sortable": true,
+              "format": "number",
+              "align": "end"
+            }
+          ],
+          "data": "${state.metrics.rows}",
+          "rowKey": "date",
+          "searchable": true,
+          "searchPlaceholder": {
+            "es": "Buscar fecha (AAAA-MM-DD)",
+            "en": "Search date (YYYY-MM-DD)"
+          },
+          "defaultSort": {
+            "key": "date",
+            "dir": "desc"
+          },
+          "pageSize": 15,
+          "emptyText": {
+            "es": "Sin datos en este periodo",
+            "en": "No data in this period"
+          },
+          "loading": "${state.$loading.getMetrics}",
+          "error": "${state.$error.getMetrics}",
+          "onRetry": {
+            "action": "CALL_BACKEND",
+            "function": "getMetrics",
+            "args": {
+              "days": "${state.days || 14}"
+            },
+            "key": "getMetrics",
+            "resultKey": "metrics",
+            "toastOnError": false
+          }
+        }
+      },
+      "alsoIn": [
+        "quick-notes/manifest.json"
       ]
     },
     "LIST": {
@@ -759,6 +1418,26 @@
       },
       "alsoIn": []
     },
+    "KPI_CARD": {
+      "file": "domain-metrics/manifest.json",
+      "extensionId": "core-domain-metrics",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[2].children[2]",
+      "node": {
+        "type": "KPI_CARD",
+        "props": {
+          "label": {
+            "es": "Correos enviados",
+            "en": "Mail sent"
+          },
+          "value": "${state.metrics.kpis.sent}",
+          "icon": "Send",
+          "loading": "${state.$loading.getMetrics}",
+          "error": "${state.$error.getMetrics}"
+        }
+      },
+      "alsoIn": []
+    },
     "SKELETON": {
       "file": "giphy/manifest.json",
       "extensionId": "core-giphy",
@@ -774,25 +1453,42 @@
       "alsoIn": []
     },
     "EMPTY": {
-      "file": "calendar/manifest.json",
-      "extensionId": "core-calendar",
-      "point": "OVERLAY",
-      "path": "mounts[3].component.children[0].children[0].props.empty",
+      "file": "quick-notes/manifest.json",
+      "extensionId": "core-quick-notes",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[1].props.startPane.props.true",
       "node": {
         "type": "EMPTY",
         "props": {
-          "icon": "CalendarX",
+          "icon": "NotebookPen",
           "title": {
-            "es": "Aún no hay eventos",
-            "en": "No events yet"
+            "es": "Aún no tienes notas",
+            "en": "You have no notes yet"
           },
           "description": {
-            "es": "Crea tu primer evento y vuelve a intentarlo.",
-            "en": "Create your first event and try again."
-          }
+            "es": "Crea tu primera nota para empezar.",
+            "en": "Create your first note to get started."
+          },
+          "actionLabel": {
+            "es": "Nueva nota",
+            "en": "New note"
+          },
+          "action": [
+            {
+              "action": "SET_STATE",
+              "key": "draft",
+              "value": {}
+            },
+            {
+              "action": "SET_STATE",
+              "key": "mode",
+              "value": "edit"
+            }
+          ]
         }
       },
       "alsoIn": [
+        "calendar/manifest.json",
         "giphy/manifest.json"
       ]
     },
@@ -846,6 +1542,7 @@
       "alsoIn": [
         "composer-helper/manifest.json",
         "google-meet/manifest.json",
+        "microsoft-teams/manifest.json",
         "zoom/manifest.json"
       ]
     },
@@ -913,11 +1610,55 @@
         "google-drive/manifest.json",
         "google-meet/manifest.json",
         "hubspot/manifest.json",
+        "microsoft-teams/manifest.json",
         "notion/manifest.json",
         "translator/manifest.json",
         "trello/manifest.json",
         "zoom/manifest.json"
       ]
+    },
+    "CHART": {
+      "file": "domain-metrics/manifest.json",
+      "extensionId": "core-domain-metrics",
+      "point": "PAGE",
+      "path": "mounts[0].component.children[4]",
+      "node": {
+        "type": "CHART",
+        "props": {
+          "kind": "area",
+          "title": {
+            "es": "Spam bloqueado por día",
+            "en": "Blocked spam per day"
+          },
+          "description": {
+            "es": "Correos que acabaron en la carpeta de spam cada día.",
+            "en": "Mail that ended up in the spam folder each day."
+          },
+          "labels": "${state.metrics.chart.labels}",
+          "series": [
+            {
+              "label": {
+                "es": "Spam bloqueado",
+                "en": "Blocked spam"
+              },
+              "data": "${state.metrics.chart.spamBlocked}",
+              "tone": "danger"
+            }
+          ],
+          "unit": {
+            "es": "correos",
+            "en": "emails"
+          },
+          "height": "sm",
+          "emptyText": {
+            "es": "Sin datos en este periodo",
+            "en": "No data in this period"
+          },
+          "loading": "${state.$loading.getMetrics}",
+          "error": "${state.$error.getMetrics}"
+        }
+      },
+      "alsoIn": []
     },
     "CONDITIONAL": {
       "file": "google-drive/manifest.json",
@@ -962,7 +1703,9 @@
         "google-meet/manifest.json",
         "google-sync/manifest.json",
         "hubspot/manifest.json",
+        "microsoft-teams/manifest.json",
         "notion/manifest.json",
+        "quick-notes/manifest.json",
         "summarizer/manifest.json",
         "zoom/manifest.json"
       ]

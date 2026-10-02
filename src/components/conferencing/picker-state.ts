@@ -172,6 +172,7 @@ export function safeConnectHref(url: unknown, returnTo?: string | null): string 
 export const DEFAULT_CONNECT_URL: Partial<Record<ConferencingProviderId, string>> = {
     'google-meet': '/api/auth/google',
     zoom: '/api/auth/zoom',
+    'microsoft-teams': '/api/oauth/microsoft/start',
 };
 
 /** Destino OAuth seguro para conectar un proveedor (null si no hay OAuth o la URL no es segura). */
@@ -320,6 +321,7 @@ export function meetingFromLink(raw: unknown): PickerMeeting | null {
     if (!info) return null;
     if (info.provider === 'google-meet') return { provider: 'google-meet', joinUrl: info.url, providerName: info.providerName, meetingId: '' };
     if (info.provider === 'zoom') return { provider: 'zoom', joinUrl: info.url, providerName: info.providerName, meetingId: '' };
+    if (info.provider === 'teams') return { provider: 'microsoft-teams', joinUrl: info.url, providerName: info.providerName, meetingId: '' };
     return null;
 }
 

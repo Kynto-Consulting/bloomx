@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+vi.setConfig({ testTimeout: 30_000 });
 
 async function load() {
     vi.resetModules();

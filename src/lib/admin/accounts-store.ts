@@ -67,6 +67,18 @@ export function deriveIntegrations(provider: string, scopes: string[]): string[]
         if (has(/auth\/tasks/)) out.push('tasks');
     } else if (p === 'zoom') {
         if (scopes.length === 0 || has(/meeting/)) out.push('meetings');
+    } else if (p === 'microsoft') {
+        if (has(/^Calendars\./i)) out.push('calendar');
+        if (has(/^OnlineMeetings\./i)) out.push('meetings');
+        if (has(/^Contacts\./i)) out.push('contacts');
+        if (has(/^Mail\./i)) out.push('mail');
+        if (has(/^Files\./i)) out.push('files');
+        if (has(/^User\.ReadBasic\.All$/i)) out.push('directory');
+    } else if (p === 'slack') {
+        // Las cuentas de Slack son dos por usuario (bot y usuario): los scopes de usuario llevan el prefijo "user:".
+        if (has(/^(user:)?chat:write/)) out.push('chat');
+        if (has(/^(user:)?(channels|groups):read/)) out.push('channels');
+        if (has(/^(user:)?users:read/)) out.push('users');
     }
     return out;
 }

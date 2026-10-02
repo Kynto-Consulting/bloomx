@@ -1,6 +1,6 @@
 import type { Block, DocPageContent } from '../types';
 import { iconBlocks } from '../icon-docs';
-import { GAPS, TONES, UI_ACTIONS, UI_COMPONENTS, UI_LIMITS, type PropSpec } from '@/lib/expansions/ui-schema';
+import { GAPS, TONES, UI_ACTIONS, UI_COMPONENTS, PAGE_UI_COMPONENTS, UI_LIMITS, type PropSpec } from '@/lib/expansions/ui-schema';
 import { EN_DOC, KIT_CATEGORIES as CATEGORIES, kitHref } from '../ui-kit/kit';
 
 /**
@@ -36,6 +36,28 @@ function catalogBlocks(locale: 'es' | 'en'): Block[] {
         });
     }
     return out;
+}
+
+/** Componentes de pagina completa (PAGE_UI_COMPONENTS, capacidad ui.pages.v1): la lista sale del esquema; el texto es manual. */
+function pageComponentBlocks(locale: 'es' | 'en'): Block[] {
+    const es = locale === 'es';
+    const rows = PAGE_UI_COMPONENTS.filter((t) => UI_COMPONENTS[t]).map((t) => [`[\`${t}\`](${kitHref(t)})`, es ? UI_COMPONENTS[t].doc : (EN_DOC[t] ?? UI_COMPONENTS[t].doc)]);
+    return [
+        { t: 'h2', id: 'page-components', text: es ? 'Componentes de página completa' : 'Full-page components' },
+        { t: 'p', text: es
+            ? 'Pensados para un mount `PAGE` (una página completa en `/extensions/<path>`). Cada uno tiene su página con vista previa y simulador con datos simulados (sin backend real). **Exigen la capacidad `ui.pages.v1`** en `requires.capabilities`; los clientes antiguos no reciben esas versiones.'
+            : 'Designed for a `PAGE` mount (a full page at `/extensions/<path>`). Each has its own page with a preview and a simulator with mock data (no real backend). **They require the `ui.pages.v1` capability** in `requires.capabilities`; old clients do not receive those versions.' },
+        { t: 'table', head: es ? ['Componente', 'Qué es'] : ['Component', 'What it is'], rows },
+        { t: 'p', text: es
+            ? 'La [`TABLE`](/docs/extension-ui/table) también ganó, con la misma capacidad: `searchable`, filtros por columna (`columns[].filter`), celdas `link` y `status` (`toneMap`, `hrefKey`), `bulkActions`, `defaultSort` y los estados `error` + `onRetry`.'
+            : 'The [`TABLE`](/docs/extension-ui/table) also gained, with the same capability: `searchable`, column filters (`columns[].filter`), `link` and `status` cells (`toneMap`, `hrefKey`), `bulkActions`, `defaultSort` and the `error` + `onRetry` states.' },
+        { t: 'callout', kind: 'note', title: es ? 'No se duplican' : 'Not duplicated', text: es
+            ? 'Ya existían y se reutilizan: [`SECTION`](/docs/extension-ui/section) (plegable), [`TABS`](/docs/extension-ui/tabs), [`WIZARD`](/docs/extension-ui/wizard), [`DRAWER`](/docs/extension-ui/drawer), [`EMPTY`](/docs/extension-ui/empty) (alias `EMPTY_STATE`), [`PROGRESS`](/docs/extension-ui/progress), [`AVATAR`](/docs/extension-ui/avatar), [`BADGE`](/docs/extension-ui/badge), [`ALERT`](/docs/extension-ui/alert), [`CODE`](/docs/extension-ui/code) (alias `CODE_BLOCK`), [`MARKDOWN`](/docs/extension-ui/markdown) (seguro, sin HTML) y `DATA_TABLE` (alias de `TABLE`).'
+            : 'These already existed and are reused: [`SECTION`](/docs/extension-ui/section) (collapsible), [`TABS`](/docs/extension-ui/tabs), [`WIZARD`](/docs/extension-ui/wizard), [`DRAWER`](/docs/extension-ui/drawer), [`EMPTY`](/docs/extension-ui/empty) (alias `EMPTY_STATE`), [`PROGRESS`](/docs/extension-ui/progress), [`AVATAR`](/docs/extension-ui/avatar), [`BADGE`](/docs/extension-ui/badge), [`ALERT`](/docs/extension-ui/alert), [`CODE`](/docs/extension-ui/code) (alias `CODE_BLOCK`), [`MARKDOWN`](/docs/extension-ui/markdown) (safe, no HTML) and `DATA_TABLE` (alias of `TABLE`).' },
+        { t: 'p', text: es
+            ? 'Para construir una página completa y enlazarla desde la navegación, sigue [Página completa y navegación](/docs/extension-pages).'
+            : 'To build a full page and link it from the navigation, follow [Full page and navigation](/docs/extension-pages).' },
+    ];
 }
 
 function actionRows(): string[][] {
@@ -89,6 +111,7 @@ const page: DocPageContent = {
         { t: 'h2', id: 'components', text: 'Un componente, una página' },
         { t: 'p', text: 'Cada componente del kit tiene su **página propia** (`/docs/extension-ui/<componente>`, por ejemplo [`BUTTON`](/docs/extension-ui/button), [`FORM`](/docs/extension-ui/form) o [`TABLE`](/docs/extension-ui/table)) con la tabla de props generada del esquema, vista previa en vivo con el renderer real, un **simulador** (editor de props, validación, estado, contexto, backend simulado y registro de eventos) y un ejemplo tomado de un manifest real. El índice de abajo agrupa todos por categoría.' },
         { t: 'kit-index' },
+        ...pageComponentBlocks('es'),
         { t: 'h2', id: 'theming', text: 'Reglas de tematización' },
         { t: 'p', text: 'Regla clave: **una extensión no elige colores ni estilos**. Solo usa propiedades semánticas y el renderer las traduce a los tokens del tema activo (`bg-primary`, `text-success`, `border-destructive`...), con el contraste exigido por el contrato de temas ([Temas empresariales](/docs/themes)).' },
         { t: 'table', head: ['Propiedad', 'Valores', 'Uso'], rows: [
@@ -167,6 +190,7 @@ const page: DocPageContent = {
         { t: 'h2', id: 'components', text: 'One component, one page' },
         { t: 'p', text: 'Every kit component has its **own page** (`/docs/extension-ui/<component>`, for example [`BUTTON`](/docs/extension-ui/button), [`FORM`](/docs/extension-ui/form) or [`TABLE`](/docs/extension-ui/table)) with the props table generated from the schema, a live preview using the real renderer, a **simulator** (props editor, validation, state, context, simulated backend and event log) and an example taken from a real manifest. The index below groups them all by category.' },
         { t: 'kit-index' },
+        ...pageComponentBlocks('en'),
         { t: 'h2', id: 'theming', text: 'Theming rules' },
         { t: 'p', text: 'Key rule: **an extension does not choose colours or styles**. It only uses semantic properties and the renderer maps them to the active theme tokens (`bg-primary`, `text-success`, `border-destructive`...) with the contrast required by the theme contract ([Enterprise themes](/docs/themes)).' },
         { t: 'table', head: ['Property', 'Values', 'Use'], rows: [

@@ -4,12 +4,12 @@ import { getCurrentUser, getSessionCookie, setSessionCookie } from '@/lib/sessio
 import { mfaRequiredFor } from '@/lib/mfa';
 import { refreshPermissions } from '@/lib/permissions';
 import { auditLog, getClientIp, isSafeRelativePath, rateLimitAsync } from '@/lib/security';
-import { checkOAuthEndpointUrl, OAUTH_RESERVED_PARAMS } from '@/lib/expansions/oauth-schema';
+import { checkOAuthEndpointUrl, issuerClaimNames, issuerParamMatches, OAUTH_RESERVED_PARAMS } from '@/lib/expansions/oauth-schema';
 import { patchAllUserMeetRooms } from '@/lib/google/meet';
 import { codeChallengeS256, PKCE_METHOD } from './pkce';
 import { clearFlowCookie, newFlow, persistFlow, setFlowCookie, verifyAndConsumeFlow, type FlowMode } from './flow-state';
 import { getProvider, usesOfficialEndpoints, type ProviderRuntime } from './providers';
-import { exchangeCode, normalizeScope, OAuthAccountError } from './tokens';
+import { exchangeCode, grantAccountId, normalizeScope, OAuthAccountError, tokenGrants } from './tokens';
 import { verifyIdToken, type IdTokenClaims } from './id-token';
 import { providerFetch } from './http';
 
@@ -97,7 +97,12 @@ export async function startOAuth(req: NextRequest, providerId: string, options: 
     });
 
     if (checkOAuthEndpointUrl(provider.authorizeUrl, provider.allowedHosts) !== null) return fail(500, 'provider_endpoint_rejected');
-    const params = new URLSearchParams({ client_id: provider.clientId, redirect_uri: redirectUri, response_type: 'code', scope: scopes.join(' '), state });
+    // Slack OAuth v2: scopes del bot en `scope` y los de usuario (prefijo "user:" en el catalogo) en `user_scope`, ambos separados por comas.
+    const slack = provider.tokenFormat === 'slack-v2';
+    const userScopes = slack ? scopes.filter((s) => s.startsWith('user:')).map((s) => s.slice(5)) : [];
+    const sentScopes = slack ? scopes.filter((s) => !s.startsWith('user:')) : scopes;
+    const params = new URLSearchParams({ client_id: provider.clientId, redirect_uri: redirectUri, response_type: 'code', scope: sentScopes.join(slack ? ',' : ' '), state });
+    if (slack) { if (sentScopes.length === 0) params.delete('scope'); if (userScopes.length) params.set('user_scope', userScopes.join(',')); }
     if (record.verifier) { params.set('code_challenge', codeChallengeS256(record.verifier)); params.set('code_challenge_method', PKCE_METHOD); }
     if (record.nonce) params.set('nonce', record.nonce);
     for (const [k, v] of Object.entries(provider.extraParams)) if (!OAUTH_RESERVED_PARAMS.includes(k)) params.set(k, v);
@@ -158,7 +163,8 @@ export async function finishOAuth(req: NextRequest, providerId: string): Promise
     }
     // Mix-up (RFC 9207): si el proveedor devuelve `iss` debe ser el suyo.
     const iss = q.get('iss');
-    if (iss && provider.issuer && iss !== provider.issuer) {
+    // (con emisor por plantilla {claim:tid} se acepta cualquier segmento seguro, y el tenant fijado si lo hay; el emisor del id_token se vuelve a comprobar con su tid)
+    if (iss && provider.issuer && !(issuerClaimNames(provider.issuer).length > 0 ? issuerParamMatches(provider.issuer, iss, provider.issuerPins) : iss === provider.issuer)) {
         auditLog('auth.oauth.mixup_blocked', { provider: provider.id, ip });
         return loginError(origin, 'InvalidState', provider.id);
     }
@@ -181,6 +187,9 @@ export async function finishOAuth(req: NextRequest, providerId: string): Promise
             console.error('[OAUTH] token exchange failed:', provider.id, error instanceof Error ? error.message.slice(0, 80) : 'unknown');
             return loginError(origin, isGoogle ? 'GoogleAuthFailed' : 'OAuthFailed', provider.id);
         }
+
+        // Slack OAuth v2: sin id_token ni userinfo; la identidad (equipo + usuario) viene en la respuesta del token y se guardan bot y usuario por separado.
+        if (provider.tokenFormat === 'slack-v2') return await completeGrants({ origin, provider, tokens, returnTo, currentUserId: currentUser?.id ?? null, ip });
 
         // 2. id_token (OIDC): firma, iss, aud, azp, exp y nonce.
         let claims: IdTokenClaims | null = null;
@@ -247,6 +256,29 @@ async function completeLinkOnly(a: { origin: string; provider: ProviderRuntime; 
     }
     await upsertAccount(a.provider, a.currentUserId, a.profile, a.tokens);
     auditLog('auth.oauth.linked', { provider: a.provider.id, userId: a.currentUserId, ip: a.ip });
+    const ok = redirect(a.origin, a.returnTo);
+    clearFlowCookie(ok, a.provider.id);
+    return ok;
+}
+
+/** Proveedores con varias concesiones por autorizacion (Slack: bot + usuario): cada una es una cuenta propia del usuario con sesion. */
+async function completeGrants(a: { origin: string; provider: ProviderRuntime; tokens: Tokens; returnTo: string; currentUserId: string | null; ip: string }): Promise<NextResponse> {
+    if (!a.currentUserId) return loginError(a.origin, 'LoginRequired', a.provider.id);
+    const identity = tokenGrants(a.provider, a.tokens);
+    if (!identity) return loginError(a.origin, 'OAuthFailed', a.provider.id);
+    const planned = identity.grants.map((g) => ({ grant: g, accountId: grantAccountId(identity, g, '') }));
+    for (const { accountId } of planned) {
+        const existing = await prisma.account.findUnique({ where: { provider_providerAccountId: { provider: a.provider.id, providerAccountId: accountId } } });
+        if (existing && existing.userId !== a.currentUserId) {
+            const res = redirect(a.origin, `${a.returnTo}${a.returnTo.includes('?') ? '&' : '?'}error=AccountAlreadyLinked`);
+            clearFlowCookie(res, a.provider.id);
+            return res;
+        }
+    }
+    for (const { grant, accountId } of planned) {
+        await upsertAccount(a.provider, a.currentUserId, { id: accountId, email: null, verified: null, name: identity.teamName ?? null, picture: null }, { ...grant, access_token: grant.access_token } as Tokens);
+    }
+    auditLog('auth.oauth.linked', { provider: a.provider.id, userId: a.currentUserId, ip: a.ip, grants: planned.map((p) => p.grant.kind) });
     const ok = redirect(a.origin, a.returnTo);
     clearFlowCookie(ok, a.provider.id);
     return ok;

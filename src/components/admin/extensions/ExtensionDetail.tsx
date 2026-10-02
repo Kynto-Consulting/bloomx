@@ -24,8 +24,9 @@ import { RunLogTable } from './RunLogTable';
 import { configFields } from '@/lib/expansions/settings-schema';
 import { TabList, panelDomId, tabDomId, type TabDef } from './Tabs';
 import type { TestResult } from './useExtensionActions';
+import { DependenciesTab, DetailHeader, SummaryMarket, SupportTab, VersionsTab, type DetailMarketProps } from './market/DetailMarket';
 
-type TabId = 'summary' | 'permissions' | 'credentials' | 'settings' | 'status';
+type TabId = 'summary' | 'permissions' | 'versions' | 'dependencies' | 'support' | 'credentials' | 'settings' | 'status';
 
 export interface DetailProps {
     row: ExtensionRow | null;
@@ -36,9 +37,11 @@ export interface DetailProps {
     testSupport: { supported: boolean; reason: string | null };
     onTest: (row: ExtensionRow) => Promise<TestResult>;
     onOpenCredentials: (row: ExtensionRow) => void;
+    /** Marketplace: favorita, navegacion a editor/suite/otra ficha y filas del catalogo (versiones, dependencias, relacionadas). Opcional. */
+    market?: DetailMarketProps;
 }
 
-export function ExtensionDetail({ row, domainId, onClose, actions, testSupport, onTest, onOpenCredentials }: DetailProps) {
+export function ExtensionDetail({ row, domainId, onClose, actions, testSupport, onTest, onOpenCredentials, market }: DetailProps) {
     const { t } = useI18n();
     const uid = useId();
     const [tab, setTab] = useState<TabId>('summary');
@@ -53,6 +56,11 @@ export function ExtensionDetail({ row, domainId, onClose, actions, testSupport, 
     const tabs: TabDef<TabId>[] = [
         { id: 'summary', label: t('admin.console.extensions.detail.tab.summary') },
         { id: 'permissions', label: t('admin.console.extensions.detail.tab.permissions') },
+        ...(market ? [
+            { id: 'versions' as const, label: t('admin.console.extensions.market.detail.tab.versions') },
+            { id: 'dependencies' as const, label: t('admin.console.extensions.market.detail.tab.dependencies') },
+            { id: 'support' as const, label: t('admin.console.extensions.market.detail.tab.support') },
+        ] : []),
         ...(row?.hasCredentialKeys ? [{ id: 'credentials' as const, label: t('admin.console.extensions.detail.tab.credentials') }] : []),
         { id: 'settings', label: t('admin.console.extensions.detail.tab.settings') },
         { id: 'status', label: t('admin.console.extensions.detail.tab.status') },
@@ -69,12 +77,16 @@ export function ExtensionDetail({ row, domainId, onClose, actions, testSupport, 
         >
             {row && (
                 <div className="space-y-4">
+                    {market && <DetailHeader row={row} market={market} />}
                     <div className="flex flex-wrap gap-1.5"><StatusBadges row={row} /></div>
                     <AiRequirementSummary row={row} />
                     <TabList tabs={tabs} active={active} onChange={setTab} label={t('admin.console.extensions.detail.tabs')} idPrefix={uid} />
                     <div role="tabpanel" id={panelDomId(uid, active)} aria-labelledby={tabDomId(uid, active)} tabIndex={0} className="focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                        {active === 'summary' && <SummaryTab row={row} actions={actions} domainId={domainId} onGoTab={setTab} />}
+                        {active === 'summary' && <SummaryTab row={row} actions={actions} domainId={domainId} onGoTab={setTab} market={market} />}
                         {active === 'permissions' && <PermissionsTab row={row} />}
+                        {active === 'versions' && <VersionsTab row={row} />}
+                        {active === 'dependencies' && market && <DependenciesTab row={row} rows={market.rows} />}
+                        {active === 'support' && <SupportTab row={row} onOpenPublisher={market?.onOpenPublisher} />}
                         {active === 'credentials' && <CredentialsTab row={row} readOnly={actions.readOnly} onOpen={() => onOpenCredentials(row)} />}
                         {active === 'settings' && <SettingsTab row={row} domainId={domainId} readOnly={actions.readOnly} onGoCredentials={() => setTab('credentials')} />}
                         {active === 'status' && <StatusTab row={row} domainId={domainId} testSupport={testSupport} onTest={onTest} />}
@@ -112,7 +124,7 @@ function ManifestHealthNotice({ row }: { row: ExtensionRow }) {
     );
 }
 
-function SummaryTab({ row, actions, domainId, onGoTab }: { row: ExtensionRow; actions: RowActions; domainId: string; onGoTab: (tab: 'credentials' | 'settings') => void }) {
+function SummaryTab({ row, actions, domainId, onGoTab, market }: { row: ExtensionRow; actions: RowActions; domainId: string; onGoTab: (tab: 'credentials' | 'settings') => void; market?: DetailMarketProps }) {
     const { t } = useI18n();
     const tpl = row.template;
     const risk = overallRisk(tpl);
@@ -166,6 +178,7 @@ function SummaryTab({ row, actions, domainId, onGoTab }: { row: ExtensionRow; ac
                     ...(tpl?.manifestVersion ? [{ label: t('admin.console.extensions.summaryTab.manifestVersion'), value: tpl.manifestVersion }] : []),
                 ]}
             />
+            {market && <SummaryMarket row={row} market={market} />}
             {row.installed && <ConfigSummary row={row} domainId={domainId} onGoTab={onGoTab} />}
             {row.installed && <MandatoryControl row={row} actions={actions} />}
         </div>

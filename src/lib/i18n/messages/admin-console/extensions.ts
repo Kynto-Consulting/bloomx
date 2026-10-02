@@ -1,7 +1,9 @@
 import type { DeepString } from './types';
+import { marketEn, marketEs } from './extensions-market';
 
 /** Textos de la seccion "extensions" de la consola (namespace admin.console.extensions). */
 export const extensionsEs = {
+    market: marketEs,
     title: 'Extensiones',
     description: 'Instala, activa y configura las extensiones de este dominio, y revisa qué permisos piden antes de concederlos.',
     live: {
@@ -43,6 +45,9 @@ export const extensionsEs = {
             integrations: 'Integraciones',
             productivity: 'Productividad',
             security: 'Seguridad',
+            composer: 'Redacción',
+            automation: 'Automatización',
+            settings: 'Ajustes',
             other: 'Otras',
         },
         statuses: {
@@ -52,6 +57,7 @@ export const extensionsEs = {
             disabled: 'Desactivadas',
             errors: 'Con errores',
             paid: 'De pago',
+            free: 'Gratis',
         },
     },
     catalog: {
@@ -166,6 +172,13 @@ export const extensionsEs = {
         instance_unavailable: 'No se pudo comprobar el dominio de esta instancia. Inténtalo de nuevo.',
         PAYMENT_REQUIRED: 'Esta extensión es de pago: completa el pago antes de instalarla.',
         paymentFailed: 'No se pudo iniciar el pago.',
+        reauth_required: 'Confirma tu identidad para continuar con el pago.',
+        payments_not_configured: 'Los pagos aún no están habilitados en esta plataforma.',
+        payments_unavailable: 'El servicio de pagos no está disponible por ahora. Inténtalo más tarde.',
+        signature_required: 'Los pagos exigen que esta instancia firme sus peticiones con la clave del dominio (Perfil, clave de firma).',
+        already_owned: 'Esta extensión ya es tuya.',
+        not_for_sale: 'Esta extensión no está a la venta.',
+        invalid_plan: 'El plan elegido no existe para esta extensión.',
         not_installed: 'La extensión no está instalada en este dominio.',
         extension_not_found: 'La extensión ya no existe en el catálogo.',
         backend_unavailable: 'El servicio de extensiones no responde. Inténtalo más tarde.',
@@ -501,6 +514,7 @@ export const extensionsEs = {
 } as const;
 
 export const extensionsEn: DeepString<typeof extensionsEs> = {
+    market: marketEn,
     title: 'Extensions',
     description: 'Install, enable and configure this domain\'s extensions, and review the permissions they ask for before granting them.',
     live: {
@@ -542,6 +556,9 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
             integrations: 'Integrations',
             productivity: 'Productivity',
             security: 'Security',
+            composer: 'Writing',
+            automation: 'Automation',
+            settings: 'Settings',
             other: 'Other',
         },
         statuses: {
@@ -551,6 +568,7 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
             disabled: 'Disabled',
             errors: 'With errors',
             paid: 'Paid',
+            free: 'Free',
         },
     },
     catalog: {
@@ -665,6 +683,13 @@ export const extensionsEn: DeepString<typeof extensionsEs> = {
         instance_unavailable: 'The domain of this instance could not be verified. Try again.',
         PAYMENT_REQUIRED: 'This extension is paid: complete the payment before installing it.',
         paymentFailed: 'Payment could not be started.',
+        reauth_required: 'Confirm your identity to continue with the payment.',
+        payments_not_configured: 'Payments are not enabled on this platform yet.',
+        payments_unavailable: 'The payment service is unavailable right now. Try again later.',
+        signature_required: 'Payments require this instance to sign its requests with the domain key (Profile, signing key).',
+        already_owned: 'You already own this extension.',
+        not_for_sale: 'This extension is not for sale.',
+        invalid_plan: 'The selected plan does not exist for this extension.',
         not_installed: 'The extension is not installed on this domain.',
         extension_not_found: 'The extension no longer exists in the catalog.',
         backend_unavailable: 'The extensions service is not responding. Try again later.',

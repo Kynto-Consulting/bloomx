@@ -5,7 +5,7 @@
  */
 import { sanitizeRequires } from './extensions-compat';
 import { manifestDependencies } from '@/lib/expansions/ext-dependencies';
-import { describePermissions, KNOWN_MOUNT_POINTS, manifestIcon, type PermissionRisk } from '@/lib/expansions/manifest-schema';
+import { describePermissions, KNOWN_MOUNT_POINTS, manifestIcon, readCatalogMeta, type PermissionRisk } from '@/lib/expansions/manifest-schema';
 import { normalizeSettingsSchema, type SettingsSchema } from '@/lib/expansions/settings-schema';
 
 export type Json = Record<string, any>;
@@ -261,6 +261,8 @@ export interface ManifestSummary {
     requires?: { clientApi: string | null; capabilities: string[] };
     /** Dependencias de otras extensiones (manifest.requires.extensions): { id: rango semver }. */
     dependencies?: Record<string, string>;
+    /** Metadatos de marketplace declarados por el manifest (editor, suite, categorias, etiquetas); solo si declara alguno. */
+    catalog?: { publisher: { id: string; name: string; icon?: string; url?: string; verified: boolean; official: boolean }; suite: { id: string; name: string; icon: string | null } | null; categories: string[]; tags: string[] };
 }
 
 const short = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max) : undefined);
@@ -295,6 +297,10 @@ export function summarizeTemplate(template: unknown): ManifestSummary | null {
     if (t.mandatory === true) out.mandatory = true;
     const requires = sanitizeRequires(t.requires);
     if (requires) out.requires = requires;
+    if (['publisher', 'suite', 'categories', 'tags'].some((k) => t[k] !== undefined)) {
+        const meta = readCatalogMeta(t);
+        out.catalog = { publisher: meta.publisher, suite: meta.suite, categories: meta.categories, tags: meta.tags };
+    }
     const dependencies = manifestDependencies(t);
     if (Object.keys(dependencies).length > 0) out.dependencies = dependencies;
     if (t.ai && typeof t.ai === 'object' && !Array.isArray(t.ai)) {

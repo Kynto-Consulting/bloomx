@@ -208,8 +208,11 @@ const TABLE_COLUMN = S.obj({
     label: S.text("Cabecera."),
     sortable: S.bool("Permite ordenar por esta columna."),
     align: S.en(TEXT_ALIGNS, "Alineacion del texto."),
-    format: S.en(["text", "number", "date", "datetime", "boolean", "badge", "code"], "Formato del valor.", { def: "text" }),
+    format: S.en(["text", "number", "date", "datetime", "boolean", "badge", "code", "link", "status"], "Formato del valor (link: el valor es el texto y `hrefKey` la URL; status: punto + texto con el tono de `toneMap`).", { def: "text" }),
     tone: tone(),
+    toneMap: S.rec(S.en(TONES, "Tono."), "Valor de la celda -> tono (formatos badge y status); lo no listado usa `tone`."),
+    hrefKey: S.name("Formato link: clave de la fila con la URL (http, https, mailto, tel o ruta interna); sin ella el propio valor es la URL."),
+    filter: S.bool("Anade un filtro desplegable con los valores distintos de la columna (hasta 30)."),
     width: S.en(["xs", "sm", "md", "lg"], "Ancho orientativo."),
 }, "Columna");
 
@@ -219,6 +222,25 @@ const ROW_ACTION = S.obj({
     tone: tone(),
     onClick: S.action("Accion (recibe `row`)."),
 }, "Accion de fila");
+
+const BULK_ACTION = S.obj({
+    label: S.text("Nombre de la accion (texto del boton)."),
+    icon: S.icon(),
+    tone: tone(),
+    onClick: S.action("Accion sobre la seleccion (recibe `rows` y `value`: claves seleccionadas)."),
+}, "Accion sobre la seleccion");
+
+const BREADCRUMB = S.obj({
+    label: S.text("Texto del tramo.", { required: true }),
+    url: S.url("Ruta interna (empieza por /) o URL; sin `url` ni `onClick` es el tramo actual."),
+    onClick: S.action("Accion en lugar de navegar."),
+}, "Tramo de migas de pan");
+
+const CHART_SERIES = S.obj({
+    label: S.text("Nombre de la serie (leyenda y tooltip); admite {es,en}.", { required: true }),
+    data: S.arr(S.any("Valor numerico (null = hueco)."), "Valores, uno por etiqueta de `labels`."),
+    tone: S.en(TONES, "Tono de la serie; por defecto se reparte por orden."),
+}, "Serie");
 
 const CHART_POINT = S.obj({
     label: S.text("Etiqueta."),
@@ -271,6 +293,29 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
             title: S.text("Titulo de la seccion."), description: S.text("Texto de apoyo."),
             collapsible: S.bool("El usuario puede plegarla."), defaultOpen: S.bool("Abierta al inicio.", { def: true }),
             gap: gap(3),
+        },
+    },
+    PAGE_HEADER: {
+        category: "layout",
+        doc: "Cabecera de una pagina completa: migas de pan, titulo (h1), estado, descripcion y acciones; muestra su propio estado de carga y error con Reintentar.",
+        props: {
+            title: S.text("Titulo de la pagina (h1).", { required: true }), description: S.text("Texto de apoyo bajo el titulo."), icon: S.icon(),
+            breadcrumbs: S.arr(BREADCRUMB, "Migas de pan (max 6)."),
+            status: S.obj({ label: S.text("Texto del estado.", { required: true }), tone: tone() }, "Estado de la pagina (etiqueta junto al titulo)."),
+            actions: S.nodes("Acciones (BUTTON, MENU...) a la derecha; en movil pasan debajo."),
+            loading: S.bool("Muestra el esqueleto del titulo."), error: S.text("Mensaje de error: muestra un aviso en lugar del estado."),
+            onRetry: S.action("Accion del boton Reintentar (solo con `error`)."),
+        },
+    },
+    SPLIT_PANE: {
+        category: "layout",
+        doc: "Dos paneles (p. ej. lista y detalle): lado a lado en escritorio y apilados en pantallas estrechas. Redimensionable con raton o teclado si `resizable`.",
+        props: {
+            startPane: S.nodes("Panel principal (izquierda; arriba en movil)."), endPane: S.nodes("Panel secundario (derecha; debajo en movil)."),
+            ratio: S.en(["1:3", "1:2", "1:1", "2:1", "3:1"], "Proporcion de ancho startPane:endPane.", { def: "1:2" }),
+            resizable: S.bool("El usuario mueve el divisor (arrastrar o flechas izquierda/derecha, Inicio/Fin)."),
+            gap: gap(4), sticky: S.bool("El panel principal (startPane) queda fijo al desplazar la pagina (solo escritorio)."),
+            startLabel: S.text("Nombre accesible de startPane."), endLabel: S.text("Nombre accesible de endPane."),
         },
     },
     DIVIDER: {
@@ -467,6 +512,10 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
             density: S.en(DENSITIES, "Altura de fila.", { def: "comfortable" }), emptyText: S.text("Texto si no hay filas."), loading: S.bool("Muestra esqueleto."),
             actions: S.arr(ROW_ACTION, "Acciones por fila."), onRowClick: S.action("Accion al pulsar una fila (recibe `row`)."), onSelect: S.action("Accion al cambiar la seleccion (recibe `value`)."),
             caption: S.text("Titulo accesible de la tabla."),
+            searchable: S.bool("Caja de busqueda que filtra por cualquier columna."), searchPlaceholder: S.text("Texto de ejemplo de la busqueda."),
+            defaultSort: S.obj({ key: S.name("Clave de la columna.", { required: true }), dir: S.en(["asc", "desc"], "Sentido.", { def: "asc" }) }, "Orden inicial."),
+            bulkActions: S.arr(BULK_ACTION, "Acciones sobre las filas seleccionadas (aparecen con seleccion multiple)."),
+            error: S.text("Mensaje de error de carga: sustituye a las filas."), onRetry: S.action("Accion del boton Reintentar (solo con `error`)."),
         },
     },
     LIST: {
@@ -483,6 +532,29 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
         category: "data", children: true,
         doc: "Elemento de lista con titulo, descripcion, icono y acciones finales (hijos).",
         props: { title: S.text("Titulo."), description: S.text("Texto secundario."), meta: S.text("Dato a la derecha (fecha, contador)."), icon: S.icon(), tone: tone(), selected: S.bool("Resaltado."), onClick: S.action("Hace el elemento pulsable.") },
+    },
+    TIMELINE: {
+        category: "data",
+        doc: "Linea de tiempo vertical de eventos (fecha, titulo, descripcion, icono y tono).",
+        props: {
+            items: S.arr(S.obj({
+                title: S.text("Titulo del evento.", { required: true }), description: S.text("Detalle."),
+                time: S.text("Fecha/hora (ISO, se formatea en el idioma del usuario) o texto libre."), icon: S.icon(), tone: tone(),
+                onClick: S.action("Accion al pulsar el evento."),
+            }, "Evento"), "Eventos (max 200), en el orden dado."),
+            emptyText: S.text("Texto si no hay eventos."), loading: S.bool("Muestra esqueleto."),
+        },
+    },
+    TREE: {
+        category: "data",
+        doc: "Arbol navegable accesible (WAI-ARIA tree: flechas, Inicio/Fin, Intro). Nodos {id, label, icon?, badge?, children?}.",
+        props: {
+            items: S.any("Arbol [{id,label,description?,icon?,badge?,children?:[...]}]; max 500 nodos y 8 niveles."),
+            bind: S.name("Clave de `state` con el id del nodo elegido."), label: S.text("Nombre accesible del arbol."),
+            defaultExpanded: S.num("Niveles abiertos al inicio (0 = todo cerrado).", { min: 0, max: 8, def: 1 }),
+            onSelect: S.action("Accion al elegir un nodo (recibe `value`: su id; y `item`)."),
+            emptyText: S.text("Texto si no hay nodos."), loading: S.bool("Muestra esqueleto."),
+        },
     },
     TABS: {
         category: "navigation", children: true,
@@ -503,6 +575,19 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
         },
     },
     ACCORDION_ITEM: { category: "navigation", children: true, doc: "Seccion de ACCORDION (forma heredada con hijos).", props: { title: S.text("Titulo.") } },
+    STEPPER: {
+        category: "navigation",
+        doc: "Indicador de los pasos de un proceso (completado, actual, pendiente, error). Solo informa; para mostrar contenido por pasos usa WIZARD.",
+        props: {
+            steps: S.arr(S.obj({
+                title: S.text("Titulo del paso.", { required: true }), description: S.text("Descripcion corta."),
+                status: S.en(["complete", "current", "upcoming", "error"], "Estado explicito; por defecto se deduce de `current`."),
+            }, "Paso"), "Pasos (max 20)."),
+            current: S.num("Indice (desde 0) del paso actual.", { min: 0, max: 100, def: 0 }),
+            orientation: S.en(["horizontal", "vertical"], "Disposicion (la horizontal pasa a vertical en pantallas estrechas).", { def: "horizontal" }),
+            onSelect: S.action("Accion al pulsar un paso completado (recibe `value`: su indice)."),
+        },
+    },
     WIZARD: {
         category: "navigation",
         doc: "Asistente por pasos con indicador de progreso.",
@@ -535,6 +620,19 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
         category: "feedback",
         doc: "Barra de progreso (role=progressbar).",
         props: { value: S.num("Valor actual."), max: S.num("Maximo.", { min: 1, def: 100 }), label: S.text("Etiqueta."), tone: tone("primary"), size: S.en(SIZES, "Grosor.", { def: "md" }), showValue: S.bool("Muestra el porcentaje.", { def: true }), indeterminate: S.bool("Progreso desconocido.") },
+    },
+    KPI_CARD: {
+        category: "data",
+        doc: "Indicador clave (KPI): valor destacado, variacion, mini-tendencia, estado de carga y error. Pulsable con onClick.",
+        props: {
+            label: S.text("Nombre del indicador.", { required: true }), value: S.text("Valor ya formateado (texto o numero)."), unit: S.text("Unidad tras el valor (%, ms, usuarios...)."),
+            delta: S.text("Variacion (texto)."), trend: S.en(["up", "down", "flat"], "Direccion de la variacion.", { def: "flat" }),
+            invertTrend: S.bool("Si bajar es bueno (p. ej. spam): up pasa a malo y down a bueno."),
+            description: S.text("Texto de apoyo."), icon: S.icon(), tone: tone(),
+            sparkline: S.arr(S.num("Valor."), "Serie de la mini-tendencia (max 60 puntos)."),
+            loading: S.bool("Muestra esqueleto."), error: S.text("Mensaje de error en lugar del valor."),
+            onClick: S.action("Hace la tarjeta pulsable."),
+        },
     },
     SKELETON: {
         category: "feedback",
@@ -585,6 +683,22 @@ export const UI_COMPONENTS: Record<string, ComponentSpec> = {
         category: "chart",
         doc: "Barras simples en SVG propio con colores de tema.",
         props: { data: S.arr(CHART_POINT, "Datos [{label,value,tone?}]."), orientation: S.en(["vertical", "horizontal"], "Direccion.", { def: "vertical" }), showValues: S.bool("Escribe el valor sobre cada barra.", { def: true }), height: S.en(["sm", "md", "lg"], "Altura.", { def: "md" }), tone: tone("primary"), title: S.text("Titulo accesible.") },
+    },
+    CHART: {
+        category: "chart",
+        doc: "Grafico de lineas, barras, area, sectores o anillo con varias series, leyenda y tooltips accesibles (raton y teclado). SVG propio con colores del tema, sin librerias.",
+        props: {
+            kind: S.en(["line", "bar", "area", "pie", "donut"], "Tipo de grafico.", { def: "line" }),
+            labels: S.arr(S.text("Etiqueta."), "Etiquetas del eje X (line, bar, area): una por valor de cada serie (max 120)."),
+            series: S.arr(CHART_SERIES, "Series (max 8) de line, bar y area."),
+            data: S.arr(CHART_POINT, "pie y donut: [{label,value,tone?}] (max 60)."),
+            stacked: S.bool("Apila las series (bar y area)."), showLegend: S.bool("Muestra la leyenda.", { def: true }), showGrid: S.bool("Lineas guia horizontales.", { def: true }),
+            valueFormat: S.en(["number", "compact", "percent"], "Formato de los valores en ejes y tooltips (percent: el valor ya es un porcentaje 0-100).", { def: "number" }),
+            unit: S.text("Unidad que se anade al valor en los tooltips (p. ej. correos)."),
+            height: S.en(["sm", "md", "lg"], "Altura.", { def: "md" }), centerLabel: S.text("Texto central (donut)."),
+            title: S.text("Titulo accesible."), description: S.text("Resumen para lectores de pantalla."),
+            emptyText: S.text("Texto si no hay datos."), loading: S.bool("Muestra esqueleto."), error: S.text("Mensaje de error en lugar del grafico."),
+        },
     },
     SPARKLINE: {
         category: "chart",
@@ -683,6 +797,40 @@ export const UI_ACTIONS: Record<string, ActionSpec> = {
 
 export const UI_COMPONENT_TYPES: string[] = Object.keys(UI_COMPONENTS);
 export const UI_ACTION_TYPES: string[] = Object.keys(UI_ACTIONS);
+
+// ---------------------------------------------------------------------------------------------------------------
+// Capacidad ui.pages.v1 (componentes de pagina completa)
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Capacidad que debe declarar (`requires.capabilities`) todo manifest que use los componentes de pagina o las props nuevas de TABLE. */
+export const PAGE_UI_CAPABILITY = "ui.pages.v1";
+/** Componentes que solo existen en clientes con ui.pages.v1. */
+export const PAGE_UI_COMPONENTS: string[] = ["PAGE_HEADER", "SPLIT_PANE", "KPI_CARD", "CHART", "TIMELINE", "TREE", "STEPPER"];
+/** Props de TABLE (y de sus columnas) anadidas con ui.pages.v1: un cliente antiguo las ignoraria y mostraria una tabla distinta. */
+export const PAGE_UI_TABLE_PROPS: string[] = ["searchable", "searchPlaceholder", "defaultSort", "bulkActions", "error", "onRetry"];
+export const PAGE_UI_COLUMN_KEYS: string[] = ["toneMap", "hrefKey", "filter"];
+export const PAGE_UI_COLUMN_FORMATS: string[] = ["link", "status"];
+
+/** Motivo por el que un nodo `{type, props}` exige ui.pages.v1, o null si no lo exige. */
+export function pageUiReason(node: unknown): string | null {
+    if (typeof node !== "object" || node === null || Array.isArray(node)) return null;
+    const n = node as { type?: unknown; props?: unknown };
+    if (typeof n.type !== "string") return null;
+    if (PAGE_UI_COMPONENTS.indexOf(n.type) !== -1) return "componente " + n.type;
+    if (n.type === "TABLE" || n.type === "DATA_TABLE") {
+        const props = typeof n.props === "object" && n.props !== null && !Array.isArray(n.props) ? (n.props as Record<string, unknown>) : {};
+        for (const key of PAGE_UI_TABLE_PROPS) if (props[key] !== undefined) return "TABLE." + key;
+        if (Array.isArray(props.columns)) {
+            for (const col of props.columns) {
+                if (typeof col !== "object" || col === null) continue;
+                const c = col as Record<string, unknown>;
+                for (const key of PAGE_UI_COLUMN_KEYS) if (c[key] !== undefined) return "TABLE.columns[]." + key;
+                if (typeof c.format === "string" && PAGE_UI_COLUMN_FORMATS.indexOf(c.format) !== -1) return "TABLE.columns[].format=" + c.format;
+            }
+        }
+    }
+    return null;
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Utilidades

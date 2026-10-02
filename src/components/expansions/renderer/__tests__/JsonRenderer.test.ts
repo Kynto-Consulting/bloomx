@@ -215,6 +215,9 @@ describe('JsonRenderer: GRID de Giphy sin TypeError', () => {
         expect(imgs).toHaveLength(1); // el src javascript: se descarta
         expect(imgs[0].getAttribute('src')).toBe('https://media.giphy.com/a.gif');
         expect(imgs[0].getAttribute('alt')).toBe('uno');
+        expect(imgs[0].getAttribute('referrerpolicy')).toBe('no-referrer');
+        expect(imgs[0].getAttribute('loading')).toBe('lazy');
+        expect(imgs[0].getAttribute('decoding')).toBe('async');
 
         await click(imgs[0].closest('button')!);
         expect(insertBody).toHaveBeenCalledWith('<img src="https://media.giphy.com/A.gif" alt="uno" />');

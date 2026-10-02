@@ -9,5 +9,5 @@ export const POST = createBridgeHandler({
     service: 'storage',
     schema: storageRequest,
     limitPerMinute: 600,
-    handle: async (req) => handleStorage(await defaultStorageStore(), req),
+    handle: async (req, ctx) => handleStorage(await defaultStorageStore(), req, ctx),
 });

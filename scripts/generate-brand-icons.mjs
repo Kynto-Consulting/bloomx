@@ -27,6 +27,7 @@ const BRANDS = [
 /** Marcas ausentes de simple-icons: ficha neutra con inicial (y el icono Lucide de reserva para los contextos que lo prefieran). */
 const NEUTRAL = [
     { slug: 'slack', name: 'Slack', initial: 'S', lucide: 'Hash' },
+    { slug: 'microsoft', name: 'Microsoft', initial: 'M', lucide: 'LayoutGrid' },
     { slug: 'microsoftteams', name: 'Microsoft Teams', initial: 'T', lucide: 'Users' },
     { slug: 'microsoftoutlook', name: 'Microsoft Outlook', initial: 'O', lucide: 'Mail' },
     { slug: 'salesforce', name: 'Salesforce', initial: 'S', lucide: 'Cloud' },

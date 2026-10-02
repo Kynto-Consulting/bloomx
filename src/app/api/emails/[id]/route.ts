@@ -12,6 +12,7 @@ import { parseAuthenticationResults, parseTransportDetails } from '@/lib/email-a
 import { buildEmailOpenedContext, fireLifecycleHook, shouldFireOnce } from '@/lib/expansions/server-hooks';
 import { moveEmailsTracked, restoreEmailsToPrevious } from '@/lib/mail-store';
 import { afterLabelsAdded, afterLabelsRemoved } from '@/lib/labels/behavior';
+import { emitLabelApplied } from '@/lib/expansions/lifecycle-v2';
 
 function extractMailboxEmail(value: unknown): string {
     if (!value) return '';
@@ -422,6 +423,7 @@ export async function PATCH(
             const removed = Array.from(before).filter((x) => !after.has(x));
             let changed = 0;
             if (added.length) changed += await afterLabelsAdded([existing.userId], [existing.id], added);
+            if (added.length) void emitLabelApplied(existing.userId, existing.id, added, 'user'); // LABEL_APPLIED v2: asincrono, nunca bloquea
             if (removed.length) changed += await afterLabelsRemoved([existing.userId], [existing.id], removed);
             if (changed > 0) {
                 const fresh = await prisma.email.findUnique({ where: { id: existing.id }, include: { labels: true } });

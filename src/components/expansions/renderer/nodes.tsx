@@ -9,6 +9,8 @@ import { Text, Heading, Code, Link, Markdown, IconGlyph } from '../kit/Typograph
 import { Button, IconButton, ButtonGroup, Menu, type KitA11y } from '../kit/Actions';
 import { Badge, Chip, Avatar, Stat, Progress, Skeleton, Empty, Alert, Callout, Spinner } from '../kit/Feedback';
 import { BarChart, Sparkline, Donut } from '../kit/Charts';
+import { Chart } from '../kit/ChartPlot';
+import { PageHeader, SplitPane, KpiCard, Timeline, Tree, Stepper } from '../kit/Pages';
 import { Dialog, ModalFrame, DrawerPanel, KitPopover, Tooltip } from '../kit/Overlays';
 import { Table, List, ListItem } from '../kit/Data';
 import { Tabs, Accordion, Wizard } from '../kit/Navigation';
@@ -140,7 +142,7 @@ function ImageButton({ r, raw, env }: { r: Record<string, any>; raw: Record<stri
             className={`block aspect-square w-full overflow-hidden rounded-md border border-border bg-muted transition hover:border-ring hover:opacity-90 ${FOCUS_RING_CLASS}`}
         >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={text(r.alt) ?? ''} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+            <img src={src} alt={text(r.alt) ?? ''} loading="lazy" decoding="async" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
         </button>
     );
 }
@@ -184,6 +186,33 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
             );
         case 'SECTION': return <Section title={text(r.title)} description={text(r.description)} collapsible={r.collapsible} defaultOpen={r.defaultOpen} gap={r.gap}>{kids()}</Section>;
         case 'DIVIDER': return <Divider label={text(r.label)} orientation={r.orientation} spacing={r.spacing} />;
+        case 'PAGE_HEADER':
+            return (
+                <PageHeader
+                    title={text(r.title)}
+                    description={text(r.description)}
+                    icon={text(r.icon)}
+                    breadcrumbs={(Array.isArray(r.breadcrumbs) ? r.breadcrumbs : []).map((crumb: any, i: number) => ({ label: text(crumb?.label), url: text(crumb?.url), onPress: asList(raw.breadcrumbs)[i]?.onClick ? () => { void env.run(asList(raw.breadcrumbs)[i].onClick, null); } : undefined }))}
+                    status={r.status && typeof r.status === 'object' ? { label: text(r.status.label), tone: r.status.tone } : undefined}
+                    actions={raw.actions ? env.renderChildren(asList(raw.actions)) : undefined}
+                    loading={r.loading}
+                    error={text(r.error)}
+                    onRetry={press(raw.onRetry)}
+                />
+            );
+        case 'SPLIT_PANE':
+            return (
+                <SplitPane
+                    start={env.renderChildren(asList(raw.startPane))}
+                    end={env.renderChildren(asList(raw.endPane))}
+                    ratio={r.ratio}
+                    resizable={r.resizable}
+                    gap={r.gap}
+                    sticky={r.sticky}
+                    startLabel={text(r.startLabel)}
+                    endLabel={text(r.endLabel)}
+                />
+            );
         case 'SPACER': return <Spacer size={r.size} />;
 
         // --- tipografia
@@ -240,6 +269,15 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
                     emptyText={text(r.emptyText)}
                     loading={r.loading}
                     caption={text(r.caption)}
+                    searchable={r.searchable}
+                    searchPlaceholder={text(r.searchPlaceholder)}
+                    defaultSort={r.defaultSort && typeof r.defaultSort === 'object' ? r.defaultSort : undefined}
+                    error={text(r.error)}
+                    onRetry={press(raw.onRetry)}
+                    bulkActions={(Array.isArray(r.bulkActions) ? r.bulkActions : []).map((action: any) => ({
+                        label: text(action?.label) ?? 'Action', icon: text(action?.icon), tone: action?.tone,
+                        onPress: (rows: Array<Record<string, unknown>>, keys: string[]) => { if (action?.onClick) void env.run(action.onClick, null, { rows, value: keys }); },
+                    }))}
                     actions={(Array.isArray(r.actions) ? r.actions : []).map((action: any) => ({
                         label: text(action?.label) ?? 'Action', icon: text(action?.icon), tone: action?.tone,
                         onPress: (row: Record<string, unknown>) => { if (action?.onClick) void env.run(action.onClick, null, { row }); },
@@ -256,6 +294,31 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
             return <List columns={r.columns} gap={r.gap} variant={r.variant} maxHeight={r.maxHeight} empty={raw.empty ? env.renderNode(raw.empty) : undefined}>{content}</List>;
         }
         case 'LIST_ITEM': return <ListItem title={text(r.title)} description={text(r.description)} meta={text(r.meta)} icon={text(r.icon)} tone={r.tone} selected={r.selected} onPress={press(raw.onClick)}>{children?.length ? kids() : undefined}</ListItem>;
+        case 'TIMELINE':
+            return (
+                <Timeline
+                    items={(Array.isArray(r.items) ? r.items : []).map((item: any, i: number) => ({
+                        title: text(item?.title), description: text(item?.description), time: text(item?.time), icon: text(item?.icon), tone: item?.tone,
+                        onPress: asList(raw.items)[i]?.onClick ? () => { void env.run(asList(raw.items)[i].onClick, null); } : undefined,
+                    }))}
+                    emptyText={text(r.emptyText)}
+                    loading={r.loading}
+                />
+            );
+        case 'TREE': {
+            const bound = r.bind ? getPath(env.state, r.bind) : undefined;
+            return (
+                <Tree
+                    items={r.items}
+                    label={text(r.label)}
+                    selected={r.bind ? (typeof bound === 'string' ? bound : '') : undefined}
+                    defaultExpanded={r.defaultExpanded}
+                    emptyText={text(r.emptyText)}
+                    loading={r.loading}
+                    onSelect={(id, item) => { if (r.bind) env.setState(r.bind, id); if (raw.onSelect) void env.run(raw.onSelect, null, { value: id, item }); }}
+                />
+            );
+        }
         case 'TABS': return <TabsNode raw={raw} r={r} env={env} children={children} />;
         case 'TAB_ITEM': case 'CASE': case 'DEFAULT': return <>{kids()}</>;
         case 'ACCORDION': {
@@ -264,12 +327,29 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
         }
         case 'ACCORDION_ITEM': return <Accordion sections={[{ title: text(r.title), content: kids() }]} />;
         case 'WIZARD': return <WizardNode raw={raw} r={r} env={env} />;
+        case 'STEPPER':
+            return (
+                <Stepper
+                    steps={(Array.isArray(r.steps) ? r.steps : []).map((step: any) => ({ title: text(step?.title), description: text(step?.description), status: step?.status }))}
+                    current={r.current}
+                    orientation={r.orientation}
+                    onSelect={raw.onSelect ? (index) => { void env.run(raw.onSelect, null, { value: index }); } : undefined}
+                />
+            );
 
         // --- feedback
         case 'BADGE': return <Badge label={text(r.label)} tone={r.tone} variant={r.variant} size={r.size}>{r.label === undefined && children?.length ? kids() : undefined}</Badge>;
         case 'CHIP': return <Chip label={text(r.label)} tone={r.tone} icon={text(r.icon)} selected={r.selected} removable={r.removable} onPress={press(raw.onClick)} onRemove={press(raw.onRemove)} />;
         case 'AVATAR': return <Avatar src={text(r.src)} name={text(r.name)} initials={text(r.initials)} alt={text(r.alt)} size={r.size} tone={r.tone} />;
         case 'STAT': return <Stat label={text(r.label)} value={text(r.value)} delta={text(r.delta)} trend={r.trend} description={text(r.description)} icon={text(r.icon)} tone={r.tone} />;
+        case 'KPI_CARD':
+            return (
+                <KpiCard
+                    label={text(r.label)} value={text(r.value)} unit={text(r.unit)} delta={text(r.delta)} trend={r.trend} invertTrend={r.invertTrend}
+                    description={text(r.description)} icon={text(r.icon)} tone={r.tone} sparkline={Array.isArray(r.sparkline) ? r.sparkline : undefined}
+                    loading={r.loading} error={text(r.error)} onPress={press(raw.onClick)}
+                />
+            );
         case 'PROGRESS': return <Progress value={r.value} max={r.max} label={text(r.label)} tone={r.tone} size={r.size} showValue={r.showValue} indeterminate={r.indeterminate} />;
         case 'SKELETON': return <Skeleton variant={r.variant} lines={r.lines} size={r.size} />;
         case 'EMPTY': return <Empty icon={text(r.icon)} title={text(r.title)} description={text(r.description)} actionLabel={raw.action ? (text(r.actionLabel) ?? 'Action') : undefined} onAction={press(raw.action)}>{children?.length ? kids() : undefined}</Empty>;
@@ -291,6 +371,14 @@ export function KitNode({ type, raw, resolved, children, env }: KitNodeProps): R
 
         // --- graficos
         case 'BAR_CHART': return <BarChart data={chartData(r.data)} orientation={r.orientation} showValues={r.showValues} height={r.height} tone={r.tone} title={text(r.title)} />;
+        case 'CHART':
+            return (
+                <Chart
+                    kind={r.kind} labels={Array.isArray(r.labels) ? r.labels : undefined} series={Array.isArray(r.series) ? r.series : undefined} data={Array.isArray(r.data) ? r.data : undefined}
+                    stacked={r.stacked} showLegend={r.showLegend} showGrid={r.showGrid} valueFormat={r.valueFormat} unit={text(r.unit)} height={r.height} centerLabel={text(r.centerLabel)}
+                    title={text(r.title)} description={text(r.description)} emptyText={text(r.emptyText)} loading={r.loading} error={text(r.error)}
+                />
+            );
         case 'SPARKLINE': return <Sparkline values={Array.isArray(r.values) ? r.values : []} tone={r.tone} height={r.height} area={r.area} label={text(r.label)} />;
         case 'DONUT': return <Donut data={chartData(r.data)} centerLabel={text(r.centerLabel)} size={r.size} showLegend={r.showLegend} title={text(r.title)} />;
 

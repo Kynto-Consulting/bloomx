@@ -57,7 +57,7 @@ describe('status por proveedor', () => {
         const list = await listProviderStatuses(actor, { deps: { call, linked: none, env: {} } });
         const zoom = list.find((p) => p.id === 'zoom')!;
         expect(zoom).toMatchObject({ configured: true, connected: true, mode: 'server-to-server', source: 'instance', origin: 'extension', connect: null });
-        expect(list.map((p) => p.id)).toEqual(['google-meet', 'zoom', 'custom']);
+        expect(list.map((p) => p.id)).toEqual(['google-meet', 'zoom', 'microsoft-teams', 'custom']);
         expect(list.find((p) => p.id === 'custom')).toMatchObject({ configured: true, mode: 'custom-link' });
         // Solo viaja el status de la cuenta de ese proveedor al contexto (sin tokens de otros)
         const zoomCall = call.mock.calls.find((c: any) => c[0].extensionId === 'core-zoom')![0] as any;
@@ -93,6 +93,26 @@ describe('status por proveedor', () => {
         const list = await listProviderStatuses(actor, { deps: { call, linked: withGoogle, env: {} } });
         expect(list.find((p) => p.id === 'google-meet')).toMatchObject({ configured: true, origin: 'core', source: 'user-oauth', mode: 'google-account', connect: null });
         expect(list.find((p) => p.id === 'zoom')).toMatchObject({ configured: false, reason: 'extension_not_installed', origin: 'core' });
+    });
+
+    it('Teams: sin extension -> extension_not_installed y conexion en Ajustes (sin OAuth directo ni modo de instancia)', async () => {
+        const { listProviderStatuses } = await import('../status');
+        const { ConferencingError } = await import('../types');
+        const call = async () => ({ ok: false as const, kind: 'not_installed' as const, authMode: null, error: new ConferencingError('unavailable', 'x') });
+        const none = async () => ({ auth: {}, problems: {} });
+        const t = (await listProviderStatuses(actor, { deps: { call, linked: none, env: { GOOGLE_CLIENT_ID: 'x', GOOGLE_CLIENT_SECRET: 'y' } } })).find((p) => p.id === 'microsoft-teams')!;
+        expect(t).toMatchObject({ configured: false, reason: 'extension_not_installed', extensionId: 'core-microsoft-teams', connect: { type: 'settings', section: 'integrations' } });
+        expect(t.modes).toEqual([{ id: 'microsoft-account', available: true }]);
+    });
+
+    it('Teams: la extension informa cuenta conectada; el host no le inyecta tokens', async () => {
+        const { listProviderStatuses } = await import('../status');
+        const calls: any[] = [];
+        const call = async (init: any) => { calls.push(init); return { ok: true as const, authMode: 'signed' as const, result: { configured: true, connected: true, mode: 'microsoft-account', source: 'user-oauth', account: 'a@b.com' } }; };
+        const none = async () => ({ auth: {}, problems: {} });
+        const t = (await listProviderStatuses(actor, { deps: { call, linked: none, env: {} } })).find((p) => p.id === 'microsoft-teams')!;
+        expect(t).toMatchObject({ configured: true, origin: 'extension', mode: 'microsoft-account', source: 'user-oauth', account: 'a@b.com' });
+        expect(calls.find((c) => c.extensionId === 'core-microsoft-teams').context).toEqual({ auth: {} });
     });
 
     it('sanea lo que devuelve la extension: modos/fuentes desconocidos, cuenta larga', async () => {

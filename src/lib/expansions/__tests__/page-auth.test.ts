@@ -57,6 +57,38 @@ describe('M3: acciones y arbol de componentes de paginas admin', () => {
         expect(mayInvokeAction(p, 'publicInfo', null)).toBe(true);
     });
 
+    it('un mount admin protege tambien las claves hermanas con el mismo handler', () => {
+        const t = {
+            api: { functions: { loadUsers: { handler: 'shared' }, loadUsersAlias: { handler: 'shared' }, other: { handler: 'o' } } },
+            mounts: [{ point: 'PAGE', path: 'a', auth: 'admin', minLevel: 3, component: { type: 'Button', onClick: { type: 'call', function: 'loadUsers' } } }],
+        };
+        const p = adminProtectedActions(t as any);
+        expect(p.get('loadUsersAlias')).toBe(3);
+        expect(mayInvokeAction(p, 'loadUsersAlias', 2)).toBe(false);
+        expect(mayInvokeAction(p, 'loadUsersAlias', 3)).toBe(true);
+        expect(p.has('other')).toBe(false);
+    });
+
+    it('el handler de una ruta con auth admin (p. ej. la insignia) tambien exige el nivel por /execute, con el nombre de la funcion o el del handler', () => {
+        const t = {
+            api: { functions: { getBadge: { handler: 'badgeHandler' }, other: { handler: 'otherHandler' } } },
+            backendRoutes: [{ path: '/badge', handler: 'getBadge', method: 'GET', auth: 'admin', minLevel: 2 }, { path: '/open', handler: 'other', method: 'GET', auth: 'session' }, { path: '/x', handler: 'nope', auth: 'admin' }, null, 'raro'],
+            mounts: [],
+        };
+        const p = adminProtectedActions(t as any);
+        expect(p.get('getBadge')).toBe(2);
+        expect(p.get('nope')).toBe(1);
+        expect(p.has('other')).toBe(false);
+        expect(mayInvokeAction(p, 'getBadge', null)).toBe(false);
+        expect(mayInvokeAction(p, 'getBadge', 1)).toBe(false);
+        expect(mayInvokeAction(p, 'getBadge', 2)).toBe(true);
+        expect(mayInvokeAction(p, 'other', null)).toBe(true);
+        // si ademas lo usa una pagina admin con nivel mayor, manda el mas alto
+        const both = { ...t, mounts: [{ point: 'PAGE', path: 'p', auth: 'admin', minLevel: 4, component: { type: 'BUTTON', props: { onClick: { action: 'CALL_BACKEND', function: 'getBadge' } } } }] };
+        expect(adminProtectedActions(both as any).get('getBadge')).toBe(4);
+        expect(adminProtectedActions({ backendRoutes: 'x' } as any).size).toBe(0);
+    });
+
     it('la configuracion del navegador no lleva el arbol ni el estado de paginas admin sin nivel', () => {
         const exts = [{ id: 'x', template }];
         const anon = stripAdminMounts(exts, null)[0].template as typeof template;

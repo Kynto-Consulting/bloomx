@@ -10,6 +10,7 @@ import type { AiBlockState } from '@/lib/ai/types';
 import { sanitizeVersionInfo, type VersionInfo, type VersionUpgrade } from './extensions-compat';
 import { computePausedExtensions, planInstall, wouldPause, type DepIssue, type InstalledExtension as DepInstalled, type InstallPlan } from '@/lib/expansions/ext-dependencies';
 import { deriveCategory, hasUpdate, parseTemplate, summarizeTemplate, type ExtensionCategory, type ManifestSummary } from './extensions-manifest';
+import { resolveMarket, type MarketMeta } from './marketplace/market-meta';
 
 export interface CatalogExtension {
     id: string;
@@ -27,6 +28,8 @@ export interface CatalogExtension {
     incompatible?: boolean;
     deprecated?: boolean;
     upgrade?: VersionUpgrade | null;
+    /** Bloque de marketplace del backend (capacidad market.catalog.v1), saneado; null si el backend no lo envia. */
+    market?: MarketMeta | null;
 }
 
 export interface InstalledExtension {
@@ -101,6 +104,8 @@ export interface ExtensionRow {
     dependencies: Record<string, string>;
     /** Motivos por los que esta extension activa esta PAUSADA (dependencia ausente, inactiva o incompatible); vacio = no pausada. */
     pausedBy: Array<DepIssue & { name: string }>;
+    /** Metadatos de marketplace (editor, suite, categorias, etiquetas, instalaciones, historial); respaldo derivado si el backend no los envia. */
+    market: MarketMeta;
 }
 
 export interface BuildRowsInput {
@@ -164,6 +169,7 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale, a
             upgrade: inst?.versionInfo?.upgrade ?? cat?.upgrade ?? null,
             dependencies: { ...(template?.dependencies ?? {}) },
             pausedBy: [],
+            market: resolveMarket(cat?.market ?? null, id, deriveCategory(template), template?.catalog ?? null),
             ...aiFields(template, ai),
         };
     };

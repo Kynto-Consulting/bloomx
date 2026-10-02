@@ -1878,6 +1878,25 @@ const TABLES: TableSpec[] = [
         ],
         indexes: ['CREATE INDEX IF NOT EXISTS "AiAudit_ts_idx" ON "AiAudit" ("ts" DESC)'],
     },
+    // Marketplace de extensiones: favoritas (estrellas) POR administrador de la instancia. Aditiva e idempotente; sin FK (el usuario puede ser
+    // una cuenta de gestor sin fila en "User"); se lee y escribe por SQL crudo (lib/admin/extension-stars.ts).
+    {
+        name: 'ExtensionStar',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ExtensionStar" (
+            "userId" TEXT NOT NULL,
+            "extensionId" TEXT NOT NULL,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'extensionId', definition: 'TEXT NOT NULL' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ExtensionStar_pkey', statement: 'ALTER TABLE "ExtensionStar" ADD CONSTRAINT "ExtensionStar_pkey" PRIMARY KEY ("userId", "extensionId")' },
+        ],
+        indexes: ['CREATE INDEX IF NOT EXISTS "ExtensionStar_extensionId_idx" ON "ExtensionStar" ("extensionId")'],
+    },
 ];
 
 let ensureSchemaPromise: Promise<void> | null = null;
