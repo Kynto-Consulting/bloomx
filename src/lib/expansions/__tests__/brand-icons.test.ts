@@ -21,9 +21,9 @@ const ROOT = path.resolve(__dirname, '../../../..');
 const EXTENSIONS_DIR = path.resolve(ROOT, '..', 'bloomx-extensions');
 
 /** Marcas que el producto integra: deben tener logotipo real. */
-const REQUIRED_BRANDS = ['googlemeet', 'googlecalendar', 'googledrive', 'zoom', 'notion', 'trello', 'hubspot', 'giphy', 'zoho', 'github', 'jira', 'linear', 'asana', 'airtable', 'stripe', 'dropbox', 'anthropic', 'googlegemini', 'whatsapp', 'telegram'];
-/** Marcas que simple-icons NO incluye: ficha neutra con inicial, nunca un logotipo inventado. */
-const ABSENT_BRANDS = ['slack', 'microsoftteams', 'microsoftoutlook', 'salesforce', 'openai'];
+const REQUIRED_BRANDS = ['googlemeet', 'googlecalendar', 'googledrive', 'zoom', 'notion', 'trello', 'hubspot', 'giphy', 'zoho', 'github', 'jira', 'linear', 'asana', 'airtable', 'stripe', 'dropbox', 'anthropic', 'googlegemini', 'whatsapp', 'telegram', 'microsoft', 'microsoftteams', 'slack'];
+/** Marcas sin logotipo (Microsoft/Teams/Slack ya se sirven como SVG propio desde _brands/): ficha neutra con inicial, nunca un logotipo inventado. */
+const ABSENT_BRANDS = ['microsoftoutlook', 'salesforce', 'openai'];
 
 describe('registro de iconos de marca', () => {
     it('cubre todas las marcas integradas con logotipo real', () => {
@@ -42,7 +42,7 @@ describe('registro de iconos de marca', () => {
         }
     });
 
-    it('cada entrada: slug estable = clave, nombre, color oficial hex y UNA ruta SVG valida sin scripts', () => {
+    it('cada entrada: slug estable = clave, nombre y color oficial hex; SIN dibujo en el bundle (viene del backend)', () => {
         const slugs = Object.keys(BRAND_ICONS);
         expect(slugs.length).toBeGreaterThanOrEqual(REQUIRED_BRANDS.length);
         for (const [key, icon] of Object.entries(BRAND_ICONS)) {
@@ -50,17 +50,14 @@ describe('registro de iconos de marca', () => {
             expect(key).toMatch(/^[a-z][a-z0-9]{0,39}$/);
             expect(icon.name.trim().length, key).toBeGreaterThan(1);
             expect(icon.hex, key).toMatch(/^#[0-9a-f]{6}$/);
-            // Solo comandos y numeros de un path SVG: ni etiquetas, ni entidades, ni URLs, ni scripts.
-            expect(icon.path, key).toMatch(/^[Mm][MmLlHhVvCcSsQqTtAaZz0-9 .,\-]+$/);
-            expect(icon.path.length, key).toBeLessThan(4000);
-            expect(icon.path, key).not.toMatch(/[<>&"'\\]|script|javascript|url\(|on\w+=/i);
+            expect(Object.keys(icon).sort(), key).toEqual(['hex', 'name', 'slug']);
         }
         expect(new Set(slugs.map((s) => s.toLowerCase())).size).toBe(slugs.length);
     });
 
     it('el modulo esta acotado (~21 KB: solo los iconos usados, no simple-icons entero)', () => {
         const size = fs.statSync(path.join(__dirname, '..', 'brand-icons.ts')).size;
-        expect(size).toBeLessThan(30 * 1024);
+        expect(size).toBeLessThan(8 * 1024); // solo indice slug/nombre/color: los dibujos ya no estan en el bundle
     });
 
     it('los iconos funcionales (lucide:) existen en Lucide y sus slugs no se repiten', () => {
@@ -78,7 +75,8 @@ describe('registro de iconos de marca', () => {
 describe('resolveIconRef y compatibilidad con el campo icon antiguo', () => {
     it('brand:, lucide:, initials: y nombre Lucide sin esquema', () => {
         expect(resolveIconRef('brand:zoom')).toMatchObject({ kind: 'brand', icon: { slug: 'zoom' } });
-        expect(resolveIconRef('brand:slack')).toMatchObject({ kind: 'neutral', brand: { initial: 'S' } });
+        expect(resolveIconRef('brand:slack')).toMatchObject({ kind: 'brand', icon: { slug: 'slack' } });
+        expect(resolveIconRef('brand:salesforce')).toMatchObject({ kind: 'neutral', brand: { initial: 'S' } });
         expect(resolveIconRef('lucide:ShieldCheck')).toEqual({ kind: 'lucide', name: 'ShieldCheck' });
         expect(resolveIconRef('initials:ab')).toEqual({ kind: 'initials', text: 'AB' });
         // Compatibilidad: un nombre Lucide sin esquema sigue valiendo.
@@ -260,7 +258,13 @@ describe.skipIf(manifestFiles.length === 0)('auditoria: los manifests de bloomx-
         const read = (dir: string) => JSON.parse(fs.readFileSync(path.join(EXTENSIONS_DIR, dir, 'manifest.json'), 'utf8'));
         const expected: Record<string, string> = { zoom: 'brand:zoom', 'google-meet': 'brand:googlemeet', calendar: 'brand:googlecalendar', notion: 'brand:notion', trello: 'brand:trello', hubspot: 'brand:hubspot', 'google-drive': 'brand:googledrive', giphy: 'brand:giphy' };
         for (const [dir, icon] of Object.entries(expected)) expect(read(dir).icon, dir).toBe(icon);
-        expect(BRAND_ICONS.zoom.path).not.toBe(BRAND_ICONS.googlemeet.path);
+        // La fuente de verdad del dibujo (backend) coincide con el indice: cada marca tiene su SVG en _brands/ con el color oficial.
+        for (const icon of Object.values(BRAND_ICONS)) {
+            const svg = fs.readFileSync(path.join(EXTENSIONS_DIR, '_brands', `${icon.slug}.svg`), 'utf8');
+            expect(svg, icon.slug).toContain(`fill="${icon.hex}"`);
+            expect(svg, icon.slug).toMatch(/viewBox="0 0 24 24"/);
+            expect(svg, icon.slug).not.toMatch(/<script|onload|href|<foreignObject/i);
+        }
         expect(BRAND_ICONS.zoom.hex).not.toBe(BRAND_ICONS.googlemeet.hex);
     });
 

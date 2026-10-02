@@ -6,7 +6,8 @@
  *   initials:<XY>    ficha con 1 a 3 letras
  *   <Nombre>         (compatibilidad) nombre Lucide sin esquema, como siempre
  *
- * Nunca hay URLs de imagen: los iconos son datos del registro, asi que la CSP no cambia y no se contacta a terceros.
+ * Nunca hay URLs de imagen arbitrarias en `icon`: el registro brand-icons.ts es solo un INDICE (slug -> nombre/color) para el placeholder; el
+ * dibujo se carga async del backend (icon-image.ts). Un `icon` data URL (png/webp/svg base64) se valida en icon-image.ts.
  */
 import { BRAND_ICONS, NEUTRAL_BRANDS, type BrandIcon, type NeutralBrand } from './brand-icons';
 import { isIconRef } from './ui-schema';

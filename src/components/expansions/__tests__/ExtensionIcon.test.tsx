@@ -27,8 +27,14 @@ async function setTheme(tokens: Record<string, string>) {
 }
 const clearTheme = () => document.documentElement.removeAttribute('style');
 /** jsdom serializa el color en linea como rgb(r, g, b): se normaliza a #rrggbb. */
-/** Color de relleno en linea del logotipo (jsdom no expone style.fill: se lee del atributo). */
-const fillOf = (svg: Element): string => /fill:\s*([^;]+)/.exec(svg.getAttribute('style') ?? '')?.[1] ?? '';
+/** Color en linea del placeholder de marca (jsdom lo serializa en el atributo style). */
+const fillOf = (el: Element): string => /(?:^|;|\s)color:\s*([^;]+)/.exec(el.getAttribute('style') ?? '')?.[1] ?? '';
+/** Letras del placeholder (van en data-initial, no como texto del DOM: no contaminan el nombre accesible del contenedor). */
+const letters = (el: Element): string => [el, ...Array.from(el.querySelectorAll('[data-initial]'))].map((n) => n.getAttribute('data-initial') ?? '').join('');
+const BACKEND = 'https://backend.bloomx.arubik.dev';
+const fire = async (el: Element, type: 'load' | 'error') => { await act(async () => { el.dispatchEvent(new Event(type)); }); };
+const PNG_1PX = `data:image/png;base64,${Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24)]).toString('base64')}`;
+const svgData = (svg: string) => `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
 function cssHex(value: string): string | null {
     const rgb = /^rgb\(\s*(\d+),\s*(\d+),\s*(\d+)\s*\)$/.exec(value.trim());
     return rgb ? rgbToHex({ r: Number(rgb[1]), g: Number(rgb[2]), b: Number(rgb[3]) }) : normalizeHex(value);
@@ -37,26 +43,110 @@ function cssHex(value: string): string | null {
 describe('ExtensionIcon: marca', () => {
     installCleanup();
 
-    it('logotipo: svg viewBox 24 con la ruta del registro, decorativo (aria-hidden) y sin imagenes remotas', async () => {
+    it('marca: placeholder instantaneo (inicial en el color de marca), decorativo, y <img> async del backend (sin dibujo en el bundle)', async () => {
         await mount(h('button', { 'aria-label': 'Zoom' }, h(ExtensionIcon, { icon: 'brand:zoom' })));
         const wrap = q('[data-extension-icon]')!;
         expect(wrap.getAttribute('aria-hidden')).toBe('true');
         expect(wrap.getAttribute('data-extension-icon')).toBe('brand');
-        const svg = q<SVGSVGElement>('svg[data-brand="zoom"]')!;
-        expect(svg.getAttribute('viewBox')).toBe('0 0 24 24');
-        expect(svg.getAttribute('aria-hidden')).toBe('true');
-        expect(svg.querySelector('path')!.getAttribute('d')).toBe(BRAND_ICONS.zoom.path);
-        expect(document.body.querySelector('img, image, use, foreignObject, script, [href], [src]')).toBeNull();
-        // el nombre accesible lo da el boton padre, no el icono
+        const placeholder = q('[data-brand="zoom"]')!;
+        expect(letters(placeholder)).toBe('Z');
+        expect(placeholder.querySelector('path')).toBeNull();
+        const img = q<HTMLImageElement>('img[data-extension-icon-img]')!;
+        expect(img.getAttribute('src')).toBe(`${BACKEND}/api/extensions/icons/brand.zoom`);
+        expect(img.getAttribute('loading')).toBe('lazy');
+        expect(img.getAttribute('decoding')).toBe('async');
+        expect(img.getAttribute('referrerpolicy')).toBe('no-referrer');
+        expect(img.getAttribute('alt')).toBe('');
+        expect(img.getAttribute('aria-hidden')).toBe('true');
+        expect(document.body.querySelector('use, foreignObject, script, [href]')).toBeNull();
         expect(q('button')!.getAttribute('aria-label')).toBe('Zoom');
         expect(wrap.getAttribute('role')).toBeNull();
     });
 
-    it('Meet y Zoom se distinguen a primera vista: ruta y color distintos', async () => {
+    it('placeholder -> img cargada: el placeholder se oculta (invisible, mantiene el espacio) y la imagen aparece', async () => {
+        await mount(h(ExtensionIcon, { icon: 'brand:trello', iconUrl: '/api/extensions/icons/core-trello?h=0123456789abcdef' }));
+        const img = q<HTMLImageElement>('img[data-extension-icon-img]')!;
+        expect(img.getAttribute('src')).toBe(`${BACKEND}/api/extensions/icons/core-trello?h=0123456789abcdef`); // iconUrl gana a brand.<slug>
+        expect(img.className).toMatch(/opacity-0/);
+        expect(q('[data-brand="trello"]')!.parentElement!.className).not.toMatch(/invisible/);
+        await fire(img, 'load');
+        expect(q('img[data-extension-icon-img]')!.className).toMatch(/opacity-100/);
+        expect(q('[data-brand="trello"]')!.parentElement!.className).toMatch(/invisible/);
+        expect(q<HTMLElement>('[data-extension-icon]')!.style.width).toBe('24px');
+    });
+
+    it('error de carga (404/red): se retira la imagen y queda el placeholder; sin saltos', async () => {
+        await mount(h(ExtensionIcon, { icon: 'brand:giphy', iconUrl: '/api/extensions/icons/core-giphy?h=aaaaaaaaaaaaaaaa', size: 32 }));
+        await fire(q('img[data-extension-icon-img]')!, 'error');
+        expect(q('img')).toBeNull();
+        expect(q('[data-brand="giphy"]')!.parentElement!.className).not.toMatch(/invisible/);
+        expect(q<HTMLElement>('[data-extension-icon]')!.style.width).toBe('32px');
+    });
+
+    it('iconUrl invalido o de otro origen se ignora (solo rutas del backend)', async () => {
+        await mount(h('div', null,
+            h(ExtensionIcon, { icon: 'lucide:Zap', iconUrl: 'https://evil.test/x.svg' }),
+            h(ExtensionIcon, { icon: 'lucide:Zap', iconUrl: '/api/extensions/icons/../../x' }),
+            h(ExtensionIcon, { icon: 'lucide:Zap', iconUrl: 'javascript:alert(1)' }),
+        ));
+        expect(q('img')).toBeNull();
+    });
+
+    it('sin iconUrl, un lucide: no pide imagen; con iconUrl, la imagen sustituye al Lucide al cargar', async () => {
+        await mount(h(ExtensionIcon, { icon: 'lucide:Zap' }));
+        expect(q('img')).toBeNull();
+        await mount(h(ExtensionIcon, { icon: 'lucide:Zap', iconUrl: '/api/extensions/icons/core-dlp?h=bbbbbbbbbbbbbbbb' }));
+        expect(qa('img').length).toBe(1);
+    });
+
+    it('data URL valido (png/svg): imagen directa; invalido (prefijo, firma, tamano, SVG activo): respaldo de letra, sin <img>', async () => {
+        await mount(h(ExtensionIcon, { icon: PNG_1PX, label: 'Acme' }));
+        expect(q<HTMLImageElement>('img')!.getAttribute('src')).toBe(PNG_1PX);
+        await mount(h(ExtensionIcon, { icon: svgData('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>'), label: 'Acme' }));
+        expect(qa('img').length).toBe(2);
+        const bad = [
+            'data:text/html;base64,PHNjcmlwdD4=',
+            'data:image/gif;base64,R0lGODlhAQABAAAAACw=',
+            'data:image/png;base64,AAAAAAAAAAAAAAAA', // sin firma PNG
+            svgData('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+            svgData('<svg xmlns="http://www.w3.org/2000/svg"><path onload="x()" d="M0 0"/></svg>'),
+            `data:image/png;base64,${Buffer.alloc(70 * 1024, 1).toString('base64')}`, // > 64 KB
+        ];
+        for (const icon of bad) {
+            await mount(h(ExtensionIcon, { icon, label: 'Acme Corp' }));
+            const el = qa('[data-extension-icon]').at(-1)!;
+            expect(letters(el), icon.slice(0, 30)).toBe('AC');
+            expect(el.querySelector('img')).toBeNull();
+        }
+    });
+
+    it('modo oscuro: SVG de data URL con currentColor hereda el color de texto del tema; los de marca con colores propios no se tocan', async () => {
+        const mono = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h24v24H0z"/></svg>';
+        const brand = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="#0b5cff" d="M0 0h24v24H0z"/></svg>';
+        const decode = (src: string) => Buffer.from(src.split(',')[1], 'base64').toString();
+        await setTheme({ foreground: '#f1f5f9', background: '#0b1020', card: '#111827', muted: '#1f2937', accent: '#1f2937' });
+        await mount(h('div', null, h(ExtensionIcon, { icon: svgData(mono) }), h(ExtensionIcon, { icon: svgData(brand) })));
+        const [m, b] = qa<HTMLImageElement>('img');
+        expect(decode(m.getAttribute('src')!)).toContain('fill="#f1f5f9"');
+        expect(decode(m.getAttribute('src')!)).not.toMatch(/currentColor/);
+        expect(b.getAttribute('src')).toBe(svgData(brand));
+        await setTheme({ foreground: '#0f172a', background: '#ffffff', card: '#ffffff', muted: '#f1f5f9', accent: '#f1f5f9' });
+        expect(decode(qa<HTMLImageElement>('img')[0].getAttribute('src')!)).toContain('fill="#0f172a"');
+        clearTheme();
+    });
+
+    it('modo mono: un icono remoto con colores propios NO se recolorea (queda el placeholder monocromo, sin <img>)', async () => {
+        await mount(h(ExtensionIcon, { icon: 'brand:zoom', mode: 'mono', iconUrl: '/api/extensions/icons/core-zoom?h=cccccccccccccccc' }));
+        expect(q('img')).toBeNull();
+        expect(q('[data-brand="zoom"]')!.getAttribute('style')).toBeNull();
+    });
+
+    it('Meet y Zoom se distinguen a primera vista: color distinto en el placeholder y URL distinta', async () => {
         await mount(h('div', null, h(ExtensionIcon, { icon: 'brand:zoom' }), h(ExtensionIcon, { icon: 'brand:googlemeet' })));
-        const [zoom, meet] = qa<SVGSVGElement>('svg[data-brand]');
-        expect(zoom.querySelector('path')!.getAttribute('d')).not.toBe(meet.querySelector('path')!.getAttribute('d'));
+        const [zoom, meet] = qa('[data-brand]');
         expect(fillOf(zoom)).not.toBe(fillOf(meet));
+        const [i1, i2] = qa('img');
+        expect(i1.getAttribute('src')).not.toBe(i2.getAttribute('src'));
     });
 
     it('dimensiones FIJAS por tamano (16/20/24/32) en cualquier estado: sin salto de maquetacion', async () => {
@@ -77,11 +167,10 @@ describe('ExtensionIcon: marca', () => {
         expect(nearestIconSize(40)).toBe(32);
     });
 
-    it('modo mono: currentColor, sin ficha ni color en linea', async () => {
+    it('modo mono: sin ficha ni color en linea (hereda el color de texto)', async () => {
         await mount(h('span', { className: 'text-muted-foreground' }, h(ExtensionIcon, { icon: 'brand:hubspot', mode: 'mono' })));
-        const svg = q<SVGSVGElement>('svg[data-brand]')!;
-        expect(svg.getAttribute('fill')).toBe('currentColor');
-        expect(svg.getAttribute('style')).toBeNull();
+        const mark = q('[data-brand]')!;
+        expect(mark.getAttribute('style')).toBeNull();
         expect(q('[data-extension-icon]')!.className).not.toMatch(/bg-card|border/);
         expect(q('[data-extension-icon]')!.getAttribute('data-mode')).toBe('mono');
     });
@@ -93,7 +182,7 @@ describe('ExtensionIcon: marca', () => {
         await mount(h(ExtensionIcon, { icon: 'brand:zoom' }));
         expect(q('[data-extension-icon]')!.className).toMatch(/bg-card/);
         expect(q('[data-extension-icon]')!.className).toMatch(/border-border/);
-        expect(cssHex(fillOf(q('svg[data-brand]')!))).toBe(BRAND_ICONS.zoom.hex);
+        expect(cssHex(fillOf(q('[data-brand]')!))).toBe(BRAND_ICONS.zoom.hex);
         clearTheme();
     });
 
@@ -101,18 +190,26 @@ describe('ExtensionIcon: marca', () => {
         await mount(h('div', null, h(ExtensionIcon, { icon: 'brand:trello', loading: true }), h(ExtensionIcon, { icon: 'brand:trello', disabled: true })));
         const [loading, disabled] = qa('[data-extension-icon]');
         expect(loading.querySelector('[data-extension-icon-loading] svg')).toBeTruthy();
-        expect(loading.querySelector('svg[data-brand]')!.parentElement!.className).toMatch(/opacity-30/);
+        expect(loading.querySelector('[data-brand]')!.closest('.transition-opacity')!.className).toMatch(/opacity-30/);
         expect(loading.querySelector('[data-extension-icon-loading] svg')!.getAttribute('class')).toMatch(/animate-spin/);
         expect(disabled.className).toMatch(/grayscale/);
         expect(disabled.className).toMatch(/opacity-50/);
         expect(disabled.querySelector('[data-extension-icon-loading]')).toBeNull();
     });
 
-    it('marca sin logotipo (Slack): ficha neutra con la inicial, sin logotipo inventado', async () => {
-        await mount(h(ExtensionIcon, { icon: 'brand:slack' }));
+    it('slack, teams y discord sin iconUrl propio: el catalogo pide brand.<slug> al backend (logo, sin letra en el texto)', async () => {
+        await mount(h('div', null, ...['brand:slack', 'brand:microsoftteams', 'brand:discord'].map((icon) => h(ExtensionIcon, { key: icon, icon, size: 32 }))));
+        const srcs = qa<HTMLImageElement>('img[data-extension-icon-img]').map((i) => i.getAttribute('src'));
+        expect(srcs).toEqual(['slack', 'microsoftteams', 'discord'].map((slug) => `${BACKEND}/api/extensions/icons/brand.${slug}`));
+        expect(document.body.textContent).toBe('');
+    });
+
+    it('marca sin logotipo (Salesforce): ficha neutra con la inicial, sin logotipo inventado', async () => {
+        await mount(h(ExtensionIcon, { icon: 'brand:salesforce' }));
         expect(q('[data-extension-icon]')!.getAttribute('data-extension-icon')).toBe('neutral');
-        expect(q('[data-extension-icon]')!.textContent).toBe('S');
-        expect(q('svg[data-brand]')).toBeNull();
+        expect(letters(q('[data-extension-icon]')!)).toBe('S');
+        expect(q('[data-brand]')).toBeNull();
+        expect(q('img')).toBeNull();
     });
 
     it('respaldo: icono no resoluble + etiqueta -> iniciales; sin etiqueta -> rompecabezas; nunca una imagen', async () => {
@@ -123,12 +220,12 @@ describe('ExtensionIcon: marca', () => {
             h(ExtensionIcon, { icon: 'brand:desconocida' }),
         ));
         const icons = qa('[data-extension-icon]');
-        expect(icons[0].textContent).toBe('AC');
+        expect(letters(icons[0])).toBe('AC');
         expect(icons[1].getAttribute('data-extension-icon')).toBe('fallback');
         expect(icons[1].querySelector('svg')).toBeTruthy();
-        expect(icons[2].textContent).toBe('ZX');
-        expect(icons[3].textContent).toBe('D');
-        expect(document.body.querySelector('img, image')).toBeNull();
+        expect(letters(icons[2])).toBe('ZX');
+        expect(letters(icons[3])).toBe('D');
+        expect(document.body.querySelector('img, image')).toBeNull(); // una URL arbitraria en `icon` nunca se carga
     });
 
     it('icono Lucide (con y sin prefijo): monocromo, sin ficha', async () => {
@@ -145,7 +242,7 @@ describe('ExtensionIcon: marca', () => {
 describe('ExtensionIcon: garantia de contraste con el tema ACTIVO', () => {
     installCleanup();
 
-    const fill = () => cssHex(fillOf(q('svg[data-brand]')!));
+    const fill = () => cssHex(fillOf(q('[data-brand]')!));
 
     it('Notion (negro) se aclara en un tema oscuro y vuelve al oficial al cambiar a uno claro (sin recargar)', async () => {
         clearTheme();
@@ -167,7 +264,7 @@ describe('ExtensionIcon: garantia de contraste con el tema ACTIVO', () => {
             clearTheme();
             await setTheme(theme.tokens as Record<string, string>);
             const m = await mount(h('div', null, slugs.map((slug) => h(ExtensionIcon, { key: slug, icon: `brand:${slug}` }))));
-            const svgs = qa<SVGSVGElement>('svg[data-brand]', m.container);
+            const svgs = qa('[data-brand]', m.container);
             expect(svgs.length).toBe(slugs.length);
             for (const svg of svgs) {
                 const color = cssHex(fillOf(svg))!;
@@ -192,9 +289,9 @@ describe('KitIcon y iconos de proveedor', () => {
             h(KitIcon, { name: 'NoExisteIcono' }),
         ));
         expect(qa('[data-extension-icon="brand"]').length).toBe(2);
-        expect(q('svg[data-brand="googledrive"]')).toBeTruthy();
+        expect(q('[data-brand="googledrive"]')).toBeTruthy();
         expect(q('[role="img"][aria-label="Zoom"]')).toBeTruthy();
-        expect(qa('[data-extension-icon="initials"]')[0].textContent).toBe('QA');
+        expect(letters(qa('[data-extension-icon="initials"]')[0])).toBe('QA');
         // Lucide y desconocido: sin componente de marca
         const spans = Array.from(m.container.firstElementChild!.children);
         expect(spans.length).toBe(6);
@@ -205,12 +302,12 @@ describe('KitIcon y iconos de proveedor', () => {
 
     it('ProviderIcon: Zoom y Google Meet ya no son dos camaras casi iguales', async () => {
         await mount(h('div', null, h(ProviderIcon, { icon: 'zoom', className: 'h-5 w-5' }), h(ProviderIcon, { icon: 'google-meet' }), h(ProviderIcon, { icon: 'link' }), h(MeetingProviderIcon, { provider: 'teams' }), h(MeetingProviderIcon, { provider: 'zoom' })));
-        const zoom = q('[data-provider-icon="zoom"] svg[data-brand]')!;
-        const meet = q('[data-provider-icon="google-meet"] svg[data-brand]')!;
-        expect(zoom.querySelector('path')!.getAttribute('d')).not.toBe(meet.querySelector('path')!.getAttribute('d'));
+        const zoom = q('[data-provider-icon="zoom"] [data-brand]')!;
+        const meet = q('[data-provider-icon="google-meet"] [data-brand]')!;
+        expect(zoom.getAttribute('style')).not.toBe(meet.getAttribute('style'));
         expect(q('[data-provider-icon="zoom"] [data-extension-icon]')!.getAttribute('data-size')).toBe('20');
         expect(q('[data-provider-icon="link"]')!.tagName.toLowerCase()).toBe('svg');
-        expect(q('[data-provider-icon="teams"] [data-extension-icon]')!.textContent).toBe('T');
+        expect(q('[data-provider-icon="teams"] [data-extension-icon]')!.getAttribute('data-extension-icon')).toBe('brand');
     });
 });
 

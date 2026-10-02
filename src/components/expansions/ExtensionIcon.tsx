@@ -11,13 +11,20 @@
  *
  * Contraste: el color oficial se usa tal cual si contrasta >= 3:1 con las superficies del tema ACTIVO (fondo, tarjeta, atenuado y
  * hover); si no (Notion negro en un tema oscuro, Zoom en azul oscuro...) se pinta una variante mas clara/oscura del mismo tono
- * (brandGlyphColor). Se recalcula al cambiar de tema. El icono es decorativo (aria-hidden): el nombre accesible lo da el boton o la
- * fila que lo contiene. Sin imagenes remotas: todo sale del registro brand-icons.ts.
+ * (brandGlyphColor) en el PLACEHOLDER. Se recalcula al cambiar de tema. El icono es decorativo (aria-hidden): el nombre accesible lo da
+ * el boton o la fila que lo contiene.
+ *
+ * Imagen ASINCRONA: el dibujo NO esta en el bundle. Encima del placeholder (ficha con inicial / Lucide, mismas dimensiones: sin saltos de
+ * maquetacion) se carga un <img loading=lazy decoding=async referrerPolicy=no-referrer> desde el backend (`iconUrl` del catalogo con
+ * ?h=<hash>, o brand.<slug>), o desde un data URL valido en `icon`. Solo se monta al acercarse al viewport (IntersectionObserver); si falla
+ * (404, red, backend caido) se queda el placeholder. Los logotipos con colores propios NO se recolorean; un SVG de data URL con
+ * `currentColor` hereda el color de texto del tema. Ver lib/expansions/icon-image.ts.
  */
 import * as React from 'react';
 import { Loader2, Puzzle } from 'lucide-react';
 import { resolveIcon } from './kit/resolve-icon';
 import { BRAND_SURFACE_TOKENS, brandGlyphColor, initialsOf, resolveIconRef } from '@/lib/expansions/icon-ref';
+import { brandIconUrl, parseIconDataUrl, recolorCurrentColor, resolveBackendIconUrl } from '@/lib/expansions/icon-image';
 import { normalizeHex } from '@/lib/color';
 
 export type ExtensionIconSize = 16 | 20 | 24 | 32;
@@ -85,10 +92,88 @@ function glyphColor(hex: string, surfaces: string): string {
     return color;
 }
 
+// ------------------------------------------------------------------ imagen asincrona
+/** SVG de data URL: `currentColor` pasa a ser el foreground del tema activo. */
+function recolorDataImage(image: NonNullable<ReturnType<typeof parseIconDataUrl>>, surfaces: string): string {
+    if (!image.svg || !/currentColor/i.test(image.svg) || typeof document === 'undefined') return image.src;
+    void surfaces; // dependencia: cambia con el tema
+    const fg = normalizeHex(getComputedStyle(document.documentElement).getPropertyValue('--color-foreground').trim());
+    return fg ? recolorCurrentColor(image, fg) : image.src; // sin tema legible: currentColor se queda (negro por defecto)
+}
+
+/** Imagenes ya cargadas (por URL con hash): al reaparecer no hay parpadeo ni espera de viewport. */
+const loadedSrcs = new Set<string>();
+
+function useNearViewport(ref: React.RefObject<HTMLElement | null>, immediate: boolean): boolean {
+    const [near, setNear] = React.useState(() => immediate || typeof IntersectionObserver === 'undefined');
+    React.useEffect(() => {
+        if (near || !ref.current || typeof IntersectionObserver === 'undefined') return;
+        const observer = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) { setNear(true); observer.disconnect(); } }, { rootMargin: '200px' });
+        observer.observe(ref.current);
+        return () => observer.disconnect();
+    }, [near, ref]);
+    return near;
+}
+
+/**
+ * Placeholder instantaneo + <img> superpuesto. Mismas dimensiones siempre. `glyph` 0 = sin imagen (modo mono con icono remoto: un logotipo
+ * con colores propios no se recolorea ni se mezcla con el color de texto; se queda el placeholder monocromo).
+ */
+function PlaceholderOrImage({ body, src, glyph }: { body: React.ReactNode; src: string | null; glyph: number }) {
+    const anchor = React.useRef<HTMLSpanElement>(null);
+    const [status, setStatus] = React.useState<'idle' | 'loaded' | 'error'>(() => (src && loadedSrcs.has(src) ? 'loaded' : 'idle'));
+    const [prevSrc, setPrevSrc] = React.useState(src);
+    if (prevSrc !== src) { setPrevSrc(src); setStatus(src && loadedSrcs.has(src) ? 'loaded' : 'idle'); }
+    const enabled = src !== null && glyph > 0 && status !== 'error';
+    const near = useNearViewport(anchor, !!src && (src.startsWith('data:') || loadedSrcs.has(src)));
+    return (
+        <span ref={anchor} className="relative inline-flex items-center justify-center">
+            <span className={status === 'loaded' ? 'invisible' : 'inline-flex items-center justify-center'}>{body}</span>
+            {enabled && near && (
+                // eslint-disable-next-line @next/next/no-img-element -- icono diminuto del backend; next/image no aporta nada aqui
+                <img
+                    src={src!}
+                    alt=""
+                    aria-hidden="true"
+                    loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
+                    draggable={false}
+                    width={glyph}
+                    height={glyph}
+                    data-extension-icon-img=""
+                    onLoad={() => { loadedSrcs.add(src!); setStatus('loaded'); }}
+                    onError={() => setStatus('error')}
+                    className={`absolute inset-0 m-auto object-contain transition-opacity ${status === 'loaded' ? 'opacity-100' : 'opacity-0'}`}
+                    style={{ width: glyph, height: glyph }}
+                />
+            )}
+        </span>
+    );
+}
+
 // ------------------------------------------------------------------ componente
+/**
+ * Letra del placeholder. Se pinta con un pseudo-elemento (CSS content: attr(data-initial)) y NO como texto del DOM: asi no se cuela
+ * en el texto ni en el nombre accesible del boton/enlace que contiene al icono (p. ej. "GUnirse a la reunion") ni en la seleccion/copia.
+ */
+function InitialGlyph({ text, size, className, style, brand }: { text: string; size: ExtensionIconSize; className?: string; style?: React.CSSProperties; brand?: string }) {
+    return (
+        <span
+            data-initial={text}
+            data-brand={brand}
+            style={style}
+            className={`select-none font-semibold leading-none before:content-[attr(data-initial)] ${INITIALS_TEXT_CLASS[size]} ${className ?? ''}`}
+        />
+    );
+}
+
+
 export interface ExtensionIconProps {
     /** `brand:<slug>` | `lucide:<Nombre>` | `initials:<XY>` | nombre Lucide (compatibilidad). */
     icon?: string | null;
+    /** `iconUrl` del catalogo del backend (ruta relativa con ?h=<hash>): la imagen se carga async sobre el placeholder. */
+    iconUrl?: string | null;
     /** Solo para el RESPALDO: si `icon` no se puede resolver se muestran las iniciales de este texto (el nombre de la accion). */
     label?: string;
     size?: ExtensionIconSize;
@@ -102,9 +187,14 @@ export interface ExtensionIconProps {
     className?: string;
 }
 
-export function ExtensionIcon({ icon, label, size = 24, mode = 'brand', tile, loading = false, disabled = false, className }: ExtensionIconProps) {
+export function ExtensionIcon({ icon, iconUrl, label, size = 24, mode = 'brand', tile, loading = false, disabled = false, className }: ExtensionIconProps) {
     const surfaces = useThemeSurfaces();
-    const ref = resolveIconRef(icon);
+    const isData = typeof icon === 'string' && icon.trim().startsWith('data:');
+    const dataImage = isData ? parseIconDataUrl(icon) : null;
+    // Un data URL invalido NO se interpreta como nada: respaldo con iniciales/puzzle.
+    const ref = isData ? null : resolveIconRef(icon);
+    const remote = resolveBackendIconUrl(iconUrl) ?? (ref?.kind === 'brand' ? brandIconUrl(ref.icon.slug) : null);
+    const imageSrc = dataImage ? recolorDataImage(dataImage, surfaces) : remote;
     const glyph = GLYPH_PX[size] ?? 16;
     const brandMode = mode === 'brand';
 
@@ -114,23 +204,11 @@ export function ExtensionIcon({ icon, label, size = 24, mode = 'brand', tile, lo
 
     if (ref?.kind === 'brand') {
         kind = 'brand';
-        body = (
-            <svg
-                viewBox="0 0 24 24"
-                width={glyph}
-                height={glyph}
-                focusable="false"
-                aria-hidden="true"
-                data-brand={ref.icon.slug}
-                fill={brandMode ? undefined : 'currentColor'}
-                style={brandMode ? { fill: glyphColor(ref.icon.hex, surfaces) } : undefined}
-            >
-                <path d={ref.icon.path} />
-            </svg>
-        );
+        // Placeholder: la inicial en el color de la marca (el dibujo llega del backend).
+        body = <InitialGlyph brand={ref.icon.slug} text={initialsOf(ref.icon.name).slice(0, 1)} size={size} style={brandMode ? { color: glyphColor(ref.icon.hex, surfaces) } : undefined} />;
     } else if (ref?.kind === 'neutral') {
         kind = 'neutral';
-        body = <span className={`font-semibold leading-none ${INITIALS_TEXT_CLASS[size]}`}>{ref.brand.initial}</span>;
+        body = <InitialGlyph text={ref.brand.initial} size={size} />;
     } else if (ref?.kind === 'lucide' && resolveIcon(ref.name)) {
         kind = 'lucide';
         const Lucide = resolveIcon(ref.name)!;
@@ -138,10 +216,10 @@ export function ExtensionIcon({ icon, label, size = 24, mode = 'brand', tile, lo
         chip = false; // los iconos funcionales (Lucide) van sin ficha: son monocromos por naturaleza
     } else if (ref?.kind === 'initials' || (ref?.kind === 'lucide' && !label)) {
         kind = 'initials';
-        body = <span className={`font-semibold leading-none ${INITIALS_TEXT_CLASS[size]}`}>{ref?.kind === 'initials' ? ref.text : <Puzzle size={glyph} aria-hidden={true} />}</span>;
+        body = ref?.kind === 'initials' ? <InitialGlyph text={ref.text} size={size} /> : <Puzzle size={glyph} aria-hidden={true} />;
     } else if (label && initialsOf(label)) {
         kind = 'initials';
-        body = <span className={`font-semibold leading-none ${INITIALS_TEXT_CLASS[size]}`}>{initialsOf(label)}</span>;
+        body = <InitialGlyph text={initialsOf(label)} size={size} />;
     } else {
         kind = 'fallback';
         body = <Puzzle size={LUCIDE_PX[size] ?? 16} aria-hidden={true} />;
@@ -150,6 +228,8 @@ export function ExtensionIcon({ icon, label, size = 24, mode = 'brand', tile, lo
 
     // Las fichas con texto (iniciales, marca sin logotipo) siempre llevan ficha en modo brand para que se lean como icono.
     if ((kind === 'initials' || kind === 'neutral') && brandMode && tile !== false) chip = true;
+    const hasImage = imageSrc !== null;
+    if (hasImage && brandMode && tile !== false) chip = true;
     const chipClass = chip ? 'rounded-md border border-border bg-card text-card-foreground' : '';
     const stateClass = disabled ? 'opacity-50 grayscale' : '';
 
@@ -162,7 +242,9 @@ export function ExtensionIcon({ icon, label, size = 24, mode = 'brand', tile, lo
             style={{ width: size, height: size }}
             className={`relative inline-flex shrink-0 items-center justify-center overflow-hidden ${chipClass} ${stateClass} ${className ?? ''}`}
         >
-            <span className={`inline-flex items-center justify-center transition-opacity ${loading ? 'opacity-30' : ''}`}>{body}</span>
+            <span className={`inline-flex items-center justify-center transition-opacity ${loading ? 'opacity-30' : ''}`}>
+                <PlaceholderOrImage body={body} src={imageSrc} glyph={!dataImage && !brandMode ? 0 : kind === 'lucide' || kind === 'fallback' ? LUCIDE_PX[size] ?? 16 : glyph} />
+            </span>
             {loading && (
                 <span data-extension-icon-loading="" className="absolute inset-0 flex items-center justify-center text-foreground">
                     <Loader2 size={size === 16 ? 12 : 14} aria-hidden={true} className="animate-spin motion-reduce:animate-none" />

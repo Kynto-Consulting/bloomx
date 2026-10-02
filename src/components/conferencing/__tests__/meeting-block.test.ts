@@ -61,7 +61,7 @@ describe('JoinMeetingButton', () => {
         expect(a.getAttribute('href')).toBe('https://meet.google.com/abc-defg-hij');
         expect(a.getAttribute('rel')).toBe('noopener noreferrer');
         expect(a.getAttribute('aria-label')).toBe('Unirse a la reunión de Google Meet');
-        expect(a.textContent).toBe('Unirse a la reunión');
+        expect(a.textContent).toBe('Unirse a la reunión'); // el icono no aporta texto
         expect(a.querySelector('[data-provider-icon]')?.getAttribute('data-provider-icon')).toBe('google-meet');
     });
 

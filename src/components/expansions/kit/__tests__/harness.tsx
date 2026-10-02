@@ -82,7 +82,7 @@ export function tokensUsed(html: string): Set<string> {
  */
 function withoutBrandGlyphColors(root: ParentNode): Element {
     const clone = (root as Element).cloneNode(true) as Element;
-    clone.querySelectorAll('svg[data-brand]').forEach((svg) => { svg.removeAttribute('style'); svg.removeAttribute('fill'); });
+    clone.querySelectorAll('[data-brand]').forEach((svg) => { svg.removeAttribute('style'); svg.removeAttribute('fill'); });
     return clone;
 }
 
