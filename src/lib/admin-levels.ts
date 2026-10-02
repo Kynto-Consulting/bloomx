@@ -47,6 +47,7 @@ export const DIRECT_ROUTES: Record<string, L> = {
     'PUT /api/admin/extensions/settings': 4,
     'POST /api/admin/extensions/settings': 4,
     'GET /api/admin/extensions/config': 3,
+    'GET /api/admin/extensions/users': 3,
     'PUT /api/admin/extensions/config': 4,
     'POST /api/admin/extensions/config': 4,
     'GET /api/admin/retention': 4,
@@ -81,7 +82,7 @@ export const COMMAND_LEVELS: Record<string, L> = {
     'extensions list': 3, 'extensions install': 3, 'extensions update': 3, 'extensions uninstall': 3, 'extensions enable': 3, 'extensions disable': 3, 'extensions order': 3,
     'extensions test': 3, 'extensions credentials': 3, 'extensions conferencing': 3,
     'extensions mandatory': 4, 'extensions credentials set': 4, 'extensions credentials unset': 4, 'extensions credentials migrate': 4,
-    'extensions config': 3, 'extensions config set': 4, 'extensions config reset': 4, 'extensions config import-env': 4, 'extensions config action': 4,
+    'extensions config': 3, 'extensions users': 3, 'extensions config set': 4, 'extensions config reset': 4, 'extensions config import-env': 4, 'extensions config action': 4,
     // IA de la instancia
     'ai status': 1, 'ai usage': 1, 'ai audit': 1, 'ai test': 3, 'ai set': 3, 'ai purge': 3,
     'ai enable': 4, 'ai disable': 4, 'ai connection set': 4, 'ai key set': 4, 'ai key clear': 4,

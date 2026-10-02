@@ -137,6 +137,15 @@ export const extensionCommands: CommandDef[] = [
         },
     }),
     def({
+        name: 'extensions users', risk: 'read', summary: L('Busca usuarios del dominio para los ajustes tipo user/users/userMap (id, correo, nombre, estado, nivel)', 'Search domain users for user/users/userMap settings (id, email, name, status, level)'),
+        flags: [str('q', 'Texto a buscar (nombre o correo)', 'Text to search (name or email)'), str('page', 'Página (desde 0)', 'Page (from 0)')], covers: ['GET /api/admin/extensions/users'],
+        examples: ['extensions users --q ana'],
+        handler: async ({ args, ctx }) => {
+            const r = await ctx.callOk({ method: 'GET', path: '/extensions/users', query: { ...(args.flags.q ? { q: String(args.flags.q) } : {}), ...(args.flags.page ? { page: String(args.flags.page) } : {}) } });
+            return table(['id', 'email', 'name', 'status', 'level'], (r.data.users as any[]).map((u) => ({ id: u.id, email: u.email, name: u.name, status: u.disabled ? 'disabled' : 'active', level: u.levelName })));
+        },
+    }),
+    def({
         name: 'extensions config set', risk: 'security', summary: L('Fija un ajuste no secreto (el JSON se acepta como valor; vacío = restablecer)', 'Set a non-secret setting (JSON accepted as value; empty = reset)'),
         managerOnly: true, positionals: [EXT, pos('key', 'Clave del ajuste', 'Setting key'), pos('value', 'Valor (JSON o texto)', 'Value (JSON or text)')], covers: ['PUT /api/admin/extensions/config'],
         handler: async ({ args, ctx }) => {

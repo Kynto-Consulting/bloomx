@@ -13,6 +13,31 @@ const domainConfigManifest = `"settingsSchema": {
       "label": { "es": "Clave de API", "en": "API key" } }
   ]
 }`;
+const userFieldsManifest = `"settingsSchema": {
+  "fields": [
+    { "key": "owner", "type": "user", "label": { "es": "Responsable", "en": "Owner" }, "filter": { "minLevel": 3 } },
+    { "key": "recipients", "type": "users", "maxItems": 10, "label": { "es": "Destinatarios", "en": "Recipients" } },
+    { "key": "digest", "type": "userMap", "valueType": "boolean", "default": false,
+      "label": { "es": "Recibe el resumen", "en": "Gets the digest" } },
+    { "key": "dailyLimit", "type": "userMap", "valueType": "number", "min": 1, "max": 500, "integer": true, "default": 20,
+      "label": { "es": "Límite diario por usuario", "en": "Daily limit per user" } },
+    { "key": "API_TOKEN", "type": "secret", "pattern": "^tok_[A-Za-z0-9]{16,}$", "revealLast4": true,
+      "label": { "es": "Token de la API", "en": "API token" } }
+  ]
+}`;
+const userFieldsUsageEs = `// server.js
+module.exports = {
+    async sendDigest(ctx) {
+        const { owner, recipients, digest } = ctx.settings;   // owner = id; recipients = ids; digest = { [userId]: boolean } (solo entradas explicitas)
+        const wants = (id) => ctx.settings.forUser('digest', id);          // entrada explicita o default del schema
+        const limit = ctx.settings.getUserValue('dailyLimit', ctx.user.id); // numero, o 20 si el usuario no tiene entrada
+        const token = ctx.env.API_TOKEN;                                   // secreto write-only: solo existe aqui, dentro del sandbox
+        if (!wants(ctx.user.id)) return { skipped: 'opt-out' };
+        // ... un id eliminado sigue llegando como id: comprueba con ctx.services.users.get(id) si lo necesitas
+    }
+};`;
+const userFieldsUsageEn = userFieldsUsageEs.replace('// server.js', '// server.js').replace('(solo entradas explicitas)', '(explicit entries only)').replace('entrada explicita o default del schema', 'explicit entry or the schema default').replace('numero, o 20 si el usuario no tiene entrada', 'a number, or 20 when the user has no entry').replace('secreto write-only: solo existe aqui, dentro del sandbox', 'write-only secret: only exists here, inside the sandbox').replace('un id eliminado sigue llegando como id: comprueba con ctx.services.users.get(id) si lo necesitas', 'a deleted id still arrives as an id: check with ctx.services.users.get(id) if you need to');
+
 const domainConfigUsageEs = `// server.js: los ajustes NO secretos llegan en ctx.settings; los secretos, en ctx.env
 module.exports = {
     async onEmailPreSend(ctx) {
@@ -898,6 +923,8 @@ const es: Block[] = [
         ['`multienum`', 'Casillas, cada una con descripción y ejemplo', 'Lista de valores de `options` (puede ser vacía)'],
         ['`list`', 'Un elemento por línea, con contador (`maxItems`, `itemMaxLength`)', 'Lista de textos sin repetidos'],
         ['`json`', 'Área de texto con validación', 'Cualquier JSON de hasta 8 KB'],
+        ['`user`, `users`', 'Buscador de usuarios del dominio (uno / varios)', 'Id(s) estable(s) del usuario'],
+        ['`userMap`', 'Tabla de usuarios con un valor cada uno (`valueType`)', 'Mapa `{ idUsuario: valor }`'],
     ] },
     { t: 'h3', id: 'domain-config-secrets', text: 'Secretos frente a ajustes' },
     { t: 'ul', items: [
@@ -905,6 +932,32 @@ const es: Block[] = [
         '**Ajustes** (el resto): valores tipados que se guardan en claro en `ExtensionOnDomain.settings.config` y la extensión recibe en **`ctx.settings[key]`**. No pongas secretos aquí. Claves reservadas: `credentials`, `env`, `meta`, `ui`, `config`, `configMeta`, `authData`, `mandatory`.',
     ] },
     { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings y ctx.env', code: domainConfigUsageEs },
+    { t: 'h3', id: 'domain-config-writeonly', text: 'Secretos de solo escritura (write-only)' },
+    { t: 'ul', items: [
+        'Un secreto se declara con `secret: true`, `writeOnly: true` o `type: "secret"` (equivalentes). Se cifra en reposo (AES-256-GCM, la misma `DATA_ENCRYPTION_KEY` que la clave de IA) y **nunca se vuelve a leer**: la API solo devuelve `{ name, configured, set, updatedAt?, last4? }`. `last4` (los 4 últimos caracteres) solo existe si el campo declara `revealLast4: true` (apagado por defecto; secretos de menos de 12 caracteres no revelan nada).',
+        'En la consola cada secreto muestra «Guardado — escribe para reemplazar» con la fecha de la última rotación y las acciones **Reemplazar** y **Borrar** (esta última pide confirmación). El campo es `type=password` con `autocomplete="new-password"`.',
+        '**Un campo vacío en un guardado no borra nada**: solo `null` (la acción Borrar) elimina el valor. Reemplazar y borrar quedan en la auditoría con quién y cuándo, **nunca con el valor** (tampoco en exportaciones, copias, registros de ejecución, errores, estado de páginas ni respuestas de `execute`).',
+        '**Validación en servidor al guardar**: `pattern`, `format` y `maxLength` del campo (tope 4096). El error indica el motivo sin repetir el valor.',
+        '**Dentro del sandbox**: el `server.js` recibe el secreto descifrado en `ctx.env` (secretos de dominio, solo los declarados con `ENV_READ:*`) o en el propio elemento de `ctx.settings` (secretos por elemento de `objects`), solo durante esa ejecución y solo si la extensión lo declara y tiene permiso.',
+        '**Migración**: los valores que aún estuvieran en claro (instalaciones antiguas) se cifran en el primer guardado de la extensión, de forma idempotente (repetirlo no cambia nada). Compatibilidad: cualquier cliente que dependiera de **leer** un valor guardado ya no podrá hacerlo (solo se devuelve el estado); un cliente antiguo que enviaba `""` para borrar debe enviar `null`.',
+    ] },
+    { t: 'h3', id: 'domain-config-users', text: 'Selector de usuarios: user, users y userMap' },
+    { t: 'p', text: 'Son ajustes que configura el **administrador** (nivel ≥ 3) eligiendo cuentas del propio dominio. Se guarda siempre el **id estable** del usuario (nunca el correo); la consola resuelve el nombre y el correo con un buscador asíncrono y paginado. Solo se ven y se validan las cuentas del dominio actual.' },
+    { t: 'table', head: ['Tipo', 'Control', 'Valor guardado / en ctx.settings'], rows: [
+        ['`user`', 'Un usuario (buscador con resultados paginados)', 'Texto: el id'],
+        ['`users`', 'Varios usuarios, con `maxItems` (tope 50)', 'Lista de ids sin repetidos'],
+        ['`userMap`', 'Tabla buscable y paginada: un valor por usuario; añadir, quitar, «Todos: sí/no» y «Añadir a todos» (boolean)', '`{ [userId]: valor }` con entradas explícitas (tope `maxItems`, hasta 5000)'],
+    ] },
+    { t: 'ul', items: [
+        '`userMap` usa `valueType`: `boolean` (por defecto), `string`, `number` (`min`, `max`, `integer`) o `select` (`options`). `default` es el valor de quien **no** tiene entrada; la tabla solo guarda entradas explícitas.',
+        '`filter: { minLevel?, role? }` acota quién se puede elegir (nivel de permiso mínimo o nombre del nivel: user, support, operator, admin, superadmin).',
+        '**Validación en servidor** (el servidor de la consola, contra la base del dominio): cada id **nuevo** debe existir, no estar desactivado y cumplir el filtro (errores `userMissing`, `userDisabled`, `userFilter`). Los ids ya guardados que luego desaparecen no bloquean otros cambios: la consola los marca **«Usuario eliminado»** y ofrece «Quitar eliminados». El backend compartido valida formato, tipos y topes.',
+        '**En el handler**: `ctx.settings.owner` es el id, `ctx.settings.recipients` la lista y `ctx.settings.digest` el mapa completo (es configuración del administrador, sin secretos de usuarios). `ctx.settings.forUser(key, userId)` y `ctx.settings.getUserValue(key, userId)` devuelven la entrada explícita o, si no existe, el `default` (funciones no enumerables: no salen en `JSON.stringify(ctx.settings)`).',
+        'API del buscador (nivel 3): `GET /api/admin/extensions/users?q=&page=&limit=` y `?ids=a,b` (resuelve y marca los inexistentes). CLI: `extensions users --q ana`.',
+    ] },
+    { t: 'code', lang: 'json', title: 'manifest.json: user, users, userMap y secreto', code: userFieldsManifest },
+    { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings.forUser', code: userFieldsUsageEs },
+    { t: 'settings-preview' },
     { t: 'h3', id: 'domain-config-objects', text: 'Listas de elementos (objects), acciones y registro' },
     { t: 'ul', items: [
         '**`objects`**: lista editable de registros (p. ej. los endpoints de un webhook). `itemFields` declara los sub-campos (tipos simples, con `required` y `visibleWhen`); cada elemento lleva un `id` estable (`[a-z0-9-]`, único, hasta 32 caracteres) que la consola genera a partir de un nombre más un sufijo y **no se puede editar** después de guardar. Máximo 50 elementos.',
@@ -1111,6 +1164,8 @@ const en: Block[] = [
         ['`multienum`', 'Checkboxes, each with description and example', 'List of `options` values (may be empty)'],
         ['`list`', 'One item per line, with counter (`maxItems`, `itemMaxLength`)', 'List of unique strings'],
         ['`json`', 'Textarea with validation', 'Any JSON up to 8 KB'],
+        ['`user`, `users`', 'Search over the domain\'s users (one / several)', 'Stable user id(s)'],
+        ['`userMap`', 'Table of users with one value each (`valueType`)', 'Map `{ userId: value }`'],
     ] },
     { t: 'h3', id: 'domain-config-secrets', text: 'Secrets vs settings' },
     { t: 'ul', items: [
@@ -1118,6 +1173,32 @@ const en: Block[] = [
         '**Settings** (everything else): typed values stored in clear in `ExtensionOnDomain.settings.config` and received by the extension in **`ctx.settings[key]`**. Do not put secrets here. Reserved keys: `credentials`, `env`, `meta`, `ui`, `config`, `configMeta`, `authData`, `mandatory`.',
     ] },
     { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings and ctx.env', code: domainConfigUsageEn },
+    { t: 'h3', id: 'domain-config-writeonly', text: 'Write-only secrets' },
+    { t: 'ul', items: [
+        'A secret is declared with `secret: true`, `writeOnly: true` or `type: "secret"` (equivalent). It is encrypted at rest (AES-256-GCM, the same `DATA_ENCRYPTION_KEY` as the AI key) and **never read back**: the API only returns `{ name, configured, set, updatedAt?, last4? }`. `last4` (the last 4 characters) only exists when the field declares `revealLast4: true` (off by default; secrets shorter than 12 characters reveal nothing).',
+        'In the console each secret shows "Saved — type to replace" with the date of the last rotation and the **Replace** and **Delete** actions (Delete asks for confirmation). The input is `type=password` with `autocomplete="new-password"`.',
+        '**An empty field in a save deletes nothing**: only `null` (the Delete action) removes the value. Replacing and deleting are audited with who and when, **never with the value** (nor in exports, backups, run logs, errors, page state or `execute` responses).',
+        '**Server-side validation on save**: the field\'s `pattern`, `format` and `maxLength` (cap 4096). The error explains the reason without repeating the value.',
+        '**Inside the sandbox**: `server.js` receives the decrypted secret in `ctx.env` (domain secrets, only those declared with `ENV_READ:*`) or in the item itself in `ctx.settings` (per-item secrets of `objects`), only for that execution and only if the extension declares it and has the permission.',
+        '**Migration**: values that were still stored in clear text (older installs) are encrypted on the extension\'s first save, idempotently (repeating it changes nothing). Compatibility: any client that relied on **reading** a stored value can no longer do so (only the state is returned); an old client that sent `""` to delete must send `null`.',
+    ] },
+    { t: 'h3', id: 'domain-config-users', text: 'User picker: user, users and userMap' },
+    { t: 'p', text: 'These are settings the **administrator** (level ≥ 3) configures by choosing accounts of their own domain. The user\'s **stable id** is always stored (never the email); the console resolves name and email with an async, paginated search. Only accounts of the current domain are visible and validated.' },
+    { t: 'table', head: ['Type', 'Control', 'Stored value / in ctx.settings'], rows: [
+        ['`user`', 'One user (search with paginated results)', 'Text: the id'],
+        ['`users`', 'Several users, with `maxItems` (cap 50)', 'List of unique ids'],
+        ['`userMap`', 'Searchable, paginated table: one value per user; add, remove, "Everyone: yes/no" and "Add everyone" (boolean)', '`{ [userId]: value }` with explicit entries (cap `maxItems`, up to 5000)'],
+    ] },
+    { t: 'ul', items: [
+        '`userMap` uses `valueType`: `boolean` (default), `string`, `number` (`min`, `max`, `integer`) or `select` (`options`). `default` is the value for anyone **without** an entry; the table only stores explicit entries.',
+        '`filter: { minLevel?, role? }` limits who can be picked (minimum permission level or level name: user, support, operator, admin, superadmin).',
+        '**Server-side validation** (the console server, against the domain database): every **new** id must exist, not be disabled and meet the filter (`userMissing`, `userDisabled`, `userFilter` errors). Ids that were already stored and later disappear do not block other changes: the console marks them **"Deleted user"** and offers "Remove deleted". The shared backend validates format, types and caps.',
+        '**In the handler**: `ctx.settings.owner` is the id, `ctx.settings.recipients` the list and `ctx.settings.digest` the whole map (it is administrator configuration, with no user secrets). `ctx.settings.forUser(key, userId)` and `ctx.settings.getUserValue(key, userId)` return the explicit entry or, if none exists, the `default` (non-enumerable functions: they do not show up in `JSON.stringify(ctx.settings)`).',
+        'Search API (level 3): `GET /api/admin/extensions/users?q=&page=&limit=` and `?ids=a,b` (resolves and flags missing ones). CLI: `extensions users --q ana`.',
+    ] },
+    { t: 'code', lang: 'json', title: 'manifest.json: user, users, userMap and a secret', code: userFieldsManifest },
+    { t: 'code', lang: 'javascript', title: 'server.js: ctx.settings.forUser', code: userFieldsUsageEn },
+    { t: 'settings-preview' },
     { t: 'h3', id: 'domain-config-objects', text: 'Item lists (objects), actions and run log' },
     { t: 'ul', items: [
         '**`objects`**: an editable list of records (e.g. a webhook\'s endpoints). `itemFields` declares the sub-fields (simple types, with `required` and `visibleWhen`); every item has a stable `id` (`[a-z0-9-]`, unique, up to 32 characters) that the console generates from a name plus a suffix and that **cannot be edited** after saving. Up to 50 items.',

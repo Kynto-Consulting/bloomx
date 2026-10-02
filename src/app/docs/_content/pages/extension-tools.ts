@@ -137,6 +137,10 @@ const page: DocPageContent = {
             ['`changelog`', '`[{ version, date, notes }]`', 'Historial de versiones mostrado como texto'],
         ] },
         { t: 'callout', kind: 'note', title: 'Límites', text: 'Estos campos no se validan aún en el schema de manifest (se leen de forma defensiva). Las preferencias de usuario no se aplican a los hooks de servidor (DLP, webhooks): solo a lo que se pinta. El playground no ejecuta `server.js`: simula sus respuestas. La vista previa de /extensions es solo visual.' },
+        { t: 'h2', id: 'settings-fields', text: 'Campos de ajustes: secretos, usuarios y mapas por usuario' },
+        { t: 'p', text: 'El `settingsSchema` del manifest admite tres familias de campos sensibles a la organización: **secretos write-only** (`secret: true`, `writeOnly: true` o `type: "secret"`; cifrados, jamás se vuelven a leer, con `pattern`/`format` validados en servidor y rotación auditada), **selectores de usuario** (`user`, `users`) y **`userMap`** (un valor por usuario del dominio: boolean, string, number o select). En el handler llegan como `ctx.env.X`, `ctx.settings.owner` (id), `ctx.settings.recipients` (ids) y `ctx.settings.digest` (mapa), con `ctx.settings.forUser(key, userId)` para resolver con el `default`.' },
+        { t: 'p', text: 'Referencia completa, validación y compatibilidad en [Configuración por dominio](/docs/expansions#domain-config-users); los tipos TypeScript están en la [referencia tsdocs](/docs/extension-tools/tsdocs). Vista previa interactiva de los controles:' },
+        { t: 'settings-preview' },
         { t: 'h2', id: 'ai-sdk', text: 'SDK de IA' },
         { t: 'p', text: '`ctx.services.ai` da acceso a la IA configurada por tu organización en [/admin/ai](/docs/ai), sin claves en la extensión. Requiere el permiso `AI_GENERATE` y el bloque `ai` del manifest. Los guardarrailes, las cuotas y la redacción de datos de /admin/ai se aplican igual que en el resto de la aplicación. **No se guardan prompts ni respuestas.**' },
         { t: 'table', head: ['Método', 'Devuelve', 'Notas'], rows: [
@@ -222,6 +226,10 @@ const page: DocPageContent = {
             ['`changelog`', '`[{ version, date, notes }]`', 'Version history shown as text'],
         ] },
         { t: 'callout', kind: 'note', title: 'Limits', text: 'These fields are not validated by the manifest schema yet (they are read defensively). User preferences do not apply to server hooks (DLP, webhooks): only to what is painted. The playground does not run `server.js`: it simulates its responses. The /extensions preview is visual only.' },
+        { t: 'h2', id: 'settings-fields', text: 'Settings fields: secrets, users and per-user maps' },
+        { t: 'p', text: 'The manifest `settingsSchema` supports three organization-aware field families: **write-only secrets** (`secret: true`, `writeOnly: true` or `type: "secret"`; encrypted, never read back, with `pattern`/`format` validated server-side and audited rotation), **user pickers** (`user`, `users`) and **`userMap`** (one value per domain user: boolean, string, number or select). In the handler they arrive as `ctx.env.X`, `ctx.settings.owner` (id), `ctx.settings.recipients` (ids) and `ctx.settings.digest` (map), with `ctx.settings.forUser(key, userId)` to resolve against the `default`.' },
+        { t: 'p', text: 'Full reference, validation and compatibility in [Per-domain configuration](/docs/expansions#domain-config-users); the TypeScript types are in the [tsdocs reference](/docs/extension-tools/tsdocs). Interactive preview of the controls:' },
+        { t: 'settings-preview' },
         { t: 'h2', id: 'ai-sdk', text: 'AI SDK' },
         { t: 'p', text: '`ctx.services.ai` gives access to the AI configured by your organization in [/admin/ai](/docs/ai), with no keys inside the extension. It needs the `AI_GENERATE` permission and the manifest `ai` block. Guardrails, quotas and redaction from /admin/ai apply exactly as elsewhere in the app. **Prompts and responses are not stored.**' },
         { t: 'table', head: ['Method', 'Returns', 'Notes'], rows: [

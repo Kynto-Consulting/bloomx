@@ -1,4 +1,5 @@
 import { catalogClientHeaders } from '@/lib/expansions/client/capabilities';
+import { resolveBackendIconUrl } from '@/lib/expansions/icon-image';
 import { sanitizeMarket } from '@/lib/admin/marketplace/market-meta';
 import { HttpError } from '@/lib/admin/http';
 import { backendUrl } from '@/lib/admin/extensions-instance';
@@ -44,6 +45,7 @@ export function shapeCatalog(data: unknown): CatalogExtension[] {
             deprecated: raw.deprecated === true,
             upgrade: sanitizeUpgrade(raw.upgrade),
             market: sanitizeMarket(raw.market, id),
+            iconUrl: resolveBackendIconUrl(raw.iconUrl) ? text(raw.iconUrl, 200) : null,
         });
     }
     return out;

@@ -56,6 +56,7 @@ export const ROUTE_TABLE: readonly Entry[] = [
     { pattern: '/extensions/order', load: () => import('@/app/api/admin/extensions/order/route') },
     { pattern: '/extensions/test', load: () => import('@/app/api/admin/extensions/test/route') },
     { pattern: '/extensions/settings', load: () => import('@/app/api/admin/extensions/settings/route') },
+    { pattern: '/extensions/users', load: () => import('@/app/api/admin/extensions/users/route') },
     { pattern: '/extensions/config', load: () => import('@/app/api/admin/extensions/config/route') },
     { pattern: '/extensions/[id]/status', load: () => import('@/app/api/admin/extensions/[id]/status/route') },
     { pattern: '/ai/settings', load: () => import('@/app/api/admin/ai/settings/route') },

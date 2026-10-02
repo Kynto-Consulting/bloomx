@@ -6,6 +6,7 @@ import { Badge, DefinitionList, btnOutline } from '@/components/admin/console';
 import { ExtensionIcon } from '@/components/expansions/ExtensionIcon';
 import { useI18n } from '@/components/I18nProvider';
 import type { ExtensionRow } from '@/lib/admin/extensions-view';
+import { versionNotes } from '@/lib/admin/marketplace/market-meta';
 import { primaryState, relatedRows, suiteMates, type PrimaryState } from '@/lib/admin/marketplace/market-model';
 import { MiniCard, PublisherBadges, PublisherLine, StarButton, SuiteChip, installsLabel } from './MarketParts';
 
@@ -43,7 +44,7 @@ export function DetailHeader({ row, market }: { row: ExtensionRow; market: Detai
     return (
         <div className="space-y-2" data-testid="market-header">
             <div className="flex items-start gap-3">
-                <ExtensionIcon icon={row.icon} label={row.name} size={32} />
+                <ExtensionIcon icon={row.icon} iconUrl={row.iconUrl} label={row.name} size={32} />
                 <div className="min-w-0 flex-1 space-y-1">
                     <PublisherLine publisher={m.publisher} onOpen={market.onOpenPublisher} />
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -113,13 +114,13 @@ export function SummaryMarket({ row, market }: { row: ExtensionRow; market: Deta
             {mates.length > 0 && (
                 <section aria-label={t('admin.console.extensions.market.detail.suiteMates')}>
                     <h3 className="mb-2 text-sm font-semibold text-foreground">{t('admin.console.extensions.market.detail.suiteMates')}</h3>
-                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">{mates.map((r) => <MiniCard key={r.id} row={r} onOpen={market.onOpenRow} />)}</ul>
+                    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">{mates.map((r) => <MiniCard key={r.id} row={r} onOpen={market.onOpenRow} />)}</ul>
                 </section>
             )}
             {related.length > 0 && (
                 <section aria-label={t('admin.console.extensions.market.detail.related')}>
                     <h3 className="mb-2 text-sm font-semibold text-foreground">{t('admin.console.extensions.market.detail.related')}</h3>
-                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">{related.map((r) => <MiniCard key={r.id} row={r} onOpen={market.onOpenRow} />)}</ul>
+                    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">{related.map((r) => <MiniCard key={r.id} row={r} onOpen={market.onOpenRow} />)}</ul>
                 </section>
             )}
         </div>
@@ -128,7 +129,7 @@ export function SummaryMarket({ row, market }: { row: ExtensionRow; market: Deta
 
 /** Historial de versiones con changelog, instalada vs disponible y compatibilidad por version. */
 export function VersionsTab({ row }: { row: ExtensionRow }) {
-    const { t } = useI18n();
+    const { t, locale } = useI18n();
     const v = (k: string, p?: Record<string, string | number>) => t(`admin.console.extensions.market.detail.versions.${k}`, p);
     const history = row.market.history.length > 0
         ? row.market.history
@@ -138,8 +139,12 @@ export function VersionsTab({ row }: { row: ExtensionRow }) {
         <div className="space-y-3">
             <h3 className="text-sm font-semibold text-foreground">{v('title')}</h3>
             <ol className="space-y-3" data-testid="version-history">
-                {history.map((h) => (
-                    <li key={h.version} className="rounded-lg border border-border p-3">
+                {history.map((h) => {
+                    const notes = versionNotes(h, locale);
+                    // La ultima y la instalada destacan sus notas (lo que cambia al actualizar / lo que ya tienes).
+                    const featured = row.latestVersion === h.version || row.installedVersion === h.version;
+                    return (
+                    <li key={h.version} data-featured={featured || undefined} className={`rounded-lg border p-3 ${featured ? 'border-primary/50 bg-muted/40' : 'border-border'}`}>
                         <div className="flex flex-wrap items-center gap-2">
                             <span className="text-sm font-semibold text-foreground">v{h.version}</span>
                             {row.installedVersion === h.version && <Badge tone="success">{v('installed')}</Badge>}
@@ -149,13 +154,14 @@ export function VersionsTab({ row }: { row: ExtensionRow }) {
                             <Badge tone={h.compatible ? 'success' : 'warning'}>{h.compatible ? v('compatible') : v('incompatible')}</Badge>
                             {h.date && <span className="text-xs text-muted-foreground">{v('date', { date: h.date })}</span>}
                         </div>
-                        {h.notes.length > 0 ? (
-                            <ul className="mt-2 list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{h.notes.map((n, i) => <li key={i} className="break-words">{n}</li>)}</ul>
+                        {notes.length > 0 ? (
+                            <ul className={`mt-2 list-disc space-y-0.5 pl-5 text-sm ${featured ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{notes.map((n, i) => <li key={i} className="break-words">{n}</li>)}</ul>
                         ) : (
                             <p className="mt-2 text-xs text-muted-foreground">{v('noNotes')}</p>
                         )}
                     </li>
-                ))}
+                    );
+                })}
             </ol>
         </div>
     );

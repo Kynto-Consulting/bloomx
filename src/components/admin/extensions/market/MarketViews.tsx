@@ -31,7 +31,7 @@ export function DiscoverView({ rows, onOpen, onSeeAll }: { rows: readonly Extens
                         </div>
                         {b.seeAll && <button type="button" className="text-xs font-medium text-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={b.seeAll}>{t('admin.console.extensions.market.discover.seeAll')}</button>}
                     </div>
-                    <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3">{b.rows.map((r) => <MiniCard key={r.id} row={r} onOpen={onOpen} />)}</ul>
+                    <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3">{b.rows.map((r) => <MiniCard key={r.id} row={r} onOpen={onOpen} />)}</ul>
                 </section>
             ))}
         </div>

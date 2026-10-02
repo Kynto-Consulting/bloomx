@@ -63,7 +63,7 @@ export function SummaryTab({ range }: { range: { from: string; to: string } }) {
                                     <StatCard label={t('admin.console.billing.summary.trialing')} value={s.mrr.trialing} />
                                 </div>
                             </section>
-                            <Card title={t('admin.console.billing.summary.byExtension')} bodyClassName="p-0">
+                            <Card title={t('admin.console.billing.summary.byExtension')}>
                                 <DataTable
                                     caption={t('admin.console.billing.summary.byExtensionCaption')}
                                     columns={columns}

@@ -30,6 +30,8 @@ export interface CatalogExtension {
     upgrade?: VersionUpgrade | null;
     /** Bloque de marketplace del backend (capacidad market.catalog.v1), saneado; null si el backend no lo envia. */
     market?: MarketMeta | null;
+    /** Ruta del icono en el backend (`/api/extensions/icons/<id>?h=<hash>`); ausente si la extension no tiene icono publicado. */
+    iconUrl?: string | null;
 }
 
 export interface InstalledExtension {
@@ -60,6 +62,8 @@ export interface ExtensionRow {
     description: string;
     /** Icono declarado por el manifest (brand:<slug>, lucide:<Nombre>, initials:<XY> o un nombre Lucide). */
     icon: string | null;
+    /** Icono del backend (async, cacheado por hash); null = solo placeholder/`icon`. */
+    iconUrl: string | null;
     /** Version del catalogo (la mas reciente publicada). */
     version: string | null;
     installedVersion: string | null;
@@ -141,6 +145,7 @@ export function buildRows({ catalog, installed, errorIds = [], health, locale, a
             name: localized.name || cat?.name || inst?.name || id,
             description: localized.description || cat?.description || inst?.description || (template?.description ?? ''),
             icon: template?.icon ?? null,
+            iconUrl: cat?.iconUrl ?? null,
             version,
             installedVersion,
             updateAvailable: !!inst && hasUpdate(installedVersion, version),

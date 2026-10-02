@@ -29,6 +29,8 @@ export interface MarketVersion {
     date: string | null;
     compatible: boolean;
     notes: string[];
+    /** Notas es/en (aditivo: el backend lo envia cuando hay notas; clientes antiguos solo leen `notes`). */
+    notesI18n?: { es: string; en: string };
 }
 
 export interface MarketMeta {
@@ -86,6 +88,19 @@ function sanitizeCategories(raw: unknown): MarketCategory[] {
     return Array.from(new Set(list)).slice(0, MANIFEST_LIMITS.maxCategories);
 }
 
+function notesI18n(raw: any): { es: string; en: string } | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const es = text(raw.es, MANIFEST_LIMITS.maxChangelogNotes);
+    const en = text(raw.en, MANIFEST_LIMITS.maxChangelogNotes);
+    return es || en ? { es: es || en, en: en || es } : undefined;
+}
+
+/** Notas de una version para el idioma de la interfaz (texto plano; React las escapa): {es,en} si existen, si no la lista antigua. */
+export function versionNotes(h: Pick<MarketVersion, 'notes' | 'notesI18n'>, locale: string): string[] {
+    const own = h.notesI18n ? (locale === 'en' ? h.notesI18n.en : h.notesI18n.es) : '';
+    return own ? [own] : h.notes;
+}
+
 function sanitizeHistory(raw: unknown): MarketVersion[] {
     if (!Array.isArray(raw)) return [];
     const out: MarketVersion[] = [];
@@ -96,6 +111,7 @@ function sanitizeHistory(raw: unknown): MarketVersion[] {
             status: h.status === 'deprecated' ? 'deprecated' : 'published',
             date: typeof h.date === 'string' && DATE_RE.test(h.date) ? h.date.slice(0, 10) : null,
             compatible: h.compatible !== false,
+            ...(notesI18n(h.notesI18n) ? { notesI18n: notesI18n(h.notesI18n)! } : {}),
             notes: Array.isArray(h.notes) ? h.notes.map((n: unknown) => text(n, MANIFEST_LIMITS.maxChangelogNotes)).filter(Boolean).slice(0, 20) : [],
         });
     }

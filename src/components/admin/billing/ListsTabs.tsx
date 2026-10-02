@@ -55,7 +55,7 @@ export function PurchasesTab() {
     ];
     if (paged.query.error && !paged.query.data) return <QueryBoundary q={paged.query} ns="billing">{() => null}</QueryBoundary>;
     return (
-        <Card title={t('admin.console.billing.purchases.title')} bodyClassName="p-0">
+        <Card title={t('admin.console.billing.purchases.title')}>
             <DataTable caption={t('admin.console.billing.purchases.caption')} columns={columns} rows={paged.items} getRowId={(r) => r.orderId} loading={!paged.query.data} empty={<EmptyState title={t('admin.console.billing.purchases.empty')} />} />
             {paged.moreError ? <p role="alert" className="p-3 text-sm text-destructive">{finError(paged.moreError)}</p> : null}
             <LoadMore hasMore={paged.hasMore} loading={paged.loadingMore} onClick={() => void paged.loadMore()} />
@@ -82,7 +82,7 @@ export function SalesTab() {
     ];
     if (paged.query.error && !paged.query.data) return <QueryBoundary q={paged.query} ns="billing">{() => null}</QueryBoundary>;
     return (
-        <Card title={t('admin.console.billing.sales.title')} bodyClassName="p-0">
+        <Card title={t('admin.console.billing.sales.title')}>
             <DataTable caption={t('admin.console.billing.sales.caption')} columns={columns} rows={paged.items} getRowId={(r) => r.orderId + r.capturedAt} loading={!paged.query.data} empty={<EmptyState title={t('admin.console.billing.sales.empty')} />} />
             {paged.moreError ? <p role="alert" className="p-3 text-sm text-destructive">{finError(paged.moreError)}</p> : null}
             <LoadMore hasMore={paged.hasMore} loading={paged.loadingMore} onClick={() => void paged.loadMore()} />
@@ -114,12 +114,12 @@ export function PayoutsTab({ range }: { range: { from: string; to: string } }) {
     ];
     return (
         <div className="space-y-5">
-            <Card title={t('admin.console.billing.payouts.title')} bodyClassName="p-0">
+            <Card title={t('admin.console.billing.payouts.title')}>
                 <QueryBoundary q={payouts} ns="billing">
                     {(d) => <DataTable caption={t('admin.console.billing.payouts.caption')} columns={payoutCols} rows={d.items} getRowId={(r) => r.id} empty={<EmptyState title={t('admin.console.billing.payouts.empty')} />} />}
                 </QueryBoundary>
             </Card>
-            <Card title={t('admin.console.billing.payouts.ledgerTitle')} bodyClassName="p-0">
+            <Card title={t('admin.console.billing.payouts.ledgerTitle')}>
                 <QueryBoundary q={ledger} ns="billing">
                     {(d) => <DataTable caption={t('admin.console.billing.payouts.ledgerCaption')} columns={ledgerCols} rows={d.items} getRowId={(r) => r.id} empty={<EmptyState title={t('admin.console.billing.payouts.ledgerEmpty')} />} />}
                 </QueryBoundary>

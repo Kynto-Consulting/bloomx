@@ -81,6 +81,7 @@
         "composer-helper/manifest.json",
         "domain-metrics/manifest.json",
         "giphy/manifest.json",
+        "github-issues/manifest.json",
         "quick-notes/manifest.json"
       ]
     },
@@ -341,7 +342,8 @@
         }
       },
       "alsoIn": [
-        "domain-metrics/manifest.json"
+        "domain-metrics/manifest.json",
+        "github-issues/manifest.json"
       ]
     },
     "SPLIT_PANE": {
@@ -899,19 +901,27 @@
         }
       },
       "alsoIn": [
+        "airtable-records/manifest.json",
         "appointments/manifest.json",
+        "asana-tasks/manifest.json",
         "calendar/manifest.json",
+        "calendly/manifest.json",
         "composer-helper/manifest.json",
         "domain-metrics/manifest.json",
+        "dropbox-links/manifest.json",
         "giphy/manifest.json",
+        "github-issues/manifest.json",
         "google-meet/manifest.json",
         "google-sync/manifest.json",
         "hubspot/manifest.json",
+        "jira-issues/manifest.json",
         "microsoft-teams/manifest.json",
         "notion/manifest.json",
         "organizer/manifest.json",
         "quick-notes/manifest.json",
+        "salesforce/manifest.json",
         "summarizer/manifest.json",
+        "todoist-tasks/manifest.json",
         "translator/manifest.json",
         "trello/manifest.json",
         "zoom/manifest.json"
@@ -1085,99 +1095,103 @@
         }
       },
       "alsoIn": [
+        "airtable-records/manifest.json",
+        "asana-tasks/manifest.json",
         "calendar/manifest.json",
+        "dropbox-links/manifest.json",
+        "github-issues/manifest.json",
         "google-meet/manifest.json",
         "hubspot/manifest.json",
+        "jira-issues/manifest.json",
         "microsoft-teams/manifest.json",
         "quick-notes/manifest.json",
+        "salesforce/manifest.json",
+        "todoist-tasks/manifest.json",
         "trello/manifest.json",
         "zoom/manifest.json"
       ]
     },
     "TABLE": {
-      "file": "domain-metrics/manifest.json",
-      "extensionId": "core-domain-metrics",
-      "point": "PAGE",
-      "path": "mounts[0].component.children[5].children[0]",
+      "file": "dropbox-links/manifest.json",
+      "extensionId": "core-dropbox-links",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[2]",
       "node": {
         "type": "TABLE",
         "props": {
           "caption": {
-            "es": "Detalle diario de correo y spam",
-            "en": "Daily mail and spam detail"
+            "es": "Resultados de Dropbox",
+            "en": "Dropbox results"
           },
           "columns": [
             {
-              "key": "date",
+              "key": "name",
               "label": {
-                "es": "Fecha",
-                "en": "Date"
-              },
-              "sortable": true,
-              "format": "date"
+                "es": "Nombre",
+                "en": "Name"
+              }
             },
             {
-              "key": "received",
+              "key": "folder",
               "label": {
-                "es": "Recibidos",
-                "en": "Received"
-              },
-              "sortable": true,
-              "format": "number",
-              "align": "end"
+                "es": "Carpeta",
+                "en": "Folder"
+              }
             },
             {
-              "key": "sent",
+              "key": "modified",
               "label": {
-                "es": "Enviados",
-                "en": "Sent"
+                "es": "Modificado",
+                "en": "Modified"
               },
-              "sortable": true,
-              "format": "number",
-              "align": "end"
-            },
-            {
-              "key": "spamBlocked",
-              "label": {
-                "es": "Spam bloqueado",
-                "en": "Blocked spam"
-              },
-              "sortable": true,
-              "format": "number",
-              "align": "end"
+              "format": "datetime"
             }
           ],
-          "data": "${state.metrics.rows}",
-          "rowKey": "date",
-          "searchable": true,
-          "searchPlaceholder": {
-            "es": "Buscar fecha (AAAA-MM-DD)",
-            "en": "Search date (YYYY-MM-DD)"
-          },
-          "defaultSort": {
-            "key": "date",
-            "dir": "desc"
-          },
-          "pageSize": 15,
+          "data": "${state.dropbox.files}",
+          "rowKey": "path",
+          "pageSize": 8,
           "emptyText": {
-            "es": "Sin datos en este periodo",
-            "en": "No data in this period"
+            "es": "Busca un archivo para ver resultados",
+            "en": "Search a file to see results"
           },
-          "loading": "${state.$loading.getMetrics}",
-          "error": "${state.$error.getMetrics}",
-          "onRetry": {
-            "action": "CALL_BACKEND",
-            "function": "getMetrics",
-            "args": {
-              "days": "${state.days || 14}"
-            },
-            "key": "getMetrics",
-            "resultKey": "metrics",
-            "toastOnError": false
-          }
+          "loading": "${state.$loading.searchFiles}",
+          "actions": [
+            {
+              "label": {
+                "es": "Insertar enlace",
+                "en": "Insert link"
+              },
+              "icon": "Link",
+              "onClick": {
+                "action": "CALL_BACKEND",
+                "function": "createLink",
+                "args": {
+                  "path": "${row.path}"
+                },
+                "key": "createLink",
+                "onSuccess": [
+                  {
+                    "action": "INSERT_CONTENT",
+                    "content": "${result.html}",
+                    "closeOverlay": true
+                  },
+                  {
+                    "action": "TOAST",
+                    "message": {
+                      "es": "Enlace insertado",
+                      "en": "Link inserted"
+                    },
+                    "tone": "success"
+                  }
+                ]
+              }
+            }
+          ]
         }
       },
       "alsoIn": [
+        "domain-metrics/manifest.json",
+        "github-issues/manifest.json",
         "quick-notes/manifest.json"
       ]
     },
@@ -1489,6 +1503,7 @@
       },
       "alsoIn": [
         "calendar/manifest.json",
+        "calendly/manifest.json",
         "giphy/manifest.json"
       ]
     },
@@ -1540,11 +1555,35 @@
         ]
       },
       "alsoIn": [
+        "airtable-records/manifest.json",
+        "asana-tasks/manifest.json",
+        "calendly/manifest.json",
         "composer-helper/manifest.json",
+        "dropbox-links/manifest.json",
+        "github-issues/manifest.json",
         "google-meet/manifest.json",
+        "jira-issues/manifest.json",
         "microsoft-teams/manifest.json",
+        "todoist-tasks/manifest.json",
         "zoom/manifest.json"
       ]
+    },
+    "LOADING": {
+      "file": "calendly/manifest.json",
+      "extensionId": "core-calendly",
+      "point": "OVERLAY",
+      "path": "mounts[1].component.children[1]",
+      "node": {
+        "type": "LOADING",
+        "props": {
+          "label": {
+            "es": "Cargando tus tipos de evento…",
+            "en": "Loading your event types…"
+          },
+          "hidden": "${!(state.$loading && state.$loading.listEventTypes)}"
+        }
+      },
+      "alsoIn": []
     },
     "MODAL": {
       "file": "summarizer/manifest.json",
@@ -1603,15 +1642,23 @@
         }
       },
       "alsoIn": [
+        "airtable-records/manifest.json",
         "appointments/manifest.json",
+        "asana-tasks/manifest.json",
         "calendar/manifest.json",
+        "calendly/manifest.json",
         "composer-helper/manifest.json",
+        "dropbox-links/manifest.json",
         "giphy/manifest.json",
+        "github-issues/manifest.json",
         "google-drive/manifest.json",
         "google-meet/manifest.json",
         "hubspot/manifest.json",
+        "jira-issues/manifest.json",
         "microsoft-teams/manifest.json",
         "notion/manifest.json",
+        "salesforce/manifest.json",
+        "todoist-tasks/manifest.json",
         "translator/manifest.json",
         "trello/manifest.json",
         "zoom/manifest.json"
@@ -1737,6 +1784,7 @@
       },
       "alsoIn": [
         "calendar/manifest.json",
+        "calendly/manifest.json",
         "giphy/manifest.json",
         "summarizer/manifest.json"
       ]

@@ -105,7 +105,7 @@ export function ExtensionCard({ row, actions, onOpen, market }: { row: Extension
         <li>
             <article aria-label={row.name} className={`flex h-full flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-sm`}>
                 <div className="flex items-start gap-3">
-                    <ExtensionIcon icon={row.icon} label={row.name} size={32} />
+                    <ExtensionIcon icon={row.icon} iconUrl={row.iconUrl} label={row.name} size={32} />
                     <div className="min-w-0 flex-1">
                         <h3 className="break-words text-sm font-semibold text-foreground">{row.name}</h3>
                         <p className="mt-0.5 text-xs text-muted-foreground">

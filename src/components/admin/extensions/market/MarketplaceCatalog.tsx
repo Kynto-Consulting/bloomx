@@ -168,7 +168,7 @@ export function MarketplaceCatalog(props: MarketplaceCatalogProps) {
     }
 
     return (
-        <Card title={t('admin.console.extensions.catalog.title')} id="catalog" bodyClassName="px-3 py-4 sm:px-5">
+        <Card title={t('admin.console.extensions.catalog.title')} id="catalog" bodyClassName="px-4 py-4 sm:px-5">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
                 <MarketSectionSelect counts={counts} state={state} onNavigate={navigate} />
                 <MarketSidebar counts={counts} state={state} onNavigate={navigate} />

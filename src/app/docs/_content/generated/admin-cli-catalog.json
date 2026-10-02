@@ -3476,6 +3476,48 @@
       "flags": []
     },
     {
+      "name": "extensions users",
+      "category": {
+        "es": "Extensiones",
+        "en": "Extensions"
+      },
+      "risk": "read",
+      "minLevel": 3,
+      "mfaStepUp": false,
+      "summary": {
+        "es": "Busca usuarios del dominio para los ajustes tipo user/users/userMap (id, correo, nombre, estado, nivel)",
+        "en": "Search domain users for user/users/userMap settings (id, email, name, status, level)"
+      },
+      "managerOnly": false,
+      "acceptsInput": false,
+      "examples": [
+        "extensions users --q ana"
+      ],
+      "positionals": [],
+      "flags": [
+        {
+          "name": "q",
+          "type": "string",
+          "description": {
+            "es": "Texto a buscar (nombre o correo)",
+            "en": "Text to search (name or email)"
+          },
+          "required": false,
+          "secret": false
+        },
+        {
+          "name": "page",
+          "type": "string",
+          "description": {
+            "es": "Página (desde 0)",
+            "en": "Page (from 0)"
+          },
+          "required": false,
+          "secret": false
+        }
+      ]
+    },
+    {
       "name": "extensions config set",
       "category": {
         "es": "Extensiones",

@@ -258,7 +258,7 @@ function ActionDialog({
                 confirmLabel = t(row.isPaid ? 'admin.console.extensions.install.confirmPaid' : 'admin.console.extensions.install.confirm');
                 body = (
                     <div className="space-y-3">
-                        <p className="flex items-center gap-2 font-medium text-foreground"><ExtensionIcon icon={row.icon} label={row.name} size={32} /><span className="min-w-0 break-words">{row.name}</span></p>
+                        <p className="flex items-center gap-2 font-medium text-foreground"><ExtensionIcon icon={row.icon} iconUrl={row.iconUrl} label={row.name} size={32} /><span className="min-w-0 break-words">{row.name}</span></p>
                         {row.isPaid && <p><Badge tone="info">{t('admin.console.extensions.install.paid', { price: row.price, currency: row.currency })}</Badge></p>}
                         <p>{(row.template?.permissions?.length ?? 0) > 0 ? t('admin.console.extensions.install.intro') : t('admin.console.extensions.install.noPermissions')}</p>
                         <div className="max-h-64 overflow-y-auto"><PermissionsList template={row.template} compact /></div>

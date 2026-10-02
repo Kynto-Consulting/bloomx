@@ -108,7 +108,7 @@ export function MiniCard({ row, onOpen }: { row: ExtensionRow; onOpen: (row: Ext
                 aria-label={t('admin.console.extensions.actions.detailsOf', { name: row.name })}
                 className="flex h-full w-full items-center gap-3 rounded-lg border border-border bg-card p-3 text-left hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-                <ExtensionIcon icon={row.icon} label={row.name} size={32} />
+                <ExtensionIcon icon={row.icon} iconUrl={row.iconUrl} label={row.name} size={32} />
                 <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-medium text-foreground">{row.name}</span>
                     <span className="block truncate text-xs text-muted-foreground">

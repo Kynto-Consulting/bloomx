@@ -133,7 +133,7 @@ function SummaryTab({ row, actions, domainId, onGoTab, market }: { row: Extensio
         <div className="space-y-4">
             <ManifestHealthNotice row={row} />
             <div className="flex items-start gap-3">
-                <ExtensionIcon icon={row.icon} label={row.name} size={32} />
+                <ExtensionIcon icon={row.icon} iconUrl={row.iconUrl} label={row.name} size={32} />
                 <p className="min-w-0 text-sm text-muted-foreground">{row.description || t('admin.console.extensions.card.noDescription')}</p>
             </div>
             <CompatNotice row={row} />

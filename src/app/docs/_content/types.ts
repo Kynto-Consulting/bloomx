@@ -22,7 +22,9 @@ export type Block =
     | { t: 'diagram'; id: 'architecture' | 'signing' | 'mail-flow'; caption: string }
     | { t: 'env'; scope?: 'frontend' | 'backend' | 'all'; group?: string }
     /** Indice de componentes del kit (rejilla de tarjetas por categoria, generada de UI_COMPONENTS). */
-    | { t: 'kit-index' };
+    | { t: 'kit-index' }
+    /** Vista previa interactiva de los campos de ajustes user / users / userMap (datos de ejemplo en memoria). */
+    | { t: 'settings-preview' };
 
 export interface DocPageContent {
     es: Block[];

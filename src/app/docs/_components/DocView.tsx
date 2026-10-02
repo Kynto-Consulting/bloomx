@@ -7,6 +7,7 @@ import { useI18n } from '@/components/I18nProvider';
 import { cn } from '@/lib/utils';
 import { Diagram } from './Diagram';
 import { KitIndex } from './ui-kit/KitIndex';
+import { SettingsPreview } from './settings-preview/SettingsPreview';
 import { DOC_NAV, docHref, findDocPage, neighbours } from '../_content/nav';
 import { DOC_CONTENT } from '../_content/registry';
 import { ENV_VARS } from '../_content/env';
@@ -187,6 +188,8 @@ function BlockView({ b, locale }: { b: Block; locale: Locale }) {
             return <EnvTable scope={b.scope} group={b.group} locale={locale} />;
         case 'kit-index':
             return <KitIndex />;
+        case 'settings-preview':
+            return <SettingsPreview />;
     }
 }
 
