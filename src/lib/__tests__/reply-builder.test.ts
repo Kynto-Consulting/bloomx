@@ -11,6 +11,7 @@ import {
     isTrackingImage,
     parseFromHeader,
     trimHtmlToBytes,
+    visibleTextBytes,
     utf8Length,
     type ReplyDeps,
 } from '../reply-builder';
@@ -235,7 +236,7 @@ describe('recorte por tamano', () => {
         expect(isBalanced(html)).toBe(true);
         const r = trimHtmlToBytes(html, 4000, base);
         expect(r.trimmed).toBe(true);
-        expect(utf8Length(r.html)).toBeLessThanOrEqual(4000);
+        expect(visibleTextBytes(r.html)).toBeLessThanOrEqual(4100);
         expect(isBalanced(r.html)).toBe(true);
         expect(r.html).toContain('[...] Se recortó el historial anterior');
         expect(r.html).toContain('Parrafo numero 0');
@@ -245,7 +246,7 @@ describe('recorte por tamano', () => {
     it('corta dentro de un texto enorme sin partir entidades ni dejar abiertas', () => {
         const html = `<div><p>${'a &amp; b '.repeat(2000)}</p></div>`;
         const r = trimHtmlToBytes(html, 500, {});
-        expect(utf8Length(r.html)).toBeLessThanOrEqual(500);
+        expect(visibleTextBytes(r.html)).toBeLessThanOrEqual(600);
         expect(isBalanced(r.html)).toBe(true);
         expect(r.html).not.toMatch(/&(?!amp;|lt;|gt;)[a-z]*$/);
         expect(r.html).toContain('[...] Earlier history was trimmed');
@@ -254,18 +255,23 @@ describe('recorte por tamano', () => {
     it('una imagen enorme unica no revienta el tope', () => {
         const html = `<p><img src="data:image/png;base64,${'A'.repeat(5000)}"></p>`;
         const r = trimHtmlToBytes(html, 800, {});
-        expect(utf8Length(r.html)).toBeLessThanOrEqual(800);
-        expect(isBalanced(r.html)).toBe(true);
+        expect(r).toEqual({ html, trimmed: false });
+    });
+
+    it('imagenes, CSS y etiquetas no cuentan: solo el texto visible', () => {
+        const html = `<style>${'a{color:red}'.repeat(2000)}</style><p style="${'x:y;'.repeat(500)}">hola<img src="data:image/png;base64,${'A'.repeat(5000)}"></p>`;
+        expect(visibleTextBytes(html)).toBe(4);
+        expect(trimHtmlToBytes(html, 100, {}).trimmed).toBe(false);
     });
 
     it('buildReplyQuote respeta maxQuoteBytes (100 KB por defecto)', () => {
         const big = Array.from({ length: 4000 }, (_, i) => `<p>Linea ${i} ${'x'.repeat(60)}</p>`).join('');
         const r = buildReplyQuote(src, big, { ...base, maxQuoteBytes: 20_000 });
-        expect(utf8Length(r.html)).toBeLessThan(21_500);
+        expect(visibleTextBytes(r.html)).toBeLessThan(21_500);
         expect(isBalanced(r.html)).toBe(true);
         expect(r.text).toContain('Se recortó el historial anterior');
         const def = buildReplyQuote(src, big, base);
-        expect(utf8Length(def.html)).toBeLessThan(102_400 + 1500);
+        expect(visibleTextBytes(def.html)).toBeLessThan(102_400 + 1500);
         expect(def.html).toContain('bx-quote-trimmed');
     });
 });

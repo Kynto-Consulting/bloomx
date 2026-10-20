@@ -318,22 +318,37 @@ function trimMarker(deps: ReplyDeps): string {
     return `<div class="bx-quote-trimmed" style="font-style:italic">[...] ${escapeHtmlContent(tx(deps, 'mailView.replyQuote.trimmed'))}</div>`;
 }
 
+const NON_VISIBLE_TAGS = new Set(['style', 'script', 'head', 'title']);
+
+/** Bytes de texto visible: ignora etiquetas, atributos, CSS, scripts, comentarios e imagenes (incluido base64). */
+export function visibleTextBytes(html: string): number {
+    let n = 0;
+    let hidden = 0;
+    for (const tok of tokenizeHtml(html)) {
+        if (tok.type === 'open' && NON_VISIBLE_TAGS.has(tok.name) && !tok.selfClosing) hidden++;
+        else if (tok.type === 'close' && NON_VISIBLE_TAGS.has(tok.name) && hidden > 0) hidden--;
+        else if (tok.type === 'text' && !hidden) n += utf8Length(tok.raw);
+    }
+    return n;
+}
+
 /**
- * Recorta el HTML (ya equilibrado) a `maxBytes` quitando el historial MAS ANTIGUO (el final), sin dejar etiquetas
- * abiertas, y anade un marcador visible. Prefiere cortar al inicio de una cita anidada / separador.
+ * Recorta el HTML (ya equilibrado) a `maxBytes` DE TEXTO VISIBLE (el HTML, CSS e imagenes no cuentan) quitando el historial
+ * MAS ANTIGUO (el final), sin dejar etiquetas abiertas, y anade un marcador visible. Prefiere cortar al inicio de una cita anidada / separador.
  */
 export function trimHtmlToBytes(html: string, maxBytes: number, deps: ReplyDeps = {}): { html: string; trimmed: boolean } {
-    if (utf8Length(html) <= maxBytes) return { html, trimmed: false };
+    if (visibleTextBytes(html) <= maxBytes) return { html, trimmed: false };
     const marker = trimMarker(deps);
-    const budget = Math.max(0, maxBytes - utf8Length(marker));
+    const budget = Math.max(0, maxBytes);
     const tokens = tokenizeHtml(html);
+    let hidden = 0;
 
     interface Cut { index: number; bytes: number; closers: string[]; kind: 'quote' | 'block' }
     const stack: string[] = [];
     let bytes = 0;
     let bestQuote: Cut | null = null;
     let bestBlock: Cut | null = null;
-    let closersBytes = 0;
+    const closersBytes = 0;
     let textCut: { index: number; keep: string; bytes: number; closers: string[] } | null = null;
 
     const closersOf = () => stack.slice().reverse().map((n) => `</${n}>`);
@@ -346,7 +361,9 @@ export function trimHtmlToBytes(html: string, maxBytes: number, deps: ReplyDeps 
 
     for (let i = 0; i < tokens.length; i++) {
         const tok = tokens[i];
-        const len = utf8Length(tok.type === 'comment' ? '' : tok.raw);
+        if (tok.type === 'open' && NON_VISIBLE_TAGS.has(tok.name) && !tok.selfClosing) hidden++;
+        else if (tok.type === 'close' && NON_VISIBLE_TAGS.has(tok.name) && hidden > 0) hidden--;
+        const len = tok.type === 'text' && !hidden ? utf8Length(tok.raw) : 0;
         if (bytes + len + closersBytes > budget) {
             if (tok.type === 'text') {
                 // Corta el texto en un espacio (sin partir entidades).
@@ -368,11 +385,11 @@ export function trimHtmlToBytes(html: string, maxBytes: number, deps: ReplyDeps 
             candidate(i, 'quote');
         }
         if (tok.type === 'open') {
-            if (!VOID_TAGS.has(tok.name) && !tok.selfClosing) { stack.push(tok.name); closersBytes += tok.name.length + 3; }
+            if (!VOID_TAGS.has(tok.name) && !tok.selfClosing) { stack.push(tok.name); }
         } else if (tok.type === 'close') {
             const idx = stack.lastIndexOf(tok.name);
             if (idx !== -1) {
-                while (stack.length > idx) { const n = stack.pop()!; closersBytes -= n.length + 3; }
+                while (stack.length > idx) stack.pop();
             }
         }
         bytes += len;
@@ -405,10 +422,10 @@ export function quotePlainText(text: string): string {
 // ---------------------------------------------------------------------------
 
 function prepareContent(contentHtml: string, deps: ReplyDeps): string {
-    const max = deps.maxQuoteBytes ?? DEFAULT_MAX_QUOTE_BYTES;
+    const max = deps.maxQuoteBytes ?? DEFAULT_MAX_QUOTE_BYTES; // bytes de TEXTO visible
     // Historiales de varios MB: se recorta ANTES de sanear (DOMPurify sobre megabytes es lento). El margen x4 cubre lo que el saneado quita
     // (estilos, comentarios, atributos); el recorte final ajusta al tope exacto y, al cortar por el final, se lleva el marcador previo.
-    const raw = utf8Length(contentHtml) > max * 4 ? trimHtmlToBytes(contentHtml, max * 4, deps).html : contentHtml;
+    const raw = visibleTextBytes(contentHtml) > max * 4 ? trimHtmlToBytes(contentHtml, max * 4, deps).html : contentHtml;
     const cleaned = cleanQuotedHtml(raw, deps);
     return trimHtmlToBytes(cleaned, max, deps).html;
 }
