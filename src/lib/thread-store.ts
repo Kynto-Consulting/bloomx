@@ -243,13 +243,26 @@ export async function loadStoredThreadHeaders(emailId: string, db: ThreadDb = de
     }
 }
 
-/** Ids de los correos de un hilo (para el lector). Vacio si el correo no tiene threadKey (correo antiguo: se usa el respaldo por asunto). */
+/**
+ * Ids de los correos de un hilo (para el lector). Incluye los correos antiguos SIN threadKey cuya clave heredada (legacyThreadKey) coincide
+ * con la del hilo: sin esto, un original enviado antes de las cabeceras de hilo queda fuera aunque su respuesta ya tenga clave.
+ */
 export async function loadThreadMemberIds(userId: string, threadKey: string, db: ThreadDb = defaultThreadDb): Promise<string[]> {
     try {
         const rows = await db.query<{ id: string }>(
             `SELECT "id" FROM "Email" WHERE "userId" = $1 AND "threadKey" = $2 ORDER BY "createdAt" DESC, "id" DESC LIMIT ${MAX_THREAD_MESSAGES}`, userId, threadKey,
         );
-        return rows.map((r) => r.id);
+        const ids = rows.map((r) => r.id);
+        const sep = threadKey.startsWith('h:') ? threadKey.indexOf('::') : -1;
+        if (sep < 0) return ids;
+        const normalized = threadKey.slice(sep + 2);
+        if (!normalized) return ids;
+        const legacy = await db.query<{ id: string; subject: string | null; to: string | null; cleanTo: string | null; createdAt: Date | string }>(
+            `SELECT "id", "subject", "to", "cleanTo", "createdAt" FROM "Email" WHERE "userId" = $1 AND "threadKey" IS NULL AND position(lower($2) in lower("subject")) > 0 ORDER BY "createdAt" DESC, "id" DESC LIMIT 200`,
+            userId, normalized,
+        );
+        const extra = legacy.filter((r) => !ids.includes(r.id) && legacyThreadKey(r) === threadKey);
+        return [...ids, ...extra.map((r) => r.id)].slice(0, MAX_THREAD_MESSAGES);
     } catch (e) {
         if (isMissingRelation(e)) return [];
         throw e;
