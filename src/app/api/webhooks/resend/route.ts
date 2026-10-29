@@ -22,7 +22,7 @@ import { normalizeContentId } from '@/lib/email-utils';
 import { validateAttachment } from '@/lib/file-type';
 import { buildEmailSentContext, fireLifecycleHook, runEmailReceivedHooks } from '@/lib/expansions/server-hooks';
 import { emitEmailSpamDetected, emitLabelApplied } from '@/lib/expansions/lifecycle-v2';
-import { internalSecretToSend } from '@/lib/internal-auth';
+import { triggerProcessAttachments } from '@/lib/attachments-trigger';
 import { collectInboundRecipients, isUniqueViolation, recipientsForUser, stableStorageId, userScopedMessageId } from '@/lib/inbound-recipients';
 import { assignThread, headersOfInbound } from '@/lib/thread-store';
 import { threadInfoFromRecord } from '@/lib/thread-headers';
@@ -663,26 +663,12 @@ async function handleEmailReceived(data: any, rawPayload: string) {
             );
         if (needsAsyncProcessing) {
             const emailIdForAsync = createdEmail.id;
-            const appUrl = process.env.NEXT_PUBLIC_APP_URL || '';
-            // Clave interna derivada de NEXTAUTH_SECRET (lib/internal-auth.ts); INTERNAL_SECRET solo si esta definido.
-            const internalSecret = internalSecretToSend();
-            const triggerProcessAttachments = () => {
-                fetch(`${appUrl}/api/emails/${emailIdForAsync}/process-attachments`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'x-internal-secret': internalSecret,
-                    },
-                }).catch(err =>
-                    console.error(`[webhook] Failed to trigger process-attachments for ${emailIdForAsync}:`, err),
-                );
-            };
-
+            // after() debe recibir la promesa (ver lib/attachments-trigger.ts): si no, el POST no sale y los adjuntos quedan 'pending'.
             try {
-                after(triggerProcessAttachments);
+                after(() => triggerProcessAttachments(emailIdForAsync));
             } catch {
                 // If after() is unavailable (e.g. background script or outside request context), run async
-                triggerProcessAttachments();
+                void triggerProcessAttachments(emailIdForAsync);
             }
         }
 

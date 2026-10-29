@@ -1,5 +1,6 @@
 
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after as runAfter } from 'next/server';
+import { needsAttachmentProcessing, triggerProcessAttachments } from '@/lib/attachments-trigger';
 import { prisma } from '@/lib/prisma';
 import { getCurrentUser } from "@/lib/session";
 import { getFromStorage } from '@/lib/storage';
@@ -314,6 +315,11 @@ export async function GET(
         // Hook EMAIL_OPENED (no bloqueante; contexto minimo derivado aqui, nunca del cliente; dedupe 60 s).
         if (shouldFireOnce(`email-opened:${user.id}:${email.id}`)) {
             fireLifecycleHook('EMAIL_OPENED', user.id, buildEmailOpenedContext({ emailId: email.id, folder: email.folder, from: email.from, isRead: email.read }));
+        }
+
+        // Autocuracion: si el disparo del webhook no llego, abrir el correo vuelve a procesar sus adjuntos pendientes.
+        if (needsAttachmentProcessing(email)) {
+            try { runAfter(() => triggerProcessAttachments(email.id)); } catch { void triggerProcessAttachments(email.id); }
         }
 
         return NextResponse.json({
