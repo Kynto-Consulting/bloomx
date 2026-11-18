@@ -1,0 +1,8 @@
+{
+  "org_id": "777bafce-3607-451f-a9e7-e5ce28f91efa",
+  "org_name": "TUMI AI",
+  "project_id": "e7ee7029-49cb-4229-a7fe-9992bf7070b4",
+  "project_name": "bloomx-tumi",
+  "deploy_type": "docker",
+  "port": 3000
+}

@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.vercel
+.env*
+*.log
+build_log.txt
+tsconfig*.tsbuildinfo
+fix-env.*
+upload-env.ps1
