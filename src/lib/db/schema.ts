@@ -1240,6 +1240,35 @@ const TABLES: TableSpec[] = [
             'CREATE INDEX IF NOT EXISTS "UserAdminState_lastLoginAt_idx" ON "UserAdminState" ("lastLoginAt")',
         ],
     },
+    // "Entrar con Bloomx" para apps externas (lib/external-auth*.ts): codigos de autorizacion de un solo uso (solo su hash, 60 s).
+    {
+        name: 'ExternalAuthCode',
+        createStatement: `CREATE TABLE IF NOT EXISTS "ExternalAuthCode" (
+            "codeHash" TEXT NOT NULL,
+            "clientId" TEXT NOT NULL,
+            "redirectUri" TEXT NOT NULL,
+            "codeChallenge" TEXT NOT NULL,
+            "userId" TEXT NOT NULL,
+            "expiresAt" TIMESTAMPTZ NOT NULL,
+            "createdAt" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`,
+        columns: [
+            { name: 'codeHash', definition: 'TEXT NOT NULL' },
+            { name: 'clientId', definition: 'TEXT NOT NULL' },
+            { name: 'redirectUri', definition: 'TEXT NOT NULL' },
+            { name: 'codeChallenge', definition: 'TEXT NOT NULL' },
+            { name: 'userId', definition: 'TEXT NOT NULL' },
+            { name: 'expiresAt', definition: 'TIMESTAMPTZ NOT NULL' },
+            { name: 'createdAt', definition: 'TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP' },
+        ],
+        constraints: [
+            { name: 'ExternalAuthCode_pkey', statement: 'ALTER TABLE "ExternalAuthCode" ADD CONSTRAINT "ExternalAuthCode_pkey" PRIMARY KEY ("codeHash")' },
+            { name: 'ExternalAuthCode_userId_fkey', statement: 'ALTER TABLE "ExternalAuthCode" ADD CONSTRAINT "ExternalAuthCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE' },
+        ],
+        indexes: [
+            'CREATE INDEX IF NOT EXISTS "ExternalAuthCode_expiresAt_idx" ON "ExternalAuthCode" ("expiresAt")',
+        ],
+    },
     // Registro de sesiones emitidas (el JWT es sin estado: sin esto no se pueden LISTAR). `tv` = User.tokenVersion al emitir:
     // la sesion sigue activa mientras tv >= User.tokenVersion y su jti no este en RevokedSession.
     {

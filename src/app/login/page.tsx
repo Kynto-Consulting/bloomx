@@ -9,6 +9,7 @@ import { MfaEnrollForm, MfaVerifyForm, type MfaLoginResult } from '@/components/
 import { useLandingConfig } from '@/hooks/useLandingConfig';
 import { AuthLanding } from '@/components/landing/AuthLanding';
 import { LandingFormExtras } from '@/components/landing/FormExtras';
+import { safeLoginNext } from '@/lib/login-next';
 
 function LoginForm() {
     const { config } = useDomainConfig();
@@ -18,6 +19,8 @@ function LoginForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const registered = searchParams.get('registered');
+    // Vuelta tras el login para "Entrar con Bloomx" de apps externas: SOLO hacia /api/auth/authorize (ver safeLoginNext)
+    const nextPath = safeLoginNext(searchParams.get('next'));
 
     const [data, setData] = useState({ email: '', password: '' });
     const [loading, setLoading] = useState(false);
@@ -42,7 +45,7 @@ function LoginForm() {
             }
         }
         // Force a hard reload to pick up the HttpOnly cookie and update state
-        window.location.href = result.mustChangePassword ? '/security?force=1' : '/';
+        window.location.href = result.mustChangePassword ? '/security?force=1' : (nextPath ?? '/');
     };
 
     const loginUser = async (e: React.FormEvent) => {
